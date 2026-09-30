@@ -1,0 +1,33 @@
+widget "crypto" {
+  meta { description: "Prices and 24-hour change from CoinGecko for the coins listed in ~/.config/omarchy-proot/crypto"; version: "1.0"; license: "MIT" }
+  size: 6x2
+  minSize: 3x2
+
+  requires { pacman: ["curl", "jq"] }
+
+  // CoinGecko coin ids, one per line (bitcoin, ethereum, solana, ...), priced in USD.
+  source prices = cmd("""
+    f=~/.config/omarchy-proot/crypto
+    mkdir -p "${f%/*}"
+    [ -f "$f" ] || printf 'bitcoin\nethereum\nsolana\n' > "$f"
+    ids=$(grep -v '^#' "$f" | grep . | paste -sd, -)
+    curl -fsm 10 "https://api.coingecko.com/api/v3/simple/price?ids=$ids&vs_currencies=usd&include_24hr_change=true" |
+      jq -c --arg ids "$ids" '. as $p | [$ids | split(",")[] | select($p[.]) | {id: ., usd: $p[.].usd, change: $p[.].usd_24h_change}]'
+  """) every 5m json timeout 15s
+
+  onTap: terminal('$EDITOR ~/.config/omarchy-proot/crypto', "crypto")
+
+  Row {
+    gap: 12
+    for c in prices key c.id {
+      Column {
+        weight: 1
+        gap: 0
+        onTap: url("https://www.coingecko.com/en/coins/${c.id}")
+        Text { text: c.id; style: label; maxLines: 1 }
+        Text { text: c.usd >= 1000 ? "$${round(c.usd)}" : c.usd >= 1 ? "$${fixed(c.usd, 2)}" : "$${round(c.usd, 5)}"; style: title; maxLines: 1 }
+        Text { text: "${c.change >= 0 ? "+" : ""}${fixed(c.change, 1)}%"; style: small; color: c.change >= 0 ? green : red }
+      }
+    }
+  }
+}

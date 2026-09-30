@@ -1,0 +1,31 @@
+widget "world clock" {
+  meta { description: "The time in several time zones, listed in ~/.config/omarchy-proot/world-clock"; version: "1.0"; license: "MIT" }
+  size: 6x2
+  minSize: 3x2
+
+  // One "Label Area/City" per line. The file is created with three examples on first run.
+  source zones = cmd("""
+    f=~/.config/omarchy-proot/world-clock
+    mkdir -p "${f%/*}"
+    [ -f "$f" ] || printf 'utc UTC\nnew-york America/New_York\ntokyo Asia/Tokyo\n' > "$f"
+    grep -v '^#' "$f" | while read -r label zone; do
+      [ -n "$zone" ] && echo "$label $(TZ=$zone date '+%H:%M %a %z')"
+    done
+  """) every 30s
+  let rows = lines(zones).filter(l => l != "").map(l => words(l))
+
+  onTap: terminal('$EDITOR ~/.config/omarchy-proot/world-clock', "world clock")
+
+  Row {
+    gap: 12
+    for r in rows key r[0] {
+      Column {
+        weight: 1
+        gap: 0
+        Text { text: r[0]; style: label; maxLines: 1 }
+        Text { text: r[1]; style: title }
+        Text { text: "${lower(r[2])} ${sub(r[3], 0, 3)}"; style: small; color: muted }
+      }
+    }
+  }
+}
