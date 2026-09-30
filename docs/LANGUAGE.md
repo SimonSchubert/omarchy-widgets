@@ -46,6 +46,7 @@ that read it redraw. Properties are separated by newlines or `;`.
 | `source x = stream("...")` | a long-running command; every line it prints becomes the new value. Add `json` for JSON lines. At most 4 different streams run at once |
 | `source now = clock every 1s` | Unix time in seconds, with no shell involved. Use `fmtTime(now, "HH:mm")` |
 | `source bat = android.battery` | `{level, charging, status}` from Android |
+| `source dev = android.device` | the phone: `{model, maker, android, sdk, soc}` (the Linux side can't see these) |
 | `state x = 0` | a value that handlers can change |
 | `let x = expr` | a derived value, recomputed only when what it reads changes. It can use sources, state and earlier lets |
 | `let h = history(x, 60)` | the last 60 values of `x`, sampled whenever a source updates (for Sparkline) |
@@ -257,5 +258,7 @@ and the message goes to `.errors/`.
 - The phone is portrait: 6 columns, ~12 rows. A full-width widget is `6xN`,
   half-width `3xN`. Set `minSize` to what the layout still fits in.
 - Use `weight: 1` to fill leftover space and `fill: width` to stretch across.
+- A `Text` without `width`, `weight` or `fill` takes the full width. In a `Row`, give the Texts
+  next to a `weight: 1` one a `width`, or the weighted one is squeezed to nothing.
 - Look at the example widgets in this folder for patterns: `90-analog-clock` (Canvas),
   `91-focus` (state and buttons), `92-aurora` (Shader), `93-latency` (stream).
