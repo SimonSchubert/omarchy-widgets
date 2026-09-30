@@ -1,5 +1,5 @@
 widget "lobsters" {
-  meta { description: "The hottest stories on Lobsters with score, comments and tags; tap a story to read it"; version: "1.0"; license: "MIT" }
+  meta { description: "The hottest stories on Lobsters with score, comments and tags; tap a story to read it"; version: "1.1"; license: "MIT"; category: "news" }
   size: 6x4
   minSize: 4x3
 

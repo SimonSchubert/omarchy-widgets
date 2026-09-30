@@ -1,5 +1,5 @@
 widget "calendar" {
-  meta { description: "This month's calendar with today highlighted"; version: "1.0"; license: "MIT" }
+  meta { description: "This month's calendar with today highlighted"; version: "1.1"; license: "MIT"; category: "productivity" }
   size: 3x3
   source now = clock every 60s
   // Date math with only fmtTime: first weekday of the month, days in the month.

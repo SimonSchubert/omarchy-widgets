@@ -1,5 +1,5 @@
 widget "feeds" {
-  meta { description: "The newest posts from the RSS and Atom feeds listed in ~/.config/omarchy-proot/feeds, starting with Arch Linux news"; version: "1.0"; license: "MIT" }
+  meta { description: "The newest posts from the RSS and Atom feeds listed in ~/.config/omarchy-proot/feeds, starting with Arch Linux news"; version: "1.1"; license: "MIT"; category: "news" }
   size: 6x4
   minSize: 4x3
 

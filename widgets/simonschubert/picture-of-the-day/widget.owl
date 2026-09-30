@@ -1,5 +1,5 @@
 widget "picture of the day" {
-  meta { description: "Wikimedia Commons' picture of the day with its caption; tap to see the full image"; version: "1.0"; license: "MIT" }
+  meta { description: "Wikimedia Commons' picture of the day with its caption; tap to see the full image"; version: "1.1"; license: "MIT"; category: "fun" }
   size: 6x4
   minSize: 3x3
   padding: 0

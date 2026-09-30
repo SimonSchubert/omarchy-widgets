@@ -1,5 +1,5 @@
 widget "uptime" {
-  meta { description: "Up or down, HTTP status and response time for the sites listed in ~/.config/omarchy-proot/uptime"; version: "1.0"; license: "MIT" }
+  meta { description: "Up or down, HTTP status and response time for the sites listed in ~/.config/omarchy-proot/uptime"; version: "1.1"; license: "MIT"; category: "dev" }
   size: 6x3
   minSize: 3x2
 

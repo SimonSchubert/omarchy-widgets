@@ -1,5 +1,5 @@
 widget "todo" {
-  meta { description: "Open items from the Markdown checklist ~/notes/todo.md; tap one to check it off"; version: "1.0"; license: "MIT" }
+  meta { description: "Open items from the Markdown checklist ~/notes/todo.md; tap one to check it off"; version: "1.1"; license: "MIT"; category: "productivity" }
   size: 3x4
   minSize: 3x2
 

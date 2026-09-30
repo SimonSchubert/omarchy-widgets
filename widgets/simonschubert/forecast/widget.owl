@@ -1,5 +1,5 @@
 widget "forecast" {
-  meta { description: "Three-day weather forecast with an hourly temperature curve, located by IP via wttr.in"; version: "1.0"; license: "MIT" }
+  meta { description: "Three-day weather forecast with an hourly temperature curve, located by IP via wttr.in"; version: "1.1"; license: "MIT"; category: "world" }
   size: 6x3
   minSize: 4x3
 

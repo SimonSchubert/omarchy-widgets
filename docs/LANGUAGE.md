@@ -54,7 +54,7 @@ that read it redraw. Properties are separated by newlines or `;`.
 | `component Name(a, b = 1) { ... }` | a reusable node; use it as `Name { a: 1 }` |
 | `asset logo = base64"iVBOR..."` | an embedded image (under 2 MB) for `Image { src: logo }`, so the widget is one self-contained file |
 | `requires { pacman: ["jq", "curl"] }` | packages the widget's commands need; see Dependencies |
-| `meta { description: "..."; version: "1.0"; license: "MIT" }` | needed to publish to the widget store (see Sharing) |
+| `meta { description: "..."; version: "1.0"; license: "MIT"; category: "news" }` | needed to publish to the widget store (see Sharing) |
 | `onTap: ...` | runs when the tile (not a button inside it) is tapped |
 | `padding: 12` / `background: ...` | the tile's padding (dp) and background |
 
@@ -236,7 +236,8 @@ The **widget store** (long-press empty space on the home screen) installs review
 https://github.com/SimonSchubert/omarchy-widgets. To publish one, long-press it, tap **publish**,
 and the default agent opens a pull request there with the GitHub CLI. The store needs:
 
-- `meta` with a `description` (10-200 characters), a `version` and a `license`
+- `meta` with a `description` (10-200 characters), a `version` and a `license`, and ideally a `category`:
+  `news`, `dev`, `productivity`, `time`, `world`, `fun`, `home` or `system`
 - every package in `requires`
 - nothing personal: no tokens, personal paths or hard-coded location
 - a higher `version` for each update

@@ -1,5 +1,5 @@
 widget "habits" {
-  meta { description: "A daily habit tracker: tap a habit to check it off for today, with the last week and your streak. Habits are listed in ~/.config/omarchy-proot/habits"; version: "1.0"; license: "MIT" }
+  meta { description: "A daily habit tracker: tap a habit to check it off for today, with the last week and your streak. Habits are listed in ~/.config/omarchy-proot/habits"; version: "1.1"; license: "MIT"; category: "productivity" }
   size: 6x3
   minSize: 4x2
 

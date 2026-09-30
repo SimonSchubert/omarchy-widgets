@@ -21,7 +21,7 @@ By hand:
 
    ```owl
    widget "disk" {
-     meta { description: "Free space on the root disk"; version: "1.0"; license: "MIT" }
+     meta { description: "Free space on the root disk"; version: "1.0"; license: "MIT"; category: "system" }
      size: 3x2
      requires { pacman: ["dua-cli"] }
      ...
@@ -39,7 +39,8 @@ The widget language is documented in [docs/LANGUAGE.md](docs/LANGUAGE.md).
 
 - One folder per widget, and only `widget.owl`, `preview.png` and `README.md` in it.
 - You can only add or change widgets under your own username.
-- `meta` needs a `description` (10-200 characters), a `version` and a `license`.
+- `meta` needs a `description` (10-200 characters), a `version` and a `license`. Add a `category`
+  (`news`, `dev`, `productivity`, `time`, `world`, `fun`, `home` or `system`) so it shows under that tab in the store; without one it goes under "other".
 - Every package the commands need goes in `requires`. CI checks that the packages exist in Arch
   and warns about programs whose package isn't declared.
 - Updates raise the version. If an update changes the commands or packages, the app asks users to

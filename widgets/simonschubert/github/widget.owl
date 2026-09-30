@@ -1,5 +1,5 @@
 widget "github" {
-  meta { description: "Unread GitHub notifications, reviews waiting on you and your open pull requests, via the GitHub CLI"; version: "1.0"; license: "MIT" }
+  meta { description: "Unread GitHub notifications, reviews waiting on you and your open pull requests, via the GitHub CLI"; version: "1.1"; license: "MIT"; category: "dev" }
   size: 6x4
   minSize: 3x3
 

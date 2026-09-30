@@ -1,5 +1,5 @@
 widget "xkcd" {
-  meta { description: "The latest xkcd comic with its title and alt text; tap to open it"; version: "1.0"; license: "MIT" }
+  meta { description: "The latest xkcd comic with its title and alt text; tap to open it"; version: "1.1"; license: "MIT"; category: "fun" }
   size: 6x5
   minSize: 3x3
 

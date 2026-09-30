@@ -1,5 +1,5 @@
 widget "hacker news" {
-  meta { description: "The Hacker News front page with points and comments; tap a story to read it"; version: "1.0"; license: "MIT" }
+  meta { description: "The Hacker News front page with points and comments; tap a story to read it"; version: "1.1"; license: "MIT"; category: "news" }
   size: 6x4
   minSize: 4x3
 

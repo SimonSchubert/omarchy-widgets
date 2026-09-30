@@ -1,5 +1,5 @@
 widget "world clock" {
-  meta { description: "The time in several time zones, listed in ~/.config/omarchy-proot/world-clock"; version: "1.0"; license: "MIT" }
+  meta { description: "The time in several time zones, listed in ~/.config/omarchy-proot/world-clock"; version: "1.1"; license: "MIT"; category: "time" }
   size: 6x2
   minSize: 3x2
 

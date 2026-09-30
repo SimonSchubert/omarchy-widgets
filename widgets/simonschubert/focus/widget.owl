@@ -1,5 +1,5 @@
 widget "focus" {
-  meta { description: "A pomodoro focus timer: start, stop and adjust in 5 minute steps"; version: "1.0"; license: "MIT" }
+  meta { description: "A pomodoro focus timer: start, stop and adjust in 5 minute steps"; version: "1.1"; license: "MIT"; category: "productivity" }
   size: 3x3
   minSize: 3x3
 

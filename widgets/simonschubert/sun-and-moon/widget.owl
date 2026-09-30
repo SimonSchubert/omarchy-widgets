@@ -1,5 +1,5 @@
 widget "sun and moon" {
-  meta { description: "Sunrise, sunset, daylight left and tonight's moon phase, located by IP via wttr.in"; version: "1.0"; license: "MIT" }
+  meta { description: "Sunrise, sunset, daylight left and tonight's moon phase, located by IP via wttr.in"; version: "1.1"; license: "MIT"; category: "world" }
   size: 3x3
   minSize: 3x3
 

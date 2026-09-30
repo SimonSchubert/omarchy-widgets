@@ -1,5 +1,5 @@
 widget "wikipedia" {
-  meta { description: "Wikipedia's featured article of the day, what everyone is reading, and on this day in history"; version: "1.0"; license: "MIT" }
+  meta { description: "Wikipedia's featured article of the day, what everyone is reading, and on this day in history"; version: "1.1"; license: "MIT"; category: "news" }
   size: 6x4
   minSize: 4x3
 

@@ -1,5 +1,5 @@
 widget "github trending" {
-  meta { description: "The most-starred GitHub repositories created in the last week; tap one to open it"; version: "1.0"; license: "MIT" }
+  meta { description: "The most-starred GitHub repositories created in the last week; tap one to open it"; version: "1.1"; license: "MIT"; category: "dev" }
   size: 6x4
   minSize: 4x3
 

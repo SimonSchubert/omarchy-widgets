@@ -1,5 +1,5 @@
 widget "launches" {
-  meta { description: "A live countdown to the next rocket launch and the ones after it, from The Space Devs"; version: "1.0"; license: "MIT" }
+  meta { description: "A live countdown to the next rocket launch and the ones after it, from The Space Devs"; version: "1.1"; license: "MIT"; category: "world" }
   size: 6x3
   minSize: 3x2
 

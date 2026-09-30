@@ -1,5 +1,5 @@
 widget "earthquakes" {
-  meta { description: "Earthquakes of magnitude 4.5 and up worldwide in the last day, from the USGS"; version: "1.0"; license: "MIT" }
+  meta { description: "Earthquakes of magnitude 4.5 and up worldwide in the last day, from the USGS"; version: "1.1"; license: "MIT"; category: "world" }
   size: 6x3
   minSize: 3x2
 

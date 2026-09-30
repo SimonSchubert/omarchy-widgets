@@ -1,5 +1,5 @@
 widget "countdown" {
-  meta { description: "Days until the dates listed in ~/.config/omarchy-proot/countdown, soonest first"; version: "1.0"; license: "MIT" }
+  meta { description: "Days until the dates listed in ~/.config/omarchy-proot/countdown, soonest first"; version: "1.1"; license: "MIT"; category: "productivity" }
   size: 3x3
   minSize: 3x2
 

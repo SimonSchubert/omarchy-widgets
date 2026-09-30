@@ -1,5 +1,5 @@
 widget "releases" {
-  meta { description: "The latest release of each GitHub repository listed in ~/.config/omarchy-proot/releases; new ones stand out"; version: "1.0"; license: "MIT" }
+  meta { description: "The latest release of each GitHub repository listed in ~/.config/omarchy-proot/releases; new ones stand out"; version: "1.1"; license: "MIT"; category: "dev" }
   size: 6x3
   minSize: 3x2
 

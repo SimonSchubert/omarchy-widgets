@@ -1,5 +1,5 @@
 widget "home assistant" {
-  meta { description: "Home Assistant entities with their states; tap a light or switch to toggle it. Set up in ~/.config/omarchy-proot/home-assistant"; version: "1.0"; license: "MIT" }
+  meta { description: "Home Assistant entities with their states; tap a light or switch to toggle it. Set up in ~/.config/omarchy-proot/home-assistant"; version: "1.1"; license: "MIT"; category: "home" }
   size: 6x3
   minSize: 3x2
 
