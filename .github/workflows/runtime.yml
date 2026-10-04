@@ -1,0 +1,30 @@
+name: runtime
+
+# Holds the Quickshell runtime (runtimes/quickshell) to the language's
+# reference implementation, tools/owl.jar: same output on every store widget,
+# same verdicts from the checker. Runs when either side changes, and when a
+# widget does, since every widget is one of the cases.
+on:
+  pull_request:
+    paths: ["runtimes/**", "tools/owl.jar", "widgets/**"]
+  push:
+    branches: [main]
+    paths: ["runtimes/**", "tools/owl.jar", "widgets/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Owl.js matches owl.jar
+        run: runtimes/quickshell/test/run.sh
