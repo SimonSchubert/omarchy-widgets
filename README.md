@@ -63,4 +63,6 @@ widgets/<author>/<name>/widget.owl    the widget
 widgets/<author>/<name>/preview.png   optional screenshot
 docs/LANGUAGE.md                      the widget language
 tools/owl.jar                         the checker CI runs (built from the app's owl module)
+runtimes/quickshell/                  OWL for Quickshell on Linux: the same widgets, drawn
+                                      by Quickshell (Omarchy Mobile's widget board uses it)
 ```

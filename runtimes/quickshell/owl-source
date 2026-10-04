@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+
+# What an OWL widget's android.* sources read, answered from Linux.
+#
+#   owl-source device   {model, maker, android, sdk, soc}
+#   owl-source system   {memory, storage, display, kernel, ...}
+#   owl-source volume   {level, muted, max}
+#
+# One JSON object on stdout, in the shape the Android launcher gives the same
+# source (omarchy-widgets' docs/LANGUAGE.md), so a widget written for the
+# launcher reads this phone without knowing. `android` and `sdk` are null:
+# there is no Android here, and a widget already has to cope with null.
+# android.battery and android.media are not here: OwlSource.qml reads the
+# battery from UPower, and the OwlHost supplies media.
+#
+# Base tools only -- no jq -- so it answers on any image.
+#
+# --root DIR reads /proc, /sys, build-info and the state directory under DIR,
+# for tests. Exit 0 done, 2 usage.
+
+set -u
+
+me=owl-source
+
+usage() {
+  echo "usage: $me [--root DIR] device|system|volume" >&2
+  exit 2
+}
+
+root=
+what=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --root)
+      [ $# -ge 2 ] || usage
+      root=${2%/}
+      shift 2
+      ;;
+    device | system | volume)
+      [ -z "$what" ] || usage
+      what=$1
+      shift
+      ;;
+    *) usage ;;
+  esac
+done
+[ -n "$what" ] || usage
+
+home=${HOME:-}
+[ -z "$root" ] || home=$root/home
+
+# A JSON string, or null for an empty one.
+str() {
+  local s=$1
+  if [ -z "$s" ]; then
+    printf 'null'
+    return
+  fi
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\n'/\\n}
+  s=${s//$'\r'/\\r}
+  s=${s//$'\t'/\\t}
+  printf '"%s"' "$s"
+}
+
+# A JSON number, or null for anything that is not one.
+num() {
+  case $1 in
+    '' | *[!0-9.-]*) printf 'null' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# The device tree's strings are NUL-terminated and NUL-separated.
+dt() {
+  [ -r "$root/proc/device-tree/$1" ] || return 0
+  tr '\000' '\n' <"$root/proc/device-tree/$1"
+}
+
+build_info() {
+  local key=$1 line
+  [ -r "$root/usr/share/omarchy-mobile/build-info" ] || return 0
+  while IFS= read -r line; do
+    case $line in
+      "$key="*) printf '%s' "${line#"$key="}" ;;
+    esac
+  done <"$root/usr/share/omarchy-mobile/build-info"
+}
+
+# "qcom,sm8150" -> sm8150: the last compatible string names the SoC.
+soc() {
+  local last
+  last=$(dt compatible | sed '/^$/d' | tail -n 1)
+  printf '%s' "${last#*,}"
+}
+
+device() {
+  local name maker model
+  name=$(build_info device-name)
+  [ -n "$name" ] || name=$(dt model | head -n 1)
+  # "Google Pixel 4" is maker Google, model Pixel 4, as Android's Build has it.
+  case $name in
+    *' '*) maker=${name%% *}; model=${name#* } ;;
+    *) maker=''; model=$name ;;
+  esac
+  printf '{"model":%s,"maker":%s,"android":null,"sdk":null,"soc":%s}\n' \
+    "$(str "$model")" "$(str "$maker")" "$(str "$(soc)")"
+}
+
+system() {
+  local total avail used kernel uptime cores mhz f v apps theme hardware maker
+  local disk storage_total storage_used display tz locale
+
+  total=$(awk '/^MemTotal:/ { print $2 * 1024 }' "$root/proc/meminfo" 2>/dev/null)
+  avail=$(awk '/^MemAvailable:/ { print $2 * 1024 }' "$root/proc/meminfo" 2>/dev/null)
+  used=
+  [ -z "$total" ] || [ -z "$avail" ] || used=$((total - avail))
+
+  disk=$(df -kP -- "${root:-/}" 2>/dev/null | awk 'NR == 2 { print $2 * 1024, $3 * 1024 }')
+  storage_total=${disk%% *}
+  storage_used=${disk#* }
+
+  kernel=$(uname -r)
+  uptime=$(awk '{ printf "%d", $1 }' "$root/proc/uptime" 2>/dev/null)
+
+  cores=$(grep -c '^processor' "$root/proc/cpuinfo" 2>/dev/null)
+  mhz=0
+  for f in "$root"/sys/devices/system/cpu/cpu[0-9]*/cpufreq/cpuinfo_max_freq; do
+    [ -r "$f" ] || continue
+    v=$(($(cat "$f") / 1000))
+    [ "$v" -le "$mhz" ] || mhz=$v
+  done
+  [ "$mhz" != 0 ] || mhz=
+  hardware=$(awk -F': *' '/^(Hardware|model name)/ { print $2; exit }' "$root/proc/cpuinfo" 2>/dev/null)
+  case $(dt compatible | tail -n 1) in
+    qcom,*) maker=Qualcomm ;;
+    *) maker= ;;
+  esac
+
+  apps=0
+  for f in "$root"/usr/share/applications/*.desktop "$home"/.local/share/applications/*.desktop; do
+    [ -e "$f" ] && apps=$((apps + 1))
+  done
+
+  theme=
+  [ ! -r "$home/.local/state/omarchy/current/theme.name" ] ||
+    theme=$(head -n 1 "$home/.local/state/omarchy/current/theme.name")
+
+  # The panel as Hyprland drives it: "1080x2280@60.00 at 0x0". Absent outside
+  # a session, which is null rather than an error.
+  display=null
+  if [ -z "$root" ] && command -v hyprctl >/dev/null 2>&1; then
+    display=$(hyprctl monitors 2>/dev/null | awk '
+      /^[[:space:]]+[0-9]+x[0-9]+@/ {
+        split($1, a, /[x@]/)
+        printf "{\"width\":%d,\"height\":%d,\"hz\":%d,\"dpi\":null}", a[1], a[2], a[3] + 0.5
+        exit
+      }')
+    [ -n "$display" ] || display=null
+  fi
+
+  tz=$(readlink "$root/etc/localtime" 2>/dev/null)
+  tz=${tz#*zoneinfo/}
+  locale=${LC_ALL:-${LANG:-}}
+  locale=${locale%%.*}
+
+  printf '{"memory":{"used":%s,"total":%s},"storage":{"used":%s,"total":%s},"display":%s,' \
+    "$(num "$used")" "$(num "$total")" "$(num "$storage_used")" "$(num "$storage_total")" "$display"
+  printf '"kernel":%s,"uptime":%s,"apps":%s,"theme":%s,' \
+    "$(str "$kernel")" "$(num "$uptime")" "$(num "$apps")" "$(str "$theme")"
+  printf '"cpu":{"soc":%s,"hardware":%s,"maker":%s,"cores":%s,"abi":%s,"maxMhz":%s},' \
+    "$(str "$(soc)")" "$(str "$hardware")" "$(str "$maker")" "$(num "$cores")" "$(str "$(uname -m)")" "$(num "$mhz")"
+  printf '"launcher":%s,"codename":%s,"build":%s,"patch":null,"locale":%s,"timezone":%s}\n' \
+    "$(str "$(build_info version)")" "$(str "$(build_info device)")" "$(str "$(build_info commit | cut -c1-12)")" \
+    "$(str "$locale")" "$(str "$tz")"
+}
+
+# wpctl prints "Volume: 0.40" and appends " [MUTED]".
+volume() {
+  local line level muted=false
+  line=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)
+  if [ -z "$line" ]; then
+    printf '{"level":null,"muted":null,"max":100}\n'
+    return
+  fi
+  level=$(printf '%s\n' "$line" | awk '{ printf "%d", $2 * 100 + 0.5 }')
+  case $line in *MUTED*) muted=true ;; esac
+  printf '{"level":%s,"muted":%s,"max":100}\n' "$(num "$level")" "$muted"
+}
+
+"$what"
