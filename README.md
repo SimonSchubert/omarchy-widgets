@@ -28,7 +28,10 @@ By hand:
    }
    ```
 
-3. Optionally add `preview.png`, a screenshot of the tile (under 300 KB).
+3. Optionally add `preview.png`, a screenshot of the tile (under 300 KB). For the store to show
+   the tile in the user's own Omarchy theme, add `previews/<theme>.webp` too, one per theme (under
+   100 KB each, named like `tokyo-night.webp`); the launcher's debug build makes them with
+   `scripts/store-previews.sh`.
 4. Check it locally: `java -jar tools/owl.jar review . widgets/<you>/<name>/widget.owl`
 5. Open a pull request. The **review** check runs the same rules and writes a summary of what the
    widget runs and installs; a maintainer reviews it and merges.
@@ -37,7 +40,7 @@ The widget language is documented in [docs/LANGUAGE.md](docs/LANGUAGE.md).
 
 ## Rules
 
-- One folder per widget, and only `widget.owl`, `preview.png` and `README.md` in it.
+- One folder per widget, and only `widget.owl`, `preview.png`, `README.md` and `previews/<theme>.webp` in it.
 - You can only add or change widgets under your own username.
 - `meta` needs a `description` (10-200 characters), a `version` and a `license`. Add a `category`
   (`news`, `dev`, `productivity`, `time`, `world`, `fun`, `home` or `system`) so it shows under that tab in the store; without one it goes under "other".
@@ -61,6 +64,8 @@ CI summary lists them all, with anything risky flagged.
 ```
 widgets/<author>/<name>/widget.owl    the widget
 widgets/<author>/<name>/preview.png   optional screenshot
+widgets/<author>/<name>/previews/     optional screenshots per Omarchy theme (<theme>.webp)
+order.txt                             the order of the store
 docs/LANGUAGE.md                      the widget language
 tools/owl.jar                         the checker CI runs (built from the app's owl module)
 runtimes/quickshell/                  OWL for Quickshell on Linux: the same widgets, drawn
