@@ -3,14 +3,15 @@ widget "fetch" {
   order: 2
   size: 3x3
   minSize: 3x2
-  meta { description: "Your phone at a glance, fastfetch style, with or without Linux: CPU, memory, storage, battery and theme, plus Arch's packages once Linux is installed. Tap it for every detail"; version: "1.0"; license: "MIT"; category: "system"; owl: 5 }
+  meta { description: "Your phone at a glance, fastfetch style, with or without Linux: CPU, memory, storage, battery and theme, plus Arch's packages once Linux is installed. Tap it for every detail"; version: "1.1"; license: "MIT"; category: "system"; owl: 5 }
 
   // The phone, from Android: works without Linux.
   source dev = android.device
   source sys = android.system every 5s
   source bat = android.battery
   // The Arch side, once Linux is installed. Base tools only, so it doesn't make the widget need Linux.
-  source lx = cmd("""
+  // Where the launcher is itself Linux, android.system already has these facts, and this never runs.
+  source lxCmd = cmd("""
     . /etc/os-release
     printf '{"os":"%s","pkgs":%s,"explicit":%s,"shell":"%s","upgraded":"%s"}' \
       "$PRETTY_NAME" "$(pacman -Qq | wc -l)" "$(pacman -Qqe | wc -l)" \
@@ -18,6 +19,7 @@ widget "fetch" {
       "$(grep -a 'starting full system upgrade' /var/log/pacman.log 2>/dev/null | tail -1 | cut -c2-11)"
   """) every 5m json optional
 
+  let lx = sys.linux ?? lxCmd
   let host = lower(replace(dev.model ?? "phone", " ", "-"))
   let user = linux ? "root" : "user"
   let mem = sys.memory
@@ -173,7 +175,7 @@ widget "fetch" {
         Line { key: "os"; value: lx.os; size: 13; keyWidth: 110 }
         Line { key: "packages"; value: lx.pkgs == null ? null : "${lx.pkgs} (${lx.explicit} explicit)"; size: 13; keyWidth: 110 }
         Line { key: "shell"; value: lx.shell; size: 13; keyWidth: 110 }
-        Line { key: "upgraded"; value: lx.upgraded == "" ? "never" : lx.upgraded; size: 13; keyWidth: 110 }
+        Line { key: "upgraded"; value: (lx.upgraded ?? "") == "" ? "never" : lx.upgraded; size: 13; keyWidth: 110 }
         Row {
           justify: end
           Button { text: "fastfetch ↗"; color: muted; onTap: terminal("command -v fastfetch >/dev/null || pacman -S --needed --noconfirm fastfetch; fastfetch", "fastfetch") }
