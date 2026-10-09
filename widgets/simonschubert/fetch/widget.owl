@@ -137,9 +137,14 @@ widget "fetch" {
       }
 
       Heading { label: "phone" }
-      Line { key: "host"; value: dev == null ? null : "${dev.maker} ${dev.model} (${sys.codename})"; size: 13; keyWidth: 110 }
-      Line { key: "android"; value: dev == null ? null : "${dev.android} (sdk ${dev.sdk})"; size: 13; keyWidth: 110 }
-      Line { key: "security"; value: sys.patch; size: 13; keyWidth: 110 }
+      Line { key: "host"; value: dev == null ? null : "${dev.maker} ${dev.model}${sys.codename == null ? "" : " (${sys.codename})"}"; size: 13; keyWidth: 110 }
+      // Android's own facts: absent where the launcher is Linux.
+      if dev.android != null {
+        Line { key: "android"; value: "${dev.android} (sdk ${dev.sdk})"; size: 13; keyWidth: 110 }
+      }
+      if sys.patch != null {
+        Line { key: "security"; value: sys.patch; size: 13; keyWidth: 110 }
+      }
       Line { key: "build"; value: sys.build; size: 13; keyWidth: 110 }
       Line { key: "kernel"; value: sys.kernel; size: 13; keyWidth: 110 }
       Line { key: "uptime"; value: sys.uptime == null ? null : fmtDuration(sys.uptime); size: 13; keyWidth: 110 }
@@ -148,7 +153,7 @@ widget "fetch" {
       Heading { label: "hardware" }
       Line { key: "cpu"; value: sys.cpu == null ? null : trim("${sys.cpu.maker} ${sys.cpu.soc == "" ? sys.cpu.hardware : sys.cpu.soc}"); size: 13; keyWidth: 110 }
       Line { key: "cores"; value: sys.cpu == null ? null : "${sys.cpu.cores} · ${sys.cpu.abi}${!sys.cpu.maxMhz ? "" : " · up to ${fixed(sys.cpu.maxMhz / 1000, 2)} GHz"}"; size: 13; keyWidth: 110 }
-      Line { key: "display"; value: shown.width == null ? null : "${shown.width}x${shown.height} @ ${shown.hz}Hz · ${shown.dpi} dpi"; size: 13; keyWidth: 110 }
+      Line { key: "display"; value: shown.width == null ? null : "${shown.width}x${shown.height} @ ${shown.hz}Hz${shown.dpi == null ? "" : " · ${shown.dpi} dpi"}"; size: 13; keyWidth: 110 }
       Meter { label: "memory"; used: mem.used; total: mem.total; tint: round(mem.used / mem.total * 100) > 85 ? red : accent }
       Meter { label: "storage"; used: disk.used; total: disk.total; tint: round(disk.used / disk.total * 100) > 90 ? red : accent }
 
