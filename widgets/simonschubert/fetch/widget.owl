@@ -160,8 +160,12 @@ widget "fetch" {
       Heading { label: "battery" }
       Line { key: "level"; value: bat == null ? null : "${bat.level}% · ${bat.status}${bat.plugged == null ? "" : " (" + bat.plugged + ")"}"; size: 13; keyWidth: 110 }
       Progress { value: bat.level ?? 0; color: batColor; padding: [116, 0, 0, 0] }
-      Line { key: "temperature"; value: bat.temp == null ? null : "${fixed(bat.temp, 1)}°C"; size: 13; keyWidth: 110 }
-      Line { key: "voltage"; value: bat.voltage == null ? null : "${fixed(bat.voltage, 2)} V"; size: 13; keyWidth: 110 }
+      if bat.temp != null {
+        Line { key: "temperature"; value: "${fixed(bat.temp, 1)}°C"; size: 13; keyWidth: 110 }
+      }
+      if bat.voltage != null {
+        Line { key: "voltage"; value: "${fixed(bat.voltage, 2)} V"; size: 13; keyWidth: 110 }
+      }
       Line { key: "health"; value: bat.health ?? "unknown"; size: 13; keyWidth: 110 }
       if bat.cycles != null {
         Line { key: "cycles"; value: bat.cycles; size: 13; keyWidth: 110 }
