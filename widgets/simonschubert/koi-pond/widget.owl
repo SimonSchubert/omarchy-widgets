@@ -1,7 +1,7 @@
 widget "koi pond" {
-  meta { description: "A pixel-art koi pond in your theme's colors. Tap the water to feed the koi"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { description: "A pixel-art koi pond in your theme's colors. Tap the water to feed the koi"; version: "1.1"; license: "MIT"; category: "fun" }
   size: 6x3
-  minSize: 3x3
+  minSize: 2x2
   padding: 0
 
   // Pixel-art koi in theme colors. A Canvas keeps nothing between frames, so
@@ -43,7 +43,7 @@ widget "koi pond" {
   let glideNow = [clamp(since / 1.6, 0, 1)].map(ease)[0]
 
   // One art pixel, in dp. With no padding the Canvas is the whole tile.
-  let p = clamp(round(min(tileWidth ?? 300, tileHeight ?? 200) / 70), 3, 5)
+  let p = clamp(round(min(tileWidth ?? 300, tileHeight ?? 200) / 70), 2, 5)
 
   // The lily pad only changes with the tile's size, so its rects are worked out
   // here, once, rather than every frame: [x, y, w, h, color]. A pixel disc a row
