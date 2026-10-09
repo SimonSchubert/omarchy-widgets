@@ -3,7 +3,7 @@
 # What an OWL widget's android.* sources read, answered from Linux.
 #
 #   owl-source device   {model, maker, android, sdk, soc}
-#   owl-source system   {memory, storage, display, kernel, ...}
+#   owl-source system   {memory, storage, display, kernel, ..., linux}
 #   owl-source volume   {level, muted, max}
 #
 # One JSON object on stdout, in the shape the Android launcher gives the same
@@ -12,6 +12,12 @@
 # there is no Android here, and a widget already has to cope with null.
 # android.battery and android.media are not here: OwlSource.qml reads the
 # battery from UPower, and the OwlHost supplies media.
+#
+# system also answers `linux`: {os, pkgs, explicit, shell, upgraded}, the
+# facts the launcher's widgets get from a cmd() in its Arch guest, read here
+# from the files pacman keeps -- so a widget can show them where it may not
+# run commands. null where there is no pacman database. The launcher's own
+# android.system has no `linux`, so a widget reads `sys.linux ?? <its cmd>`.
 #
 # Base tools only -- no jq -- so it answers on any image.
 #
@@ -171,12 +177,34 @@ system() {
     "$(str "$kernel")" "$(num "$uptime")" "$(num "$apps")" "$(str "$theme")"
   printf '"cpu":{"soc":%s,"hardware":%s,"maker":%s,"cores":%s,"abi":%s,"maxMhz":%s},' \
     "$(str "$(soc)")" "$(str "$hardware")" "$(str "$maker")" "$(num "$cores")" "$(str "$(uname -m)")" "$(num "$mhz")"
-  printf '"launcher":%s,"codename":%s,"build":%s,"patch":null,"locale":%s,"timezone":%s}\n' \
+  printf '"launcher":%s,"codename":%s,"build":%s,"patch":null,"locale":%s,"timezone":%s,"linux":%s}\n' \
     "$(str "$(build_info version)")" "$(str "$(build_info device)")" "$(str "$(build_info commit | cut -c1-12)")" \
-    "$(str "$locale")" "$(str "$tz")"
+    "$(str "$locale")" "$(str "$tz")" "$(linux)"
 }
 
 # wpctl prints "Volume: 0.40" and appends " [MUTED]".
+# The Arch side, from files alone: os-release, pacman's local database (one
+# directory per package; a dependency's desc says %REASON% then 1) and the
+# last full upgrade in pacman.log. The same answers as pacman -Qq, -Qqe and
+# grep, without running pacman.
+linux() {
+  local db=$root/var/lib/pacman/local os pkgs deps upgraded sh version
+  if [ ! -d "$db" ]; then
+    printf 'null'
+    return
+  fi
+  os=$( (. "$root/etc/os-release" 2>/dev/null && printf '%s' "${PRETTY_NAME:-${NAME:-}}") )
+  pkgs=$(find "$db" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+  deps=$(find "$db" -mindepth 2 -maxdepth 2 -name desc -exec awk 'FNR == 1 { prev = "" } prev == "%REASON%" && $0 == "1" { print FILENAME; nextfile } { prev = $0 }' {} + 2>/dev/null | wc -l)
+  upgraded=$(grep -a 'starting full system upgrade' "$root/var/log/pacman.log" 2>/dev/null | tail -n 1 | cut -c2-11)
+  sh=${SHELL:-}
+  sh=${sh##*/}
+  version=
+  [ "$sh" != bash ] || version=" ${BASH_VERSION%%(*}"
+  printf '{"os":%s,"pkgs":%s,"explicit":%s,"shell":%s,"upgraded":%s}' \
+    "$(str "$os")" "$(num "$pkgs")" "$(num "$((pkgs - deps))")" "$(str "$sh$version")" "$(str "$upgraded")"
+}
+
 volume() {
   local line level muted=false
   line=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)
