@@ -11,10 +11,10 @@ pragma ComponentBehavior: Bound
 //                    Linux: the battery from UPower, media and the
 //                    device/system/volume command from the OwlHost
 //
-// `status` sources (cmd and http) get {status, body}: the exit code or HTTP
-// status beside the output. owl.jar declares the flag but its meaning lives
-// in the launcher, which is not published; this is the reading that lets a
-// widget tell "offline" from "empty".
+// `status` sources (cmd and http) get {out, err, code, ok}, as the language
+// guide has it: the output, stderr, the exit code or HTTP status (124 when it
+// timed out), and whether it worked -- so a widget can tell "offline" from
+// "empty".
 
 import QtQuick
 import Quickshell
@@ -71,7 +71,9 @@ Item {
   // ---------------------------------------------------------------- cmd
 
   property string pendingText: ""
+  property string pendingErr: ""
   property int pendingCode: 0
+  property bool timedOut: false
   property bool streamDone: false
   property bool exitedDone: false
 
@@ -79,6 +81,7 @@ Item {
     if (proc.running) return
     root.streamDone = false
     root.exitedDone = false
+    root.timedOut = false
     proc.command = ["bash", "-c", command]
     proc.running = true
     killer.restart()
@@ -89,7 +92,8 @@ Item {
     var json = root.spec.json || root.kind.indexOf("android.") === 0
     var text = root.pendingText
     if (root.spec.status) {
-      root.widget.sourceStatus(root.spec.slot, root.pendingCode, text, json)
+      var code = root.timedOut ? 124 : root.pendingCode
+      root.widget.sourceStatus(root.spec.slot, code, text, root.pendingErr, json, code === 0)
       return
     }
     if (json && root.kind.indexOf("android.") === 0) {
@@ -109,6 +113,9 @@ Item {
         root.settle()
       }
     }
+    stderr: StdioCollector {
+      onStreamFinished: root.pendingErr = text
+    }
     onExited: (code) => {
       killer.stop()
       root.pendingCode = code
@@ -123,6 +130,7 @@ Item {
     onTriggered: {
       if (!proc.running) return
       root.widget.report(root.spec.name + ": timed out after " + Math.round(interval / 1000) + "s")
+      root.timedOut = true
       proc.running = false
     }
   }
@@ -140,7 +148,7 @@ Item {
       if (xhr.readyState !== XMLHttpRequest.DONE || root.request !== xhr) return
       root.request = null
       httpKiller.stop()
-      if (root.spec.status) root.widget.sourceStatus(root.spec.slot, xhr.status, xhr.responseText, root.spec.json)
+      if (root.spec.status) root.widget.sourceStatus(root.spec.slot, xhr.status, xhr.responseText, "", root.spec.json, xhr.status >= 200 && xhr.status < 300)
       else if (xhr.status >= 200 && xhr.status < 300) root.push(xhr.responseText)
       else root.widget.report(root.spec.name + ": HTTP " + xhr.status + " from " + url)
     }
@@ -159,6 +167,7 @@ Item {
       root.request = null
       if (xhr) xhr.abort()
       root.widget.report(root.spec.name + ": timed out")
+      if (xhr && root.spec.status) root.widget.sourceStatus(root.spec.slot, 124, "", "", root.spec.json, false)
     }
   }
 

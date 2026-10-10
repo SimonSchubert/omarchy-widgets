@@ -224,13 +224,16 @@ Item {
     root.instance.setSource(slot, v)
   }
 
-  function sourceStatus(slot, code, text, json) {
+  // A `status` source: {out, err, code, ok}, as docs/LANGUAGE.md has it. `out`
+  // is parsed when the source is `json` (null when it is not JSON), `code` is
+  // the exit code or the HTTP status, 124 for a timeout.
+  function sourceStatus(slot, code, text, err, json, ok) {
     if (!root.instance) return
-    var body = text
+    var out = text
     if (json) {
-      try { body = Owl.parseJson(String(text).trim()) } catch (e) { body = null }
-    } else body = String(text).replace(/\s+$/, "")
-    root.instance.setSource(slot, new Map([["status", code], ["body", body]]))
+      try { out = Owl.parseJson(String(text).trim()) } catch (e) { out = null }
+    } else out = String(text).replace(/\s+$/, "")
+    root.instance.setSource(slot, new Map([["out", out], ["err", String(err || "").replace(/\s+$/, "")], ["code", code], ["ok", !!ok]]))
   }
 
   Instantiator {

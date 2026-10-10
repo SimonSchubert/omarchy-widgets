@@ -82,6 +82,5 @@ Where it differs, because Android is not here:
   compositor can do. Full-screen programs open in a real terminal.
 - **android.notifications** is an empty list; **androidApp()** and
   **notification()** report that there is no Android.
-- **`status` sources** get `{status, body}`, and **`e` in `fmtTime`** counts
-  from Monday: the jar declares both and leaves their meaning to the
-  launcher, which is not published.
+- **`e` in `fmtTime`** counts from Monday: the jar declares it and leaves
+  its meaning to the launcher, which is not published.
