@@ -67,6 +67,7 @@ widgets/<author>/<name>/preview.png   optional screenshot
 widgets/<author>/<name>/previews/     optional screenshots per Omarchy theme (<theme>.webp)
 order.txt                             the order of the store
 docs/LANGUAGE.md                      the widget language
+w/index.html                          where a shared widget's link lands: shows it, opens the launcher
 tools/owl.jar                         the checker CI runs (built from the app's owl module)
 runtimes/quickshell/                  OWL for Quickshell on Linux: the same widgets, drawn
                                       by Quickshell (Omarchy Mobile's widget board uses it)
