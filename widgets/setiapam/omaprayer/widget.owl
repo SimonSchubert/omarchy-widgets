@@ -4,7 +4,7 @@ widget "omaprayer" {
 
   meta {
     description: "Prayer times timetable and Horizon day strip with Aladhan & Kemenag RI methods, Madhab Asr, ihtiyat tuning, city search, and 7-day schedule"
-    version: "1.1"
+    version: "1.2"
     license: "MIT"
     category: "productivity"
     owl: 5
@@ -41,16 +41,18 @@ widget "omaprayer" {
   let geoResult = city != "auto" && geoFound && geo.out.results != null ? geo.out.results.0 : null
   let notFound = city != "auto" && geo != null && geo.ok && (geo.out.results == null || len(geo.out.results) == 0)
 
+  let isJakarta = city == "auto" || lower(trim(city)) == "jakarta"
+
   // Resolved coordinates & display location
-  let lat = city == "auto" ? (ipArea != null ? ipArea.latitude : -6.2146) : (geoResult != null ? geoResult.latitude : null)
-  let lon = city == "auto" ? (ipArea != null ? ipArea.longitude : 106.8451) : (geoResult != null ? geoResult.longitude : null)
+  let lat = isJakarta ? (city == "auto" && ipArea != null ? ipArea.latitude : -6.2146) : (geoResult != null ? geoResult.latitude : null)
+  let lon = isJakarta ? (city == "auto" && ipArea != null ? ipArea.longitude : 106.8451) : (geoResult != null ? geoResult.longitude : null)
   let placeName = city == "auto" ? (ipArea != null ? ipArea.areaName.0.value : "Auto") : (geoResult != null ? geoResult.name : city)
   let countryName = city == "auto" ? (ipArea != null ? ipArea.country.0.value : "") : (geoResult != null ? (geoResult.country ?? "") : "")
 
   // Timezone & local clock via Open-Meteo
   source tz = http(lat == null ? "" : "https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=is_day&timezone=auto") every 1h timeout 10s json status
-  let tzOffset = tz != null && tz.ok && tz.out.utc_offset_seconds != null ? tz.out.utc_offset_seconds : (city == "auto" ? 25200 : 0)
-  let tzName = tz != null && tz.ok && tz.out.timezone != null ? tz.out.timezone : (city == "auto" ? "Asia/Jakarta" : "UTC")
+  let tzOffset = tz != null && tz.ok && tz.out.utc_offset_seconds != null ? tz.out.utc_offset_seconds : (isJakarta ? 25200 : 0)
+  let tzName = tz != null && tz.ok && tz.out.timezone != null ? tz.out.timezone : (isJakarta ? "Asia/Jakarta" : "UTC")
 
   // Local time in target city's timezone
   let localSec = now + tzOffset
@@ -88,15 +90,15 @@ widget "omaprayer" {
 
   // Timings from todayItem
   let rawTimings = todayItem != null ? todayItem.timings : null
-  let tFajr = rawTimings != null ? sub(rawTimings.Fajr, 0, 5) : (city == "auto" ? "04:15" : null)
-  let tSunrise = rawTimings != null ? sub(rawTimings.Sunrise, 0, 5) : (city == "auto" ? "05:33" : null)
-  let tDhuhr = rawTimings != null ? sub(rawTimings.Dhuhr, 0, 5) : (city == "auto" ? "11:39" : null)
-  let tAsr = rawTimings != null ? sub(rawTimings.Asr, 0, 5) : (city == "auto" ? "14:43" : null)
-  let tMaghrib = rawTimings != null ? sub(rawTimings.Maghrib, 0, 5) : (city == "auto" ? "17:46" : null)
-  let tIsha = rawTimings != null ? sub(rawTimings.Isha, 0, 5) : (city == "auto" ? "18:56" : null)
-  let tImsak = rawTimings != null ? sub(rawTimings.Imsak, 0, 5) : (city == "auto" ? "04:05" : null)
-  let tSunset = rawTimings != null ? sub(rawTimings.Sunset, 0, 5) : (city == "auto" ? "17:46" : null)
-  let tMidnight = rawTimings != null ? sub(rawTimings.Midnight, 0, 5) : (city == "auto" ? "23:39" : null)
+  let tFajr = rawTimings != null ? sub(rawTimings.Fajr, 0, 5) : (isJakarta ? "04:15" : null)
+  let tSunrise = rawTimings != null ? sub(rawTimings.Sunrise, 0, 5) : (isJakarta ? "05:33" : null)
+  let tDhuhr = rawTimings != null ? sub(rawTimings.Dhuhr, 0, 5) : (isJakarta ? "11:39" : null)
+  let tAsr = rawTimings != null ? sub(rawTimings.Asr, 0, 5) : (isJakarta ? "14:43" : null)
+  let tMaghrib = rawTimings != null ? sub(rawTimings.Maghrib, 0, 5) : (isJakarta ? "17:46" : null)
+  let tIsha = rawTimings != null ? sub(rawTimings.Isha, 0, 5) : (isJakarta ? "18:56" : null)
+  let tImsak = rawTimings != null ? sub(rawTimings.Imsak, 0, 5) : (isJakarta ? "04:05" : null)
+  let tSunset = rawTimings != null ? sub(rawTimings.Sunset, 0, 5) : (isJakarta ? "17:46" : null)
+  let tMidnight = rawTimings != null ? sub(rawTimings.Midnight, 0, 5) : (isJakarta ? "23:39" : null)
 
   // Milestones in minutes from midnight
   let fMin = tFajr != null ? floor(num(sub(tFajr, 0, 2))) * 60 + floor(num(sub(tFajr, 3, 5))) : 255
@@ -125,21 +127,23 @@ widget "omaprayer" {
     curMin < iMin ? "isha" :
     "fajr"
 
-  let nextNameId = nextId == "fajr" ? (curMin >= iMin ? "Subuh (Besok)" : "Subuh") :
+  let isTomorrow = curMin >= iMin && nextId == "fajr"
+
+  let nextNameId = nextId == "fajr" ? "Subuh" :
     nextId == "sunrise" ? "Terbit" :
     nextId == "dhuhr" ? "Dzuhur" :
     nextId == "asr" ? "Ashar" :
     nextId == "maghrib" ? "Maghrib" :
     "Isya"
 
-  let nextNameEn = nextId == "fajr" ? (curMin >= iMin ? "Fajr (Tomorrow)" : "Fajr") :
+  let nextNameEn = nextId == "fajr" ? "Fajr" :
     nextId == "sunrise" ? "Sunrise" :
     nextId == "dhuhr" ? "Dhuhr" :
     nextId == "asr" ? "Asr" :
     nextId == "maghrib" ? "Maghrib" :
     "Isha"
 
-  let nextAr = nextId == "fajr" ? (curMin >= iMin ? "الفجر (غداً)" : "الفجر") :
+  let nextAr = nextId == "fajr" ? "الفجر" :
     nextId == "sunrise" ? "الشروق" :
     nextId == "dhuhr" ? "الظهر" :
     nextId == "asr" ? "العصر" :
@@ -210,7 +214,6 @@ widget "omaprayer" {
       justify: center
       align: center
       padding: [4, 7]
-      radius: 6
       background: selected ? accent : alpha(surface, 0.9)
       border: 1
       borderColor: selected ? accent : alpha(muted, 0.6)
@@ -274,10 +277,9 @@ widget "omaprayer" {
       gap: 1
       align: center
       padding: [3, 4]
-      radius: 4
       background: isCurrent ? alpha(accent, 0.22) : alpha(surface, 0.45)
-      border: isCurrent ? 1 : 0
-      borderColor: accent
+      border: 1
+      borderColor: isCurrent ? accent : rgb(0, 0, 0, 0)
 
       Text {
         text: p.name
@@ -303,10 +305,9 @@ widget "omaprayer" {
       gap: 10
       align: center
       padding: [10, 8]
-      radius: 6
       background: row.isCurrent ? alpha(accent, 0.15) : alpha(surface, 0.3)
-      border: row.isCurrent ? 1 : 0
-      borderColor: accent
+      border: 1
+      borderColor: row.isCurrent ? accent : rgb(0, 0, 0, 0)
 
       Text {
         text: row.isCurrent ? "●" : "○"
@@ -389,7 +390,6 @@ widget "omaprayer" {
       gap: 8
       align: center
       padding: [8, 6]
-      radius: 6
       background: alpha(accent, 0.12)
       border: 1
       borderColor: alpha(accent, 0.35)
@@ -397,12 +397,24 @@ widget "omaprayer" {
       Column {
         gap: 1
         weight: 1
-        Text {
-          text: upper(nextName)
-          fontSize: 16
-          bold: true
-          color: foreground
-          maxLines: 1
+        Row {
+          gap: 4
+          align: center
+          Text {
+            text: upper(nextName)
+            fontSize: 16
+            bold: true
+            color: foreground
+            maxLines: 1
+          }
+          if isTomorrow {
+            Text {
+              text: lang == "en" ? "(tmrw)" : lang == "ar" ? "(غداً)" : "(besok)"
+              fontSize: 10
+              color: muted
+              maxLines: 1
+            }
+          }
         }
         Text {
           text: nextTimeRaw ?? "—:—"
@@ -531,7 +543,6 @@ widget "omaprayer" {
           justify: center
           align: center
           padding: [6, 8]
-          radius: 6
           background: accent
           border: 1
           borderColor: accent
@@ -555,7 +566,6 @@ widget "omaprayer" {
           justify: center
           align: center
           padding: [8, 8]
-          radius: 6
           background: !showSettings ? accent : alpha(surface, 0.7)
           border: 1
           borderColor: !showSettings ? accent : alpha(muted, 0.4)
@@ -575,7 +585,6 @@ widget "omaprayer" {
           justify: center
           align: center
           padding: [8, 8]
-          radius: 6
           background: showSettings ? accent : alpha(surface, 0.7)
           border: 1
           borderColor: showSettings ? accent : alpha(muted, 0.4)
@@ -599,7 +608,6 @@ widget "omaprayer" {
           gap: 16
           align: center
           padding: [14, 12]
-          radius: 10
           background: alpha(accent, 0.15)
           border: 1
           borderColor: alpha(accent, 0.4)
@@ -696,8 +704,9 @@ widget "omaprayer" {
               Row {
                 gap: 4
                 padding: [4, 6]
-                radius: 4
                 background: idx == 0 ? alpha(accent, 0.12) : alpha(surface, 0.3)
+                border: 1
+                borderColor: idx == 0 ? alpha(accent, 0.3) : rgb(0, 0, 0, 0)
                 Text {
                   text: d.date.gregorian.day + " " + (d.date.gregorian.month.en != null ? sub(d.date.gregorian.month.en, 0, 3) : "")
                   style: small
@@ -728,7 +737,6 @@ widget "omaprayer" {
           justify: center
           align: center
           padding: [8, 10]
-          radius: 6
           background: alpha(surface, 0.7)
           border: 1
           borderColor: alpha(muted, 0.4)
@@ -750,7 +758,6 @@ widget "omaprayer" {
           fill: width
           align: center
           padding: [8, 10]
-          radius: 6
           background: alpha(accent, 0.15)
           border: 1
           borderColor: alpha(accent, 0.5)
@@ -769,7 +776,6 @@ widget "omaprayer" {
         Column {
           gap: 6
           padding: [10, 10]
-          radius: 8
           background: alpha(surface, 0.4)
           border: 1
           borderColor: alpha(border, 0.5)
@@ -805,8 +811,9 @@ widget "omaprayer" {
               justify: center
               align: center
               padding: [7, 8]
-              radius: 6
               background: accent
+              border: 1
+              borderColor: accent
               onTap: {
                 city = len(typedCity) > 0 ? typedCity : city
                 refresh()
@@ -839,7 +846,6 @@ widget "omaprayer" {
         Column {
           gap: 6
           padding: [10, 10]
-          radius: 8
           background: alpha(surface, 0.4)
           border: 1
           borderColor: alpha(border, 0.5)
@@ -909,8 +915,9 @@ widget "omaprayer" {
           justify: center
           align: center
           padding: [9, 10]
-          radius: 6
           background: accent
+          border: 1
+          borderColor: accent
           onTap: {
             showSettings = false
           }
@@ -936,7 +943,6 @@ widget "omaprayer" {
         }
         Row {
           padding: [8, 6]
-          radius: 6
           background: alpha(surface, 0.9)
           border: 1
           borderColor: alpha(muted, 0.6)
