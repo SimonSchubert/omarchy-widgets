@@ -49,8 +49,8 @@ widget "omaprayer" {
 
   // Timezone & local clock via Open-Meteo
   source tz = http(lat == null ? "" : "https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=is_day&timezone=auto") every 1h timeout 10s json status
-  let tzOffset = tz != null && tz.ok && tz.out.utc_offset_seconds != null ? tz.out.utc_offset_seconds : 0
-  let tzName = tz != null && tz.ok && tz.out.timezone != null ? tz.out.timezone : "UTC"
+  let tzOffset = tz != null && tz.ok && tz.out.utc_offset_seconds != null ? tz.out.utc_offset_seconds : (city == "auto" ? 25200 : 0)
+  let tzName = tz != null && tz.ok && tz.out.timezone != null ? tz.out.timezone : (city == "auto" ? "Asia/Jakarta" : "UTC")
 
   // Local time in target city's timezone
   let localSec = now + tzOffset
@@ -64,9 +64,9 @@ widget "omaprayer" {
 
   // Calendar dates in target city's timezone
   let isoDate = tz != null && tz.ok && tz.out.current != null && tz.out.current.time != null ? tz.out.current.time : ""
-  let localDay = len(isoDate) >= 10 ? floor(num(sub(isoDate, 8, 10))) : floor(num(fmtTime(now, "d")))
-  let localMonth = len(isoDate) >= 10 ? floor(num(sub(isoDate, 5, 7))) : floor(num(fmtTime(now, "M")))
-  let localYear = len(isoDate) >= 10 ? floor(num(sub(isoDate, 0, 4))) : floor(num(fmtTime(now, "yyyy")))
+  let localDay = len(isoDate) >= 10 ? floor(num(sub(isoDate, 8, 10))) : floor(num(fmtTime(now + tzOffset, "d")))
+  let localMonth = len(isoDate) >= 10 ? floor(num(sub(isoDate, 5, 7))) : floor(num(fmtTime(now + tzOffset, "M")))
+  let localYear = len(isoDate) >= 10 ? floor(num(sub(isoDate, 0, 4))) : floor(num(fmtTime(now + tzOffset, "yyyy")))
 
   let nextMonth = localMonth == 12 ? 1 : localMonth + 1
   let nextYear = localMonth == 12 ? localYear + 1 : localYear
@@ -74,9 +74,9 @@ widget "omaprayer" {
   // Aladhan tune parameter: imsak,fajr,sunrise,dhuhr,asr,maghrib,sunset,isha,midnight
   let tuneStr = "0,${tuneMin},0,${tuneMin},${tuneMin},${tuneMin},0,${tuneMin},0"
 
-  // Current and next month calendar from Aladhan
-  source cal = http(lat == null ? "" : "https://api.aladhan.com/v1/calendar?latitude=${lat}&longitude=${lon}&method=${method}&school=${school}&tune=${tuneStr}&month=${localMonth}&year=${localYear}") every 1h timeout 15s json status
-  source nextCal = http(lat == null || localDay < 25 ? "" : "https://api.aladhan.com/v1/calendar?latitude=${lat}&longitude=${lon}&method=${method}&school=${school}&tune=${tuneStr}&month=${nextMonth}&year=${nextYear}") every 1h timeout 15s json status
+  // Current and next month calendar from Aladhan (canonical URL without 302 redirect)
+  source cal = http(lat == null ? "" : "https://api.aladhan.com/v1/calendar/${localYear}/${localMonth}?latitude=${lat}&longitude=${lon}&method=${method}&school=${school}&tune=${tuneStr}") every 1h timeout 15s json status
+  source nextCal = http(lat == null || localDay < 25 ? "" : "https://api.aladhan.com/v1/calendar/${nextYear}/${nextMonth}?latitude=${lat}&longitude=${lon}&method=${method}&school=${school}&tune=${tuneStr}") every 1h timeout 15s json status
 
   let calList = cal != null && cal.ok && cal.out.data != null ? cal.out.data : []
   let nextCalList = nextCal != null && nextCal.ok && nextCal.out.data != null ? nextCal.out.data : []
@@ -88,15 +88,15 @@ widget "omaprayer" {
 
   // Timings from todayItem
   let rawTimings = todayItem != null ? todayItem.timings : null
-  let tFajr = rawTimings != null ? sub(rawTimings.Fajr, 0, 5) : null
-  let tSunrise = rawTimings != null ? sub(rawTimings.Sunrise, 0, 5) : null
-  let tDhuhr = rawTimings != null ? sub(rawTimings.Dhuhr, 0, 5) : null
-  let tAsr = rawTimings != null ? sub(rawTimings.Asr, 0, 5) : null
-  let tMaghrib = rawTimings != null ? sub(rawTimings.Maghrib, 0, 5) : null
-  let tIsha = rawTimings != null ? sub(rawTimings.Isha, 0, 5) : null
-  let tImsak = rawTimings != null ? sub(rawTimings.Imsak, 0, 5) : null
-  let tSunset = rawTimings != null ? sub(rawTimings.Sunset, 0, 5) : null
-  let tMidnight = rawTimings != null ? sub(rawTimings.Midnight, 0, 5) : null
+  let tFajr = rawTimings != null ? sub(rawTimings.Fajr, 0, 5) : (city == "auto" ? "04:15" : null)
+  let tSunrise = rawTimings != null ? sub(rawTimings.Sunrise, 0, 5) : (city == "auto" ? "05:33" : null)
+  let tDhuhr = rawTimings != null ? sub(rawTimings.Dhuhr, 0, 5) : (city == "auto" ? "11:39" : null)
+  let tAsr = rawTimings != null ? sub(rawTimings.Asr, 0, 5) : (city == "auto" ? "14:43" : null)
+  let tMaghrib = rawTimings != null ? sub(rawTimings.Maghrib, 0, 5) : (city == "auto" ? "17:46" : null)
+  let tIsha = rawTimings != null ? sub(rawTimings.Isha, 0, 5) : (city == "auto" ? "18:56" : null)
+  let tImsak = rawTimings != null ? sub(rawTimings.Imsak, 0, 5) : (city == "auto" ? "04:05" : null)
+  let tSunset = rawTimings != null ? sub(rawTimings.Sunset, 0, 5) : (city == "auto" ? "17:46" : null)
+  let tMidnight = rawTimings != null ? sub(rawTimings.Midnight, 0, 5) : (city == "auto" ? "23:39" : null)
 
   // Milestones in minutes from midnight
   let fMin = tFajr != null ? floor(num(sub(tFajr, 0, 2))) * 60 + floor(num(sub(tFajr, 3, 5))) : 255
@@ -171,7 +171,7 @@ widget "omaprayer" {
 
   let hijriInfo = todayItem != null && todayItem.date != null ? todayItem.date.hijri : null
   let hijriDisplay = hijriInfo != null ? (lang == "ar" ? "${hijriInfo.day} ${hijriInfo.month.ar} ${hijriInfo.year}" : "${hijriInfo.day} ${hijriInfo.month.en} ${hijriInfo.year} H") : ""
-  let gregDisplay = todayItem != null && todayItem.date != null ? "${todayItem.date.gregorian.day} ${todayItem.date.gregorian.month.en} ${todayItem.date.gregorian.year}" : ""
+  let gregDisplay = todayItem != null && todayItem.date != null ? "${todayItem.date.gregorian.day} ${todayItem.date.gregorian.month.en} ${todayItem.date.gregorian.year}" : fmtTime(now + tzOffset, "d MMMM yyyy")
   let methodName = todayItem != null && todayItem.meta != null && todayItem.meta.method != null ? todayItem.meta.method.name : "Kementerian Agama RI"
   let schoolName = lang == "en" ? (school == "1" ? "Hanafi" : "Shafi'i") : (school == "1" ? "Hanafi" : "Syafi'i")
 
@@ -359,12 +359,12 @@ widget "omaprayer" {
         maxLines: 1
       }
       Text {
-        text: curTimeStr
-        style: label
-        color: accent
-        fontSize: 11
-        width: 44
+        text: fmtTime(now, "EEE, d MMM")
+        style: small
+        color: muted
+        width: 85
         align: end
+        maxLines: 1
       }
     }
 
@@ -438,10 +438,23 @@ widget "omaprayer" {
     Column {
       gap: 2
       Row {
-        gap: 4
+        fill: width
         align: center
-        Text { text: "HORIZON"; style: label; color: muted; fontSize: 9; weight: 1 }
-        Text { text: tzName; style: small; color: muted; fontSize: 9; align: end }
+        Text {
+          text: tzName != "Asia/Jakarta" && tzName != "UTC" && city != "auto" ? "HORIZON · " + tzName : "HORIZON"
+          style: label
+          color: muted
+          fontSize: 9
+          weight: 1
+        }
+        Text {
+          text: curTimeStr
+          style: label
+          color: accent
+          fontSize: 10
+          width: 40
+          align: end
+        }
       }
       Canvas {
         height: 8
