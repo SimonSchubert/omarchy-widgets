@@ -1,0 +1,67 @@
+widget "dns" {
+  size: 3x1
+  minSize: 1x1
+
+  meta { owl: 4; description: "Switch this machine's DNS resolver between Cloudflare, Google, Quad9 and the default in /etc/resolv.conf, showing the active server and its response time."; version: "1.0"; license: "MIT"; category: "system" }
+
+  requires { pacman: ["bind"] }
+
+  // The resolver list in use, read live from the file the toggle writes.
+  source resolv = file("/etc/resolv.conf")
+  // Response time of the resolver the system is actually using, via dig.
+  source probe = cmd('f=/etc/resolv.conf; s=$(awk "/^[[:space:]]*nameserver/ {print \$2; exit}" "$f"); [ -n "$s" ] || exit 0; dig +time=2 +tries=1 +stats @"$s" cloudflare.com A 2>/dev/null | awk "/Query time:/ {print \$4}"') every 60s timeout 15s
+
+  // Preset secondary servers are unique, so they tell the presets apart from the
+  // default resolv.conf, which already lists 1.1.1.1 and 8.8.8.8.
+  let provider = contains(resolv ?? "", "9.9.9.9") ? "quad9" : contains(resolv ?? "", "8.8.4.4") ? "google" : contains(resolv ?? "", "1.0.0.1") ? "cloudflare" : "default"
+  let servers = lines(resolv ?? "").filter(l => startsWith(trim(l), "nameserver")).map(l => words(l)[1])
+  let wide = tileWidth != null && tileHeight != null && tileWidth > tileHeight
+  // A one-row tile only fits the buttons and the header; the server list needs more.
+  let roomy = (rows ?? 2) >= 2
+
+  // Back up the original resolv.conf once, then rewrite it per provider.
+  let pre = 'f=/etc/resolv.conf; b=/etc/resolv.conf.omarchy-default; [ -f "$b" ] || cp "$f" "$b"; p='
+  let post = '; case $p in default) [ -f "$b" ] && cp "$b" "$f" ;; cloudflare) s="1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001" ;; google) s="8.8.8.8 8.8.4.4 2001:4860:4860::8888 2001:4860:4860::8844" ;; quad9) s="9.9.9.9 149.112.112.112 2620:fe::fe 2620:fe::9" ;; esac; if [ "$p" != default ]; then { for i in $s; do echo "nameserver $i"; done; echo "options timeout:1 attempts:1"; } > "$f"; fi; true'
+
+  component Pill(label, preset, tint, fillmode) {
+    let active = provider == preset
+    Button {
+      text: label
+      weight: 1
+      fill: fillmode
+      color: active ? background : foreground
+      background: active ? tint : surface
+      border: active ? 0 : 1
+      borderColor: border
+      onTap: run(pre + preset + post)
+    }
+  }
+
+  Column {
+    gap: 5
+    Row {
+      fill: width
+      Text { text: "ARCH DNS PROVIDER"; style: label; color: muted; weight: 1 }
+      Text { text: len(probe ?? "") > 0 ? "${probe} ms" : ""; style: small; color: muted; width: 64; align: end }
+    }
+    if wide {
+      Row {
+        fill: width
+        weight: 1
+        gap: 5
+        Pill { label: "Default"; preset: "default"; tint: muted; fillmode: "height" }
+        Pill { label: "Cloudflare"; preset: "cloudflare"; tint: orange; fillmode: "height" }
+        Pill { label: "Google"; preset: "google"; tint: blue; fillmode: "height" }
+        Pill { label: "Quad9"; preset: "quad9"; tint: magenta; fillmode: "height" }
+      }
+    } else {
+      Pill { label: "Default"; preset: "default"; tint: muted; fillmode: true }
+      Pill { label: "Cloudflare"; preset: "cloudflare"; tint: orange; fillmode: true }
+      Pill { label: "Google"; preset: "google"; tint: blue; fillmode: true }
+      Pill { label: "Quad9"; preset: "quad9"; tint: magenta; fillmode: true }
+    }
+    if roomy {
+      Text { text: join(servers, "  ·  "); style: muted; color: muted; maxLines: 1; fill: width }
+    }
+  }
+}
