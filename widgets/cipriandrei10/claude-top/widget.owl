@@ -2,7 +2,7 @@ widget "claude top" {
   size: 6x3
   minSize: 3x2
 
-  meta { owl: 5; description: "htop for Claude Code: every running instance with its status, folder, window, CPU and memory. Tap for details, the last prompt and kill"; version: "1.0"; license: "MIT"; category: "dev" }
+  meta { owl: 6; description: "htop for Claude Code: every running instance with its status, folder, window, CPU and memory. Tap for details, the last prompt and kill"; version: "1.0"; license: "MIT"; category: "dev" }
   requires { pacman: ["jq", "procps-ng"] }
 
   // Claude Code registers each running instance in ~/.claude/sessions/<pid>.json (name, folder,
@@ -29,7 +29,7 @@ widget "claude top" {
       done
       f=~/.claude/sessions/$p.json; [ -f "$f" ] || f=/dev/null
       sid=$(jq -r '.sessionId // empty' "$f" 2>/dev/null)
-      last=""; [ -n "$sid" ] && last=$(grep -F "\"sessionId\":\"$sid\"" ~/.claude/history.jsonl 2>/dev/null | tail -n 1 | jq -r '.display // empty' | head -c 200)
+      last=""; [ -n "$sid" ] && last=$(tac ~/.claude/history.jsonl 2>/dev/null | grep -m1 -F "\"sessionId\":\"$sid\"" | jq -r '.display // empty' | head -c 200)
       jq -n -c --argjson pid "$p" --argjson cpu "$(( (b - a) * 100 / hz ))" --argjson rss "${rss:-0}" --argjson up "${et:-0}" \
         --arg home "$home" --arg tty "$tty" --arg where "$where" --arg last "$last" --arg cwd "$(readlink /proc/$p/cwd)" \
         --slurpfile s <(cat "$f" 2>/dev/null || true) \
@@ -123,7 +123,7 @@ widget "claude top" {
         Text { text: "${len(all)} running · ${busy} busy · ${len(idle)} idle · ${fmtBytes(totalMem)}"; style: small; color: muted; weight: 1 }
         if len(idle) > 0 {
           if confirm == -1 {
-            Button { text: "close ${len(idle)} idle?"; color: red; onTap: { run("kill " + join(idle.map(p => str(p.pid)), " ")); confirm = 0 } }
+            Button { text: "close ${len(idle)} idle?"; color: red; onTap: { run("for p in $(echo ${sh(join(idle.map(p => str(int(p.pid))), " "))}); do [ \"$(cat /proc/$p/comm 2>/dev/null)\" = claude ] && kill $p; done"); confirm = 0 } }
             Button { text: "no"; color: muted; onTap: confirm = 0 }
           } else {
             Button { text: "close idle"; color: muted; onTap: confirm = -1 }
@@ -170,13 +170,13 @@ widget "claude top" {
             Row {
               gap: 8
               if confirm == p.pid {
-                Button { text: "kill ${p.name}?"; color: red; onTap: { run("kill ${p.pid}"); confirm = 0 } }
+                Button { text: "kill ${p.name}?"; color: red; onTap: { run("p=${int(p.pid)}; [ \"$(cat /proc/$p/comm 2>/dev/null)\" = claude ] && kill $p"); confirm = 0 } }
                 Button { text: "no"; color: muted; onTap: confirm = 0 }
               } else {
                 Button { text: "kill"; color: red; onTap: confirm = p.pid }
               }
               if p.sid != "" {
-                Button { text: "copy resume"; color: muted; onTap: copy("cd '${p.cwd}' && claude --resume ${p.sid}") }
+                Button { text: "copy resume"; color: muted; onTap: copy("cd ${sh(p.cwd)} && claude --resume ${sh(p.sid)}") }
               }
             }
           }
