@@ -1,0 +1,332 @@
+widget "widget maker" {
+  size: 6x4
+  minSize: 4x3
+  meta { owl: 5; description: "Describe a widget in plain words and your coding agent (Claude Code, Codex, opencode, Crush or Grok) writes it, checks it on the launcher and puts it on your home screen"; version: "1.0"; license: "MIT"; category: "dev" }
+
+  requires { pacman: ["jq"] }
+
+  // How it works: the tile installs a small script, ~/.local/share/owlmaker/make. It hands your
+  // request to the agent you pick (the launcher's default agent unless you change it), together
+  // with README.md and examples/. The agent writes one made-<time>.owl file and runs owl-check
+  // on it. The script runs owl-check once more at the end and only keeps a widget that passes:
+  // a failed new widget is moved to ~/.cache/owlmaker/failed, and a failed change is undone.
+  // Claude Code runs with file tools only, Bash limited to owl-check and pacman -S, and no web or
+  // MCP connectors. The other agents run in their own non-interactive modes.
+  source now = clock every 1s
+  source env = cmd("""
+    d=~/.local/share/owlmaker
+    a=""; for x in claude codex opencode crush grok; do command -v $x >/dev/null && a="$a\"$x\","; done
+    printf '{"v":"%s","agents":[%s],"def":"%s"}' "$(cat $d/VERSION 2>/dev/null)" "${a%,}" "$(cat ~/.config/omalauncher/agent 2>/dev/null)"
+  """) every 5m json
+  source st = file("~/.cache/owlmaker/status.json") json
+  source step = file("~/.cache/owlmaker/step")
+  // Whether the run is really still going: its pid file holds a pid and that process's start time.
+  source alive = cmd("""
+    read -r p s < ~/.cache/owlmaker/pid 2>/dev/null && [ -n "$s" ] &&
+      [ "$(sed 's/.*) //' /proc/$p/stat 2>/dev/null | cut -d' ' -f20)" = "$s" ] && r=true || r=false
+    printf '{"run":%s,"t":%s}' $r "$(date +%s)"
+  """) every 1m json
+  // The widgets made here: file|title, newest first.
+  source made = cmd("""
+    cd ~/.config/omalauncher/widgets 2>/dev/null || exit 0
+    for f in $(ls -t made-*.owl 2>/dev/null); do
+      printf '%s|%s\n' "$f" "$(sed -n 's/^widget "\([^"]*\)".*/\1/p' "$f" | head -1)"
+    done
+  """) every 1m
+
+  state agent = "" persist      // the agent picked here; empty means the launcher's default
+  state notified = 0 persist
+  state next = "" persist       // a request waiting for the current run to finish
+  state nextEdit = "" persist
+  state editing = ""            // the made widget the field changes, on the full screen
+  state confirmDel = ""
+  state gone = []
+  state sentAt = 0
+
+  let version = "4"
+  let installed = env.agents ?? []
+  let useAgent = installed.indexOf(agent) >= 0 ? agent : installed.indexOf(env.def) >= 0 ? env.def : installed.first()
+  let ready = env.v == version
+  let stopped = st.state == "working" && alive.run == false && alive.t >= st.t
+  let working = st.state == "working" && !stopped
+  let starting = sentAt > 0 && (st.t ?? 0) < sentAt && (now ?? 0) - sentAt < 45
+  let busy = working || starting
+  let q = "'"
+  let qq = q + '"' + q + '"' + q   // a ' inside a '…' shell argument
+  let list = lines(made ?? "").filter(l => l != "").map(l => {file: split(l, "|")[0], title: split(l, "|").drop(1).join("|")}).filter(m => gone.indexOf(m.file) < 0)
+  let titleOf = list.find(m => m.file == editing).title ?? editing
+  let ideas = [
+    "my phone's storage as a ring, with the biggest folders in ~ below it",
+    "a countdown to New Year with a big number of days",
+    "today's top 5 Hacker News stories, tap to open",
+    "the ISS position on a small world map, updated every minute"
+  ]
+
+  // The script, installed (again) whenever this file carries a newer one.
+  let installCmd = """
+mkdir -p ~/.local/share/owlmaker ~/.cache/owlmaker
+cat > ~/.local/share/owlmaker/make.new <<'MAKE_EOF'
+#!/bin/bash
+# make <agent>: builds the widget described in ~/.cache/owlmaker/request.txt, or changes the
+# file named in target.txt. Progress: ~/.cache/owlmaker/status.json and step.
+agent=$1
+W=~/.config/omalauncher/widgets
+C=~/.cache/owlmaker
+mkdir -p "$C/failed"
+req=$(head -c 4000 "$C/request.txt")
+target=$(cat "$C/target.txt" 2>/dev/null)
+started() { sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | cut -d' ' -f20; }
+[ -f "$C/pid" ] && read -r p s <"$C/pid"
+if [ -n "$s" ] && [ "$(started "$p")" = "$s" ]; then echo "already making one" >&2; exit 1; fi
+echo "$$ $(started $$)" >"$C/pid"
+trap 'rm -f "$C/pid"' EXIT
+
+status() { # state file summary error
+  jq -nc --arg state "$1" --arg req "$req" --arg file "$2" --arg summary "$3" --arg error "$4" \
+    --arg agent "$agent" --arg edit "$target" --argjson t "$(date +%s)" \
+    '{state:$state, req:$req, file:$file, summary:$summary, error:$error, agent:$agent, edit:$edit, t:$t}' \
+    >"$C/status.tmp" && mv "$C/status.tmp" "$C/status.json"
+}
+step() { echo "$1" >"$C/step"; }
+step "starting $agent"
+status working "" "" ""
+
+if [ -n "$target" ]; then
+  F=$W/$target
+  [ -f "$F" ] || { status failed "" "" "that widget isn't there any more"; exit 1; }
+  cp "$F" "$C/backup.owl"
+  task="Change the widget $F as asked: $req
+Keep everything the request doesn't touch. Raise its meta version (1.0 becomes 1.1)."
+else
+  F=$W/made-$(date +%m%d-%H%M%S).owl
+  task="Make a new home-screen widget: $req
+Write it to exactly this file: $F"
+fi
+prompt="You write home-screen widgets for omalauncher, an Android launcher with Arch Linux inside.
+$task
+
+First read $W/README.md, which documents the OWL widget language, and one or two files in
+$W/examples/ that are close to the request. Then write the widget. Then run: owl-check $F
+It prints errors and the paths of PNG previews drawn with live data. Fix every error, open the
+PNGs, and fix what looks wrong: cut-off or overlapping text, wasted space, unreadable colours, a
+layout that doesn't fit the tile. Check again; at most four rounds.
+
+Rules:
+- Create or change only $F. Never touch other files in $W.
+- Nothing personal in the file: no tokens, keys, names or home location. If the widget needs one,
+  keep it in a persisted state that the user sets with an Input on the widget's screen { }.
+- Prefer http() over curl and file() over polling cat. Poll no more often than the data changes.
+  Read 'time' only if the widget really animates (it redraws every frame).
+- Include meta { owl: <the version it needs>; description; version: \"1.0\"; license: \"MIT\";
+  category }. Declare every package in requires and install it with
+  pacman -S --needed --noconfirm <packages>.
+- Use theme colour names so it follows the user's theme. Make it look good: it's on their home screen.
+Don't ask questions; make sensible choices. End with one short sentence saying what the widget shows."
+
+cd "$W"
+: >"$C/agent.log"
+case $agent in
+  claude)
+    # File tools, Bash only for owl-check and pacman -S, no web and no MCP connectors.
+    ENABLE_CLAUDEAI_MCP_SERVERS=false claude -p "$prompt" --strict-mcp-config \
+      --tools "Read,Write,Edit,Glob,Grep,Bash" \
+      --allowedTools "Read Write Edit Glob Grep Bash(owl-check:*) Bash(pacman -S --needed --noconfirm:*)" \
+      --output-format stream-json --verbose 2>"$C/agent.err" |
+    while IFS= read -r line; do
+      printf '%s\n' "$line" >>"$C/agent.log"
+      t=$(jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use")
+        | .name + " " + ((.input.file_path // .input.command // .input.pattern // "") | tostring)' <<<"$line" 2>/dev/null | tail -1)
+      case "$t" in
+        "Read "*README*) step "reading the OWL docs" ;;
+        "Read "*.png) step "looking at the preview" ;;
+        "Read "*|"Glob "*|"Grep "*) step "looking at examples" ;;
+        "Write "*) step "writing the widget" ;;
+        "Edit "*) step "polishing it" ;;
+        "Bash "*owl-check*) step "checking it on the launcher" ;;
+        "Bash "*pacman*) step "installing packages" ;;
+      esac
+    done
+    summary=$(jq -r 'select(.type=="result") | .result // empty' "$C/agent.log" 2>/dev/null | grep -v '^\s*$' | tail -1 | cut -c1-300) ;;
+  codex)    step "working with codex";    codex exec --full-auto --skip-git-repo-check -C "$W" "$prompt" >"$C/agent.log" 2>"$C/agent.err" ;;
+  opencode) step "working with opencode"; opencode run "$prompt" >"$C/agent.log" 2>"$C/agent.err" ;;
+  crush)    step "working with crush";    crush run "$prompt" >"$C/agent.log" 2>"$C/agent.err" ;;
+  grok)     step "working with grok";     grok --prompt "$prompt" >"$C/agent.log" 2>"$C/agent.err" ;;
+  *) status failed "" "" "unknown agent: $agent"; exit 1 ;;
+esac
+[ -n "$summary" ] || summary=$(grep -v '^\s*$' "$C/agent.log" | tail -1 | cut -c1-300)
+
+step "final check"
+if [ -f "$F" ] && owl-check "$F" >"$C/check.txt" 2>&1; then
+  rm -f "$C/backup.owl"
+  status done "$(basename "$F")" "$summary" ""
+else
+  err=$( [ -f "$F" ] && grep -v '^\s*$' "$C/check.txt" | sed -n 2,3p | tr '\n' ' ' || tail -c 200 "$C/agent.err")
+  if [ -n "$target" ]; then cp "$C/backup.owl" "$F"; else [ -f "$F" ] && mv "$F" "$C/failed/"; fi
+  status failed "" "$summary" "${err:-the agent wrote no widget}"
+  exit 1
+fi
+MAKE_EOF
+chmod +x ~/.local/share/owlmaker/make.new && mv ~/.local/share/owlmaker/make.new ~/.local/share/owlmaker/make
+echo 4 > ~/.local/share/owlmaker/VERSION
+"""
+  when env != null && !ready { run(installCmd) }
+
+  on st.state { refresh() }
+  when ready && !busy && next != "" && useAgent != null {
+    run("printf '%s' '${replace(next, q, qq)}' > ~/.cache/owlmaker/request.txt; printf '%s' '${replace(nextEdit, q, qq)}' > ~/.cache/owlmaker/target.txt; setsid ~/.local/share/owlmaker/make ${useAgent} >/dev/null 2>&1 &")
+    sentAt = now
+    next = ""
+    nextEdit = ""
+  }
+  when st.state == "done" && st.t != notified {
+    notify(st.edit != "" ? "widget changed" : "new widget", st.summary != "" ? st.summary : st.req)
+    notified = st.t
+  }
+
+  onTap: screen()
+
+  component Spinner() {
+    Canvas { width: 16; height: 16; arc(8, 8, 6, (now ?? 0) * 90 % 360, 100, stroke: accent, width: 2, cap: round) }
+  }
+
+  component AgentChip() {
+    Text {
+      text: useAgent ?? "no agent"
+      style: small
+      color: accent
+      align: center
+      width: 84
+      padding: [8, 3]
+      border: 1
+      borderColor: accent
+      radius: 10
+      // Cycles through the installed agents.
+      onTap: agent = len(installed) > 0 ? installed[(installed.indexOf(useAgent) + 1) % len(installed)] : ""
+    }
+  }
+
+  component Status() {
+    if starting {
+      Row { align: center; Spinner {}; Text { text: "starting…"; style: small; color: accent; weight: 1 } }
+    } else if working {
+      Column {
+        gap: 4
+        Text { text: st.edit != "" ? "changing: ${st.req}" : st.req; style: body; maxLines: 2 }
+        Row {
+          align: center
+          Spinner {}
+          Text { text: trim(step ?? "") == "" ? "working" : trim(step); style: small; color: accent; weight: 1; maxLines: 1 }
+          Text { text: fmtDuration(now - st.t); style: small; color: muted; width: 56; align: end }
+        }
+      }
+    } else if st.state == "done" {
+      Text { text: "✓ ${st.summary != '' ? st.summary : st.req}"; style: small; color: green; maxLines: 3 }
+    } else if st.state == "failed" {
+      Text { text: "✗ ${st.error}"; style: small; color: red; maxLines: 3 }
+    } else if stopped {
+      Text { text: "✗ stopped before it finished (Linux or the app was closed): send it again"; style: small; color: red; maxLines: 2 }
+    }
+  }
+
+  Column {
+    gap: 8
+    fill: true
+    Row {
+      align: center
+      Text { text: "widget maker"; style: label; weight: 1 }
+      if ready && len(installed) > 0 { AgentChip {} }
+    }
+    if env != null && len(installed) == 0 {
+      Text { text: "Widget maker uses a coding agent (Claude Code, Codex, opencode, Crush or Grok). Install one and log in first."; style: small; maxLines: 3 }
+      Button { text: "set up an agent"; onTap: launcher("agents") }
+    } else if !ready {
+      Text { text: env.v == "" ? "One-time setup: a small script that runs your agent." : "An update to the widget maker script is ready."; style: small; color: muted; maxLines: 2 }
+      Button { text: env.v == "" ? "set up" : "update"; onTap: run(installCmd) }
+    } else {
+      Row {
+        align: center
+        padding: [10, 8]
+        border: 1
+        borderColor: border
+        radius: 8
+        onTap: screen()
+        Text { text: next != "" ? "up next: ${next}" : busy ? "＋ queue another widget" : "describe a widget…"; style: small; color: next != "" ? foreground : muted; maxLines: 1; weight: 1 }
+      }
+      Status {}
+      Column {
+        gap: 4
+        weight: 1
+        for m in list.take(rows >= 4 ? 3 : 1) key m.file {
+          Text { text: "▸ ${m.title}"; style: small; color: muted; maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "widget maker"
+    Column {
+      gap: 12
+      padding: 16
+      scroll: true
+      if ready && len(installed) > 0 {
+        Row {
+          align: center
+          gap: 8
+          Text { text: "Describe a widget. Your agent writes it, checks it and adds it to the home screen, in a few minutes."; style: small; color: muted; weight: 1; maxLines: 3 }
+          AgentChip {}
+        }
+        if editing != "" {
+          Row {
+            align: center
+            gap: 8
+            Text { text: "changing: ${titleOf}"; style: small; color: accent; weight: 1; maxLines: 1 }
+            Button { text: "✕"; color: muted; onTap: editing = "" }
+          }
+          Input {
+            placeholder: "what to change, e.g. make the numbers bigger"
+            clear: true
+            onSubmit: { next = trim(value); nextEdit = editing; editing = "" }
+          }
+        } else {
+          Input {
+            placeholder: busy ? "next widget: starts when this one is done" : "e.g. days left until my exams"
+            clear: true
+            onSubmit: { next = trim(value); nextEdit = "" }
+          }
+          if !busy && next == "" {
+            Text { text: "or try one:"; style: small; color: muted }
+            for idea in ideas key idea {
+              Text { text: "→ ${idea}"; style: small; color: accent; maxLines: 2; padding: [0, 2]; onTap: { next = idea; nextEdit = "" } }
+            }
+          }
+        }
+        if next != "" && busy {
+          Row {
+            align: center
+            gap: 8
+            Text { text: "up next: ${next}"; style: small; weight: 1; maxLines: 2 }
+            Button { text: "✕"; color: muted; onTap: { next = ""; nextEdit = "" } }
+          }
+        }
+        Status {}
+      } else {
+        Text { text: "Finish setting up on the tile first."; style: small; color: muted }
+      }
+      Text { text: len(list) == 0 ? "Widgets you make show up here." : "${len(list)} made here · change: describe what to change · remove asks once more"; style: small; color: muted; maxLines: 2 }
+      for m in list key m.file {
+        Row {
+          gap: 8
+          align: center
+          Text { text: m.title; style: small; weight: 1; maxLines: 1 }
+          Text { text: "change"; style: small; color: editing == m.file ? accent : foreground; width: 56; align: center; onTap: { editing = editing == m.file ? "" : m.file; confirmDel = "" } }
+          if confirmDel == m.file {
+            Text { text: "sure?"; style: small; color: red; width: 56; align: center; onTap: { gone = gone + [m.file]; confirmDel = ""; run("rm -f -- ~/.config/omalauncher/widgets/'${replace(m.file, q, qq)}'") } }
+          } else {
+            Text { text: "remove"; style: small; color: muted; width: 56; align: center; onTap: { confirmDel = m.file; editing = "" } }
+          }
+        }
+      }
+    }
+  }
+}
