@@ -1,0 +1,843 @@
+widget "calendar" {
+  size: 6x4
+  minSize: 3x3
+  meta { description: "Upcoming events from your Google Calendar. Scroll the next 30 days, open one, and add an event."; version: "1.0"; license: "MIT"; category: "productivity"; owl: 6 }
+  requires { pacman: ["python", "python-icalendar", "python-recurring-ical-events", "tzdata"] }
+
+  // Secret iCal links live in ~/.config/gcal-widget/feeds.json, not in this file.
+  source now = clock every 1m
+  source sys = android.system every 10m
+  source cfgRaw = file("~/.config/gcal-widget/feeds.json")
+
+  let tzName = replace(sys.timezone ?? "", "'", "")
+  let feeds = parseJson(cfgRaw == "" || cfgRaw == null ? "[]" : cfgRaw) ?? []
+
+  // Helpers live next to the feed list. The script is fixed; only the request and time zone are quoted into the runner.
+  source setup = cmd("""mkdir -p ~/.config/gcal-widget
+cat > ~/.config/gcal-widget/agenda.py << 'PY'
+import json
+import os
+import urllib.request
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import recurring_ical_events
+from icalendar import Calendar
+
+FEEDS = Path(os.environ.get("GCAL_FEEDS") or str(Path.home() / ".config/gcal-widget/feeds.json"))
+LIMIT = 80
+WINDOW_DAYS = 30
+
+
+def resolve_tz():
+    name = (os.environ.get("GCAL_TZ") or "").strip()
+    if name in ("", "null", "…"):
+        name = os.environ.get("TZ") or "UTC"
+    try:
+        return name, ZoneInfo(name)
+    except Exception:
+        fallback = os.environ.get("TZ") or "UTC"
+        try:
+            return fallback, ZoneInfo(fallback)
+        except Exception:
+            return "UTC", ZoneInfo("UTC")
+
+
+def load_feeds():
+    if not FEEDS.exists():
+        return []
+    try:
+        data = json.loads(FEEDS.read_text() or "[]")
+    except Exception:
+        return None
+    return data if isinstance(data, list) else []
+
+
+def as_local_date(value, tz):
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=tz)
+        return value.astimezone(tz).date()
+    return value
+
+
+def to_unix(value, tz):
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=tz)
+        return int(value.timestamp())
+    return int(datetime.combine(value, time.min, tzinfo=tz).timestamp())
+
+
+def text_of(component, key, limit=140):
+    raw = component.get(key)
+    if raw is None:
+        return ""
+    value = str(raw).replace("\n", " ").strip()
+    if len(value) > limit:
+        return value[: limit - 1].rstrip() + "…"
+    return value
+
+
+def span_text(end_value, all_day, visible, tz):
+    if end_value is None:
+        return ""
+    if all_day:
+        end_day = as_local_date(end_value, tz) - timedelta(days=1)
+        if end_day > visible:
+            return "through " + end_day.strftime("%a %-d %b").lower()
+        return ""
+    if isinstance(end_value, datetime):
+        local = end_value if end_value.tzinfo is not None else end_value.replace(tzinfo=tz)
+        local = local.astimezone(tz)
+        if local.date() > visible:
+            return "until " + local.strftime("%a %-d %b %H:%M").lower()
+    return ""
+
+
+def emit(component, calendar, index, tz, today, window_end):
+    start_prop = component.get("DTSTART")
+    if start_prop is None:
+        return None
+    status = str(component.get("STATUS") or "")
+    if status.upper() == "CANCELLED":
+        return None
+    start_value = start_prop.dt
+    end_prop = component.get("DTEND")
+    end_value = end_prop.dt if end_prop is not None else None
+    all_day = isinstance(start_value, date) and not isinstance(start_value, datetime)
+    if end_value is None:
+        if all_day:
+            end_value = as_local_date(start_value, tz) + timedelta(days=1)
+        elif isinstance(start_value, datetime):
+            end_value = start_value + timedelta(hours=1)
+    start_day = as_local_date(start_value, tz)
+    end_day = as_local_date(end_value, tz)
+    # All-day DTEND is exclusive.
+    last_day = end_day - timedelta(days=1) if all_day else end_day
+    if last_day < today or start_day >= window_end:
+        return None
+    visible = max(start_day, today)
+    start_unix = to_unix(start_value, tz)
+    end_unix = to_unix(end_value, tz)
+    return {
+        "uid": text_of(component, "UID", 180) + ":" + str(start_unix),
+        "title": text_of(component, "SUMMARY", 140) or "(no title)",
+        "start": start_unix,
+        "end": end_unix,
+        "allDay": all_day,
+        "location": text_of(component, "LOCATION", 80),
+        "calendar": calendar,
+        "cal": index,
+        "day": visible.isoformat(),
+        "dayStart": to_unix(visible, tz),
+        "span": span_text(end_value, all_day, visible, tz),
+    }
+
+
+def fetch(url):
+    request = urllib.request.Request(url, headers={"User-Agent": "omarchy-calendar/1.0"})
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return response.read(4_000_000)
+
+
+def main():
+    tzname, tz = resolve_tz()
+    feeds = load_feeds()
+    if feeds is None:
+        print(json.dumps({"ok": False, "setup": False, "error": "couldn't read the calendar list", "events": [], "calendars": [], "errors": [], "tz": tzname}))
+        return
+    if not feeds:
+        print(json.dumps({"ok": True, "setup": True, "events": [], "calendars": [], "errors": [], "tz": tzname}))
+        return
+    now = datetime.now(tz)
+    today = now.date()
+    window_start = datetime.combine(today, time.min, tzinfo=tz)
+    window_end = today + timedelta(days=WINDOW_DAYS)
+    events = []
+    errors = []
+    calendars = []
+    seen = set()
+    for index, feed in enumerate(feeds):
+        if not isinstance(feed, dict):
+            continue
+        name = str(feed.get("name") or "calendar").strip() or "calendar"
+        url = str(feed.get("url") or "").strip()
+        calendars.append({"name": name, "index": index})
+        try:
+            calendar = Calendar.from_ical(fetch(url))
+            found = recurring_ical_events.of(calendar, skip_bad_series=True).between(window_start, window_end)
+        except Exception:
+            errors.append(name + " didn't load")
+            continue
+        for component in found:
+            item = emit(component, name, index, tz, today, window_end)
+            if item is None or item["uid"] in seen:
+                continue
+            seen.add(item["uid"])
+            events.append(item)
+    events.sort(key=lambda item: (item["day"], 0 if item["allDay"] else 1, item["start"], item["title"].lower()))
+    print(json.dumps({
+        "ok": True,
+        "setup": False,
+        "events": events[:LIMIT],
+        "calendars": calendars,
+        "errors": errors,
+        "tz": tzname,
+    }, ensure_ascii=False))
+
+
+main()
+PY
+cat > ~/.config/gcal-widget/action.py << 'PY'
+import json
+import os
+import re
+import urllib.request
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
+from urllib.parse import urlencode, urlparse
+from zoneinfo import ZoneInfo
+
+from icalendar import Calendar
+
+BASE = Path.home() / ".config/gcal-widget"
+FEEDS = Path(os.environ.get("GCAL_FEEDS") or str(BASE / "feeds.json"))
+SAMPLE = {
+    "name": "US holidays",
+    "url": "https://calendar.google.com/calendar/ical/en.usa%23holiday%40group.v.calendar.google.com/public/basic.ics",
+}
+WEEKDAYS = {
+    "monday": 0, "mon": 0,
+    "tuesday": 1, "tue": 1, "tues": 1,
+    "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3, "thur": 3, "thurs": 3,
+    "friday": 4, "fri": 4,
+    "saturday": 5, "sat": 5,
+    "sunday": 6, "sun": 6,
+}
+WHEN_WORD = re.compile(
+    r"(?i)today|tomorrow|tonight|noon|midnight|"
+    r"mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs?|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|"
+    r"\d{4}-\d{2}-\d{2}|(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?"
+)
+RANGE = re.compile(
+    r"(?i)(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?"
+)
+CLOCK = re.compile(r"(?i)(?<!\d)(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?!\d)")
+DURATION = re.compile(r"(?i)\bfor\s+(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes)\b")
+
+
+def fail(message):
+    nonce = os.environ.get("GCAL_NONCE") or "0"
+    print("ERR " + nonce + " " + " ".join(message.split()))
+    raise SystemExit(0)
+
+
+def succeed(url):
+    nonce = os.environ.get("GCAL_NONCE") or "0"
+    print("OK " + nonce + " " + url)
+
+
+def resolve_tz(name):
+    name = (name or "").strip()
+    if name in ("", "null", "…"):
+        name = os.environ.get("TZ") or "UTC"
+    try:
+        return name, ZoneInfo(name)
+    except Exception:
+        fallback = os.environ.get("TZ") or "UTC"
+        try:
+            return fallback, ZoneInfo(fallback)
+        except Exception:
+            return "UTC", ZoneInfo("UTC")
+
+
+def parse_clock(hour, minute, ampm):
+    hour = int(hour)
+    minute = int(minute or 0)
+    if ampm:
+        mark = ampm.lower()
+        if hour < 1 or hour > 12:
+            raise ValueError("that time doesn't look right")
+        if hour == 12:
+            hour = 0
+        if mark == "pm":
+            hour += 12
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise ValueError("that time doesn't look right")
+    return time(hour, minute)
+
+
+def next_weekday(today, index):
+    delta = (index - today.weekday()) % 7
+    return today + timedelta(days=delta)
+
+
+def clock_rejected(match, source):
+    after = source[match.end():match.end() + 1].lower()
+    before = source[max(0, match.start() - 5):match.start()].lower()
+    if after in ("m", "h") or before.rstrip().endswith("for"):
+        return True
+    if match.group(3) is None and match.group(2) is None and ":" not in match.group(0):
+        if not before.rstrip().endswith("at"):
+            return True
+    return False
+
+
+def parse_when(text, tz, now):
+    source = text.strip()
+    lowered = source.lower()
+    day = now.date()
+    explicit = False
+    if "tomorrow" in lowered:
+        day = now.date() + timedelta(days=1)
+        explicit = True
+    elif "today" in lowered or "tonight" in lowered:
+        day = now.date()
+        explicit = True
+    else:
+        found = re.search(r"(\d{4})-(\d{2})-(\d{2})", source)
+        if found:
+            day = date(int(found.group(1)), int(found.group(2)), int(found.group(3)))
+            explicit = True
+        else:
+            for name, index in sorted(WEEKDAYS.items(), key=lambda item: -len(item[0])):
+                if re.search(r"\b" + name + r"\b", lowered):
+                    day = next_weekday(now.date(), index)
+                    explicit = True
+                    break
+    if not explicit:
+        raise ValueError("add a day or a time, like lunch tomorrow at 1pm")
+    scrub = re.sub(r"\d{4}-\d{2}-\d{2}", " ", source)
+    duration = None
+    duration_match = DURATION.search(source)
+    if duration_match:
+        amount = float(duration_match.group(1))
+        unit = duration_match.group(2).lower()
+        duration = timedelta(hours=amount) if unit.startswith("h") else timedelta(minutes=amount)
+    clocks = []
+    if re.search(r"\bnoon\b", lowered):
+        clocks.append(time(12, 0))
+    elif re.search(r"\bmidnight\b", lowered):
+        clocks.append(time(0, 0))
+    else:
+        ranged = RANGE.search(scrub)
+        if ranged:
+            end_mark = ranged.group(6) or ranged.group(3)
+            start_mark = ranged.group(3) or ranged.group(6)
+            clocks.append(parse_clock(ranged.group(1), ranged.group(2), start_mark))
+            clocks.append(parse_clock(ranged.group(4), ranged.group(5), end_mark))
+        else:
+            for match in CLOCK.finditer(scrub):
+                if clock_rejected(match, scrub):
+                    continue
+                clocks.append(parse_clock(match.group(1), match.group(2), match.group(3)))
+                if len(clocks) == 2:
+                    break
+    if not clocks and "tonight" in lowered:
+        clocks.append(time(19, 0))
+        if duration is None:
+            duration = timedelta(hours=2)
+    if not clocks:
+        start = datetime.combine(day, time.min, tzinfo=tz)
+        return start, start + timedelta(days=1), True
+    start = datetime.combine(day, clocks[0], tzinfo=tz)
+    if len(clocks) >= 2:
+        end = datetime.combine(day, clocks[1], tzinfo=tz)
+        if end <= start:
+            end += timedelta(days=1)
+    elif duration is not None:
+        end = start + duration
+    else:
+        end = start + timedelta(hours=1)
+    return start, end, False
+
+
+def split_quick(raw):
+    raw = (raw or "").strip()
+    if not raw:
+        raise ValueError("type an event, like lunch tomorrow at 1pm")
+    if " @ " in raw:
+        title, when = raw.split(" @ ", 1)
+    else:
+        found = WHEN_WORD.search(raw)
+        if not found:
+            raise ValueError("add a day or a time, like lunch tomorrow at 1pm")
+        title = raw[:found.start()]
+        when = raw[found.start():]
+    title = title.strip(" -–,@\t")
+    title = re.sub(r"(?i)(?:\s+(?:on|at|this|next|from))+\s*$", "", title).strip(" -–,@")
+    if not title:
+        raise ValueError("put the title first, like lunch tomorrow at 1pm")
+    return title, when.strip()
+
+
+def event_url(title, start, end, all_day, place, note, tzname):
+    if all_day:
+        dates = start.strftime("%Y%m%d") + "/" + end.strftime("%Y%m%d")
+    else:
+        dates = start.strftime("%Y%m%dT%H%M%S") + "/" + end.strftime("%Y%m%dT%H%M%S")
+    query = {"action": "TEMPLATE", "text": title, "dates": dates, "ctz": tzname}
+    if place:
+        query["location"] = place
+    if note:
+        query["details"] = note
+    return "https://calendar.google.com/calendar/render?" + urlencode(query)
+
+
+def parse_form_day(text, today):
+    text = (text or "").strip().lower()
+    if text in ("", "today"):
+        return today
+    if text == "tomorrow":
+        return today + timedelta(days=1)
+    found = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", text)
+    if not found:
+        raise ValueError("use a date like 2026-10-13")
+    try:
+        return date(int(found.group(1)), int(found.group(2)), int(found.group(3)))
+    except ValueError as error:
+        raise ValueError("that date doesn't exist") from error
+
+
+def parse_form_time(text):
+    text = (text or "").strip().lower()
+    if text == "":
+        return None
+    if text == "noon":
+        return time(12, 0)
+    if text == "midnight":
+        return time(0, 0)
+    found = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", text)
+    if not found:
+        raise ValueError("use a time like 15:00 or 3pm")
+    return parse_clock(found.group(1), found.group(2), found.group(3))
+
+
+def allowed(url):
+    parsed = urlparse((url or "").strip())
+    host = (parsed.hostname or "").lower()
+    return (
+        parsed.scheme == "https"
+        and host in ("calendar.google.com", "www.google.com")
+        and "/calendar/ical/" in parsed.path
+        and parsed.path.endswith(".ics")
+    )
+
+
+def read_feeds():
+    if not FEEDS.exists():
+        return []
+    try:
+        data = json.loads(FEEDS.read_text() or "[]")
+    except Exception:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def write_feeds(feeds):
+    FEEDS.parent.mkdir(parents=True, exist_ok=True)
+    FEEDS.write_text(json.dumps(feeds, ensure_ascii=False, indent=2) + "\n")
+    os.chmod(FEEDS, 0o600)
+
+
+def calendar_name(url):
+    request = urllib.request.Request(url, headers={"User-Agent": "omarchy-calendar/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            data = response.read(1_000_000)
+    except Exception as error:
+        raise ValueError("couldn't reach google") from error
+    try:
+        calendar = Calendar.from_ical(data)
+    except Exception as error:
+        raise ValueError("that link isn't a calendar") from error
+    name = str(calendar.get("X-WR-CALNAME") or "").strip()
+    return name or "calendar"
+
+
+def add_feed(name, url):
+    url = (url or "").strip()
+    if not allowed(url):
+        raise ValueError("paste the secret address in iCal format. it ends in basic.ics")
+    feeds = read_feeds()
+    if any(str(feed.get("url") or "") == url for feed in feeds if isinstance(feed, dict)):
+        raise ValueError("that calendar is already connected")
+    official = calendar_name(url)
+    chosen = (name or "").strip() or official
+    feeds.append({"name": chosen, "url": url})
+    write_feeds(feeds)
+
+
+def remove_feed(url):
+    url = (url or "").strip()
+    write_feeds([feed for feed in read_feeds() if not isinstance(feed, dict) or feed.get("url") != url])
+
+
+def main():
+    try:
+        req = json.loads(os.environ.get("GCAL_REQ") or "{}")
+    except Exception:
+        fail("couldn't read that")
+        return
+    mode = req.get("mode")
+    try:
+        if mode == "quick":
+            tzname, tz = resolve_tz(req.get("tz"))
+            title, when = split_quick(req.get("text"))
+            start, end, all_day = parse_when(when, tz, datetime.now(tz))
+            succeed(event_url(title, start, end, all_day, "", "", tzname))
+        elif mode == "form":
+            tzname, tz = resolve_tz(req.get("tz"))
+            now = datetime.now(tz)
+            title = (req.get("title") or "").strip()
+            if not title:
+                raise ValueError("add a title")
+            day = parse_form_day(req.get("day"), now.date())
+            start_time = parse_form_time(req.get("start"))
+            end_time = parse_form_time(req.get("end"))
+            if start_time is None and end_time is None:
+                start = datetime.combine(day, time.min, tzinfo=tz)
+                end = start + timedelta(days=1)
+                all_day = True
+            else:
+                if start_time is None:
+                    raise ValueError("add a start time")
+                start = datetime.combine(day, start_time, tzinfo=tz)
+                if end_time is None:
+                    end = start + timedelta(hours=1)
+                else:
+                    end = datetime.combine(day, end_time, tzinfo=tz)
+                    if end <= start:
+                        end += timedelta(days=1)
+                all_day = False
+            succeed(event_url(title, start, end, all_day, (req.get("place") or "").strip(), (req.get("note") or "").strip(), tzname))
+        elif mode == "addfeed":
+            add_feed(req.get("name"), req.get("url"))
+            succeed("saved")
+        elif mode == "rmfeed":
+            remove_feed(req.get("url"))
+            succeed("saved")
+        elif mode == "sample":
+            add_feed(SAMPLE["name"], SAMPLE["url"])
+            succeed("saved")
+        else:
+            fail("unknown action")
+    except ValueError as error:
+        fail(str(error))
+    except SystemExit:
+        raise
+    except Exception:
+        fail("something went wrong")
+
+
+main()
+PY
+""") every 10m
+  source agenda = cmd("export GCAL_TZ=${sh(tzName)}; f=$HOME/.config/gcal-widget/agenda.py; i=0; while [ ! -f \"$f\" ] && [ \"$i\" -lt 50 ]; do i=$((i+1)); read -t 0.1 || true; done; python3 \"$f\"; true") every 10m json timeout 30s status
+
+  state panel = "agenda"
+  state quick = ""
+  state title = ""
+  state day = ""
+  state t1 = ""
+  state t2 = ""
+  state place = ""
+  state note = ""
+  state feedName = ""
+  state feedUrl = ""
+  state addMsg = ""
+  state feedMsg = ""
+  state actionKind = ""
+  state actionReq = ""
+  state kick = 0
+  state actionResult = ""
+  state doRefresh = 0
+
+  let jQuick = replace(replace(replace(replace(quick, "\\", "\\\\"), "\"", "\\\""), "\n", " "), "\r", "")
+  let jTitle = replace(replace(replace(replace(title, "\\", "\\\\"), "\"", "\\\""), "\n", " "), "\r", "")
+  let jDay = replace(replace(replace(day, "\\", "\\\\"), "\"", "\\\""), "\n", "")
+  let jT1 = replace(replace(replace(t1, "\\", "\\\\"), "\"", "\\\""), "\n", "")
+  let jT2 = replace(replace(replace(t2, "\\", "\\\\"), "\"", "\\\""), "\n", "")
+  let jPlace = replace(replace(replace(replace(place, "\\", "\\\\"), "\"", "\\\""), "\n", " "), "\r", "")
+  let jNote = replace(replace(replace(replace(note, "\\", "\\\\"), "\"", "\\\""), "\n", " "), "\r", "")
+  let jName = replace(replace(replace(replace(feedName, "\\", "\\\\"), "\"", "\\\""), "\n", " "), "\r", "")
+  let jFeed = replace(replace(replace(feedUrl, "\\", "\\\\"), "\"", "\\\""), "\n", "")
+  let jTz = replace(replace(tzName, "\\", "\\\\"), "\"", "\\\"")
+  let quickJson = "{\"mode\":\"quick\",\"text\":\"" + jQuick + "\",\"tz\":\"" + jTz + "\"}"
+  let formJson = "{\"mode\":\"form\",\"title\":\"" + jTitle + "\",\"day\":\"" + jDay + "\",\"start\":\"" + jT1 + "\",\"end\":\"" + jT2 + "\",\"place\":\"" + jPlace + "\",\"note\":\"" + jNote + "\",\"tz\":\"" + jTz + "\"}"
+  let feedJson = "{\"mode\":\"addfeed\",\"name\":\"" + jName + "\",\"url\":\"" + jFeed + "\"}"
+
+  let data = agenda != null && agenda.ok ? agenda.out : null
+  let offline = agenda != null && !agenda.ok
+  let events = data.events ?? []
+  let loadErrors = data.errors ?? []
+  let todayKey = fmtTime(now, "yyyy-MM-dd")
+  let upcoming = events.filter(e => e.end > now)
+  let next = first(upcoming)
+  let later = drop(upcoming, 1)
+  let dayKeys = events.map(e => e.day).unique()
+  let dateLabel = lower(fmtTime(now, cols < 5 ? "d MMM" : "EEE d MMM"))
+  let tileCap = rows >= 4 ? 12 : 8
+
+  on kick {
+    actionResult = run("export GCAL_NONCE=${int(kick)}; export GCAL_REQ=${sh(actionReq)}; f=$HOME/.config/gcal-widget/action.py; i=0; while [ ! -f \"$f\" ] && [ \"$i\" -lt 50 ]; do i=$((i+1)); read -t 0.1 || true; done; python3 \"$f\"; true")
+  }
+  on actionResult {
+    addMsg = actionKind == "add" ? (words(value)[0] == "ERR" ? join(drop(words(value), 2), " ") : words(value)[0] == "OK" ? "opening Google Calendar to save it" : "something went wrong") : addMsg
+    url(actionKind == "add" && words(value)[0] == "OK" ? words(value)[2] : null)
+    title = actionKind == "add" && words(value)[0] == "OK" ? "" : title
+    quick = actionKind == "add" && words(value)[0] == "OK" ? "" : quick
+    place = actionKind == "add" && words(value)[0] == "OK" ? "" : place
+    note = actionKind == "add" && words(value)[0] == "OK" ? "" : note
+    feedMsg = actionKind == "feed" ? (words(value)[0] == "ERR" ? join(drop(words(value), 2), " ") : "") : feedMsg
+    feedName = actionKind == "feed" && words(value)[0] == "OK" ? "" : feedName
+    feedUrl = actionKind == "feed" && words(value)[0] == "OK" ? "" : feedUrl
+    doRefresh = actionKind == "feed" ? doRefresh + 1 : doRefresh
+  }
+  on doRefresh { refresh() }
+
+  onTap: screen()
+
+  component EventRow(ev, roomy = false, showDay = false) {
+    let gone = ev.end <= now
+    let live = !ev.allDay && ev.start <= now && ev.end > now
+    let when = showDay ? ev.day == todayKey ? "today" : lower(fmtTime(ev.dayStart, "EEE d MMM")) : ""
+    let meta = join([when, len(feeds) > 1 ? ev.calendar : "", ev.location, ev.span].filter(s => s != null && s != ""), " · ")
+    Row {
+      gap: 8
+      align: center
+      padding: [0, 2]
+      Box {
+        width: 3
+        height: meta != "" ? 34 : 16
+        radius: 2
+        background: ev.cal == 1 ? cyan : ev.cal == 2 ? yellow : ev.cal == 3 ? green : ev.cal == 4 ? magenta : ev.cal == 5 ? orange : ev.cal == 6 ? blue : accent
+      }
+      Text {
+        text: ev.allDay ? "all day" : fmtTime(ev.start, "HH:mm")
+        font: mono
+        fontSize: 12
+        color: live ? accent : muted
+        width: 58
+        maxLines: 1
+      }
+      Column {
+        gap: 0
+        weight: 1
+        Text { text: ev.title; maxLines: 1; bold: !gone; color: gone ? muted : foreground }
+        if meta != "" {
+          Text { text: meta; style: small; color: muted; maxLines: 1 }
+        }
+      }
+      if roomy && !ev.allDay {
+        Text { text: fmtTime(ev.end, "HH:mm"); font: mono; fontSize: 12; color: muted; width: 48; align: end; maxLines: 1 }
+      }
+    }
+  }
+
+  component DayGroup(day, items) {
+    let head = first(items)
+    Column {
+      gap: 6
+      Row {
+        gap: 8
+        align: center
+        Text {
+          text: day == todayKey ? "today" : day == fmtTime(now + 86400, "yyyy-MM-dd") ? "tomorrow" : lower(fmtTime(head.dayStart, "EEE d MMM"))
+          style: label
+          color: accent
+          width: 108
+          maxLines: 1
+        }
+        Spacer { height: 1; weight: 1; background: alpha(muted, 0.25) }
+      }
+      for ev in items key ev.uid {
+        Box {
+          onTap: url("https://calendar.google.com/calendar/r/day/" + fmtTime(ev.dayStart, "yyyy") + "/" + fmtTime(ev.dayStart, "M") + "/" + fmtTime(ev.dayStart, "d"))
+          EventRow { ev: ev; roomy: true }
+        }
+      }
+    }
+  }
+
+  component ConnectForm(intro = true) {
+    Column {
+      gap: 8
+      if intro {
+        Text { text: "connect google calendar"; style: title }
+        Text { text: "On a computer, open calendar.google.com. Hover the calendar, choose Settings and sharing, and scroll to Integrate calendar. Copy Secret address in iCal format."; style: small; color: muted }
+        Text { text: "Share with specific people invites a person, and that page does not give this address. The one you want contains private- and ends in basic.ics. It stays on this phone."; style: small; color: muted }
+      } else {
+        Text { text: "add a calendar"; style: label; color: accent }
+      }
+      Input { placeholder: "name, optional"; text: feedName; onChange: feedName = value }
+      Input { placeholder: "secret address, ends in basic.ics"; text: feedUrl; onChange: feedUrl = value }
+      Row {
+        gap: 8
+        wrap: true
+        Button { text: "add calendar"; onTap: { actionKind = "feed"; actionReq = feedJson; kick = kick + 1 } }
+        Button { text: "US holidays"; color: muted; onTap: { actionKind = "feed"; actionReq = "{\"mode\":\"sample\"}"; kick = kick + 1 } }
+      }
+      Button { text: "open calendar settings"; color: muted; onTap: url("https://calendar.google.com/calendar/r/settings") }
+      if feedMsg != "" {
+        Text { text: feedMsg; style: small; color: red; maxLines: 3 }
+      }
+    }
+  }
+
+  Column {
+    gap: 8
+    fill: true
+    Row {
+      gap: 8
+      align: center
+      Text { text: "calendar"; style: small; color: muted; weight: 1; maxLines: 1 }
+      Text { text: dateLabel; style: label; color: accent; width: cols < 5 ? 72 : 120; align: end; maxLines: 1 }
+      if len(feeds) > 0 {
+        Button { text: "add"; color: muted; onTap: { panel = "add"; screen() } }
+      }
+    }
+    Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
+    if len(feeds) == 0 {
+      Row {
+        gap: 14
+        align: center
+        Text { text: fmtTime(now, "d"); style: huge; width: 64 }
+        Column {
+          gap: 2
+          weight: 1
+          Text { text: lower(fmtTime(now, "EEEE")); style: title; maxLines: 1 }
+          Text { text: lower(fmtTime(now, "MMMM yyyy")); style: small; color: muted; maxLines: 1 }
+        }
+      }
+      Text { text: "on a computer, under Integrate calendar"; style: small; color: muted; maxLines: 2 }
+      Text { text: "tap to connect"; style: small; color: accent }
+      Spacer { weight: 1 }
+    } else if agenda == null {
+      Spacer { weight: 1 }
+      Text { text: "loading events…"; style: small; color: muted }
+      Spacer { weight: 1 }
+    } else if next == null {
+      Text { text: offline ? "calendar offline" : "nothing coming up"; style: title; maxLines: 2 }
+      Text { text: offline ? "open it and tap refresh" : "the next 30 days are clear"; style: small; color: muted; maxLines: 2 }
+      if first(loadErrors) != null {
+        Text { text: first(loadErrors); style: small; color: red; maxLines: 2 }
+      }
+      Spacer { weight: 1 }
+    } else {
+      Column {
+        gap: 2
+        weight: 1
+        scroll: true
+        for ev in upcoming.take(tileCap) key ev.uid {
+          EventRow { ev: ev; showDay: true; roomy: rows >= 4 }
+        }
+        if len(upcoming) > tileCap {
+          Text { text: "${len(upcoming) - tileCap} more"; style: small; color: muted }
+        }
+      }
+      if first(loadErrors) != null {
+        Text { text: first(loadErrors); style: small; color: red; maxLines: 1 }
+      }
+    }
+  }
+
+  screen {
+    title: "calendar"
+    Column {
+      gap: 10
+      fill: true
+      if len(feeds) > 0 {
+        Row {
+          gap: 6
+          wrap: true
+          align: center
+          Button { text: "agenda"; color: panel == "agenda" ? accent : muted; onTap: panel = "agenda" }
+          Button { text: "add"; color: panel == "add" ? accent : muted; onTap: panel = "add" }
+          Button { text: "calendars"; color: panel == "calendars" ? accent : muted; onTap: panel = "calendars" }
+          Spacer { weight: 1 }
+          Button { text: "refresh"; color: muted; onTap: refresh() }
+        }
+      }
+      Column {
+        scroll: true
+        weight: 1
+        fill: width
+        gap: 14
+        if len(feeds) == 0 {
+          ConnectForm { }
+        } else if panel == "add" {
+          Text { text: "quick add"; style: label; color: accent }
+          Input {
+            placeholder: "lunch tomorrow at 1pm"
+            text: quick
+            onChange: quick = value
+            onSubmit: { actionKind = "add"; actionReq = quickJson; kick = kick + 1 }
+          }
+          Text { text: "title first, then a day and a time. try: dentist friday at 3pm"; style: small; color: muted }
+          Button { text: "add"; onTap: { actionKind = "add"; actionReq = quickJson; kick = kick + 1 } }
+          Spacer { height: 4 }
+          Text { text: "or with details"; style: label; color: accent }
+          Input { placeholder: "title"; text: title; onChange: title = value; onSubmit: { actionKind = "add"; actionReq = formJson; kick = kick + 1 } }
+          Input { placeholder: "date, blank for today"; text: day; onChange: day = value }
+          Row {
+            gap: 8
+            Input { placeholder: "start 15:00"; text: t1; onChange: t1 = value; weight: 1 }
+            Input { placeholder: "end 16:00"; text: t2; onChange: t2 = value; weight: 1 }
+          }
+          Input { placeholder: "where"; text: place; onChange: place = value }
+          Input { placeholder: "notes"; text: note; onChange: note = value }
+          Button { text: "add event"; onTap: { actionKind = "add"; actionReq = formJson; kick = kick + 1 } }
+          Text { text: "opens Google Calendar with this filled in, for you to save"; style: small; color: muted }
+          if addMsg != "" {
+            Text { text: addMsg; style: small; color: startsWith(addMsg, "opening") ? accent : red; maxLines: 3 }
+          }
+        } else if panel == "calendars" {
+          if len(feeds) == 0 {
+            Text { text: "no calendars yet"; style: small; color: muted }
+          }
+          for feed, i in feeds key feed.url {
+            let rmJson = "{\"mode\":\"rmfeed\",\"url\":\"" + replace(replace(feed.url, "\\", "\\\\"), "\"", "\\\"") + "\"}"
+            Row {
+              gap: 8
+              align: center
+              Box {
+                width: 8
+                height: 8
+                radius: 4
+                background: i == 1 ? cyan : i == 2 ? yellow : i == 3 ? green : i == 4 ? magenta : i == 5 ? orange : i == 6 ? blue : accent
+              }
+              Text { text: feed.name; weight: 1; maxLines: 1 }
+              Button { text: "remove"; color: muted; onTap: { actionKind = "feed"; actionReq = rmJson; kick = kick + 1 } }
+            }
+          }
+          Spacer { height: 4 }
+          ConnectForm { intro: false }
+        } else {
+          if agenda == null {
+            Text { text: "loading…"; style: body; color: muted }
+          } else if offline && len(events) == 0 {
+            Text { text: "couldn't refresh"; style: body; color: red }
+            Text { text: "tap refresh to try the calendars again"; style: small; color: muted; maxLines: 2 }
+          } else if len(events) == 0 {
+            Text { text: "nothing in the next 30 days"; style: body; color: muted }
+            Button { text: "add an event"; onTap: panel = "add" }
+          } else {
+            Text { text: "${len(upcoming)} still ahead · ${len(events)} in the next 30 days"; style: small; color: muted }
+            if first(loadErrors) != null {
+              Text { text: first(loadErrors); style: small; color: red; maxLines: 2 }
+            }
+            for d in dayKeys key d {
+              DayGroup { day: d; items: events.filter(e => e.day == d) }
+            }
+            Text { text: "tap an event to open that day in Google Calendar"; style: small; color: muted }
+          }
+        }
+        Spacer { height: 8 }
+      }
+    }
+  }
+}
