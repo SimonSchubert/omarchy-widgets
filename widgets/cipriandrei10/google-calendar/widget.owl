@@ -17,7 +17,7 @@ widget "google calendar" {
 
   let palette = [accent, blue, green, magenta, orange, cyan, yellow, red]
   // One URL per calendar, in order, so events' `c` indexes `cals`; "-" skips a hidden one.
-  let urlList = join(cals.map(c => c.on && match(c.url ?? "", "^(https?|webcal)://[^'\"`$\\\\\\s]+$") != null ? c.url : "-"), " ")
+  let urlList = join(cals.map(c => c.on && match(c.url ?? "", "^(https|webcal)://[^'\"`$\\\\\\s]+$") != null ? c.url : "-"), " ")
 
   // Fetches every calendar's iCal feed, expands recurring events over the next `days`, and keeps
   // the last good copy in ~/.cache/owl-gcal so the agenda still shows offline.
@@ -38,7 +38,8 @@ widget "google calendar" {
           path = os.path.join(cache, hashlib.sha1(url.encode()).hexdigest() + ".ics")
           try:
               req = urllib.request.Request(url, headers={"User-Agent": "omalauncher-calendar"})
-              data = urllib.request.urlopen(req, timeout=20).read()
+              data = urllib.request.urlopen(req, timeout=20).read(64 << 20 | 1)
+              if len(data) > 64 << 20: raise ValueError("feed over 64 MB")
               cal = icalendar.Calendar.from_ical(data)
               open(path, "wb").write(data)
           except Exception as e:
@@ -265,7 +266,7 @@ widget "google calendar" {
           Button {
             text: "add calendar"
             onTap: {
-              addErr = match(newUrl, "^(https?|webcal)://[^'\"`$\\\\\\s]+$") == null ? "Paste a link that starts with https:// (or webcal://), without spaces, quotes or $." : any(cals, c => c.url == newUrl) ? "That calendar is already added." : ""
+              addErr = match(newUrl, "^(https|webcal)://[^'\"`$\\\\\\s]+$") == null ? "Paste a link that starts with https:// (or webcal://), without spaces, quotes or $." : any(cals, c => c.url == newUrl) ? "That calendar is already added." : ""
               cals = addErr != "" ? cals : cals + [{name: trim(newName), url: newUrl, color: len(cals) % len(palette), on: true}]
               newName = addErr != "" ? newName : ""
               newUrl = addErr != "" ? newUrl : ""
