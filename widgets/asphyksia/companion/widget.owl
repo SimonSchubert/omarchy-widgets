@@ -5,14 +5,16 @@ widget "companion" {
   meta {
     owl: 5
     description: "The agent as a reactive core: a polar voice waveform, radar attention that locks onto the tool in use, packet streams to and from it. Grows with every interaction."
-    version: "1.2"
+    version: "1.0"
     license: "MIT"
     category: "dev"
   }
 
   requires { pacman: ["procps-ng"] }
 
-  // Drive it from this system:  owl-send <this widget file> set activity bash
+  // Drive it from this system (one state per call, detail first so it is logged):
+  //   owl-send <this widget file> set detail "reading widget.owl"
+  //   owl-send <this widget file> set activity bash
   state activity = "idle" persist     // idle | think | bash | read | edit | write | web | error
   state detail = "" persist           // what the agent is doing right now
   state since = 0 persist             // when the current activity started (Unix s)
@@ -41,10 +43,22 @@ widget "companion" {
   let curious = total > 0 ? (counts[1] + counts[3]) / total : 0.5
 
   on activity {
+    // scripts and buttons alike: this mode's clock starts here
+    since = now
     log = [[{t: now, tool: value, detail: detail}], log].flatten().take(24)
     total = value != "idle" ? total + 1 : total
     counts = range(len(tools)).map(i => counts[i] + (tools[i] == value ? 1 : 0))
     born = born == 0 && value != "idle" ? now : born
+  }
+  // an agent appearing (0 -> more) thinks; the last one leaving goes idle.
+  // It never overrides a mode a script or a button set.
+  on agents {
+    detail = old == 0 && value > 0 && activity == "idle" ? "an agent started"
+      : value == 0 && activity == "think" ? "the agents stopped"
+      : detail
+    activity = old == 0 && value > 0 && activity == "idle" ? "think"
+      : value == 0 && activity == "think" ? "idle"
+      : activity
   }
   every 10s {
     detail = activity != "idle" && age > 300 ? "went quiet" : detail
@@ -257,7 +271,9 @@ widget "companion" {
           Text { text: "${counts[i]}"; style: small; font: mono; color: muted; width: 36; align: end }
         }
       }
-      Text { text: "curiosity ${round(curious * 100)}% — next form at ${stage < 3 ? (stage == 0 ? 30 : stage == 1 ? 120 : 400) : 400} interactions"; style: small; color: muted }
+      Text { text: stage < 3
+        ? "curiosity ${round(curious * 100)}% — next form at ${stage == 0 ? 30 : stage == 1 ? 120 : 400} interactions"
+        : "curiosity ${round(curious * 100)}% — final form"; style: small; color: muted }
 
       Text { text: "activity log"; style: muted }
       if len(log) == 0 {
@@ -280,13 +296,13 @@ widget "companion" {
           Button {
             text: t
             color: t == "bash" ? "#4ade80" : t == "read" ? "#60a5fa" : t == "edit" ? "#facc15" : t == "web" ? "#22d3ee" : "#c084fc"
-            onTap: { detail = "manual test"; since = now; activity = t }
+            onTap: { detail = "manual test"; activity = t }
           }
         }
-        Button { text: "idle"; color: muted; onTap: { detail = ""; since = now; activity = "idle" } }
+        Button { text: "idle"; color: muted; onTap: { detail = ""; activity = "idle" } }
       }
       Text {
-        text: "any script can drive it: owl-send <this widget file> set activity bash [detail]. It also lights up on its own while an agent (pi, claude, codex…) is running, and settles back to idle when it stops."
+        text: "any script can drive it, one state per call: owl-send <this widget file> set detail \"reading widget.owl\", then owl-send <this widget file> set activity bash. It also lights up on its own while an agent (pi, claude, codex…) is running, and settles back to idle when it stops."
         style: small; color: muted
       }
       Button { text: "close"; onTap: close() }
