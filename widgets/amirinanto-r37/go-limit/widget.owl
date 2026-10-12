@@ -1,0 +1,96 @@
+widget "go limit" {
+  meta {
+    description: "OpenCode Go usage as rolling 5-hour, weekly and monthly percentages of the limit (same math as the Go page on opencode.ai), computed from the local opencode database."
+    version: "1.2"
+    license: "MIT"
+    category: "dev"
+  }
+  page: 2
+  order: 1
+  size: 3x3
+  minSize: 3x3
+
+  requires { pacman: ["sqlite", "jq"] }
+
+  // Percentage = used dollars / window limit, as on opencode.ai. Limits for the Go plan's
+  // GLM-5.3-Flash tier, in dollars: 5h rolling = 20% of monthly ($12), weekly = 50% ($30), monthly = 100% ($60).
+  // Prices per 1M tokens: input 0.15, output 0.50, cache read 0.03 (no cache write for this model).
+  // Weekly = Monday 00:00 local, monthly = 1st, 5-hour = rolling.
+  source usage = cmd("""
+    db="$HOME/.local/share/opencode/opencode.db"
+    if [ ! -f "$db" ]; then printf '{"h5":null,"wk":null,"mo":null,"hours":null}\n'; exit 0; fi
+    now=$(date +%s); nowms=$((now*1000)); h5ms=$((nowms-18000000)); h24ms=$((nowms-86400000))
+    dow=$(date +%u)
+    wk0=$(date -d "$(date -d "@$((now - (dow-1)*86400))" +%F) 00:00" +%s)
+    wkms=$((wk0*1000))
+    mo0=$(date -d "$(date +%Y-%m-01) 00:00" +%s); moms=$((mo0*1000))
+    sel="json_valid(data)=1 and time_created/1000 >= $mo0 and json_extract(data,'$.providerID')='opencode-go' and json_extract(data,'$.role')='assistant'"
+    q1="with cost as (select time_created as t, (json_extract(data,'$.tokens.input')*0.15 + (json_extract(data,'$.tokens.output')+json_extract(data,'$.tokens.reasoning'))*0.5 + json_extract(data,'$.tokens.cache.read')*0.03)/1000000.0 as c from message where $sel) select coalesce(sum(c) filter (where t >= $h5ms),0) as h5, coalesce(sum(c) filter (where t >= $wkms),0) as wk, coalesce(sum(c) filter (where t >= $moms),0) as mo, (min(t) filter (where t >= $h5ms))/1000 as h5first from cost"
+    h=$(sqlite3 --json "$db" "
+      with cost as (select time_created as t, (json_extract(data,'$.tokens.input')*0.15 + (json_extract(data,'$.tokens.output')+json_extract(data,'$.tokens.reasoning'))*0.5 + json_extract(data,'$.tokens.cache.read')*0.03)/1000000.0 as c from message where $sel),
+      b(i,s) as (select 0, $h24ms union all select i+1, s+3600000 from b where i < 23)
+      select coalesce(sum(x.c),0) as c from b left join cost x on x.t >= b.s and x.t < b.s + 3600000 group by b.i order by b.i" 2>/dev/null | jq -c 'if type == "array" then map(.c) else null end')
+    [ -n "$h" ] || h=null
+    sqlite3 --json "$db" "$q1" 2>/dev/null | jq -c --argjson H "$h" '
+      (if length then .[0] else null end // {h5:null, wk:null, mo:null, h5first:null}) + {hours: $H}'
+  """) every 2m json timeout 30s
+
+  source now = clock every 60s
+
+  let pct5 = usage.h5 == null ? null : usage.h5 / 12 * 100
+
+  component G(label, pct, cost, limit) {
+    let tint = pct == null ? muted : pct >= 100 ? red : pct >= 80 ? orange : accent
+    let left = max(limit - cost, 0)
+    Column {
+      gap: 3
+      weight: 1
+      align: center
+      Box {
+        size: 60
+        align: center
+        Ring { fill: true; thickness: 7; value: pct == null ? 0 : min(max(pct, 0), 100); color: tint; animate value: tween(500ms) }
+        Text {
+          text: pct == null ? "…" : "${fixed(pct, 0)}%"
+          style: body
+          color: tint
+          align: center
+        }
+      }
+      Text { text: label; style: label; color: muted }
+      Text { text: cost == null ? "…" : '$' + fixed(cost, 2) + ' of $' + limit; style: small; color: muted }
+      Text {
+        text: cost == null ? "…" : '$' + fixed(left, 2) + ' left'
+        style: small; color: left / limit <= 0.2 ? tint : muted
+      }
+    }
+  }
+
+  onTap: terminal("opencode stats")
+
+  Column {
+    gap: 8
+    Text { text: "opencode go"; style: muted }
+    Row {
+      gap: 4
+      align: top
+      G { label: "rolling"; pct: pct5; cost: usage.h5; limit: 12 }
+      G { label: "weekly"; pct: usage.wk == null ? null : usage.wk / 30 * 100; cost: usage.wk; limit: 30 }
+      G { label: "monthly"; pct: usage.mo == null ? null : usage.mo / 60 * 100; cost: usage.mo; limit: 60 }
+    }
+    Sparkline {
+      values: usage.hours ?? []
+      min: 0
+      area: true
+      color: accent
+      fill: width
+      weight: 1
+    }
+    if pct5 != null && pct5 >= 80 {
+      Text {
+        text: "5h window refreshes in " + fmtDuration(max((usage.h5first + 18000) - now, 0))
+        style: small; color: pct5 >= 100 ? red : orange
+      }
+    }
+  }
+}
