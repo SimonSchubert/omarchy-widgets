@@ -50,7 +50,8 @@ widget "companion" {
   // ---- draw twelve numbers from the genome ---------------------------
   // A linear congruential generator: each roll is the previous one times a
   // small multiplier, modulo 2^31-1, so it stays inside exact integer range.
-  let g0 = (genome > 0 ? genome : 12345) % 65536
+  let gid = genome >= 1 ? int(genome) : 0    // normalise: whole, positive, or none
+  let g0 = (gid > 0 ? gid : 12345) % 65535 + 1   // never 0, whatever the code
   let r1 = (g0 * 48271) % 2147483647
   let r2 = (r1 * 48271) % 2147483647
   let r3 = (r2 * 48271) % 2147483647
@@ -98,7 +99,7 @@ widget "companion" {
     hue: hue, ringN: ringN, moodK: moodK, orbR: orbR,
     shiny: shiny ? 1 : 0, rare: rare ? 1 : 0, epic: epic ? 1 : 0, une: une ? 1 : 0
   }
-  let code = genome > 0 ? fixed(genome, 0) : "…"
+  let code = gid > 0 ? fixed(gid, 0) : "…"
   let grade = shiny ? "✦ shiny" : epic ? "eclipse" : rare ? "aurora" : une ? "ornate" : "common"
   let badge = shiny ? "✦" : epic ? "◑" : rare ? "❋" : une ? "◇" : ""
   // colour: while idle the species shows its own hue; an activity overrides it
@@ -115,7 +116,7 @@ widget "companion" {
     total = value != "idle" ? total + 1 : total
     counts = range(len(tools)).map(i => counts[i] + (tools[i] == value ? 1 : 0))
     born = born == 0 && value != "idle" ? now : born
-    genome = genome == 0 && value != "idle" ? now : genome
+    genome = genome < 1 && value != "idle" ? now : genome
   }
   on detail {
     since = value == "went quiet" ? since : now
@@ -430,6 +431,10 @@ widget "companion" {
           }
         }
         Button { text: "idle"; color: muted; onTap: { detail = ""; activity = "idle" } }
+      }
+      Text {
+        text: "any script can drive it, one state per call: owl-send <this widget file> set detail \"reading widget.owl\" then set activity bash; set sigil \"a name\" to name it; set mood calm|focused|curious|wild for its temper; or set genome <code> to adopt a species. It also lights up on its own while an agent (pi, claude, codex…) is running, and settles back to idle when it stops."
+        style: small; color: muted
       }
       Button { text: "close"; onTap: close() }
     }
