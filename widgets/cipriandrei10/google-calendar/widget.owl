@@ -2,7 +2,7 @@ widget "google calendar" {
   size: 3x4
   minSize: 2x2
 
-  meta { owl: 6; description: "Upcoming events from one or more Google calendars (or any iCal link). Tap for the full agenda and settings: add calendars, colors, days ahead"; version: "1.0"; license: "MIT"; category: "productivity" }
+  meta { owl: 6; description: "Upcoming events from one or more Google calendars (or any iCal link). Tap for the full agenda and settings: add calendars, colors, days ahead"; version: "1.1"; license: "MIT"; category: "productivity" }
   requires { pacman: ["python", "python-icalendar", "python-recurring-ical-events"] }
 
   // Calendars are { name, url, color, on }, kept by the launcher, not in this file.
@@ -30,6 +30,7 @@ widget "google calendar" {
       now = datetime.now(timezone.utc).astimezone()
       start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
       end = start + timedelta(days=days + 2)
+      cap = 64 * 1024 * 1024
       cache = os.path.expanduser("~/.cache/owl-gcal"); os.makedirs(cache, exist_ok=True)
       out = {"events": [], "errors": {}, "names": {}}
       for i, url in enumerate(urls):
@@ -38,8 +39,8 @@ widget "google calendar" {
           path = os.path.join(cache, hashlib.sha1(url.encode()).hexdigest() + ".ics")
           try:
               req = urllib.request.Request(url, headers={"User-Agent": "omalauncher-calendar"})
-              data = urllib.request.urlopen(req, timeout=20).read(64 << 20 | 1)
-              if len(data) > 64 << 20: raise ValueError("feed over 64 MB")
+              data = urllib.request.urlopen(req, timeout=20).read(cap + 1)
+              if len(data) > cap: raise ValueError("feed over 64 MB")
               cal = icalendar.Calendar.from_ical(data)
               open(path, "wb").write(data)
           except Exception as e:
