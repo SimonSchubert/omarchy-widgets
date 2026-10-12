@@ -2,18 +2,21 @@ widget "spacex" {
   size: 3x4
   minSize: 3x3
   meta {
-    description: "Upcoming SpaceX launches, booster landings, dockings and splashdowns, with the X live feed when a webcast is on."
+    description: "Upcoming SpaceX launches, booster landings, dockings and splashdowns, with the webcast when one is on."
     version: "1.0"
     license: "MIT"
     category: "world"
     owl: 5
   }
 
-  // Launch Library 2. Detailed launches include the official X broadcast link (list mode leaves it out).
+  // Launch Library 2.3.0. Detailed launches include the webcast links (list mode leaves them out).
   // No shell tools: http only, so the tile also works before Linux is installed.
   source now = clock every 1s
-  source launches = http("https://ll.thespacedevs.com/2.2.0/launch/upcoming/?search=SpaceX&limit=5&mode=detailed&format=json") every 20m json timeout 20s status
-  source events = http("https://ll.thespacedevs.com/2.2.0/event/upcoming/?search=SpaceX&limit=8&format=json") every 20m json timeout 20s status
+  source launches = http("https://ll.thespacedevs.com/2.3.0/launches/upcoming/?lsp__name=SpaceX&limit=5&mode=detailed&format=json") every 20m json timeout 20s status
+  source events = http("https://ll.thespacedevs.com/2.3.0/events/upcoming/?search=SpaceX&limit=8&format=json") every 20m json timeout 20s status
+
+  let months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+  let mon = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
 
   // ISO-8601 UTC to Unix seconds. The launcher has fmtTime but no parser.
   let unix = iso => iso == null || iso == "" ? null : [match(str(iso), "(\\d+)-(\\d+)-(\\d+)T(\\d+):(\\d+):(\\d+)")].map(g => g == null ? null : {
@@ -35,19 +38,27 @@ widget "spacex" {
     h: p.h, mi: p.mi, s: p.s
   }).map(p => p == null ? null : p.days * 86400 + p.h * 3600 + p.mi * 60 + p.s)[0]
 
-  // Timeline offsets look like PT8M23S, PT1H1M57S, -PT35M or P0D.
-  let dur = rel => rel == null || rel == "P0D" ? 0 : [rel].map(rel => {
+  // Timeline offsets look like PT8M23S, PT8M23.5S, PT1H1M57S, -PT35M, P1DT2H or P0D.
+  let dur = rel => rel == null || rel == "" ? 0 : [rel].map(rel => {
     sign: startsWith(rel, "-") ? -1 : 1,
-    body: startsWith(rel, "-PT") ? sub(rel, 3, len(rel)) : startsWith(rel, "PT") ? sub(rel, 2, len(rel)) : rel
+    body: startsWith(rel, "-") ? sub(rel, 1, len(rel)) : rel
+  }).map(p => {
+    sign: p.sign,
+    body: startsWith(p.body, "P") ? sub(p.body, 1, len(p.body)) : p.body
   }).map(p => p.sign * (
-    (match(p.body, "(\\d+)H") != null ? num(match(p.body, "(\\d+)H")[0]) * 3600 : 0) +
-    (match(p.body, "(\\d+)M") != null ? num(match(p.body, "(\\d+)M")[0]) * 60 : 0) +
-    (match(p.body, "(\\d+)S") != null ? num(match(p.body, "(\\d+)S")[0]) : 0)
+    (match(p.body, "(\\d+\\.\\d+|\\d+)D") != null ? num(match(p.body, "(\\d+\\.\\d+|\\d+)D")[0]) * 86400 : 0) +
+    (match(p.body, "(\\d+\\.\\d+|\\d+)H") != null ? num(match(p.body, "(\\d+\\.\\d+|\\d+)H")[0]) * 3600 : 0) +
+    (match(p.body, "(\\d+\\.\\d+|\\d+)M") != null ? num(match(p.body, "(\\d+\\.\\d+|\\d+)M")[0]) * 60 : 0) +
+    (match(p.body, "(\\d+\\.\\d+|\\d+)S") != null ? num(match(p.body, "(\\d+\\.\\d+|\\d+)S")[0]) : 0)
   ))[0]
 
+  // Prefer an X webcast. Otherwise the first video link, labeled by its host. No link means no button.
   let xCast = urls => ((urls ?? []).filter(v => contains(v.url ?? "", "x.com/") || contains(v.url ?? "", "twitter.com/")))
     .sortBy(v => v.type.name == "Official Webcast" ? 0 : 1).first()
-  let preciseOf = n => n == "Second" || n == "Minute" || n == "Hour"
+  let castOf = urls => [urls].map(xCast)[0] ?? (urls ?? []).first()
+  let hostOf = url => url == null || url == "" ? "" : contains(url, "x.com/") || contains(url, "twitter.com/") ? "X" : contains(url, "youtube.com") || contains(url, "youtu.be") ? "YouTube" : contains(url, "nasa.gov") ? "NASA" : [match(url, "://([^/]+)")].map(g => g == null ? "web" : replace(g[0], "www.", ""))[0]
+  // Hour is a window, not a liftoff time, so it does not get a seconds countdown or a live state.
+  let preciseOf = n => n == "Second" || n == "Minute"
   let missionOf = name => split(split(name ?? "", " | ").last() ?? "", " (")[0]
   let kindOf = n => n == "Press Event" ? "briefing" : n == "Static Fire" ? "static fire" : lower(n ?? "event")
   let leadOf = k => k == "docking" || k == "undocking" ? 90 * 60 : k == "splashdown" || k == "reentry" || k == "landing" ? 60 * 60 : k == "return" ? 5 * 60 : k == "briefing" ? 20 * 60 : 30 * 60
@@ -55,6 +66,14 @@ widget "spacex" {
   let tone = s => s == "Go" || s == "Success" ? green : s == "TBD" || s == "TBC" ? yellow : s == "Failure" || s == "Hold" ? red : s == "In Flight" ? orange : muted
   let away = s => s >= 86400 ? "${floor(s / 86400)}d ${floor((s % 86400) / 3600)}h" : s >= 3600 ? "${floor(s / 3600)}h ${pad(floor((s % 3600) / 60), 2, "0")}m" : s >= 600 ? "${floor(s / 60)}m" : s >= 60 ? "${floor(s / 60)}m ${pad(floor(s % 60), 2, "0")}s" : "${max(floor(s), 0)}s"
   let placeOf = s => trim(replace(replace(replace(split(s ?? "", ",")[0] ?? "", " SFB", ""), " SFS", ""), " AFB", ""))
+  // Day, month and hour NETs are midnight or the top of the hour in UTC. fmtTime would show the day before, west of UTC.
+  let utcWhen = e => [match(str(e.iso ?? ""), "(\\d+)-(\\d+)-(\\d+)T(\\d+)")].map(g => g == null ? null : {
+    y: g[0],
+    m: months[floor(num(g[1])) - 1] ?? "",
+    mo: mon[floor(num(g[1])) - 1] ?? "",
+    d: floor(num(g[2])),
+    h: g[3]
+  }).map(p => p == null ? "tbd" : e.prec == "Month" || e.prec == "Quarter" || e.prec == "Year" ? "${p.m} ${p.y}" : e.prec == "Hour" ? "no earlier than ${p.d} ${p.mo} ${p.y}, ${p.h}:00 utc" : "no earlier than ${p.d} ${p.mo} ${p.y}")[0]
 
   let ready = launches != null && events != null
   let launchRows = ready && launches.ok ? launches.out.results ?? [] : []
@@ -62,7 +81,7 @@ widget "spacex" {
 
   // One launch, plus a booster-return row when a landing is planned (about T+8m).
   let fromLaunch = launch => [launch].map(launch => {
-    cast: [launch.vidURLs ?? launch.vid_urls].map(xCast)[0],
+    cast: [launch.vid_urls].map(castOf)[0],
     at: [launch.net].map(unix)[0],
     prec: launch.net_precision.name ?? "",
     land: (launch.timeline ?? []).filter(t => contains(t.type.abbrev ?? "", "Landing") && !contains(t.type.abbrev ?? "", "Burn")).last().relative_time,
@@ -71,15 +90,15 @@ widget "spacex" {
     mission: [launch.name].map(missionOf)[0],
     status: launch.status.abbrev ?? "",
     id: launch.id,
+    iso: launch.net,
     webcast: launch.webcast_live == true,
     stages: launch.rocket.launcher_stage ?? []
   }).map(f => {
     precise: [f.prec].map(preciseOf)[0],
     off: f.land != null ? [f.land].map(dur)[0] : 510,
-    x: f.cast.url,
-    xStart: [f.cast.start_time].map(unix)[0],
-    xEnd: [f.cast.end_time].map(unix)[0],
-    at: f.at, prec: f.prec, vehicle: f.vehicle, place: f.place, mission: f.mission,
+    url: f.cast.url,
+    start: [f.cast.start_time].map(unix)[0],
+    at: f.at, iso: f.iso, prec: f.prec, vehicle: f.vehicle, place: f.place, mission: f.mission,
     status: f.status, id: f.id, webcast: f.webcast, stages: f.stages
   }).map(f => [{
     id: f.id,
@@ -89,13 +108,14 @@ widget "spacex" {
     place: f.place,
     status: f.status,
     at: f.at,
+    iso: f.iso,
     precise: f.precise,
     prec: f.prec,
     lead: ["launch"].map(leadOf)[0],
     tail: ["launch"].map(tailOf)[0],
-    x: f.x,
-    xStart: f.xStart,
-    xEnd: f.xEnd,
+    url: f.url,
+    start: f.start,
+    host: [f.url].map(hostOf)[0],
     webcast: f.webcast
   }] + f.stages.filter(s => f.precise && s.landing.attempt == true && f.off > 60 && !contains(lower(s.launcher.serial_number ?? "unknown"), "unknown")).map(s => {
     id: "${f.id}-${s.launcher.serial_number ?? s.id}",
@@ -105,18 +125,19 @@ widget "spacex" {
     place: s.landing.location.abbrev ?? s.landing.location.name ?? "landing zone",
     status: f.status,
     at: f.at + f.off,
+    iso: f.iso,
     precise: f.precise,
     prec: f.prec,
     lead: ["return"].map(leadOf)[0],
     tail: ["return"].map(tailOf)[0],
-    x: f.x,
-    xStart: null,
-    xEnd: null,
+    url: f.url,
+    start: null,
+    host: [f.url].map(hostOf)[0],
     webcast: false
   }))[0]
 
   let fromEvent = ev => [ev].map(ev => {
-    cast: [ev.vid_urls ?? ev.vidURLs].map(xCast)[0],
+    cast: [ev.vid_urls].map(castOf)[0],
     kind: [ev.type.name].map(kindOf)[0],
     at: [ev.date].map(unix)[0],
     precise: [ev.date_precision.name ?? ""].map(preciseOf)[0],
@@ -129,44 +150,48 @@ widget "spacex" {
     place: [ev.location ?? ""].map(placeOf)[0],
     status: f.precise ? "Set" : "TBD",
     at: f.at,
+    iso: ev.date,
     precise: f.precise,
     prec: f.prec,
     lead: [f.kind].map(leadOf)[0],
     tail: [f.kind].map(tailOf)[0],
-    x: f.cast.url,
-    xStart: [f.cast.start_time].map(unix)[0],
-    xEnd: [f.cast.end_time].map(unix)[0],
+    url: f.cast.url,
+    start: [f.cast.start_time].map(unix)[0],
+    host: [f.cast.url].map(hostOf)[0],
     webcast: ev.webcast_live == true
   })[0]
 
-  let raw = flatten((launchRows ?? []).filter(l => l.launch_service_provider.name == "SpaceX").map(fromLaunch))
-    + (eventRows ?? []).filter(ev => contains(lower(ev.name ?? ""), "spacex") || contains(lower(ev.name ?? ""), "starship") || contains(lower(ev.name ?? ""), "falcon") || contains(lower(ev.name ?? ""), "dragon")).map(fromEvent)
+  // lsp__name=SpaceX already limited the launches. search=SpaceX keeps splashdowns and undockings whose names omit those words.
+  let raw = flatten((launchRows ?? []).map(fromLaunch)) + (eventRows ?? []).map(fromEvent)
 
-  // The watch window opens when SpaceX's X broadcast does, otherwise a few minutes before the event.
-  let items = raw.filter(e => e.at != null).map(e => [e].map(e => {
-    announced: e.xStart != null && e.precise && e.xStart <= e.at && e.at - e.xStart < 3 * 3600 ? e.xStart : null
+  // Clock-independent fields. The 1s tick only fills in the countdown, the live flag and the hint.
+  let scheduled = raw.filter(e => e.at != null).map(e => [e].map(e => {
+    announced: e.start != null && e.precise && e.start <= e.at && e.at - e.start < 3 * 3600 ? e.start : null
   }).map(w => {
-    id: e.id, kind: e.kind, title: e.title, vehicle: e.vehicle, place: e.place, status: e.status,
-    at: e.at, precise: e.precise, prec: e.prec, x: e.x, webcast: e.webcast,
     open: w.announced != null ? w.announced : e.at - e.lead,
     close: e.at + e.tail,
-    link: e.x ?? "https://x.com/SpaceX"
-  }).map(e => {
     id: e.id, kind: e.kind, title: e.title, vehicle: e.vehicle, place: e.place, status: e.status,
-    at: e.at, precise: e.precise, prec: e.prec, open: e.open, close: e.close, link: e.link,
-    live: e.precise && ((now >= e.open && now <= e.close) || (e.webcast && now >= e.open - 600 && now <= e.close)),
+    at: e.at, precise: e.precise, prec: e.prec, link: e.url, host: e.host, webcast: e.webcast,
     detail: join([e.vehicle, e.place].filter(s => s != null && s != ""), " · "),
-    when: !e.precise ? "tbd" : now >= e.at && now <= e.close ? "live" : e.at > now ? [e.at - now].map(away)[0] : "T+${[now - e.at].map(away)[0]}",
-    clock: !e.precise ? (e.prec == "Month" || e.prec == "Quarter" || e.prec == "Year" ? lower(fmtTime(e.at, "MMMM yyyy")) : "no earlier than ${lower(fmtTime(e.at, "d MMM yyyy"))}") : lower(fmtTime(e.at, "EEE d MMM · HH:mm")),
-    feed: e.precise && e.x != null ? lower(fmtTime(e.open, "HH:mm")) : "",
-    hint: !e.precise ? "live on X once a time is set" : now >= e.open && now <= e.close ? "live on X" : "on X from ${lower(fmtTime(e.open, "EEE HH:mm"))}",
+    clock: e.precise ? lower(fmtTime(e.at, "EEE d MMM · HH:mm")) : [e].map(utcWhen)[0],
+    feed: e.precise && e.url != null ? lower(fmtTime((w.announced != null ? w.announced : e.at - e.lead), "HH:mm")) : "",
+    from: e.url != null ? lower(fmtTime((w.announced != null ? w.announced : e.at - e.lead), "EEE HH:mm")) : ""
+  })[0]).sortBy(e => e.at)
+
+  let items = scheduled.map(e => {
+    id: e.id, kind: e.kind, title: e.title, vehicle: e.vehicle, place: e.place, status: e.status,
+    at: e.at, precise: e.precise, prec: e.prec, open: e.open, close: e.close, link: e.link, host: e.host,
+    detail: e.detail, clock: e.clock, feed: e.feed,
+    live: e.link != null && e.precise && ((now >= e.open && now <= e.close) || (e.webcast && now >= e.open - 600 && now <= e.close)),
+    when: !e.precise ? "tbd" : now >= e.at && now <= e.close ? "live" : [max(e.at - now, 0)].map(away)[0],
+    hint: e.link == null ? "" : !e.precise ? "on ${e.host} once a time is set" : now >= e.open && now <= e.close ? "live on ${e.host}" : "on ${e.host} from ${e.from}",
     urgency: !e.precise ? muted : now >= e.at && now <= e.close ? red : e.at - now < 3600 ? orange : e.at - now < 6 * 3600 ? accent : foreground
-  })[0]).filter(e => e.precise ? e.close >= now : e.at >= now - 86400).sortBy(e => e.at)
+  }).filter(e => e.precise ? e.close >= now : e.at >= now - 86400)
 
   let hero = items.first()
   let extraN = rows != null && rows < 4 ? 0 : clamp(rows == null ? 2 : rows - 2, 1, 4)
   let upcoming = items.drop(1).take(extraN)
-  let offline = ready && launches.ok != true && events.ok != true
+  let notice = !ready ? "" : launches.ok != true && events.ok != true ? "schedule offline" : launches.ok != true ? "launches offline" : events.ok != true ? "events offline" : ""
 
   onTap: screen()
 
@@ -174,7 +199,7 @@ widget "spacex" {
     Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
   }
 
-  component Activity(kind, title, when, detail, clock, live, link, tint) {
+  component Activity(kind, title, when, detail, clock, live, link, host, tint) {
     Column {
       gap: 1
       padding: [0, 8]
@@ -192,7 +217,7 @@ widget "spacex" {
       }
       Text { text: clock; style: small; color: muted; maxLines: 1 }
       if live {
-        Button { text: "watch on X"; fill: width; onTap: url(link) }
+        Button { text: host == "" ? "watch" : "watch on ${host}"; fill: width; onTap: url(link) }
       }
     }
   }
@@ -207,7 +232,7 @@ widget "spacex" {
     } else if hero == null {
       Text { text: "spacex"; style: label; color: accent }
       Spacer { weight: 1 }
-      Text { text: offline ? "schedule offline" : "nothing scheduled"; style: body; color: muted }
+      Text { text: notice != "" ? notice : "nothing scheduled"; style: body; color: muted }
       Spacer { weight: 1 }
     } else {
       Row {
@@ -215,14 +240,17 @@ widget "spacex" {
         Text { text: "spacex"; style: label; color: accent; weight: 1; maxLines: 1 }
         Text { text: lower(hero.status); style: label; color: [hero.status].map(tone)[0]; width: 64; align: end; maxLines: 1 }
       }
+      if notice != "" {
+        Text { text: notice; style: small; color: yellow; maxLines: 1 }
+      }
       Text { text: hero.when; fontSize: 30; color: hero.urgency; maxLines: 1 }
       Text { text: hero.title; style: title; maxLines: 2 }
       Text { text: "${hero.kind}${hero.place != "" ? " · " + hero.place : ""}"; style: small; color: muted; maxLines: 1 }
       Text { text: hero.clock; style: small; color: muted; maxLines: 1 }
       if hero.live {
         Spacer { height: 4 }
-        Button { text: "watch on X"; fill: width; onTap: url(hero.link) }
-      } else {
+        Button { text: hero.host == "" ? "watch" : "watch on ${hero.host}"; fill: width; onTap: url(hero.link) }
+      } else if hero.hint != "" {
         Text { text: hero.hint; style: small; color: muted; maxLines: 1 }
       }
       Spacer { weight: 1 }
@@ -255,11 +283,15 @@ widget "spacex" {
       if !ready {
         Text { text: "…"; style: title }
       } else if hero == null {
-        Text { text: offline ? "schedule offline" : "nothing scheduled"; color: muted }
+        Text { text: notice != "" ? notice : "nothing scheduled"; color: muted }
       } else {
+        if notice != "" {
+          Text { text: notice; style: small; color: yellow; maxLines: 1 }
+          Spacer { height: 8 }
+        }
         if items.any(e => e.live) {
           let on = items.find(e => e.live)
-          Button { text: "watch ${on.kind} on X"; fill: width; onTap: url(on.link) }
+          Button { text: on.host == "" ? "watch ${on.kind}" : "watch ${on.kind} on ${on.host}"; fill: width; onTap: url(on.link) }
           Text { text: on.title; style: small; color: muted; maxLines: 1 }
           Spacer { height: 8 }
         }
@@ -270,14 +302,15 @@ widget "spacex" {
             title: e.title
             when: e.when
             detail: e.detail
-            clock: e.feed != "" ? "${e.clock} · X ${e.feed}" : e.clock
+            clock: e.feed != "" ? "${e.clock} · ${e.host} ${e.feed}" : e.clock
             live: e.live
             link: e.link
+            host: e.host
             tint: e.urgency
           }
         }
         Spacer { height: 12 }
-        Text { text: "times are local · launch library · webcasts on X"; style: small; color: muted; maxLines: 2 }
+        Text { text: "precise times are local · dates without a clock are utc · launch library"; style: small; color: muted; maxLines: 2 }
       }
     }
   }
