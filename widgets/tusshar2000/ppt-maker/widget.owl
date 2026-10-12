@@ -1,0 +1,489 @@
+widget "ppt maker" {
+  size: 6x4
+  minSize: 3x3
+  meta { owl: 5; description: "Type a topic and Claude Code makes a PowerPoint deck: quick plain slides, or designed and visually checked ones. Tap a deck to download it"; version: "1.0"; license: "MIT"; category: "productivity" }
+
+  requires { pacman: ["jq", "curl", "python", "python-lxml", "python-pillow"] }
+
+  // How it works: "set up" writes the ppt command (below) to ~/.local/share/pptmaker with
+  // python-pptx in a venv there. ppt asks Claude Code (claude -p) for the deck and reports
+  // progress to ~/.cache/ppt. Decks are saved in ~/Decks and reach the phone through a small
+  // server on 127.0.0.1:8765, since Android can't see this system's files. "install pro" adds
+  // pptxgenjs and LibreOffice (about 600 MB) so Claude can design the deck and check every slide.
+  source now = clock every 1s
+  source env = cmd("""
+    d=~/.local/share/pptmaker
+    has() { command -v "$1" >/dev/null && echo true || echo false; }
+    pro=false; [ -d $d/node_modules/pptxgenjs ] && command -v soffice >/dev/null && pro=true
+    printf '{"v":"%s","claude":%s,"pro":%s}' "$(cat $d/VERSION 2>/dev/null)" "$(has claude)" "$pro"
+  """) every 1m json
+  source setup = file("~/.cache/ppt/setup.json") json
+  source st = file("~/.cache/ppt/status.json") json
+  source step = file("~/.cache/ppt/step")
+  source decks = cmd("""
+    [ -x ~/.local/share/pptmaker/ppt ] && ~/.local/share/pptmaker/ppt serve
+    cd ~/Decks 2>/dev/null && ls -t -- *.pptx 2>/dev/null | head -30
+  """) every 1m
+  state quick = false persist
+  state notified = 0 persist
+
+  let version = "1"
+  let ready = env.v == version
+  let installing = setup.state == "installing"
+  let proReady = env.pro == true
+  let working = st.state == "working"
+  let base = "http://127.0.0.1:8765/"
+  let list = lines(decks ?? "").filter(d => d != "")
+  let q = "'"
+
+  on setup.state { refresh() }
+  on st.state { refresh() }
+  when st.state == "done" && st.t != notified { notify("deck ready", "${st.slides} slides: ${st.topic}"); notified = st.t }
+
+  onTap: screen()
+
+  component DeckRow(f) {
+    Row {
+      gap: 8
+      onTap: url("${base}${f}")
+      Text { text: "▸"; color: accent; width: 12 }
+      Text { text: replace(sub(f, 0, len(f) - 15), "-", " "); style: small; maxLines: 1; weight: 1 }
+      Text { text: "${sub(f, len(f) - 12, len(f) - 10)}/${sub(f, len(f) - 14, len(f) - 12)}"; style: small; color: muted; width: 40; align: end }
+    }
+  }
+
+  Column {
+    gap: 8
+    fill: true
+    Row {
+      align: center
+      Text { text: "ppt maker"; style: label; weight: 1 }
+      if ready {
+        Text {
+          text: quick ? "quick" : "pro"
+          style: small
+          width: 64
+          align: center
+          color: quick ? muted : accent
+          padding: [10, 3]
+          border: 1
+          borderColor: quick ? border : accent
+          radius: 10
+          onTap: quick = !quick
+        }
+      }
+    }
+
+    if installing {
+      Row {
+        align: center
+        Canvas { width: 16; height: 16; arc(8, 8, 6, time * 360 % 360, 100, stroke: accent, width: 2, cap: round) }
+        Text { text: setup.step; style: small; color: accent; weight: 1; maxLines: 2 }
+        Text { text: fmtDuration(now - setup.t); style: small; color: muted; width: 56; align: end }
+      }
+    } else if env.claude == false {
+      Text { text: "ppt maker uses Claude Code to write the slides. Install it and log in first."; style: small; maxLines: 3 }
+      Button { text: "set up Claude Code"; onTap: launcher("agents") }
+    } else if !ready {
+      Text { text: env == null ? "…" : env.v == "" ? "One-time setup: the ppt command and python-pptx (a few MB)." : "An update to the ppt command is ready."; style: small; maxLines: 3 }
+      if setup.state == "failed" { Text { text: "✗ ${setup.step}"; style: small; color: red; maxLines: 3 } }
+      Button { text: env.v == "" ? "set up" : "update"; onTap: run("""
+mkdir -p ~/.cache/ppt ~/.local/share/pptmaker
+say() { printf '{"state":"%s","step":"%s","t":%s}' "$1" "$2" "$(date +%s)" > ~/.cache/ppt/setup.json; }
+fail() { say failed "$1 (see ~/.cache/ppt/setup.log)"; exit 1; }
+exec >>~/.cache/ppt/setup.log 2>&1
+cd ~/.local/share/pptmaker
+say installing "writing the ppt command"
+cat > ppt <<'PPT_EOF'
+#!/bin/bash
+# ppt "topic and any instructions"   - a designed deck, built and visually checked by Claude
+# ppt --quick "topic"               - a plain deck in about a minute (render.py)
+# ppt serve                          - makes sure ~/Decks is served on http://127.0.0.1:8765
+# Progress goes to ~/.cache/ppt/status.json and ~/.cache/ppt/step, which the ppt maker widget watches.
+HERE=~/.local/share/pptmaker
+PY=$HERE/venv/bin/python
+DECKS=~/Decks
+CACHE=~/.cache/ppt
+PORT=8765
+mode=pro
+mkdir -p "$DECKS" "$CACHE"
+
+serve() {
+  curl -fsm 2 -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null && return
+  setsid nohup "$PY" -m http.server "$PORT" --bind 127.0.0.1 -d "$DECKS" >"$CACHE/server.log" 2>&1 </dev/null &
+}
+
+status() { # state topic [file] [slides] [error]
+  jq -nc --arg state "$1" --arg topic "$2" --arg file "$3" --arg slides "$4" --arg error "$5" \
+    --arg mode "$mode" --argjson t "$(date +%s)" \
+    '{state:$state, mode:$mode, topic:$topic, file:$file, slides:$slides, error:$error, t:$t}' \
+    >"$CACHE/status.tmp" && mv "$CACHE/status.tmp" "$CACHE/status.json"
+}
+
+[ "$1" = serve ] && { serve; exit 0; }
+[ "$1" = --quick ] && { mode=quick; shift; }
+topic="$*"
+[ -z "$topic" ] && { echo 'usage: ppt [--quick] "topic, audience, number of slides..."' >&2; exit 2; }
+command -v claude >/dev/null || { echo "ppt needs Claude Code (claude) installed and logged in" >&2; exit 1; }
+if [ -f "$CACHE/pid" ] && kill -0 "$(cat "$CACHE/pid")" 2>/dev/null; then
+  echo "a deck is already being made" >&2; exit 1
+fi
+echo $$ >"$CACHE/pid"
+trap 'rm -f "$CACHE/pid"' EXIT
+
+echo "starting" >"$CACHE/step"
+status working "$topic"
+serve
+stamp=$(date +%m%d-%H%M)
+
+fail() { status failed "$topic" "" "" "$1"; echo "failed: $1" >&2; exit 1; }
+
+finish() { # pptx: names it after its first slide's text, copies it to ~/Decks
+  local info name slides file
+  info=$("$PY" - "$1" <<'PYEOF'
+import re, sys
+from pptx import Presentation
+p = Presentation(sys.argv[1])
+t = next((s.text_frame.text for s in p.slides[0].shapes if s.has_text_frame and s.text_frame.text.strip()), "deck")
+print(re.sub("[^a-z0-9]+", "-", t.lower()).strip("-")[:60] or "deck")
+print(len(p.slides))
+PYEOF
+) || fail "the deck doesn't open"
+  name=$(sed -n 1p <<<"$info"); slides=$(sed -n 2p <<<"$info")
+  file="$name-$stamp.pptx"
+  cp "$1" "$DECKS/$file"
+  status done "$topic" "$file" "$slides"
+  echo "$DECKS/$file ($slides slides)  http://127.0.0.1:$PORT/$file"
+}
+
+if [ $mode = pro ]; then
+  [ -d "$HERE/node_modules/pptxgenjs" ] && command -v soffice >/dev/null \
+    || fail "pro mode isn't installed yet: tap 'install pro' in the widget, or use quick"
+  WORK=$CACHE/work-$stamp
+  rm -rf "$WORK"; mkdir -p "$WORK"
+  export PATH="$HERE/venv/bin:$PATH" NODE_PATH="$HERE/node_modules"
+  # Anthropic's pptx skill, when this account has it; otherwise the design rules below.
+  SKILL=$(ls -d ~/.claude/skills/*/pptx ~/.claude/skills/*/*/pptx ~/.claude/skills/pptx 2>/dev/null | head -1)
+  if [ -n "$SKILL" ]; then
+    guide="Follow the pptx skill exactly: read $SKILL/SKILL.md first; its scripts are in $SKILL/scripts
+(use its office/validate.py and office/soffice.py)."
+    extra=(--add-dir "$SKILL")
+  else
+    guide="Design rules: pick a bold palette that suits this subject (not default blue), one dominant colour,
+one or two supporting tones and a sharp accent; dark title and closing slides, light content slides; one
+repeated visual motif (e.g. icons in coloured circles); every slide gets a visual element (icon, chart,
+table, shape or stat callout) and layouts vary from slide to slide; titles 36-44pt, body 14-16pt, never
+smaller; 0.5in margins and consistent 0.3-0.5in gaps; left-aligned body text; safe fonts only (Calibri,
+Arial, Cambria); no accent lines under titles, no decorative edge stripes, no text-only slides.
+pptxgenjs: hex colours without '#', fresh option objects for every call, bullet: true instead of literal
+bullets, slide.addNotes() for notes, native addChart() for charts. Render with
+'soffice --headless --convert-to pdf deck.pptx' and 'pdftoppm -jpeg -r 80 deck.pdf slide'."
+    extra=()
+  fi
+  prompt="Make a professional PowerPoint deck for: $topic
+
+$guide
+Build it with pptxgenjs (installed: require it directly, never npm install), LAYOUT_WIDE, a
+content-informed palette, one consistent visual motif, varied layouts, icons from react-icons rendered with
+sharp, native charts or tables where data helps, and speaker notes on every content slide.
+Unless the request says otherwise: 12-15 slides. Be accurate; for medical or exam topics follow standard
+textbooks and current national guidelines.
+
+Work only in $WORK and save the final deck as $WORK/deck.pptx.
+QA: check the text with markitdown, render every slide to an image and look at each one, fix real defects
+(overflow, overlap, low contrast), re-render, then stop (at most two fix rounds).
+Before each phase run: echo \"<3-5 word phase>\" > $CACHE/step   (like \"planning the outline\",
+\"writing slides\", \"rendering for QA\", \"fixing slide 6\", \"final checks\").
+Don't ask questions; make sensible choices. End with one line: the slide count."
+  (cd "$WORK" && claude -p "$prompt" --allowedTools "Bash Read Write Edit Glob Grep" "${extra[@]}" \
+    >"$WORK/claude.out" 2>"$WORK/claude.err")
+  [ -s "$WORK/deck.pptx" ] || fail "$(cat "$WORK/claude.err" "$WORK/claude.out" 2>/dev/null | tail -c 300)"
+  finish "$WORK/deck.pptx"
+  exit 0
+fi
+
+# Quick mode: Claude writes a JSON spec, render.py draws it.
+echo "writing slides" >"$CACHE/step"
+prompt="Write a presentation for: $topic
+
+Reply with ONLY one JSON object, no prose and no code fences, in this shape:
+{\"title\": \"...\", \"subtitle\": \"...\", \"theme\": \"#RRGGBB\", \"slides\": [ ... ]}
+Each slide is one of:
+  {\"type\": \"section\", \"title\": \"...\", \"subtitle\": \"...\"}
+  {\"type\": \"bullets\", \"title\": \"...\", \"bullets\": [\"point\", [\"sub-point\", \"sub-point\"], \"point\"], \"notes\": \"...\"}
+  {\"type\": \"two_column\", \"title\": \"...\", \"left\": {\"heading\": \"...\", \"bullets\": [...]}, \"right\": {\"heading\": \"...\", \"bullets\": [...]}, \"notes\": \"...\"}
+  {\"type\": \"table\", \"title\": \"...\", \"columns\": [\"...\"], \"rows\": [[\"...\"]], \"notes\": \"...\"}
+  {\"type\": \"summary\", \"title\": \"...\", \"bullets\": [...], \"notes\": \"...\"}
+Rules: 10-14 slides unless the request says otherwise (the title slide is added for you, don't include it).
+At most 6 bullets per slide, each under 15 words; a list inside \"bullets\" holds sub-points of the bullet before it.
+Use tables for comparisons and classifications, two_column for contrasts, sections to split long decks,
+and end with a summary slide. \"notes\" are speaker notes of 2-4 sentences. Pick a calm, readable theme colour
+that suits the subject. Be accurate; for medical or exam topics follow standard textbooks and current guidelines."
+
+raw=$(claude -p "$prompt" 2>"$CACHE/claude.err")
+spec=$(printf '%s' "$raw" | sed -n '/{/,$p' | sed '/^```/d')
+printf '%s' "$spec" | jq -e '.slides | length > 0' >/dev/null 2>&1 \
+  || fail "$(tail -c 300 "$CACHE/claude.err" | grep . || echo "Claude didn't return a deck")"
+printf '%s' "$spec" >"$CACHE/last.json"
+"$PY" "$HERE/render.py" "$CACHE/last.json" "$CACHE/quick.pptx" >/dev/null 2>"$CACHE/render.err" \
+  || fail "$(tail -c 300 "$CACHE/render.err")"
+finish "$CACHE/quick.pptx"
+PPT_EOF
+cat > render.py <<'RENDER_EOF'
+# Render a deck spec (JSON) into a .pptx.
+#
+# Spec: {"title", "subtitle", "theme": "#hex"?, "slides": [
+#   {"type": "section", "title", "subtitle"?},
+#   {"type": "bullets", "title", "bullets": [str | [str, ...sub-bullets]], "notes"?},
+#   {"type": "two_column", "title", "left": {"heading", "bullets"}, "right": {...}, "notes"?},
+#   {"type": "table", "title", "columns": [...], "rows": [[...]], "notes"?},
+#   {"type": "summary", "title", "bullets", "notes"?}]}
+import json
+import sys
+
+from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.util import Emu, Inches, Pt
+
+W, H = Inches(13.333), Inches(7.5)
+INK = RGBColor(0x1F, 0x24, 0x2E)
+MUTED = RGBColor(0x5C, 0x66, 0x77)
+PAPER = RGBColor(0xFF, 0xFF, 0xFF)
+TINT = RGBColor(0xF3, 0xF5, 0xF8)
+
+
+def rgb(hexstr, default="1F6FEB"):
+    h = (hexstr or default).lstrip("#")
+    try:
+        return RGBColor.from_string(h.upper()[:6])
+    except ValueError:
+        return RGBColor.from_string(default)
+
+
+def rect(slide, x, y, w, h, color):
+    s = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, y, w, h)
+    s.fill.solid()
+    s.fill.fore_color.rgb = color
+    s.line.fill.background()
+    s.shadow.inherit = False
+    return s
+
+
+def textbox(slide, x, y, w, h, text, size, color=INK, bold=False, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP):
+    tb = slide.shapes.add_textbox(x, y, w, h)
+    tf = tb.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = anchor
+    tf.margin_left = tf.margin_right = 0
+    p = tf.paragraphs[0]
+    p.alignment = align
+    r = p.add_run()
+    r.text = str(text)
+    r.font.size = Pt(size)
+    r.font.bold = bold
+    r.font.color.rgb = color
+    r.font.name = "Calibri"
+    return tf
+
+
+def bullets(tf, items, size, accent):
+    # Fill a text frame with bullets; a list item that is itself a list holds sub-bullets.
+    flat = []
+    for it in items or []:
+        if isinstance(it, list):
+            flat += [(1, s) for s in it]
+        else:
+            flat.append((0, it))
+    # Shrink text on crowded slides so it stays on the page.
+    n = len(flat) + sum(len(str(s)) for _, s in flat) / 90
+    size = size if n <= 7 else max(14, size - int((n - 7) * 1.2))
+    first = True
+    for level, s in flat:
+        p = tf.paragraphs[0] if first else tf.add_paragraph()
+        first = False
+        p.space_after = Pt(8 if level == 0 else 4)
+        mark = p.add_run()
+        mark.text = ("■  " if level == 0 else "–  ")
+        mark.font.size = Pt(size * (0.55 if level == 0 else 0.9))
+        mark.font.color.rgb = accent if level == 0 else MUTED
+        r = p.add_run()
+        r.text = str(s)
+        r.font.size = Pt(size if level == 0 else size - 3)
+        r.font.color.rgb = INK if level == 0 else MUTED
+        r.font.name = "Calibri"
+        if level:
+            p.level = 1
+
+
+def frame(prs, title, accent, num):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    textbox(slide, Inches(0.7), Inches(0.45), Inches(11.9), Inches(1.0), title, 32, accent, bold=True,
+            anchor=MSO_ANCHOR.MIDDLE)
+    textbox(slide, Inches(12.2), Inches(6.95), Inches(0.8), Inches(0.4), num, 11, MUTED, align=PP_ALIGN.RIGHT)
+    return slide
+
+
+def notes(slide, text):
+    if text:
+        slide.notes_slide.notes_text_frame.text = str(text)
+
+
+def render(spec, out):
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = W, H
+    accent = rgb(spec.get("theme"))
+
+    # Title slide: a full accent background.
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    rect(s, 0, 0, W, H, accent)
+    textbox(s, Inches(0.9), Inches(1.4), Inches(11.5), Inches(2.1), spec.get("title", "Untitled"), 46, PAPER,
+            bold=True, anchor=MSO_ANCHOR.BOTTOM)
+    if spec.get("subtitle"):
+        textbox(s, Inches(0.9), Inches(3.85), Inches(11.5), Inches(1.5), spec["subtitle"], 22, PAPER)
+
+    for i, sl in enumerate(spec.get("slides", []), start=2):
+        kind = sl.get("type", "bullets")
+        title = sl.get("title", "")
+        if kind == "section":
+            s = prs.slides.add_slide(prs.slide_layouts[6])
+            rect(s, 0, 0, W, H, TINT)
+            textbox(s, Inches(0.9), Inches(2.4), Inches(11.5), Inches(1.4), title, 40, accent, bold=True,
+                    anchor=MSO_ANCHOR.BOTTOM)
+            if sl.get("subtitle"):
+                textbox(s, Inches(0.9), Inches(3.9), Inches(11.5), Inches(1.2), sl["subtitle"], 20, MUTED)
+        elif kind == "two_column":
+            s = frame(prs, title, accent, i)
+            for col, x in ((sl.get("left") or {}, 0.7), (sl.get("right") or {}, 6.95)):
+                rect(s, Inches(x), Inches(1.9), Inches(5.7), Inches(4.85), TINT)
+                textbox(s, Inches(x + 0.3), Inches(2.05), Inches(5.1), Inches(0.6), col.get("heading", ""), 20,
+                        accent, bold=True)
+                tf = s.shapes.add_textbox(Inches(x + 0.3), Inches(2.75), Inches(5.1), Inches(3.9)).text_frame
+                tf.word_wrap = True
+                bullets(tf, col.get("bullets"), 17, accent)
+        elif kind == "table":
+            s = frame(prs, title, accent, i)
+            cols, rows = sl.get("columns") or [], sl.get("rows") or []
+            if cols:
+                h = min(Inches(4.9), Emu(Inches(0.5) * (len(rows) + 1)))
+                t = s.shapes.add_table(len(rows) + 1, len(cols), Inches(0.7), Inches(1.9), Inches(11.9), h).table
+                size = 16 if len(rows) <= 6 else 13
+                for c, name in enumerate(cols):
+                    cell = t.cell(0, c)
+                    cell.fill.solid()
+                    cell.fill.fore_color.rgb = accent
+                    cell.text = str(name)
+                    f = cell.text_frame.paragraphs[0].runs[0].font
+                    f.bold, f.size, f.color.rgb = True, Pt(size), PAPER
+                for r, row in enumerate(rows, start=1):
+                    for c in range(len(cols)):
+                        cell = t.cell(r, c)
+                        cell.fill.solid()
+                        cell.fill.fore_color.rgb = TINT if r % 2 else PAPER
+                        cell.text = str(row[c]) if c < len(row) else ""
+                        f = cell.text_frame.paragraphs[0].runs[0].font
+                        f.size, f.color.rgb = Pt(size), INK
+        else:
+            s = frame(prs, title, accent, i)
+            if kind == "summary":
+                rect(s, Inches(0.7), Inches(1.9), Inches(11.9), Inches(4.85), TINT)
+            tf = s.shapes.add_textbox(Inches(1.0 if kind == "summary" else 0.7), Inches(2.05),
+                                      Inches(11.3), Inches(4.6)).text_frame
+            tf.word_wrap = True
+            bullets(tf, sl.get("bullets"), 22, accent)
+        notes(s, sl.get("notes"))
+
+    prs.save(out)
+    return len(prs.slides)
+
+
+if __name__ == "__main__":
+    with open(sys.argv[1]) as f:
+        print(render(json.load(f), sys.argv[2]))
+RENDER_EOF
+chmod +x ppt
+mkdir -p ~/.local/bin ~/Decks
+ln -sf ~/.local/share/pptmaker/ppt ~/.local/bin/ppt
+say installing "installing python-pptx"
+[ -x venv/bin/python ] || python -m venv --system-site-packages venv || fail "couldn't make a Python venv"
+venv/bin/pip install -q python-pptx || fail "couldn't install python-pptx"
+echo 1 > VERSION
+say done "ready"
+""") }
+    } else if !quick && !proReady {
+      Text { text: "Pro decks need pptxgenjs and LibreOffice (about 600 MB) so Claude can design and check every slide."; style: small; maxLines: 3 }
+      if setup.state == "failed" { Text { text: "✗ ${setup.step}"; style: small; color: red; maxLines: 3 } }
+      Row {
+        Button { text: "install pro"; onTap: run("""
+mkdir -p ~/.cache/ppt ~/.local/share/pptmaker
+say() { printf '{"state":"%s","step":"%s","t":%s}' "$1" "$2" "$(date +%s)" > ~/.cache/ppt/setup.json; }
+fail() { say failed "$1 (see ~/.cache/ppt/setup.log)"; exit 1; }
+exec >>~/.cache/ppt/setup.log 2>&1
+cd ~/.local/share/pptmaker
+say installing "installing Node and LibreOffice (about 600 MB)"
+pacman -S --needed --noconfirm nodejs npm libreoffice-fresh poppler ttf-carlito ttf-caladea ttf-liberation python-defusedxml || fail "pacman couldn't install the pro packages"
+say installing "installing pptxgenjs and icons"
+[ -f package.json ] || npm init -y >/dev/null
+npm install --silent pptxgenjs react react-dom react-icons sharp || fail "npm couldn't install pptxgenjs"
+say installing "installing markitdown"
+venv/bin/pip install -q "markitdown[pptx]" || fail "couldn't install markitdown"
+say done "pro ready"
+""") }
+        Button { text: "use quick"; color: muted; onTap: quick = true }
+      }
+    } else if working {
+      Column {
+        gap: 4
+        padding: [0, 4]
+        Text { text: st.topic; style: body; maxLines: 2 }
+        Row {
+          align: center
+          Canvas { width: 16; height: 16; arc(8, 8, 6, time * 360 % 360, 100, stroke: accent, width: 2, cap: round) }
+          Text { text: trim(step ?? "") == "" ? "working" : trim(step); style: small; color: accent; weight: 1; maxLines: 1 }
+          Text { text: fmtDuration(now - st.t); style: small; color: muted; width: 56; align: end }
+        }
+      }
+    } else {
+      Input {
+        placeholder: quick ? "topic (quick, ~1 min)" : "topic, e.g. How vaccines work, 12 slides"
+        clear: true
+        onSubmit: run("setsid ~/.local/share/pptmaker/ppt ${quick ? '--quick ' : ''}'${replace(value, q, '’')}' >/dev/null 2>&1 &")
+      }
+      if st.state == "done" {
+        Row {
+          align: center
+          Text { text: "✓ ${replace(sub(st.file, 0, len(st.file) - 15), "-", " ")} · ${st.slides} slides"; style: small; color: green; weight: 1; maxLines: 1 }
+          Button { text: "open"; onTap: url("${base}${st.file}") }
+        }
+      } else if st.state == "failed" {
+        Text { text: "✗ ${st.error}"; style: small; color: red; maxLines: 2 }
+      }
+    }
+
+    Column {
+      gap: 6
+      weight: 1
+      scroll: true
+      if ready && len(list) == 0 {
+        Text { text: "no decks yet"; style: small; color: muted }
+      }
+      for f in list.take(rows >= 4 ? 4 : 2) key f {
+        DeckRow { f: f }
+      }
+    }
+  }
+
+  screen {
+    title: "decks"
+    Column {
+      gap: 10
+      padding: 16
+      scroll: true
+      Text { text: "${len(list)} decks in ~/Decks · tap one to download it, then open it in PowerPoint or Google Slides"; style: small; color: muted }
+      for f in list key f {
+        DeckRow { f: f }
+      }
+    }
+  }
+}
