@@ -1,0 +1,88 @@
+widget "tailscale" {
+  page: 1
+  order: 10
+  size: 6x5
+  minSize: 3x4
+
+  meta { description: "List Tailscale peers, copy an IP or hostname, and open the Android app to toggle the VPN. Requires Tailscale installed and configured on this device."; version: "1.0"; license: "MIT"; category: "system" }
+
+  requires { pacman: ["iproute2"] }
+
+  // The VPN runs in the Tailscale app on Android, so the tunnel shows up here
+  // as a tun interface; each tailnet node is a host route on it. Resolve the
+  // names through MagicDNS (100.100.100.100).
+  source raw = cmd('ip -o -4 route show table all 2>/dev/null | grep "dev tun" | cut -d" " -f1 | sort -u | grep "^100." | grep -v "^100.100.100.100" | while read -r ip; do printf "%s %s\n" "$ip" "$(getent hosts "$ip" 2>/dev/null | tr -s " " | cut -d" " -f2)"; done') every 15s
+
+  let peers = lines(raw).map(l => words(l)).map(w => { ip: w[0], host: w[1] ?? w[0] }).sortBy(p => p.host)
+  let connected = peers.length > 0
+  let tailnet = connected ? split(peers[0].host, ".").drop(1).join(".") : null
+
+  // Tapping the tile opens the Tailscale app; the VPN is switched there.
+  onTap: androidApp("com.tailscale.ipn")
+
+  // The Tailscale mark: a 3x3 dot grid, the T-shaped dots solid, the rest faded.
+  component Mark(dim = 26) {
+    Canvas {
+      width: dim
+      height: dim
+      let d = dim * 0.24
+      let r = d / 2
+      let c = [r, dim / 2, dim - r]
+      for i in range(3) {
+        for j in range(3) {
+          circle(c[i], c[j], r, fill: (j == 1 || (i == 1 && j == 2)) ? foreground : alpha(foreground, 0.28))
+        }
+      }
+    }
+  }
+
+  Column {
+    gap: 8
+    padding: 12
+
+    Row {
+      gap: 8
+      align: center
+      Mark { dim: 24; opacity: connected ? 1 : 0.5 }
+      Box { width: 10; height: 10; radius: 5; background: connected ? green : red }
+      Text {
+        text: connected ? "connected" : "disconnected"
+        style: small
+        color: connected ? green : red
+      }
+    }
+
+    if connected {
+      Text { text: tailnet; style: muted; fontSize: 11; maxLines: 1 }
+
+      Column {
+        gap: 6
+        weight: 1
+        scroll: true
+        for p in peers key p.ip {
+          Row {
+            gap: 6
+            align: center
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: split(p.host, ".")[0]; style: body; bold: true; maxLines: 1 }
+              Text { text: p.ip; style: small; color: muted; font: mono; maxLines: 1 }
+            }
+            Button { text: "ip"; color: muted; onTap: copy(p.ip) }
+            Button { text: "host"; color: muted; onTap: copy(p.host) }
+          }
+        }
+      }
+    } else {
+      Column {
+        gap: 10
+        justify: center
+        weight: 1
+        Text { text: "VPN is off"; style: body }
+        Text { text: "Tailscale runs in the Android app; open it to connect."; style: small; color: muted; maxLines: 3 }
+        Button { text: "open tailscale"; fill: width; onTap: androidApp("com.tailscale.ipn") }
+      }
+    }
+  }
+}
