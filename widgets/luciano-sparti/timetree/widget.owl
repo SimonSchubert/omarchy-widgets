@@ -1,9 +1,9 @@
 widget "timetree" {
   size: 6x4
-  minSize: 3x3
+  minSize: 6x4
 
   meta {
-    description: "TimeTree shared calendar widget with monthly view, agenda, and quick app launch"
+    description: "TimeTree shared calendar with monthly view, agenda, quick app launch, and phone notification reminders"
     version: "1.0"
     license: "MIT"
     category: "productivity"
@@ -11,7 +11,7 @@ widget "timetree" {
   }
 
   requires {
-    pacman: ["gawk", "jq", "python", "python-pip"]
+    pacman: ["gawk"]
   }
 
   // Live time, calendar calculation, and event sources
@@ -103,15 +103,12 @@ widget "timetree" {
     }'
   """) every 10m json
 
-  source sync = cmd("python ~/.config/timetree/sync.py sync 2>/dev/null || true") every 30m optional
   source events = file("~/.config/timetree/events.json") json
   source notifs = android.notifications
 
   // State for interactive navigation
   state offset = 0 persist
   state selectedDate = ""
-  state newTitle = ""
-  state newTime = "12:00"
 
   // Derived calendar values
   let todayDate = cal.today ?? fmtTime(now, "yyyy-MM-dd")
@@ -286,7 +283,6 @@ widget "timetree" {
         radius: 4
         background: alpha(ttColor, 0.2)
         onTap: notification("open", ttNotifs[0].key)
-        Text { text: "󰅖"; font: icon; fontSize: 11; color: ttColor; width: 14 }
         Text { text: ttNotifs[0].title; fontSize: 10; bold: true; width: 90; maxLines: 1 }
         Text { text: ttNotifs[0].text; fontSize: 10; color: muted; weight: 1; maxLines: 1 }
       }
@@ -304,14 +300,14 @@ widget "timetree" {
 
         // Weekday headers
         Row {
-          for w in ["S", "M", "T", "W", "T", "F", "S"] {
+          for w, i in ["S", "M", "T", "W", "T", "F", "S"] {
             Text {
               text: w
               weight: 1
               fontSize: 9
               bold: true
               align: center
-              color: w == "S" ? (indexOf(["S", "M", "T", "W", "T", "F", "S"], w) == 0 ? red : cyan) : muted
+              color: i == 0 ? red : (i == 6 ? cyan : muted)
             }
           }
         }
@@ -414,14 +410,6 @@ widget "timetree" {
         }
         Row {
           gap: 6
-          Button {
-            text: "Sync"
-            color: ttColor
-            onTap: {
-              run("python ~/.config/timetree/sync.py sync")
-              refresh()
-            }
-          }
           Button {
             text: "Open App"
             color: ttColor
@@ -609,11 +597,6 @@ widget "timetree" {
       // Bottom Action buttons
       Row {
         gap: 8
-        Button {
-          text: "Login Account"
-          weight: 1
-          onTap: terminal('python ~/.config/timetree/sync.py login; exec bash', "TimeTree Login")
-        }
         Button {
           text: "Edit Events"
           weight: 1
