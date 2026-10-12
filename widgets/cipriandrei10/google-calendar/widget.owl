@@ -2,7 +2,7 @@ widget "google calendar" {
   size: 3x4
   minSize: 2x2
 
-  meta { owl: 5; description: "Upcoming events from one or more Google calendars (or any iCal link). Tap for the full agenda and settings: add calendars, colors, days ahead"; version: "1.0"; license: "MIT"; category: "productivity" }
+  meta { owl: 6; description: "Upcoming events from one or more Google calendars (or any iCal link). Tap for the full agenda and settings: add calendars, colors, days ahead"; version: "1.0"; license: "MIT"; category: "productivity" }
   requires { pacman: ["python", "python-icalendar", "python-recurring-ical-events"] }
 
   // Calendars are { name, url, color, on }, kept by the launcher, not in this file.
@@ -21,7 +21,7 @@ widget "google calendar" {
 
   // Fetches every calendar's iCal feed, expands recurring events over the next `days`, and keeps
   // the last good copy in ~/.cache/owl-gcal so the agenda still shows offline.
-  let fetch = """
+  source ev = cmd("""
     python3 -c 'import sys, textwrap; exec(textwrap.dedent(sys.argv[1]))' '
       import sys, json, os, hashlib, urllib.request
       from datetime import datetime, date, timedelta, timezone
@@ -63,11 +63,14 @@ widget "google calendar" {
                       if d >= start.date():
                           out["events"].append(dict(item, d=d.isoformat(), a=True, s=0, e=0, n=(e - s).days))
                       d += timedelta(days=1)
+      # Forget the copies of calendars that were removed or hidden.
+      keep = {hashlib.sha1(("https://" + u[9:] if u.startswith("webcal://") else u).encode()).hexdigest() + ".ics" for u in urls}
+      for f in os.listdir(cache):
+          if f.endswith(".ics") and f not in keep: os.remove(os.path.join(cache, f))
       out["events"].sort(key=lambda x: (x["d"], x["s"]))
       print(json.dumps(out, ensure_ascii=False))
     '
-  """
-  source ev = cmd(fetch + " \"${days}\" \"${urlList}\"") every 15m json timeout 60s status
+  """ + " ${int(days)} ${sh(urlList)}") every 15m json timeout 60s status
 
   let data = ev.ok ? ev.out : null
   let dayKeys = range(days + 1).map(k => fmtTime(now + k * 86400, "yyyy-MM-dd"))
@@ -246,9 +249,9 @@ widget "google calendar" {
               }
               Button {
                 text: c.on ? "hide" : "show"
-                onTap: cals = range(len(cals)).map(j => j == i ? {name: c.name, url: c.url, color: c.color, on: !c.on} : cals[j])
+                onTap: { cals = range(len(cals)).map(j => j == i ? {name: c.name, url: c.url, color: c.color, on: !c.on} : cals[j]); refresh() }
               }
-              Button { text: "✕"; color: red; onTap: cals = cals.take(i) + cals.drop(i + 1) }
+              Button { text: "✕"; color: red; onTap: { cals = cals.take(i) + cals.drop(i + 1); refresh() } }
             }
           }
 
@@ -266,6 +269,7 @@ widget "google calendar" {
               cals = addErr != "" ? cals : cals + [{name: trim(newName), url: newUrl, color: len(cals) % len(palette), on: true}]
               newName = addErr != "" ? newName : ""
               newUrl = addErr != "" ? newUrl : ""
+              refresh()
             }
           }
           Text {
