@@ -593,32 +593,20 @@ widget "timetree" {
         borderColor: alpha(muted, 0.3)
         radius: 8
 
-        Text { text: "Quick Add Event to ${activeDate}"; fontSize: 13; bold: true }
+        Text { text: "Manage Events for ${activeDate}"; fontSize: 13; bold: true }
         Row {
           gap: 6
           align: center
-          Input {
-            placeholder: "Event title (e.g. Dinner, Meeting)..."
-            text: newTitle
+          Button {
+            text: "+ Add Event in TimeTree App"
+            color: ttColor
             weight: 1
-            clear: true
-            onSubmit: {
-              run("python ~/.config/timetree/sync.py add '${value}' '${activeDate}' '${newTime}'")
-              newTitle = ""
-            }
-            onChange: newTitle = value
+            onTap: app("works.jubilee.timetree")
           }
-          Box {
-            width: 50
-            height: 32
-            radius: 4
-            background: ttColor
-            align: center
-            onTap: {
-              run("python ~/.config/timetree/sync.py add '${newTitle}' '${activeDate}' '${newTime}'")
-              newTitle = ""
-            }
-            Text { text: "Add"; fontSize: 12; bold: true; color: #ffffff; align: center }
+          Button {
+            text: "Add via CLI"
+            color: muted
+            onTap: terminal("timetree add")
           }
         }
       }
