@@ -1,0 +1,498 @@
+widget "photoprism random" {
+  meta {
+    owl: 5
+    description: "Random photo from PhotoPrism. Credentials are set in the terminal (hidden password); the widget never uses a plain Input for secrets."
+    version: "4.0"
+    license: "MIT"
+    category: "fun"
+  }
+
+  size: 3x4
+  minSize: 2x3
+  padding: 0
+
+  requires { pacman: ["python"] }
+
+  state statusMsg = ""
+  state busy = false
+  state busyAt = 0
+
+  source now = clock every 1s
+  source sessionFile = file("~/.config/photoprism-random/session.json")
+  source configFile = file("~/.config/photoprism-random/config.json")
+  source loginStatus = file("~/.config/photoprism-random/login-status.txt")
+
+  let configured = sessionFile != null && sessionFile != ""
+  let hasConfig = configFile != null && configFile != ""
+  let statusText = trim(loginStatus)
+
+  // Writes helper scripts once into ~/.config/photoprism-random (store ships only widget.owl).
+  source helpers = cmd("""
+D="$HOME/.config/photoprism-random"
+mkdir -p "$D" && chmod 700 "$D"
+need=
+for f in fetch.py auth.py auth_from_config.py set_password.py; do [ -f "$D/$f" ] || need=1; done
+[ -n "$need" ] || { echo ok; exit 0; }
+cat > "$D/fetch.py" <<'OWL_PP_EOF'
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import pathlib
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+CONF = pathlib.Path.home() / ".config" / "photoprism-random"
+SESSION = CONF / "session.json"
+CACHE = pathlib.Path.home() / ".cache" / "photoprism-random"
+OUT = CACHE / "widget.jpg"
+UA = "PhotoPrismRandomWidget/3.0 (Linux; omalauncher)"
+
+
+def fail(msg: str) -> None:
+    print(msg, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def main() -> None:
+    if not SESSION.is_file():
+        fail("not configured")
+    cfg = json.loads(SESSION.read_text())
+    base = (cfg.get("url") or "").strip().rstrip("/")
+    token = cfg.get("token") or ""
+    preview = cfg.get("preview") or "public"
+    scope = (cfg.get("scope") or "all").strip() or "all"
+    album = (cfg.get("album") or "").strip()
+    if base and "://" not in base:
+        base = "https://" + base
+    if not base.startswith("http://") and not base.startswith("https://"):
+        fail("bad url in session")
+    if not token:
+        fail("not configured")
+
+    def call(method: str, path: str, binary: bool = False):
+        req = urllib.request.Request(
+            base + path,
+            headers={
+                "X-Auth-Token": token,
+                "User-Agent": UA,
+                "Accept": "*/*",
+            },
+            method=method,
+        )
+        with urllib.request.urlopen(req, timeout=60) as res:
+            raw = res.read()
+            return raw if binary else json.loads(raw.decode() or "null")
+
+    params = {
+        "count": "1",
+        "order": "random",
+        "merged": "true",
+        "primary": "true",
+    }
+    if scope == "favorites":
+        params["favorite"] = "true"
+    elif scope == "album":
+        if not album:
+            fail("album scope needs an album UID")
+        params["s"] = album
+
+    try:
+        photos = call("GET", "/api/v1/photos?" + urllib.parse.urlencode(params))
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            fail("session expired — open settings")
+        fail(f"photos failed: HTTP {e.code}")
+    except Exception as e:
+        fail(str(e))
+
+    if not photos:
+        fail("no photos for this scope")
+    item = photos[0]
+    h = item.get("Hash") or ((item.get("Files") or [{}])[0].get("Hash"))
+    if not h:
+        fail("photo missing hash")
+    try:
+        jpeg = call("GET", f"/api/v1/t/{h}/{preview}/fit_720", binary=True)
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            fail("session expired — open settings")
+        fail(f"image failed: HTTP {e.code}")
+
+    CACHE.mkdir(parents=True, exist_ok=True)
+    OUT.write_bytes(jpeg)
+    print(OUT)
+
+
+if __name__ == "__main__":
+    main()
+OWL_PP_EOF
+cat > "$D/auth.py" <<'OWL_PP_EOF'
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import sys
+import urllib.error
+import urllib.request
+
+CONF = pathlib.Path.home() / ".config" / "photoprism-random"
+SESSION = CONF / "session.json"
+STATUS = CONF / "login-status.txt"
+UA = "PhotoPrismRandomWidget/3.1 (Linux; omalauncher)"
+
+
+def write_status(msg: str) -> None:
+    CONF.mkdir(parents=True, exist_ok=True)
+    STATUS.write_text(msg + "\n")
+    STATUS.chmod(0o600)
+
+
+def fail(msg: str) -> None:
+    write_status(msg)
+    print(msg)
+    raise SystemExit(1)
+
+
+def main() -> None:
+    CONF.mkdir(parents=True, exist_ok=True)
+    CONF.chmod(0o700)
+    write_status("signing in…")
+
+    url = (os.environ.get("PP_URL") or "").strip().rstrip("/")
+    if url and "://" not in url:
+        url = "https://" + url
+    user = (os.environ.get("PP_USER") or "").strip()
+    password = os.environ.get("PP_PASS") or ""
+    scope = (os.environ.get("PP_SCOPE") or "all").strip() or "all"
+    album = (os.environ.get("PP_ALBUM") or "").strip()
+
+    if os.environ.get("PP_OK") != "true":
+        fail("fill URL, username and password")
+    if not url:
+        fail("URL is required")
+    if not url.startswith("http://") and not url.startswith("https://"):
+        fail("URL needs http:// or https://")
+    if " " in url or "…" in url or "example.com" in url:
+        fail("that looks like a placeholder — enter your real PhotoPrism URL")
+    if not user or not password:
+        fail("username and password are required")
+    if scope == "album" and not album:
+        fail("album UID is required for album scope")
+
+    body = json.dumps({"username": user, "password": password}).encode()
+    req = urllib.request.Request(
+        url + "/api/v1/session",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": UA,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as res:
+            sess = json.loads(res.read().decode() or "null")
+    except urllib.error.HTTPError as e:
+        fail(f"login failed: HTTP {e.code}")
+    except urllib.error.URLError as e:
+        reason = str(getattr(e, "reason", e))
+        if "Name or service not known" in reason or "nodename nor servname" in reason:
+            fail(f"cannot resolve host — check the URL")
+        fail(f"network error: {reason}")
+    except Exception as e:
+        fail(str(e))
+
+    token = (sess or {}).get("access_token") or (sess or {}).get("id")
+    preview = ((sess or {}).get("config") or {}).get("previewToken") or (
+        (sess or {}).get("previewToken") or "public"
+    )
+    if not token:
+        fail("login failed: no token")
+
+    data = {
+        "url": url,
+        "username": user,
+        "token": token,
+        "preview": preview,
+        "scope": scope,
+        "album": album,
+    }
+    SESSION.write_text(json.dumps(data, indent=2) + "\n")
+    SESSION.chmod(0o600)
+    for legacy in (
+        pathlib.Path.home() / ".cache" / "photoprism-random" / "widget.json",
+        CONF / "session.enc",
+        CONF / "master.key",
+    ):
+        if legacy.is_file():
+            legacy.unlink()
+    write_status("ok")
+    print("ok")
+
+
+if __name__ == "__main__":
+    main()
+OWL_PP_EOF
+cat > "$D/auth_from_config.py" <<'OWL_PP_EOF'
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import sys
+
+CONF = pathlib.Path.home() / ".config" / "photoprism-random"
+CONFIG = CONF / "config.json"
+
+
+def main() -> None:
+    # Reuse auth.py by exporting env from config.json
+    if not CONFIG.is_file():
+        print("no saved config — run set_password.py first", file=sys.stderr)
+        (CONF / "login-status.txt").write_text(
+            "no saved credentials — tap “set password” first\n"
+        )
+        raise SystemExit(1)
+
+    cfg = json.loads(CONFIG.read_text())
+    url = (cfg.get("url") or "").strip().rstrip("/")
+    user = (cfg.get("username") or "").strip()
+    password = cfg.get("password") or ""
+    scope = (cfg.get("scope") or "all").strip() or "all"
+    album = (cfg.get("album_uid") or cfg.get("album") or "") or ""
+
+    if not (url and user and password):
+        (CONF / "login-status.txt").write_text(
+            "saved config incomplete — tap “set password”\n"
+        )
+        raise SystemExit(1)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PP_OK": "true",
+            "PP_URL": url,
+            "PP_USER": user,
+            "PP_PASS": password,
+            "PP_SCOPE": scope,
+            "PP_ALBUM": str(album),
+        }
+    )
+    os.execvpe(
+        sys.executable,
+        [sys.executable, str(CONF / "auth.py")],
+        env,
+    )
+
+
+if __name__ == "__main__":
+    main()
+OWL_PP_EOF
+cat > "$D/set_password.py" <<'OWL_PP_EOF'
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import getpass
+import json
+import pathlib
+import sys
+
+CONF = pathlib.Path.home() / ".config" / "photoprism-random"
+CONFIG = CONF / "config.json"
+
+
+def main() -> None:
+    CONF.mkdir(parents=True, exist_ok=True)
+    CONF.chmod(0o700)
+    existing = {}
+    if CONFIG.is_file():
+        try:
+            existing = json.loads(CONFIG.read_text())
+        except json.JSONDecodeError:
+            existing = {}
+
+    print("PhotoPrism setup (password is hidden while typing)")
+    print()
+    default_url = (existing.get("url") or "").strip()
+    default_user = (existing.get("username") or "").strip()
+    default_scope = (existing.get("scope") or "all").strip() or "all"
+
+    url = input(f"URL [{default_url or 'https://photos.example.com'}]: ").strip() or default_url
+    if url and "://" not in url:
+        url = "https://" + url
+    user = input(f"Username [{default_user or 'admin'}]: ").strip() or default_user
+    password = getpass.getpass("Password: ")
+    if not password and existing.get("password"):
+        password = existing["password"]
+        print("(kept existing password)")
+    scope = input(f"Scope all/favorites/album [{default_scope}]: ").strip() or default_scope
+    album = ""
+    if scope == "album":
+        album = input("Album UID: ").strip()
+
+    if not (url and user and password):
+        print("URL, username and password are required.", file=sys.stderr)
+        raise SystemExit(1)
+
+    data = {
+        "url": url.rstrip("/"),
+        "username": user,
+        "password": password,
+        "scope": scope,
+        "album_uid": album or None,
+        "album_title": None,
+    }
+    CONFIG.write_text(json.dumps(data, indent=2) + "\n")
+    CONFIG.chmod(0o600)
+    print()
+    print(f"Saved {CONFIG}")
+    print("Return to the widget and tap Connect.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\ncancelled")
+        raise SystemExit(1)
+OWL_PP_EOF
+chmod 755 "$D"/fetch.py "$D"/auth.py "$D"/auth_from_config.py "$D"/set_password.py
+echo ok
+""") every 24h
+
+  source shot = cmd("python ~/.config/photoprism-random/fetch.py") every 30m timeout 60s status
+
+  on loginStatus {
+    busy = trim(value) == "signing in…" ? true : false
+    statusMsg = trim(value) == "ok" || trim(value) == "signing in…" || trim(value) == "" ? "" : trim(value)
+  }
+  when statusText == "ok" {
+    busy = false
+    run("rm -f ~/.config/photoprism-random/login-status.txt")
+    refresh()
+  }
+  when busy && busyAt > 0 && now != null && now - busyAt > 35 {
+    busy = false
+    statusMsg = "timed out"
+    run("rm -f ~/.config/photoprism-random/login-status.txt")
+  }
+
+  if !configured {
+    Column {
+      justify: center
+      align: center
+      gap: 10
+      fill: true
+      padding: 12
+      Text { text: "photoprism"; style: muted }
+      Text { text: "not signed in"; style: title }
+      if statusMsg != "" {
+        Text { text: statusMsg; style: small; color: red; maxLines: 4 }
+      }
+      if busy {
+        Text { text: "Signing in…"; style: small; color: accent }
+      }
+      if hasConfig {
+        Button {
+          text: busy ? "please wait…" : "connect"
+          color: accent
+          onTap: {
+            statusMsg = ""
+            busy = true
+            busyAt = now != null ? now : 0
+            run("rm -f ~/.config/photoprism-random/login-status.txt; timeout 25 python ~/.config/photoprism-random/auth_from_config.py || true")
+          }
+        }
+      }
+      Button {
+        text: hasConfig ? "change credentials" : "set credentials"
+        onTap: terminal("python ~/.config/photoprism-random/set_password.py", "PhotoPrism setup")
+      }
+      Text {
+        text: "Password is entered in the terminal (hidden). Widget fields cannot mask autofill."
+        style: label
+        color: muted
+        maxLines: 4
+      }
+    }
+  } else if shot == null {
+    Column {
+      justify: center
+      align: center
+      fill: true
+      padding: 12
+      Text { text: "loading…"; style: title }
+    }
+  } else if !shot.ok {
+    Column {
+      justify: center
+      gap: 8
+      fill: true
+      padding: 12
+      Text { text: "photoprism"; style: muted }
+      Text { text: shot.err != "" ? shot.err : "could not load photo"; style: small; maxLines: 5 }
+      Button {
+        text: "reconnect"
+        color: accent
+        onTap: {
+          statusMsg = ""
+          busy = true
+          busyAt = now != null ? now : 0
+          run("rm -f ~/.config/photoprism-random/session.json ~/.config/photoprism-random/login-status.txt; timeout 25 python ~/.config/photoprism-random/auth_from_config.py || true")
+        }
+      }
+      Button {
+        text: "change credentials"
+        onTap: terminal("python ~/.config/photoprism-random/set_password.py", "PhotoPrism setup")
+      }
+      Button { text: "retry"; onTap: refresh() }
+    }
+  } else {
+    Box {
+      fill: true
+      Image { src: shot.out; fit: cover; fill: true; onTap: refresh() }
+      Box {
+        align: topEnd
+        padding: 6
+        Button {
+          text: "⚙"
+          onTap: screen()
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "PhotoPrism"
+    Column {
+      gap: 10
+      padding: 16
+      Text { text: "Credentials are stored in ~/.config/photoprism-random/config.json (mode 0600). Password entry uses the terminal so it stays hidden and autofill cannot break sign-in."; style: small; maxLines: 6 }
+      if statusMsg != "" {
+        Text { text: statusMsg; style: small; color: red; maxLines: 4 }
+      }
+      Button {
+        text: "connect / refresh session"
+        color: accent
+        onTap: {
+          statusMsg = ""
+          busy = true
+          busyAt = now != null ? now : 0
+          run("rm -f ~/.config/photoprism-random/login-status.txt; timeout 25 python ~/.config/photoprism-random/auth_from_config.py || true")
+        }
+      }
+      Button {
+        text: "change credentials"
+        onTap: terminal("python ~/.config/photoprism-random/set_password.py", "PhotoPrism setup")
+      }
+      Button { text: "close"; onTap: close() }
+    }
+  }
+}
