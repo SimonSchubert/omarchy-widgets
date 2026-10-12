@@ -1,7 +1,7 @@
 widget "ppt maker" {
   size: 6x4
   minSize: 3x3
-  meta { owl: 5; description: "Type a topic and Claude Code makes a PowerPoint deck with real photos and diagrams: quick ones in a minute, or designed and checked ones. Edit or delete decks from the full screen"; version: "1.1"; license: "MIT"; category: "productivity" }
+  meta { owl: 5; description: "Type a topic and Claude Code makes a PowerPoint deck with real photos and diagrams: quick ones in a minute, or designed and checked ones. Edit or delete decks from the full screen"; version: "1.2"; license: "MIT"; category: "productivity" }
 
   requires { pacman: ["jq", "curl", "python", "python-lxml", "python-pillow"] }
 
@@ -20,11 +20,17 @@ widget "ppt maker" {
   source setup = file("~/.cache/ppt/setup.json") json
   source st = file("~/.cache/ppt/status.json") json
   source step = file("~/.cache/ppt/step")
+  // Whether the deck run and the installer are really still running: a killed one (proot stopped,
+  // app closed) leaves "working" or "installing" behind, which must not spin forever.
+  source alive = cmd("""
+    up() { [ -f ~/.cache/ppt/$1 ] && kill -0 "$(cat ~/.cache/ppt/$1)" 2>/dev/null && echo true || echo false; }
+    printf '{"deck":%s,"setup":%s}' "$(up pid)" "$(up setup.pid)"
+  """) every 5s json
   source decks = cmd("""
     [ -x ~/.local/share/pptmaker/ppt ] && ~/.local/share/pptmaker/ppt serve
     cd ~/Decks 2>/dev/null && ls -t -- *.pptx 2>/dev/null | head -30
   """) every 1m
-  state quick = false persist
+  state quick = true persist
   state notified = 0 persist
   // A submitted topic waits here until no deck is being made, then starts (see the when below).
   state next = "" persist
@@ -37,11 +43,13 @@ widget "ppt maker" {
   state confirmDel = ""    // the deck whose delete was tapped once
   state gone = []          // decks deleted here, hidden before the list is read again
 
-  let version = "2"
+  let version = "3"
   let ready = env.v == version
-  let installing = setup.state == "installing"
+  let installing = setup.state == "installing" && alive.setup != false
+  let setupStopped = setup.state == "installing" && alive.setup == false
   let proReady = env.pro == true
-  let working = st.state == "working"
+  let working = st.state == "working" && alive.deck != false
+  let stopped = st.state == "working" && alive.deck == false
   // Between pressing send and ppt writing its first status: show it at once, not seconds later.
   let starting = sentAt > 0 && (st.t ?? 0) < sentAt && (now ?? 0) - sentAt < 45
   let busy = working || starting
@@ -71,8 +79,8 @@ widget "ppt maker" {
       gap: 8
       align: center
       Text { text: "▸"; color: accent; width: 12; onTap: url("${base}${f}") }
-      Text { text: replace(sub(f, 0, len(f) - 15), "-", " "); style: small; maxLines: 1; weight: 1; onTap: url("${base}${f}") }
-      Text { text: "${sub(f, len(f) - 12, len(f) - 10)}/${sub(f, len(f) - 14, len(f) - 12)}"; style: small; color: muted; width: 40; align: end; onTap: url("${base}${f}") }
+      Text { text: (len(f) > 15 && sub(f, len(f) - 15, len(f) - 14) == "-" && sub(f, len(f) - 10, len(f) - 9) == "-") ? replace(sub(f, 0, len(f) - 15), "-", " ") : replace(f, ".pptx", ""); style: small; maxLines: 1; weight: 1; onTap: url("${base}${f}") }
+      Text { text: (len(f) > 15 && sub(f, len(f) - 15, len(f) - 14) == "-" && sub(f, len(f) - 10, len(f) - 9) == "-") ? "${sub(f, len(f) - 12, len(f) - 10)}/${sub(f, len(f) - 14, len(f) - 12)}" : ""; style: small; color: muted; width: 40; align: end; onTap: url("${base}${f}") }
       if actions {
         Text { text: "edit"; style: small; color: editing == f ? accent : foreground; width: 40; align: center; padding: [0, 6]; onTap: { editing = editing == f ? "" : f; confirmDel = "" } }
         // The first tap only asks; the second hides the row at once and deletes the file.
@@ -111,6 +119,8 @@ widget "ppt maker" {
       }
     } else if st.state == "failed" {
       Text { text: "✗ ${st.error}"; style: small; color: red; maxLines: 2 }
+    } else if stopped {
+      Text { text: "✗ stopped before it finished (Linux or the app was closed): send it again"; style: small; color: red; maxLines: 2 }
     }
   }
 
@@ -148,12 +158,13 @@ widget "ppt maker" {
       Button { text: "set up Claude Code"; onTap: launcher("agents") }
     } else if !ready {
       Text { text: env == null ? "…" : env.v == "" ? "One-time setup: the ppt command and python-pptx (a few MB)." : "An update to the ppt command is ready."; style: small; maxLines: 3 }
-      if setup.state == "failed" { Text { text: "✗ ${setup.step}"; style: small; color: red; maxLines: 3 } }
+      if setup.state == "failed" || setupStopped { Text { text: setupStopped ? "✗ setup was interrupted: tap to try again" : "✗ ${setup.step}"; style: small; color: red; maxLines: 3 } }
       Button { text: env.v == "" ? "set up" : "update"; onTap: run("""
 mkdir -p ~/.cache/ppt ~/.local/share/pptmaker
 say() { printf '{"state":"%s","step":"%s","t":%s}' "$1" "$2" "$(date +%s)" > ~/.cache/ppt/setup.json; }
 fail() { say failed "$1 (see ~/.cache/ppt/setup.log)"; exit 1; }
 exec >>~/.cache/ppt/setup.log 2>&1
+echo $$ > ~/.cache/ppt/setup.pid  # the widget shows "installing" only while this shell is alive
 cd ~/.local/share/pptmaker
 say installing "writing the ppt command"
 # Written beside the old files and moved over them, so a deck being made keeps its copy.
@@ -233,6 +244,25 @@ stamp=$(date +%m%d-%H%M)
 
 fail() { status failed "$shown" "" "" "$1"; echo "failed: $1" >&2; exit 1; }
 
+tidy() { # keeps what a later edit needs (build.js, pictures, the spec) and only for decks that still exist
+  local d s
+  for d in "$CACHE"/work-*; do
+    [ -d "$d" ] || continue
+    s=${d##*/work-}
+    if compgen -G "$DECKS/*-$s.pptx" >/dev/null; then
+      # Renders made for checking the slides; build.js and img/ stay for edits.
+      rm -f "$d"/*.pdf "$d"/slide*.jpg "$d"/contact*.jpg "$d"/pair*.jpg "$d"/deck.md
+    else
+      rm -rf -- "$d"
+    fi
+  done
+  for d in "$CACHE"/specs/*.json; do
+    [ -f "$d" ] || continue
+    s=$(basename "$d" .json)
+    compgen -G "$DECKS/*-$s.pptx" >/dev/null || rm -f -- "$d"
+  done
+}
+
 finish() { # pptx: names it after its first slide's text, copies it to ~/Decks (over the deck being edited)
   local info name slides file
   info=$("$PY" - "$1" <<'PYEOF'
@@ -306,6 +336,7 @@ PYEOF
   file="$name-$stamp.pptx"
   cp "$1" "$DECKS/$file"
   [ -n "$replaces" ] && [ "$replaces" != "$file" ] && rm -f -- "$DECKS/$replaces"
+  tidy
   status done "$shown" "$file" "$slides"
   echo "$DECKS/$file ($slides slides)  http://127.0.0.1:$PORT/$file"
 }
@@ -822,25 +853,28 @@ RENDER_EOF
 chmod +x ppt.new
 mv ppt.new ppt && mv render.py.new render.py
 mkdir -p ~/.local/bin ~/Decks
-ln -sf ~/.local/share/pptmaker/ppt ~/.local/bin/ppt
+# A ppt command for the terminal too, unless the user already has another one.
+[ -e ~/.local/bin/ppt ] && [ "$(readlink ~/.local/bin/ppt)" != ~/.local/share/pptmaker/ppt ] \
+  || ln -sf ~/.local/share/pptmaker/ppt ~/.local/bin/ppt
 say installing "installing python-pptx"
 [ -x venv/bin/python ] || python -m venv --system-site-packages venv || fail "couldn't make a Python venv"
 venv/bin/pip install -q python-pptx || fail "couldn't install python-pptx"
-echo 2 > VERSION
+echo 3 > VERSION
 say done "ready"
 """) }
     } else if !quick && !proReady {
       Text { text: "Pro decks need pptxgenjs and LibreOffice (about 600 MB) so Claude can design and check every slide."; style: small; maxLines: 3 }
-      if setup.state == "failed" { Text { text: "✗ ${setup.step}"; style: small; color: red; maxLines: 3 } }
+      if setup.state == "failed" || setupStopped { Text { text: setupStopped ? "✗ setup was interrupted: tap to try again" : "✗ ${setup.step}"; style: small; color: red; maxLines: 3 } }
       Row {
         Button { text: "install pro"; onTap: run("""
 mkdir -p ~/.cache/ppt ~/.local/share/pptmaker
 say() { printf '{"state":"%s","step":"%s","t":%s}' "$1" "$2" "$(date +%s)" > ~/.cache/ppt/setup.json; }
 fail() { say failed "$1 (see ~/.cache/ppt/setup.log)"; exit 1; }
 exec >>~/.cache/ppt/setup.log 2>&1
+echo $$ > ~/.cache/ppt/setup.pid  # the widget shows "installing" only while this shell is alive
 cd ~/.local/share/pptmaker
 say installing "installing Node and LibreOffice (about 600 MB)"
-pacman -S --needed --noconfirm nodejs npm libreoffice-fresh poppler ttf-carlito ttf-caladea ttf-liberation python-defusedxml || fail "pacman couldn't install the pro packages"
+pacman -Syu --needed --noconfirm nodejs npm libreoffice-fresh poppler ttf-carlito ttf-caladea ttf-liberation python-defusedxml || fail "pacman couldn't install the pro packages"
 say installing "installing pptxgenjs and icons"
 [ -f package.json ] || npm init -y >/dev/null
 npm install --silent pptxgenjs react react-dom react-icons sharp || fail "npm couldn't install pptxgenjs"
