@@ -1,4 +1,4 @@
-widget "terminal" {
+widget "terminal-profiles" {
   size: 6x4
   minSize: 2x2
   padding: 0
@@ -6,7 +6,7 @@ widget "terminal" {
   meta {
     owl: 5
     description: "Live terminal with profiles: switch commands from the chevron, manage them from the menu"
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "dev"
   }
@@ -15,20 +15,20 @@ widget "terminal" {
   state profiles = [
     {id: "shell", name: "shell", command: ""},
   ] persist
-  state activeId = "shell" persist
   state defaultId = "shell" persist
   state seq = 1 persist
 
+  // Not persisted: each start opens on the current default.
+  state activeId = defaultId
   state dropOpen = false
   state dotsOpen = false
-  state gen = 0
   state screenView = "list"
   state editId = ""
   state draftName = ""
   state draftCmd = ""
 
   let active = profiles.find(p => p.id == activeId) ?? profiles[0] ?? {id: "shell", name: "shell", command: ""}
-  let termCmd = trim(active.command ?? "") == "" ? "bash -l" : active.command
+  let termCmd = trim(active.command ?? "") == "" ? "exec bash -l" : active.command
   let editing = profiles.find(p => p.id == editId)
   let barH = 28
 
@@ -65,17 +65,14 @@ widget "terminal" {
         }
       }
 
-      // Remount Terminal when gen flips so a profile switch restarts the session.
-      if gen % 2 == 0 {
-        Terminal { command: termCmd; weight: 1; fill: true }
-      } else {
-        Terminal { command: termCmd; weight: 1; fill: true }
-      }
+      // Changing command ends the old session and starts a new one.
+      Terminal { command: termCmd; weight: 1; fill: true }
     }
 
     if dropOpen || dotsOpen {
       Box {
-        fill: true
+        fill: width
+        height: max(0, (tileHeight ?? 0) - barH)
         offset: [0, barH]
         onTap: { dropOpen = false; dotsOpen = false }
       }
@@ -103,7 +100,6 @@ widget "terminal" {
               background: on ? alpha(accent, 0.18) : rgb(0, 0, 0, 0)
               onTap: {
                 activeId = p.id
-                gen = gen + 1
                 dropOpen = false
               }
               Text { text: p.name; style: small; weight: 1; maxLines: 1; color: on ? accent : foreground }
@@ -238,7 +234,6 @@ widget "terminal" {
             profiles = profiles.map(p => p.id == editId
               ? {id: p.id, name: trim(draftName) == "" ? p.name : trim(draftName), command: draftCmd}
               : p)
-            gen = activeId == editId ? gen + 1 : gen
             screenView = "list"
           }
         }
@@ -267,7 +262,6 @@ widget "terminal" {
           text: "delete"
           color: red
           onTap: {
-            gen = len(profiles) > 1 && activeId == editId ? gen + 1 : gen
             activeId = len(profiles) > 1 && activeId == editId
               ? profiles.find(p => p.id != editId).id
               : activeId
@@ -308,7 +302,6 @@ widget "terminal" {
             }]
             activeId = "p${seq}"
             seq = seq + 1
-            gen = gen + 1
             screenView = "list"
             close()
           }
