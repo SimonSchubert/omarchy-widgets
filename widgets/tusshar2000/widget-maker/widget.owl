@@ -1,22 +1,21 @@
 widget "widget maker" {
   size: 6x4
   minSize: 4x3
-  meta { owl: 5; description: "Describe a widget in plain words and your coding agent (Claude Code, Codex, opencode, Crush or Grok) writes it, checks it on the launcher and puts it on your home screen"; version: "1.0"; license: "MIT"; category: "dev" }
+  meta { owl: 5; description: "Describe a widget in plain words and Claude Code writes it, checks it on the launcher and puts it on your home screen"; version: "1.0"; license: "MIT"; category: "dev" }
 
   requires { pacman: ["jq"] }
 
   // How it works: the tile installs a small script, ~/.local/share/owlmaker/make. It hands your
-  // request to the agent you pick (the launcher's default agent unless you change it), together
-  // with README.md and examples/. The agent writes one made-<time>.owl file and runs owl-check
+  // request to Claude Code, together with README.md and examples/. Claude writes one made-<time>.owl file and runs owl-check
   // on it. The script runs owl-check once more at the end and only keeps a widget that passes:
   // a failed new widget is moved to ~/.cache/owlmaker/failed, and a failed change is undone.
   // Claude Code runs with file tools only, Bash limited to owl-check and pacman -S, and no web or
-  // MCP connectors. The other agents run in their own non-interactive modes.
+  // MCP connectors.
   source now = clock every 1s
   source env = cmd("""
     d=~/.local/share/owlmaker
-    a=""; for x in claude codex opencode crush grok; do command -v $x >/dev/null && a="$a\"$x\","; done
-    printf '{"v":"%s","agents":[%s],"def":"%s"}' "$(cat $d/VERSION 2>/dev/null)" "${a%,}" "$(cat ~/.config/omalauncher/agent 2>/dev/null)"
+    a=""; for x in claude; do command -v $x >/dev/null && a="\"$x\""; done
+    printf '{"v":"%s","agents":[%s]}' "$(cat $d/VERSION 2>/dev/null)" "$a"
   """) every 5m json
   source st = file("~/.cache/owlmaker/status.json") json
   source step = file("~/.cache/owlmaker/step")
@@ -34,7 +33,6 @@ widget "widget maker" {
     done
   """) every 1m
 
-  state agent = "" persist      // the agent picked here; empty means the launcher's default
   state notified = 0 persist
   state next = "" persist       // a request waiting for the current run to finish
   state nextEdit = "" persist
@@ -43,9 +41,9 @@ widget "widget maker" {
   state gone = []
   state sentAt = 0
 
-  let version = "4"
+  let version = "5"
   let installed = env.agents ?? []
-  let useAgent = installed.indexOf(agent) >= 0 ? agent : installed.indexOf(env.def) >= 0 ? env.def : installed.first()
+  let useAgent = installed.first()
   let ready = env.v == version
   let stopped = st.state == "working" && alive.run == false && alive.t >= st.t
   let working = st.state == "working" && !stopped
@@ -147,10 +145,6 @@ case $agent in
       esac
     done
     summary=$(jq -r 'select(.type=="result") | .result // empty' "$C/agent.log" 2>/dev/null | grep -v '^\s*$' | tail -1 | cut -c1-300) ;;
-  codex)    step "working with codex";    codex exec --full-auto --skip-git-repo-check -C "$W" "$prompt" >"$C/agent.log" 2>"$C/agent.err" ;;
-  opencode) step "working with opencode"; opencode run "$prompt" >"$C/agent.log" 2>"$C/agent.err" ;;
-  crush)    step "working with crush";    crush run "$prompt" >"$C/agent.log" 2>"$C/agent.err" ;;
-  grok)     step "working with grok";     grok --prompt "$prompt" >"$C/agent.log" 2>"$C/agent.err" ;;
   *) status failed "" "" "unknown agent: $agent"; exit 1 ;;
 esac
 [ -n "$summary" ] || summary=$(grep -v '^\s*$' "$C/agent.log" | tail -1 | cut -c1-300)
@@ -167,7 +161,7 @@ else
 fi
 MAKE_EOF
 chmod +x ~/.local/share/owlmaker/make.new && mv ~/.local/share/owlmaker/make.new ~/.local/share/owlmaker/make
-echo 4 > ~/.local/share/owlmaker/VERSION
+echo 5 > ~/.local/share/owlmaker/VERSION
 """
   when env != null && !ready { run(installCmd) }
 
@@ -191,7 +185,7 @@ echo 4 > ~/.local/share/owlmaker/VERSION
 
   component AgentChip() {
     Text {
-      text: useAgent ?? "no agent"
+      text: "claude"
       style: small
       color: accent
       align: center
@@ -200,8 +194,6 @@ echo 4 > ~/.local/share/owlmaker/VERSION
       border: 1
       borderColor: accent
       radius: 10
-      // Cycles through the installed agents.
-      onTap: agent = len(installed) > 0 ? installed[(installed.indexOf(useAgent) + 1) % len(installed)] : ""
     }
   }
 
@@ -237,10 +229,10 @@ echo 4 > ~/.local/share/owlmaker/VERSION
       if ready && len(installed) > 0 { AgentChip {} }
     }
     if env != null && len(installed) == 0 {
-      Text { text: "Widget maker uses a coding agent (Claude Code, Codex, opencode, Crush or Grok). Install one and log in first."; style: small; maxLines: 3 }
-      Button { text: "set up an agent"; onTap: launcher("agents") }
+      Text { text: "Widget maker uses Claude Code. Install it and log in first."; style: small; maxLines: 3 }
+      Button { text: "set up Claude Code"; onTap: launcher("agents") }
     } else if !ready {
-      Text { text: env.v == "" ? "One-time setup: a small script that runs your agent." : "An update to the widget maker script is ready."; style: small; color: muted; maxLines: 2 }
+      Text { text: env.v == "" ? "One-time setup: a small script that runs Claude Code." : "An update to the widget maker script is ready."; style: small; color: muted; maxLines: 2 }
       Button { text: env.v == "" ? "set up" : "update"; onTap: run(installCmd) }
     } else {
       Row {
@@ -273,7 +265,7 @@ echo 4 > ~/.local/share/owlmaker/VERSION
         Row {
           align: center
           gap: 8
-          Text { text: "Describe a widget. Your agent writes it, checks it and adds it to the home screen, in a few minutes."; style: small; color: muted; weight: 1; maxLines: 3 }
+          Text { text: "Describe a widget. Claude Code writes it, checks it and adds it to the home screen, in a few minutes."; style: small; color: muted; weight: 1; maxLines: 3 }
           AgentChip {}
         }
         if editing != "" {
