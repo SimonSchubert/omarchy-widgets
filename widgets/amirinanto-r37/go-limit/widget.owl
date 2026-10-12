@@ -1,7 +1,7 @@
 widget "go limit" {
   meta {
     owl: 5
-    description: "OpenCode Go usage as rolling 5-hour, weekly and monthly percentages of the limit with credit left, per model. Same math as the Go page on opencode.ai, estimated from the local opencode database. Tap the model to pick another one."
+    description: "OpenCode Go usage per model: 5-hour, weekly and monthly ring gauges against that model's limits, credit left, cost sparkline. Estimated from the local opencode database."
     version: "1.3"
     license: "MIT"
     category: "dev"
@@ -56,26 +56,27 @@ widget "go limit" {
 
   source usage = cmd("""
     db="$HOME/.local/share/opencode/opencode.db"
-    if [ ! -f "$db" ]; then printf '{models:null,hours:null}\n'; exit 0; fi
+    if [ ! -f "$db" ]; then printf '{"models":null,"hours":null}\n'; exit 0; fi
     now=$(date +%s); h5ms=$((now*1000-18000000)); h24ms=$((now*1000-86400000))
     dow=$(date +%u)
     wk=$(date -d "$(date -d "@$((now - (dow-1)*86400))" +%F) 00:00" +%s)
-    mo=$(date -d "$(date +%Y-%m-01) 00:00" +%s)
-    sel="json_valid(data)=1 and time_created/1000 >= $mo and json_extract(data,'$.providerID')='opencode-go' and json_extract(data,'$.role')='assistant'"
+    mo=$(date -d "$(date +%Y-%m-01) 00:00" +%s); moMS=$((mo*1000)); wkMS=$((wk*1000))
+    earliest=$(( moMS < wkMS ? (moMS < h24ms ? moMS : h24ms) : (wkMS < h24ms ? wkMS : h24ms) ))
+    sel="json_valid(data)=1 and time_created >= $earliest and json_extract(data,'$.providerID')='opencode-go' and json_extract(data,'$.role')='assistant'"
     q1="with cost as (select time_created as t, json_extract(data,'$.modelID') as m, json_extract(data,'$.tokens.input') as i, json_extract(data,'$.tokens.output')+json_extract(data,'$.tokens.reasoning') as o, json_extract(data,'$.tokens.cache.read') as c, json_extract(data,'$.tokens.cache.write') as v from message where $sel)
       select m as m,
         coalesce(sum(i) filter (where t >= $h5ms),0) as i5,
         coalesce(sum(o) filter (where t >= $h5ms),0) as o5,
         coalesce(sum(c) filter (where t >= $h5ms),0) as c5,
         coalesce(sum(v) filter (where t >= $h5ms),0) as v5,
-        coalesce(sum(i) filter (where t >= $wk),0) as iw,
-        coalesce(sum(o) filter (where t >= $wk),0) as ow,
-        coalesce(sum(c) filter (where t >= $wk),0) as cw,
-        coalesce(sum(v) filter (where t >= $wk),0) as vw,
-        coalesce(sum(i),0) as im,
-        coalesce(sum(o),0) as om,
-        coalesce(sum(c),0) as cm,
-        coalesce(sum(v),0) as vm,
+        coalesce(sum(i) filter (where t >= $wkMS),0) as iw,
+        coalesce(sum(o) filter (where t >= $wkMS),0) as ow,
+        coalesce(sum(c) filter (where t >= $wkMS),0) as cw,
+        coalesce(sum(v) filter (where t >= $wkMS),0) as vw,
+        coalesce(sum(i) filter (where t >= $moMS),0) as im,
+        coalesce(sum(o) filter (where t >= $moMS),0) as om,
+        coalesce(sum(c) filter (where t >= $moMS),0) as cm,
+        coalesce(sum(v) filter (where t >= $moMS),0) as vm,
         coalesce((min(t) filter (where t >= $h5ms))/1000,0) as f5
       from cost group by m order by m"
     h=$(sqlite3 --json "$db" "
@@ -83,11 +84,12 @@ widget "go limit" {
       used as (select distinct m from cost),
       b(i,s) as (select 0, $h24ms union all select i+1, s+3600000 from b where i < 23)
       select used.m as m, b.i as hb,
-        coalesce(sum(case when cost.t >= b.s and cost.t < b.s + 3600000 then cost.i end),0) as hs,
-        coalesce(sum(case when cost.t >= b.s and cost.t < b.s + 3600000 then cost.o end),0) as hos,
-        coalesce(sum(case when cost.t >= b.s and cost.t < b.s + 3600000 then cost.c end),0) as hcs,
-        coalesce(sum(case when cost.t >= b.s and cost.t < b.s + 3600000 then cost.v end),0) as hvs
-      from used cross join b left join cost on true
+        coalesce(sum(cost.i),0) as hs,
+        coalesce(sum(cost.o),0) as hos,
+        coalesce(sum(cost.c),0) as hcs,
+        coalesce(sum(cost.v),0) as hvs
+      from used cross join b
+      left join cost on cost.m = used.m and cost.t >= b.s and cost.t < b.s + 3600000
       group by used.m, b.i order by used.m, b.i
     " 2>/dev/null | jq -c 'if type == "array" then (group_by(.m) | map({m: .[0].m, hours: map([.hs, .hos, .hcs, .hvs])})) else null end')
     [ -n "$h" ] || h=null
@@ -127,7 +129,7 @@ widget "go limit" {
         }
       }
       Text { text: label; style: label; color: muted }
-      Text { text: free ? "free model" : cost == null || limit == null ? "…" : '$' + fixed(cost, 2) + ' of $' + limit; style: small; color: muted }
+      Text { text: free ? "free model" : cost == null || limit == null ? "…" : '$' + fixed(cost, 2) + ' of $' + fixed(limit, 2); style: small; color: muted }
       Text {
         text: free ? "unlimited" : left == null ? "…" : '$' + fixed(left, 2) + ' left'
         style: small; color: left != null && limit > 0 && left / limit <= 0.2 ? tint : muted
