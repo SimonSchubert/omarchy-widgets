@@ -190,7 +190,7 @@ widget "terminal-profiles" {
                 }
               }
               if isDef {
-                Text { text: "default"; style: label; color: muted }
+                Text { text: "default"; style: label; color: muted; width: 56 }
               }
             }
           }
