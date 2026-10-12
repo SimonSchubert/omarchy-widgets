@@ -50,19 +50,29 @@ widget "companion" {
     counts = range(len(tools)).map(i => counts[i] + (tools[i] == value ? 1 : 0))
     born = born == 0 && value != "idle" ? now : born
   }
-  // an agent appearing (0 -> more) thinks; the last one leaving goes idle.
-  // It never overrides a mode a script or a button set.
-  on agents {
-    detail = old == 0 && value > 0 && activity == "idle" ? "an agent started"
-      : value == 0 && activity == "think" ? "the agents stopped"
-      : detail
-    activity = old == 0 && value > 0 && activity == "idle" ? "think"
-      : value == 0 && activity == "think" ? "idle"
-      : activity
+  // scripts send `set detail` before every `set activity`, even when the mode
+  // repeats, so a reported detail keeps the clock fresh too. The fallback
+  // below writes "went quiet" itself, which must not count as a report.
+  on detail {
+    since = value == "went quiet" ? since : now
   }
+  // a running agent lights it up: on the 0 -> more edge, and also when the
+  // widget loads with one already running (`on` skips a first value, `when`
+  // does not). It never overrides a mode a script or a button set.
+  when num(agents, 0) > 0 {
+    detail = activity == "idle" ? "an agent started" : detail
+    activity = activity == "idle" ? "think" : activity
+  }
+  // the last one leaving goes back to idle
+  on agents {
+    detail = value == 0 && activity == "think" ? "the agents stopped" : detail
+    activity = value == 0 && activity == "think" ? "idle" : activity
+  }
+  // nothing reported for 5 min: settle to idle, unless an agent is still around
+  let quiet = activity != "idle" && age > 300 && !(activity == "think" && num(agents, 0) > 0)
   every 10s {
-    detail = activity != "idle" && age > 300 ? "went quiet" : detail
-    activity = activity != "idle" && age > 300 ? "idle" : activity
+    detail = quiet ? "went quiet" : detail
+    activity = quiet ? "idle" : activity
   }
 
   // The companion: an abstract reactive core. Its waveform is its voice,
