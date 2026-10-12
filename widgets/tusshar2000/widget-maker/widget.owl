@@ -1,17 +1,18 @@
 widget "widget maker" {
   size: 6x4
   minSize: 4x3
-  meta { owl: 6; description: "Describe a widget in plain words and Claude Code writes and checks it. You see what it runs before you add it to your home screen"; version: "1.1"; license: "MIT"; category: "dev" }
+  meta { owl: 6; description: "Describe a widget in plain words and Claude Code writes and checks it. You see what it runs before you add it to your home screen"; version: "1.2"; license: "MIT"; category: "dev" }
 
   requires { pacman: ["jq", "diffutils"] }
 
   // How it works: the tile installs a small script, ~/.local/share/owlmaker/make. It hands your
   // request to Claude Code, together with README.md and examples/. Claude writes one draft in
-  // ~/.cache/owlmaker/pending and checks it with owlmaker-check, which copies it into the widgets
-  // folder for owl-check and takes it out again. Claude Code can only write that one draft, its
-  // Bash can only run owlmaker-check, and it has no web or MCP connectors. A draft that passes
-  // waits on the full screen, which shows what it runs; it only reaches the home screen when you
-  // tap add (or apply, for a change). A draft that fails is moved to ~/.cache/owlmaker/failed.
+  // ~/.cache/owlmaker/work. Claude Code can only write that one file, and it has no Bash, web or
+  // MCP connectors. When it's done, make checks the draft with owl-check and gives Claude the
+  // errors and previews to fix, at most three checks. A draft that compiles moves to
+  // ~/.cache/owlmaker/pending and waits on the full screen, which shows what it runs and the whole
+  // file; it only reaches the home screen when you tap add (or apply, for a change). A draft that
+  // fails is moved to ~/.cache/owlmaker/failed.
   source now = clock every 1s
   source env = cmd("""
     d=~/.local/share/owlmaker
@@ -24,6 +25,8 @@ widget "widget maker" {
   source alive = cmd("""
     read -r p s < ~/.cache/owlmaker/pid 2>/dev/null && [ -n "$s" ] &&
       [ "$(sed 's/.*) //' /proc/$p/stat 2>/dev/null | cut -d' ' -f20)" = "$s" ] && r=true || r=false
+    # A check copy left behind by a run that was killed mid-check doesn't stay on the home screen.
+    [ $r = false ] && rm -f ~/.config/omalauncher/widgets/owlmaker-check.owl
     printf '{"run":%s,"t":%s}' $r "$(date +%s)"
   """) every 1m json
   // The widgets made here: file|title, newest first.
@@ -33,23 +36,28 @@ widget "widget maker" {
       printf '%s|%s\n' "$f" "$(sed -n 's/^widget "\([^"]*\)".*/\1/p' "$f" | head -1)"
     done
   """) every 1m
-  // Drafts waiting to be added: their title, the lines that run or install something and, for a
-  // change, the diff against the widget on the home screen.
+  // Drafts waiting to be added: their title, the lines that run or install something, the whole
+  // file and, for a change, the diff against the widget on the home screen.
   source pending = cmd("""
     W=~/.config/omalauncher/widgets
     cd ~/.cache/owlmaker/pending 2>/dev/null || { echo '[]'; exit 0; }
     for f in $(ls -t *.owl 2>/dev/null); do
       runs=$(awk -v q="$(printf '\042\042\042')" '
         b { sub(/^[ \t]+/, ""); print; if (index($0, q)) b = 0; next }
-        /(cmd|run|http|launcher|open)\(|requires/ { s = $0; if (gsub(q, "", s) % 2) b = 1; sub(/^[ \t]+/, ""); print }
+        r { sub(/^[ \t]+/, ""); print; if (index($0, "}")) r = 0; next }
+        /requires[ \t]*\{/ { if (!index($0, "}")) r = 1; sub(/^[ \t]+/, ""); print; next }
+        /(cmd|stream|run|http|launcher|terminal|app|androidApp|url)\(/ { s = $0; if (gsub(q, "", s) % 2) b = 1; sub(/^[ \t]+/, ""); print }
       ' "$f")
       [ ${#runs} -gt 8000 ] && runs="${runs:0:8000}
 … and more: discard it if you're not sure"
       edit=false; changes=""
       [ -f "$W/$f" ] && { edit=true; changes=$(diff -u "$W/$f" "$f" | tail -n +3 | grep '^[-+]' | head -c 4000); }
+      # A file too long to read through on the phone can only be discarded.
+      big=false; [ "$(wc -c <"$f")" -gt 60000 ] && big=true
       jq -nc --arg file "$f" --arg title "$(sed -n 's/^widget "\([^"]*\)".*/\1/p' "$f" | head -1)" \
-        --arg runs "$runs" --arg changes "$changes" --argjson edit $edit \
-        '{file:$file, title:$title, runs:$runs, changes:$changes, edit:$edit}'
+        --arg runs "$runs" --arg changes "$changes" --argjson edit $edit --argjson big $big \
+        --rawfile src "$f" \
+        '{file:$file, title:$title, runs:$runs, changes:$changes, edit:$edit, big:$big, src:(if $big then "" else $src end)}'
     done | jq -sc .
   """) every 1m json
 
@@ -61,7 +69,7 @@ widget "widget maker" {
   state gone = []
   state sentAt = 0
 
-  let version = "6"
+  let version = "7"
   let hasClaude = env.claude == true
   let ready = env.v == version
   let stopped = st.state == "working" && alive.run == false && alive.t >= st.t
@@ -147,44 +155,33 @@ widget "widget maker" {
       Button {
         text: env.v == "" ? "set up" : "update"
         onTap: run("""
-mkdir -p ~/.local/share/owlmaker/bin ~/.cache/owlmaker/pending
-cat > ~/.local/share/owlmaker/bin/owlmaker-check.new <<'CHECK_EOF'
-#!/bin/bash
-# owlmaker-check: owl-check only reads widgets in the widgets folder, so the draft named in
-# $OWLMAKER_DRAFT goes in for the check and comes out again. Previews are kept in ~/.cache/owlmaker.
-d=$OWLMAKER_DRAFT
-[ -f "$d" ] || { echo "no draft at $d"; exit 1; }
-W=~/.config/omalauncher/widgets
-C=~/.cache/owlmaker
-t=$W/owlmaker-check.owl
-cp "$d" "$t"
-out=$(owl-check "$t" 2>&1)
-s=$?
-cp "$W/.preview/owlmaker-check.owl.png" "$C/preview.png" 2>/dev/null
-cp "$W/.preview/owlmaker-check.owl.screen.png" "$C/preview.screen.png" 2>/dev/null
-rm -f "$t"
-printf '%s\n' "$out" | sed -e "s|$W/.preview/owlmaker-check.owl.screen.png|$C/preview.screen.png|" \
-  -e "s|$W/.preview/owlmaker-check.owl.png|$C/preview.png|" -e "s|owlmaker-check.owl|$(basename "$d")|g"
-exit $s
-CHECK_EOF
+mkdir -p ~/.local/share/owlmaker ~/.cache/owlmaker/pending
+# 1.1 let the agent run this checker; make checks drafts itself now.
+rm -f ~/.local/share/owlmaker/bin/owlmaker-check
 cat > ~/.local/share/owlmaker/make.new <<'MAKE_EOF'
 #!/bin/bash
 # make claude: drafts the widget described in ~/.cache/owlmaker/request.txt, or a change to the
-# file named in target.txt, in ~/.cache/owlmaker/pending. The widget maker's full screen shows a
-# draft and adds it to the home screen only when the user taps add.
+# file named in target.txt. Claude Code writes it in ~/.cache/owlmaker/work; once it compiles it
+# moves to ~/.cache/owlmaker/pending, where the widget maker's full screen shows it and adds it to
+# the home screen only when the user taps add.
 # Progress: ~/.cache/owlmaker/status.json and step.
 agent=$1
 W=~/.config/omalauncher/widgets
 C=~/.cache/owlmaker
 P=$C/pending
-mkdir -p "$C/failed" "$P"
+K=$C/work
+T=$W/owlmaker-check.owl
+mkdir -p "$C/failed" "$P" "$K"
 req=$(head -c 4000 "$C/request.txt")
 target=$(basename -- "$(cat "$C/target.txt" 2>/dev/null)" 2>/dev/null)
 started() { sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | cut -d' ' -f20; }
 [ -f "$C/pid" ] && read -r p s <"$C/pid"
 if [ -n "$s" ] && [ "$(started "$p")" = "$s" ]; then echo "already making one" >&2; exit 1; fi
 echo "$$ $(started $$)" >"$C/pid"
-trap 'rm -f "$C/pid"' EXIT
+# The check copy in the widgets folder must never outlive the run.
+trap 'rm -f "$C/pid" "$T"' EXIT
+trap 'exit 1' HUP INT TERM
+rm -f "$T" "$K"/*.owl
 
 status() { # state file summary error
   jq -nc --arg state "$1" --arg req "$req" --arg file "$2" --arg summary "$3" --arg error "$4" \
@@ -197,19 +194,18 @@ step "starting $agent"
 status working "" "" ""
 [ "$agent" = claude ] || { status failed "" "" "unknown agent: $agent"; exit 1; }
 
-rm -f "$C/backup.owl"
 if [ -n "$target" ]; then
   name=$target
-  F=$P/$name
+  F=$K/$name
   # A change starts from a draft of the same widget that is still waiting, if there is one.
-  if [ -f "$F" ]; then cp "$F" "$C/backup.owl"
+  if [ -f "$P/$name" ]; then cp "$P/$name" "$F"
   elif [ -f "$W/$name" ]; then cp "$W/$name" "$F"
   else status failed "" "" "that widget isn't there any more"; exit 1; fi
   task="Change the widget in $F as asked: $req
 Keep everything the request doesn't touch. Raise its meta version (1.0 becomes 1.1)."
 else
   name=made-$(date +%m%d-%H%M%S).owl
-  F=$P/$name
+  F=$K/$name
   task="Make a new home-screen widget: $req
 Write it to exactly this file: $F"
 fi
@@ -217,11 +213,9 @@ prompt="You write home-screen widgets for omalauncher, an Android launcher with 
 $task
 
 First read $W/README.md, which documents the OWL widget language, and one or two files in
-$W/examples/ that are close to the request. Then write the widget. Then run: owlmaker-check
-It checks $F the way the launcher sees it, and prints errors and the paths of PNG previews
-drawn with live data. Fix every error, open the PNGs, and fix what looks wrong: cut-off or
-overlapping text, wasted space, unreadable colours, a layout that doesn't fit the tile. Check
-again; at most four rounds.
+$W/examples/ that are close to the request. Then write the widget and stop. You can't run
+commands: when you're done, the widget is checked on the launcher and you get its errors and
+PNG previews drawn with live data to fix.
 
 Rules:
 - Create or change only $F. You can't write anywhere else.
@@ -232,54 +226,80 @@ Rules:
 - Put values into commands the way README.md says, so a value can never run as code.
 - Include meta { owl: <the version it needs>; description; version: \"1.0\"; license: \"MIT\";
   category }. Declare every package its commands need in requires { pacman: [...] }. Don't install
-  anything: the widget offers the install to the user. Errors from a missing program that is in
-  requires are fine.
+  anything: the widget offers the install to the user.
 - Use theme colour names so it follows the user's theme. Make it look good: it's on their home screen.
 Don't ask questions; make sensible choices. End with one short sentence saying what the widget shows."
 
-cd "$P"
+cd "$K"
 : >"$C/agent.log"
-# File tools that can only write the draft, Bash only for owlmaker-check, no web and no MCP connectors.
-OWLMAKER_DRAFT=$F PATH=~/.local/share/owlmaker/bin:$PATH ENABLE_CLAUDEAI_MCP_SERVERS=false \
-  claude -p "$prompt" --strict-mcp-config \
-  --tools "Read,Write,Edit,Glob,Grep,Bash" \
-  --allowedTools "Read Glob Grep Edit(./$name) Bash(owlmaker-check:*)" \
-  --output-format stream-json --verbose 2>"$C/agent.err" |
-while IFS= read -r line; do
-  printf '%s\n' "$line" >>"$C/agent.log"
-  t=$(jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use")
-    | .name + " " + ((.input.file_path // .input.command // .input.pattern // "") | tostring)' <<<"$line" 2>/dev/null | tail -1)
-  case "$t" in
-    "Read "*README*) step "reading the OWL docs" ;;
-    "Read "*.png) step "looking at the preview" ;;
-    "Read "*|"Glob "*|"Grep "*) step "looking at examples" ;;
-    "Write "*) step "writing the widget" ;;
-    "Edit "*) step "polishing it" ;;
-    "Bash "*owlmaker-check*) step "checking it on the launcher" ;;
-  esac
+# File tools that can only write the draft; no Bash, no web and no MCP connectors.
+ask() { # prompt [session to continue]
+  ENABLE_CLAUDEAI_MCP_SERVERS=false claude -p "$1" ${2:+--resume "$2"} --strict-mcp-config \
+    --tools "Read,Write,Edit,Glob,Grep" \
+    --allowedTools "Read Glob Grep Edit(./$name)" \
+    --output-format stream-json --verbose 2>>"$C/agent.err" |
+  while IFS= read -r line; do
+    printf '%s\n' "$line" >>"$C/agent.log"
+    t=$(jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use")
+      | .name + " " + ((.input.file_path // .input.pattern // "") | tostring)' <<<"$line" 2>/dev/null | tail -1)
+    case "$t" in
+      "Read "*README*) step "reading the OWL docs" ;;
+      "Read "*.png) step "looking at the preview" ;;
+      "Read "*|"Glob "*|"Grep "*) step "looking at examples" ;;
+      "Write "*) step "writing the widget" ;;
+      "Edit "*) step "polishing it" ;;
+    esac
+  done
+}
+# owl-check only reads the widgets folder, so the draft goes in under a fixed name for the check
+# and comes out again. This loads it on the launcher once, like owl-check does for any widget.
+check() {
+  step "checking it on the launcher"
+  cp "$F" "$T"
+  owl-check "$T" >"$C/check.raw" 2>&1
+  cp "$W/.preview/owlmaker-check.owl.png" "$C/preview.png" 2>/dev/null
+  cp "$W/.preview/owlmaker-check.owl.screen.png" "$C/preview.screen.png" 2>/dev/null
+  rm -f "$T"
+  sed -e "s|$W/.preview/owlmaker-check.owl.screen.png|$C/preview.screen.png|" \
+    -e "s|$W/.preview/owlmaker-check.owl.png|$C/preview.png|" -e "s|owlmaker-check.owl|$name|g" \
+    "$C/check.raw" >"$C/check.txt"
+  grep -q "^$name: compiles" "$C/check.txt"
+}
+
+: >"$C/agent.err"
+ask "$prompt"
+sid=$(jq -r 'select(.type=="system") | .session_id // empty' "$C/agent.log" 2>/dev/null | head -1)
+# At most three checks: errors go back to Claude, and one compiling draft gets a look at its preview.
+n=0; ok=false
+while [ -f "$F" ]; do
+  n=$((n + 1))
+  check && ok=true || ok=false
+  { $ok && [ $n -ge 2 ]; } || [ $n -ge 3 ] && break
+  ask "The launcher checked $F and printed:
+$(head -c 3000 "$C/check.txt")
+
+Fix every error. Errors from a missing program that is in requires are fine. Then Read the PNG
+previews it names and fix what looks wrong: cut-off or overlapping text, wasted space, unreadable
+colours, a layout that doesn't fit the tile. If it all looks right, leave the file as it is.
+End with one short sentence saying what the widget shows." "$sid"
 done
 summary=$(jq -r 'select(.type=="result") | .result // empty' "$C/agent.log" 2>/dev/null | grep -v '^\s*$' | tail -1 | cut -c1-300)
 [ -n "$summary" ] || summary=$(grep -v '^\s*$' "$C/agent.log" | tail -1 | cut -c1-300)
 
 # The draft has to compile. Runtime errors are allowed: a package in requires may not be installed yet.
-step "final check"
-rm -f "$C/check.txt"
-[ -f "$F" ] && OWLMAKER_DRAFT=$F ~/.local/share/owlmaker/bin/owlmaker-check >"$C/check.txt" 2>&1
-if grep -q "^$name: compiles" "$C/check.txt" 2>/dev/null; then
-  rm -f "$C/backup.owl"
+if [ -f "$F" ] && $ok; then
+  mv -f "$F" "$P/$name"
   status done "$name" "$summary" ""
 else
   err=$( [ -f "$F" ] && grep -v '^\s*$' "$C/check.txt" | sed -n 2,3p | tr '\n' ' ' || tail -c 200 "$C/agent.err")
   [ -f "$F" ] && mv "$F" "$C/failed/"
-  [ -f "$C/backup.owl" ] && mv "$C/backup.owl" "$F"
   status failed "" "$summary" "${err:-the agent wrote no widget}"
   exit 1
 fi
 MAKE_EOF
-chmod +x ~/.local/share/owlmaker/bin/owlmaker-check.new ~/.local/share/owlmaker/make.new &&
-  mv ~/.local/share/owlmaker/bin/owlmaker-check.new ~/.local/share/owlmaker/bin/owlmaker-check &&
+chmod +x ~/.local/share/owlmaker/make.new &&
   mv ~/.local/share/owlmaker/make.new ~/.local/share/owlmaker/make &&
-  echo 6 > ~/.local/share/owlmaker/VERSION
+  echo 7 > ~/.local/share/owlmaker/VERSION
 """)
       }
     } else {
@@ -368,13 +388,19 @@ chmod +x ~/.local/share/owlmaker/bin/owlmaker-check.new ~/.local/share/owlmaker/
             Text { text: "what changes"; style: label; color: muted }
             Text { text: d.changes; style: small; font: mono; maxLines: 40 }
           }
-          Text { text: d.runs == "" ? "It runs no commands." : "what it runs and installs (look before you add it)"; style: label; color: muted }
+          Text { text: d.runs == "" ? "No commands found at a glance: still read the file below." : "what it runs and installs, at a glance"; style: label; color: muted }
           if d.runs != "" {
             Text { text: d.runs; style: small; font: mono }
           }
+          if d.big {
+            Text { text: "This file is too long to show here, so it can't be added. Discard it, or ask for something smaller."; style: small; color: red; maxLines: 3 }
+          } else {
+            Text { text: "the whole file (a command kept in a let only shows up here)"; style: label; color: muted }
+            Text { text: d.src; style: small; font: mono }
+          }
           Row {
             gap: 8
-            Button { text: d.edit ? "apply" : "add"; onTap: run("mv -f -- ~/.cache/owlmaker/pending/${sh(d.file)} ~/.config/omalauncher/widgets/") }
+            if !d.big { Button { text: d.edit ? "apply" : "add"; onTap: run("mv -f -- ~/.cache/owlmaker/pending/${sh(d.file)} ~/.config/omalauncher/widgets/") } }
             Button { text: "discard"; color: muted; onTap: run("rm -f -- ~/.cache/owlmaker/pending/${sh(d.file)}") }
           }
         }
