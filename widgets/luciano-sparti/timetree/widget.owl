@@ -601,12 +601,7 @@ widget "timetree" {
             text: "+ Add Event in TimeTree App"
             color: ttColor
             weight: 1
-            onTap: app("works.jubilee.timetree")
-          }
-          Button {
-            text: "Add via CLI"
-            color: muted
-            onTap: terminal("timetree add")
+            onTap: androidApp("works.jubilee.timetree")
           }
         }
       }
