@@ -1,6 +1,6 @@
 widget "nostr git" {
   meta {
-    description: "Nostr git repos with the most pushes, pull requests, and issues in the last 7 days."
+    description: "Trending repositories from the last 7 days. People published them to Nostr. The yellow number is how busy each one was."
     version: "1.3"
     license: "MIT"
     category: "dev"

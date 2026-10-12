@@ -1,6 +1,6 @@
 widget "nostr apps" {
   meta {
-    description: "Newest Nostr apps on gittr, with search. GitHub stars show only when the listing points at GitHub."
+    description: "The newest apps published to Nostr. Search the list and tap one to open it. A star count shows only when there is a real one."
     version: "1.2"
     license: "MIT"
     category: "dev"
