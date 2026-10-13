@@ -17,6 +17,7 @@ widget "bookmarks" {
   state nTitle = ""
   state nUrl = ""
   state dupOk = ""
+  state go = false
   state nTag = ""
 
   let needle = lower(trim(q ?? ""))
@@ -128,14 +129,16 @@ widget "bookmarks" {
           text: isDup && !canAdd ? "link already saved, tap to add anyway" : "add bookmark"
           color: isDup && !canAdd ? orange : (hasUrl ? accent : muted)
           onTap: {
-            pending = canAdd ? fullUrl : pending
-            links = canAdd ? [{id: "b${nextId}", title: trim(nTitle) == "" ? fullUrl : trim(nTitle), url: fullUrl, tag: lower(trim(nTag)), auto: trim(nTitle) == "", desc: "", img: ""}] + links : links
-            nextId = canAdd ? nextId + 1 : nextId
-            nTitle = canAdd ? "" : nTitle
-            nUrl = canAdd ? "" : nUrl
-            nTag = canAdd ? "" : nTag
-            fetchN = canAdd ? fetchN + 1 : fetchN
-            dupOk = canAdd ? "" : (isDup ? fullUrl : dupOk)
+            go = canAdd
+            pending = go ? fullUrl : pending
+            links = go ? [{id: "b${nextId}", title: trim(nTitle) == "" ? fullUrl : trim(nTitle), url: fullUrl, tag: lower(trim(nTag)), auto: trim(nTitle) == "", desc: "", img: ""}] + links : links
+            nextId = go ? nextId + 1 : nextId
+            nTitle = go ? "" : nTitle
+            nUrl = go ? "" : nUrl
+            nTag = go ? "" : nTag
+            fetchN = go ? fetchN + 1 : fetchN
+            dupOk = go ? "" : (isDup ? fullUrl : dupOk)
+            go = false
             refresh()
           }
         }
