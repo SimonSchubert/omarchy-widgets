@@ -2,7 +2,7 @@ widget "claude sessions" {
   size: 6x4
   minSize: 4x3
 
-  meta { owl: 7; description: "Claude Code at a glance: last prompt and project, sessions today, continue, and every running instance with CPU and memory. Tap for details, resume and kill"; version: "1.0"; license: "MIT"; category: "dev" }
+  meta { owl: 6; description: "Claude Code at a glance: last prompt and project, sessions today, continue, and every running instance with CPU and memory. Tap for details, resume and kill"; version: "1.0"; license: "MIT"; category: "dev" }
   requires { pacman: ["jq", "procps-ng"] }
 
   // ~/.claude/history.jsonl gives the last prompt and today's sessions; the running instances come
