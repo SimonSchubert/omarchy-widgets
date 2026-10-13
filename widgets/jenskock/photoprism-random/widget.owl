@@ -17,7 +17,6 @@ widget "photoprism random" {
   let sessionText = trim(sessionFile)
   let session = sessionText != null && sessionText != "" ? parseJson(sessionText) : null
   let configured = session.token != null && session.token != ""
-  let signOut = "rm -f ~/.config/photoprism-random/session.json ~/.config/photoprism-random/config.json; find ~/.cache/photoprism-random -maxdepth 1 -type f -delete 2>/dev/null; true"
 
   // The photo command reads the session file itself, so sign-in has to run it again.
   state seen = ""
@@ -268,7 +267,7 @@ except KeyboardInterrupt:
       Text { text: shot.err != "" ? shot.err : "could not load photo"; style: small; maxLines: 5 }
       SignIn {}
       Button { text: "retry"; onTap: refresh() }
-      Button { text: "sign out"; onTap: run(signOut) }
+      Button { text: "sign out"; onTap: run("rm -f ~/.config/photoprism-random/session.json ~/.config/photoprism-random/config.json; find ~/.cache/photoprism-random -maxdepth 1 -type f -delete 2>/dev/null; true") }
     }
   } else {
     Box {
@@ -294,7 +293,7 @@ except KeyboardInterrupt:
         Text { text: session.username; style: muted }
       }
       SignIn {}
-      Button { text: "sign out"; onTap: run(signOut) }
+      Button { text: "sign out"; onTap: run("rm -f ~/.config/photoprism-random/session.json ~/.config/photoprism-random/config.json; find ~/.cache/photoprism-random -maxdepth 1 -type f -delete 2>/dev/null; true") }
       Button { text: "close"; onTap: close() }
     }
   }
