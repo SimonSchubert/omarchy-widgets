@@ -4,10 +4,11 @@ widget "reminders" {
   size: 3x5
   minSize: 3x3
 
-  meta { owl: 5; description: "Reminders with quick or custom date/time, editing and Android notifications when due."; version: "2.1"; license: "MIT"; category: "productivity" }
+  meta { owl: 5; description: "Reminders with quick or custom date/time, editing and Android notifications when due."; version: "2.2"; license: "MIT"; category: "productivity" }
 
   source now = clock every 30s
   state items = [] persist
+  state nextId = 1 persist
   state delay = 1800 persist
   state editId = 0
   state draft = ""
@@ -41,7 +42,7 @@ widget "reminders" {
     Text { text: "reminders"; style: muted }
     Input {
       placeholder: "remind me to…"; clear: true
-      onSubmit: items = value == "" ? items : [{id: now, t: value, at: now + delay, fired: false}] + pending + done.take(20)
+      onSubmit: { items = value == "" ? items : [{id: nextId, t: value, at: now + delay, fired: false}] + pending + done.take(20); nextId = value == "" ? nextId : nextId + 1 }
     }
     Row {
       gap: 4
@@ -97,7 +98,8 @@ widget "reminders" {
         Button {
           text: "save"; weight: 1; color: accent
           onTap: {
-            items = draft == "" ? items : editId == 0 ? [{id: now, t: draft, at: when, fired: false}] + pending + done.take(20) : items.map(r => (r.id ?? r.at) == editId ? {id: editId, t: draft, at: when, fired: false} : r)
+            items = draft == "" ? items : editId == 0 ? [{id: nextId, t: draft, at: when, fired: false}] + pending + done.take(20) : items.map(r => (r.id ?? r.at) == editId ? {id: editId, t: draft, at: when, fired: false} : r)
+            nextId = draft == "" || editId != 0 ? nextId : nextId + 1
             close()
           }
         }
