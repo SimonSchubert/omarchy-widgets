@@ -12,4 +12,4 @@ commands and needs no Linux packages.
   the choice is remembered. The effects follow time, not the audio.
 
 Needs notification access for the launcher, otherwise Android doesn't share VLC's session. Only VLC's
-session is shown, but the buttons control whatever is playing on the phone.
+session is shown, and the buttons control it only while VLC is the active session; otherwise they open VLC.

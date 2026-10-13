@@ -24,23 +24,18 @@ widget "vlc" {
   let dur = has ? num(m.duration, 0) : 0
   let pos = dur > 0 ? clamp(num(m.position, 0), 0, dur) : 0
   source now = clock every 1s
-  state lastMove = 0
   state tapAt = 0
   state tapPlay = false
-  on pos { lastMove = now }
-  let playingRaw = m != null && (m.playing == true || (has && now - lastMove < 3))
+  let playingRaw = has && m.playing == true
   // A tap on play/pause shows its result at once; Android reports the change a few seconds later.
-  let playing = now - tapAt < 5 ? tapPlay : playingRaw
+  let playing = has && (now - tapAt < 5 ? tapPlay : playingRaw)
   let narrow = cols != null && cols < 5
   let art = clamp((tileHeight ?? 130) - 26, 64, 132)
   let bigArt = clamp((screenWidth ?? 360) - 72, 160, 340)
 
   onTap: screen()
 
-  component Control(kind, big = false, s = 0) {
-    Box {
-      size: s > 0 ? s : (big ? 38 : 32)
-      onTap: { haptic(); media(kind); tapPlay = kind == "toggle" ? !playing : playing; tapAt = kind == "toggle" ? now : tapAt }
+  component ControlIcon(kind) {
       Canvas {
         let cx = width / 2
         let cy = height / 2
@@ -59,8 +54,25 @@ widget "vlc" {
           rect(dir > 0 ? cx + d * 0.1 : cx - d * 0.18, cy - d * 0.2, d * 0.08, d * 0.4, radius: d * 0.03, fill: foreground)
         }
       }
+  }
+
+  // media() controls whichever app is active, so without a VLC session the buttons open VLC instead.
+  component Control(kind, big = false, s = 0) {
+    if has {
+      Box {
+        size: s > 0 ? s : (big ? 38 : 32)
+        onTap: { haptic(); media(kind); tapPlay = kind == "toggle" ? !playing : playing; tapAt = kind == "toggle" ? now : tapAt }
+        ControlIcon { kind: kind }
+      }
+    } else {
+      Box {
+        size: s > 0 ? s : (big ? 38 : 32)
+        onTap: { haptic(); androidApp("org.videolan.vlc") }
+        ControlIcon { kind: kind }
+      }
     }
   }
+
 
   component Bars() {
     Canvas {
