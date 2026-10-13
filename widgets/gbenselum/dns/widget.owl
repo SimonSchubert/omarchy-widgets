@@ -55,7 +55,7 @@ widget "dns" {
       fill: width
       Text { text: "ARCH DNS PROVIDER"; style: label; color: muted; weight: 1 }
       if roomy {
-        Text { text: len(probe ?? "") > 0 ? "${who} · ${probe} ms" : who; style: small; color: muted; width: 150; align: end; maxLines: 1 }
+        Text { text: len(probe ?? "") > 0 ? "${who} · ${probe} ms" : who; style: small; color: muted; width: 96; align: end; maxLines: 1 }
       } else {
         Text { text: len(probe ?? "") > 0 ? "${probe} ms" : ""; style: small; color: muted; width: 96; align: end }
       }
