@@ -23,8 +23,14 @@ widget "vlc" {
   let album = has ? (m.album ?? "") : ""
   let dur = has ? num(m.duration, 0) : 0
   let pos = dur > 0 ? clamp(num(m.position, 0), 0, dur) : 0
-  let lastPos = prev(pos)
-  let playing = m != null && (m.playing == true || (has && pos > lastPos))
+  source now = clock every 1s
+  state lastMove = 0
+  state tapAt = 0
+  state tapPlay = false
+  on pos { lastMove = now }
+  let playingRaw = m != null && (m.playing == true || (has && now - lastMove < 3))
+  // A tap on play/pause shows its result at once; Android reports the change a few seconds later.
+  let playing = now - tapAt < 5 ? tapPlay : playingRaw
   let narrow = cols != null && cols < 5
   let art = clamp((tileHeight ?? 130) - 26, 64, 132)
   let bigArt = clamp((screenWidth ?? 360) - 72, 160, 340)
@@ -34,7 +40,7 @@ widget "vlc" {
   component Control(kind, big = false, s = 0) {
     Box {
       size: s > 0 ? s : (big ? 38 : 32)
-      onTap: { haptic(); media(kind) }
+      onTap: { haptic(); media(kind); tapPlay = kind == "toggle" ? !playing : playing; tapAt = kind == "toggle" ? now : tapAt }
       Canvas {
         let cx = width / 2
         let cy = height / 2
