@@ -1,0 +1,30 @@
+widget "claude terminal" {
+  size: 6x6
+  minSize: 4x4
+  padding: 0
+
+  meta { owl: 2; description: "A live terminal tile with tabs for Claude Code, Oh My Pi (omp) and a shell. Tap a tab to switch, tap the terminal to type and drag to scroll"; version: "1.0"; license: "MIT"; category: "dev" }
+
+  // Tabs switch what runs in the tile: Claude Code, Oh My Pi or a shell. Each keeps its own terminal.
+  // Tap the terminal to type and drag to scroll; tap outside or press Back to let go.
+  // Needs claude and omp on PATH; when either is missing or exits, the tab falls back to a shell.
+  state tab = 0 persist
+
+  Column {
+    gap: 0
+    Row {
+      gap: 4
+      padding: [10, 6]
+      Text { text: "claude"; width: 64; style: label; bold: tab == 0; color: tab == 0 ? accent : muted; onTap: tab = 0 }
+      Text { text: "omp"; width: 48; style: label; bold: tab == 1; color: tab == 1 ? accent : muted; onTap: tab = 1 }
+      Text { text: "terminal"; width: 80; style: label; bold: tab == 2; color: tab == 2 ? accent : muted; onTap: tab = 2 }
+    }
+    if tab == 0 {
+      Terminal { command: "claude; exec bash" }
+    } else if tab == 1 {
+      Terminal { command: "omp; exec bash" }
+    } else {
+      Terminal { }
+    }
+  }
+}
