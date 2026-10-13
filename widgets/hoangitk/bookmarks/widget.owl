@@ -4,11 +4,11 @@ widget "bookmarks" {
   size: 3x4
   minSize: 2x3
 
-  requires { pacman: ["curl", "jq"] }
+  requires { pacman: ["curl", "jq", "grep", "sed", "coreutils"] }
   meta { owl: 6; description: "Favorite links with auto-fetched title, summary and thumbnail; search by title, link or tag; open in the browser."; version: "1.1"; license: "MIT"; category: "productivity" }
 
-  source now = clock every 1s
   state links = [] persist
+  state nextId = 0 persist
   state pending = ""
   state sel = ""
   state q = ""
@@ -23,7 +23,7 @@ widget "bookmarks" {
   let cur = links.find(b => b.id == sel)
 
   // Fetches title, description and og:image of a newly added link; {} when idle.
-  source meta_ = cmd(pending == "" ? "echo '{}'" : "U=${sh(pending)}; H=$(curl -sL -m 8 -A 'Mozilla/5.0' \"$U\" | tr '\n\r' '  ' | head -c 300000); t=$(echo \"$H\" | grep -oiP '(?<=<title>)[^<]*' | head -1 | sed 's/^ *//;s/ *$//'); d=$(echo \"$H\" | grep -oiP '<meta[^>]+(property|name)=.(og:)?description.[^>]*>' | head -1 | grep -oiP '(?<=content=.)[^\"]*' | head -1); i=$(echo \"$H\" | grep -oiP '<meta[^>]+og:image.[^>]*>' | head -1 | grep -oiP '(?<=content=.)[^\"]*' | head -1); mkdir -p ~/.cache/owl-bookmarks; f=~/.cache/owl-bookmarks/$(echo \"$U\" | md5sum | cut -c1-12); g=''; case \"$i\" in http*) curl -sL -m 8 -o \"$f\" \"$i\" && g=\"$f\";; esac; jq -nc --arg u \"$U\" --arg t \"$t\" --arg d \"$d\" --arg g \"$g\" '{u:$u,title:$t,desc:$d,img:$g}'") every 4s json
+  source meta_ = cmd(pending == "" ? "echo '{}'" : "U=${sh(pending)}; H=$(curl -sL -m 8 -A 'Mozilla/5.0' \"$U\" | tr '\n\r' '  ' | head -c 300000); t=$(echo \"$H\" | grep -oiP '(?<=<title>)[^<]*' | head -1 | sed 's/^ *//;s/ *$//'); d=$(echo \"$H\" | grep -oiP '<meta[^>]+(property|name)=.(og:)?description.[^>]*>' | head -1 | grep -oiP '(?<=content=.)[^\"]*' | head -1); i=$(echo \"$H\" | grep -oiP '<meta[^>]+og:image.[^>]*>' | head -1 | grep -oiP '(?<=content=.)[^\"]*' | head -1); mkdir -p ~/.cache/owl-bookmarks; f=~/.cache/owl-bookmarks/$(echo \"$U\" | md5sum | cut -c1-12); g=''; case \"$i\" in http*) curl -sL -m 8 -o \"$f\" \"$i\" && g=\"$f\";; esac; jq -nc --arg u \"$U\" --arg t \"$t\" --arg d \"$d\" --arg g \"$g\" '{u:$u,title:$t,desc:$d,img:$g}'") every 24h json timeout 30s
   on meta_ {
     links = pending == "" || value.u != pending ? links : links.map(b => b.url == pending ? {id: b.id, title: b.auto && value.title != "" ? value.title : b.title, url: b.url, tag: b.tag, auto: b.auto, desc: value.desc == "" ? b.desc : value.desc, img: value.img == "" ? b.img : value.img} : b)
     pending = pending != "" && value.u == pending ? "" : pending
@@ -98,7 +98,7 @@ widget "bookmarks" {
         Row {
           gap: 8
           Button { text: "open"; color: accent; onTap: url(cur.url) }
-          Button { text: pending == cur.url ? "fetching…" : "refetch"; onTap: pending = cur.url }
+          Button { text: pending == cur.url ? "fetching…" : "refetch"; onTap: { pending = cur.url; refresh() } }
           Button { text: "back"; onTap: sel = "" }
           Button { text: "remove"; color: red; onTap: { links = links.filter(x => x.id != cur.id); sel = "" } }
         }
@@ -116,10 +116,12 @@ widget "bookmarks" {
           color: canAdd ? accent : muted
           onTap: {
             pending = canAdd ? fullUrl : pending
-            links = canAdd ? [{id: "${round(now * 1000)}${len(links)}", title: trim(nTitle) == "" ? fullUrl : trim(nTitle), url: fullUrl, tag: lower(trim(nTag)), auto: trim(nTitle) == "", desc: "", img: ""}] + links : links
+            links = canAdd ? [{id: "b${nextId}", title: trim(nTitle) == "" ? fullUrl : trim(nTitle), url: fullUrl, tag: lower(trim(nTag)), auto: trim(nTitle) == "", desc: "", img: ""}] + links : links
+            nextId = canAdd ? nextId + 1 : nextId
             nTitle = canAdd ? "" : nTitle
             nUrl = canAdd ? "" : nUrl
             nTag = canAdd ? "" : nTag
+            refresh()
           }
         }
         Input { placeholder: "search title, link or tag"; text: q; onChange: q = value }
