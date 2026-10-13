@@ -46,12 +46,17 @@ widget "agenda" {
               req = urllib.request.Request(url, headers={"User-Agent": "gcal-agenda"})
               with urllib.request.urlopen(req, timeout=20) as r:
                   data = r.read()
+              # A wifi login page or an error page served with a 200 is not a calendar:
+              # keep the last good copy instead of caching it.
+              if not data.lstrip().startswith(b"BEGIN:VCALENDAR"):
+                  raise ValueError("not an iCal feed")
               path.write_bytes(data)
               return data, None
           except Exception as e:
               # Offline: fall back to the last copy, however old.
               if path.exists():
-                  return path.read_bytes(), "offline (" + e.__class__.__name__ + ")"
+                  why = str(e) if isinstance(e, ValueError) else "offline, " + e.__class__.__name__
+                  return path.read_bytes(), "last copy (" + why + ")"
               return None, str(e)
 
       days = int(sys.argv[2])
@@ -76,32 +81,39 @@ widget "agenda" {
               warnings.append((name or "calendar") + ": " + err)
           if data is None:
               continue
-          cal = icalendar.Calendar.from_ical(data)
-          cal_name = name or str(cal.get("X-WR-CALNAME", ""))
-          for ev in recurring_ical_events.of(cal).between(start, end):
-              if str(ev.get("STATUS", "")).upper() == "CANCELLED":
-                  continue
-              s = ev["DTSTART"].dt
-              e = ev["DTEND"].dt if "DTEND" in ev else None
-              all_day = not isinstance(s, dt.datetime)
-              if all_day:
-                  e = e or s + dt.timedelta(days=1)
-                  s_dt = dt.datetime.combine(s, dt.time(), tz)
-                  e_dt = dt.datetime.combine(e, dt.time(), tz)
-              else:
-                  s_dt = s.astimezone(tz) if s.tzinfo else s.replace(tzinfo=tz)
-                  e_dt = (e.astimezone(tz) if e.tzinfo else e.replace(tzinfo=tz)) if e else s_dt
-              events.append({
-                  "title": str(ev.get("SUMMARY", "(no title)")),
-                  "location": str(ev.get("LOCATION", "")),
-                  "calendar": cal_name,
-                  "color": idx,
-                  "allDay": all_day,
-                  "start": int(s_dt.timestamp()),
-                  "end": int(e_dt.timestamp()),
-                  "time": "all day" if all_day else s_dt.strftime("%H:%M"),
-                  "until": "" if all_day else e_dt.strftime("%H:%M"),
-              })
+          # One broken feed must not take the other calendars down with it.
+          try:
+              cal = icalendar.Calendar.from_ical(data)
+              cal_name = name or str(cal.get("X-WR-CALNAME", ""))
+              feed_events = []
+              for ev in recurring_ical_events.of(cal).between(start, end):
+                  if str(ev.get("STATUS", "")).upper() == "CANCELLED":
+                      continue
+                  s = ev["DTSTART"].dt
+                  e = ev["DTEND"].dt if "DTEND" in ev else None
+                  all_day = not isinstance(s, dt.datetime)
+                  if all_day:
+                      e = e or s + dt.timedelta(days=1)
+                      s_dt = dt.datetime.combine(s, dt.time(), tz)
+                      e_dt = dt.datetime.combine(e, dt.time(), tz)
+                  else:
+                      s_dt = s.astimezone(tz) if s.tzinfo else s.replace(tzinfo=tz)
+                      e_dt = (e.astimezone(tz) if e.tzinfo else e.replace(tzinfo=tz)) if e else s_dt
+                  feed_events.append({
+                      "title": str(ev.get("SUMMARY", "(no title)")),
+                      "location": str(ev.get("LOCATION", "")),
+                      "calendar": cal_name,
+                      "color": idx,
+                      "allDay": all_day,
+                      "start": int(s_dt.timestamp()),
+                      "end": int(e_dt.timestamp()),
+                      "time": "all day" if all_day else s_dt.strftime("%H:%M"),
+                      "until": "" if all_day else e_dt.strftime("%H:%M"),
+                  })
+          except Exception as e:
+              warnings.append((name or "calendar") + ": " + str(e))
+              continue
+          events.extend(feed_events)
 
       seen, unique = set(), []
       for e in events:
