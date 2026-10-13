@@ -2,8 +2,7 @@ widget "gestures" {
   size: 6x2
   minSize: 2x2
 
-  meta { owl: 6; description: "A swipe pad: swipe in any of 8 directions to open the app assigned to it."; version: "1.6"; license: "MIT"; category: "productivity" }
-  requires { pacman: ["curl"] }
+  meta { owl: 7; description: "A swipe pad: swipe in any of 8 directions to open the app assigned to it."; version: "1.7"; license: "MIT"; category: "productivity" }
 
   // Directions clockwise from up; apps and labels are lists in this order ("" = unassigned).
   // Also settable from a script:
@@ -144,24 +143,6 @@ widget "gestures" {
 
   onTap: screen()
 
-  // App icons from the Play Store (or F-Droid), cached in ~/.cache/owl-gestures;
-  // the command prints the packages that have one. Image can't load URLs, so this
-  // needs Linux; without it, or for apps on neither store, a letter badge is shown.
-  // Apps on neither store are retried after a day.
-  let iconArgs = join(apps.filter(p => p != ""), " ")
-  source icons = cmd(
-    "ps=${sh(iconArgs)}\n"
-    + "d=~/.cache/owl-gestures; mkdir -p $d\n"
-    + "for p in $ps; do\n"
-    + "  [[ $p =~ ^[A-Za-z0-9_.]+$ ]] || continue; [ -s $d/$p.png ] && continue\n"
-    + "  [[ -n $(find $d/$p.none -mtime -1 2>/dev/null) ]] && continue\n"
-    + "  u=$(curl -sfL -m 10 -A Mozilla/5.0 'https://play.google.com/store/apps/details?hl=en&id='$p | grep -o 'og:image\" content=\"[^\"]*' | head -1 | cut -d'\"' -f3 | sed 's/=s[0-9].*//')\n"
-    + "  if { [ -n \"$u\" ] && curl -sfL -m 10 \"$u=s128\" -o $d/$p.tmp; } || curl -sfL -m 10 https://f-droid.org/repo/$p/en-US/icon.png -o $d/$p.tmp\n"
-    + "  then mv $d/$p.tmp $d/$p.png; rm -f $d/$p.none; else rm -f $d/$p.tmp; touch $d/$p.none; fi\n"
-    + "done\n"
-    + "cd $d && ls *.png 2>/dev/null | sed 's/[.]png$//' | tr '\\n' ' '"
-  ) every 10m timeout 60s optional
-  let haveIcons = words(icons ?? "")
   // Small tiles get small icons, so the eight never touch.
   let iconSize = clamp(min(tileWidth ?? 200, tileHeight ?? 200) / (look == "both" ? 6 : 5), 18, 44)
   state look = "icons" persist     // "icons", "both" (icons and titles) or "text"
@@ -174,18 +155,8 @@ widget "gestures" {
       if (apps[i] ?? "") == "" {
         Text { text: arrows[i]; color: alpha(muted, 0.5); align: center }
       } else {
-        if contains(haveIcons, apps[i]) {
-          Image { src: "~/.cache/owl-gestures/${apps[i]}.png"; fit: cover; width: s; height: s; radius: s / 4; clip: true }
-        } else {
-          Box {
-            width: s
-            height: s
-            radius: s / 2
-            background: alpha(accent, 0.25)
-            align: center
-            Text { text: upper(sub(shown[i], 0, 1)); bold: true; fontSize: s / 2; color: foreground; align: center }
-          }
-        }
+        // The installed app's own icon, as the drawer shows it (icon pack, monochrome).
+        Image { src: "app:${apps[i]}"; width: s; height: s }
       }
     }
   }
