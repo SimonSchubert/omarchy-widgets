@@ -4,7 +4,7 @@ widget "ns" {
   size: 6x5
   minSize: 3x3
   padding: 10
-  meta { owl: 5; description: "Dutch railways (NS): whether your off-peak discount is on, and departures from your station with delays, platforms, favourites and disruptions. Needs a free NS API key"; version: "1.0"; license: "MIT"; category: "world" }
+  meta { owl: 6; description: "Dutch railways (NS): whether your off-peak discount is on, and departures from your station with delays, platforms, favourites and disruptions. Needs a free NS API key"; version: "1.0"; license: "MIT"; category: "world" }
 
   // Port of https://github.com/nyaadesu/NSWidget. The NS API key, the station and the favourites
   // are set in the widget's screen (tap the tile) and kept by the launcher, not in this file.
@@ -24,14 +24,17 @@ widget "ns" {
   let api = "https://gateway.apiportal.ns.nl/reisinformatie-api/api"
   let headers = {"Ocp-Apim-Subscription-Key": apiKey, Accept: "application/json"}
   let ready = apiKey != "" && station != null
-  // An empty URL makes no request, so unused favourites cost nothing.
+  // An empty URL makes no request, so unused favourites, and one that is the station shown, cost nothing.
   source deps = http(ready ? "${api}/v2/departures?uicCode=${station.uic}&maxJourneys=20" : "", headers) every 2m timeout 15s json status
-  source trip0 = http(ready && len(favs) > 0 ? "${api}/v3/trips?originUicCode=${station.uic}&destinationUicCode=${favs[0].uic}" : "", headers) every 5m timeout 15s json status
-  source trip1 = http(ready && len(favs) > 1 ? "${api}/v3/trips?originUicCode=${station.uic}&destinationUicCode=${favs[1].uic}" : "", headers) every 5m timeout 15s json status
-  source trip2 = http(ready && len(favs) > 2 ? "${api}/v3/trips?originUicCode=${station.uic}&destinationUicCode=${favs[2].uic}" : "", headers) every 5m timeout 15s json status
-  // An empty query makes no request; while a search is open it re-runs every minute.
-  let q = replace(replace(replace(replace(trim(query), "%", "%25"), " ", "%20"), "&", "%26"), "'", "%27")
-  source found = http(apiKey != "" && query != "" ? "${api}/v2/stations?q=${q}&limit=12" : "", headers) every 1m timeout 15s json status
+  source trip0 = http(ready && len(favs) > 0 && favs[0].uic != station.uic ? "${api}/v3/trips?originUicCode=${station.uic}&destinationUicCode=${favs[0].uic}" : "", headers) every 5m timeout 15s json status
+  source trip1 = http(ready && len(favs) > 1 && favs[1].uic != station.uic ? "${api}/v3/trips?originUicCode=${station.uic}&destinationUicCode=${favs[1].uic}" : "", headers) every 5m timeout 15s json status
+  source trip2 = http(ready && len(favs) > 2 && favs[2].uic != station.uic ? "${api}/v3/trips?originUicCode=${station.uic}&destinationUicCode=${favs[2].uic}" : "", headers) every 5m timeout 15s json status
+  // An empty query makes no request. Station names don't change, so a search open for long re-runs only hourly.
+  // There is no urlencode: escape what station names and typing contain. % goes first.
+  let q = replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(
+    trim(query), "%", "%25"), " ", "%20"), "&", "%26"), "'", "%27"), "#", "%23"), "?", "%3F"), "+", "%2B"), "/", "%2F"),
+    "ë", "%C3%AB"), "é", "%C3%A9"), "ï", "%C3%AF"), "ö", "%C3%B6"), "ü", "%C3%BC")
+  source found = http(apiKey != "" && query != "" ? "${api}/v2/stations?q=${q}&limit=12" : "", headers) every 1h timeout 15s json status
 
   // A station picked before the saved list existed joins it.
   when station != null && !any(saved, s => s.uic == station.uic) { saved = (saved + [station]).take(6) }
@@ -142,6 +145,7 @@ widget "ns" {
         .map(v => v == null ? null : (365 * v[0] + floor(v[0] / 4) - floor(v[0] / 100) + floor(v[0] / 400) + floor((153 * v[1] + 2) / 5) + v[2] - 719469) * 86400 + v[3])
     })
     .filter(x => x.t[0] != null && x.t[1] >= now - 60)   // trains that left drop off
+    .sortBy(x => x.t[1])                                   // by when they actually leave, delays included
     .take(8)
     .map(x => {
       time: sub(x.o.actualDateTime ?? x.o.plannedDateTime, 11, 16),
@@ -191,9 +195,10 @@ widget "ns" {
 
   // ---- Disruptions on the way to a favourite (parseTripDisruptions, disruptionAlert) ----
   let severity = ["CALAMITY", "DISRUPTION", "MAINTENANCE"]
-  let disruptions = flatten(range(len(favs)).map(i => (tripRes[i].ok ? tripRes[i].out.trips ?? [] : [])
+  // flatten goes one level deep: once for the favourites, once for their trips.
+  let disruptions = flatten(flatten(range(len(favs)).map(i => (tripRes[i].ok ? tripRes[i].out.trips ?? [] : [])
     .map(t => [t.primaryMessage.message] + flatten((t.legs ?? []).map(l => l.messages ?? [])))
-    .map(ms => ms.filter(m => m != null && m.id != null && contains(severity, m.type)).map(m => {fav: i, id: m.id, type: m.type, head: m.head ?? m.text}))))
+    .map(ms => ms.filter(m => m != null && m.id != null && contains(severity, m.type)).map(m => {fav: i, id: m.id, type: m.type, head: m.head ?? m.text})))))
   let worst = first(disruptions.sortBy(d => indexOf(severity, d.type)))
   // The first affected favourite's label goes in the warning sign if it's one symbol (an emoji, a letter).
   let firstLabel = trim(favs[first(disruptions).fav].label ?? "")
@@ -207,7 +212,8 @@ widget "ns" {
   let dualN = clamp(floor(avail / 34), 1, 8)
   let dual = any(take(rows, dualN), r => (showVia && len(r.d.via) > 0) || len(r.notices) > 0) && min(dualN, len(rows)) >= min(singleN, len(rows))
   let shown = take(rows, dual ? dualN : singleN)
-  let rowH = dual ? 34 : 26
+  // Rows share out the room left over, up to a few dp each, so the board fills the tile.
+  let rowH = len(shown) == 0 ? 26 : clamp(floor(avail / len(shown)), dual ? 34 : 26, dual ? 40 : 32)
   // A delay column only when a shown train is late, as wide as its digits.
   let delayW = max(shown.filter(r => r.d.delay > 0 && !r.d.cancelled).map(r => len(str(r.d.delay)))) ?? 0
   let delaySlot = delayW == 0 ? 0 : delayW == 1 ? (compact ? 22 : 26) : (compact ? 30 : 36)
@@ -219,7 +225,7 @@ widget "ns" {
     : len(rows) == 0 ? (deps.ok ? "No upcoming departures" : deps.code == 401 || deps.code == 403 ? "NS rejected the API key" : deps.code == 429 ? "NS API rate limit reached" : "No connection to NS")
     : null
 
-  onTap: screen()
+  onTap: { query = ""; pick = ""; screen() }   // ✕, Back and Home close it without the close button
 
   component Icon(kind, tint) {
     Canvas {
@@ -246,7 +252,7 @@ widget "ns" {
       Box {
         width: 30
         height: 20
-        radius: 3
+        radius: 3 * corners
         background: r.d.cancelled ? "#d6455d" : r.d.trackChanged ? "#f08a24" : "#ffc917"
         align: center
         Text { text: r.d.cancelled ? "×" : r.d.track; fontSize: 13; bold: true; color: r.d.cancelled ? "#ffffff" : "#14233f"; align: center; maxLines: 1 }
@@ -277,7 +283,7 @@ widget "ns" {
         weight: 1
         gap: 6
         align: center
-        onTap: { station = len(saved) > 1 ? saved[(indexOf(saved.map(s => s.uic), station.uic) + 1) % len(saved)] : station; good = []; fetchedAt = 0; switching = len(saved) > 1; refresh() }
+        onTap: { station = len(saved) > 1 ? saved[(indexOf(saved.map(s => s.uic), station.uic) + 1) % len(saved)] : station; good = len(saved) > 1 ? [] : good; fetchedAt = len(saved) > 1 ? 0 : fetchedAt; switching = len(saved) > 1; refresh() }
         Text { text: station.name ?? "NS departures"; fontSize: compact ? 14 : 16; bold: true; maxLines: 1; weight: 1 }
         if len(saved) > 1 {
           Text { text: "${indexOf(saved.map(s => s.uic), station.uic) + 1}/${len(saved)}"; fontSize: 11; color: muted; width: 28; maxLines: 1 }
@@ -304,7 +310,7 @@ widget "ns" {
         gap: 10
         align: center
         padding: [compact ? 10 : 12, 4]
-        radius: 14
+        radius: 14 * corners
         background: alpha(tone, 0.18)
         if !compact { Icon { kind: peak ? (soon ? "clock" : "block") : (soon ? "clock" : "check"); tint: tone } }
         Column {
@@ -319,7 +325,7 @@ widget "ns" {
           width: compact ? 36 : 46
           fill: height
           onTap: url(alertUrl)
-          rect(0, 0, width, height, radius: 14, fill: "#d6455d")
+          rect(0, 0, width, height, radius: 14 * corners, fill: "#d6455d")
           path([[width / 2, height / 2 - 15], [width / 2 + (compact ? 12 : 16), height / 2 + 13], [width / 2 - (compact ? 12 : 16), height / 2 + 13]], fill: "#ffffff", closed: true)
           text(alertSymbol, width / 2, height / 2 + 5, size: 13, align: center, bold: true, color: "#d6455d")
         }
@@ -330,7 +336,7 @@ widget "ns" {
       gap: 0
       fill: width
       padding: [4, 2]
-      radius: 14
+      radius: 14 * corners
       background: alpha(muted, 0.12)
       if message != null {
         Text { text: message; fontSize: 13; color: muted; maxLines: 3; padding: 8 }
@@ -354,7 +360,7 @@ widget "ns" {
               gap: 0
               align: center
               padding: [compact ? 5 : 8, 0]
-              radius: (rowH - 2) / 2
+              radius: 8 * corners   // a step inside the card's 14, following the corner style
               background: r.fastest ? accent : alpha(accent, 0)
               opacity: r.d.cancelled ? 0.6 : 1
               Text { text: r.d.time; fontSize: compact ? 13 : 15; bold: true; color: ink; width: compact ? 56 : 64; maxLines: 1 }
@@ -499,7 +505,7 @@ widget "ns" {
         Button { text: showVia ? "on" : "off"; color: showVia ? green : muted; onTap: showVia = !showVia }
       }
       Text { text: "Peak (no discount): Mon–Fri 06:30–09:00 and 16:00–18:30, except public holidays. The discount goes by your check-in time. Departures refresh every 2 minutes and favourites every 5 while the page is on screen."; style: small; color: muted }
-      Button { text: "close"; onTap: close() }
+      Button { text: "close"; onTap: { query = ""; pick = ""; close() } }
     }
   }
 }
