@@ -37,11 +37,13 @@ widget "agenda" {
               result.append((name.strip(), url.strip()))
           return result
 
+      # Returns the feed, why it could not be updated (or None), and whether that was
+      # the network rather than the feed itself.
       def fetch(url):
           CACHE.mkdir(parents=True, exist_ok=True)
           path = CACHE / (hashlib.sha1(url.encode()).hexdigest() + ".ics")
           if path.exists() and time.time() - path.stat().st_mtime < MAX_AGE:
-              return path.read_bytes(), None
+              return path.read_bytes(), None, False
           try:
               req = urllib.request.Request(url, headers={"User-Agent": "gcal-agenda"})
               with urllib.request.urlopen(req, timeout=20) as r:
@@ -51,13 +53,15 @@ widget "agenda" {
               if not data.lstrip().startswith(b"BEGIN:VCALENDAR"):
                   raise ValueError("not an iCal feed")
               path.write_bytes(data)
-              return data, None
+              return data, None, False
+          except urllib.error.HTTPError as e:
+              err, offline = "HTTP " + str(e.code), False
+          except ValueError as e:
+              err, offline = str(e), False
           except Exception as e:
-              # Offline: fall back to the last copy, however old.
-              if path.exists():
-                  why = str(e) if isinstance(e, ValueError) else "offline, " + e.__class__.__name__
-                  return path.read_bytes(), "last copy (" + why + ")"
-              return None, str(e)
+              err, offline = "offline (" + e.__class__.__name__ + ")", True
+          # Fall back to the last copy, however old.
+          return (path.read_bytes() if path.exists() else None), err, offline
 
       days = int(sys.argv[2])
       try:
@@ -74,45 +78,48 @@ widget "agenda" {
       start = dt.datetime.combine(today, dt.time(), tz)
       end = start + dt.timedelta(days=days)
 
-      events, warnings = [], []
+      # problems: one entry per calendar that could not be updated, for the tile to name it.
+      events, problems = [], []
       for idx, (name, url) in enumerate(urls):
-          data, err = fetch(url)
-          if err:
-              warnings.append((name or "calendar") + ": " + err)
-          if data is None:
-              continue
+          data, err, offline = fetch(url)
+          label = name or "calendar " + str(idx + 1)
+          feed_events = []
           # One broken feed must not take the other calendars down with it.
           try:
-              cal = icalendar.Calendar.from_ical(data)
-              cal_name = name or str(cal.get("X-WR-CALNAME", ""))
-              feed_events = []
-              for ev in recurring_ical_events.of(cal).between(start, end):
-                  if str(ev.get("STATUS", "")).upper() == "CANCELLED":
-                      continue
-                  s = ev["DTSTART"].dt
-                  e = ev["DTEND"].dt if "DTEND" in ev else None
-                  all_day = not isinstance(s, dt.datetime)
-                  if all_day:
-                      e = e or s + dt.timedelta(days=1)
-                      s_dt = dt.datetime.combine(s, dt.time(), tz)
-                      e_dt = dt.datetime.combine(e, dt.time(), tz)
-                  else:
-                      s_dt = s.astimezone(tz) if s.tzinfo else s.replace(tzinfo=tz)
-                      e_dt = (e.astimezone(tz) if e.tzinfo else e.replace(tzinfo=tz)) if e else s_dt
-                  feed_events.append({
-                      "title": str(ev.get("SUMMARY", "(no title)")),
-                      "location": str(ev.get("LOCATION", "")),
-                      "calendar": cal_name,
-                      "color": idx,
-                      "allDay": all_day,
-                      "start": int(s_dt.timestamp()),
-                      "end": int(e_dt.timestamp()),
-                      "time": "all day" if all_day else s_dt.strftime("%H:%M"),
-                      "until": "" if all_day else e_dt.strftime("%H:%M"),
-                  })
+              if data is not None:
+                  cal = icalendar.Calendar.from_ical(data)
+                  cal_name = name or str(cal.get("X-WR-CALNAME", ""))
+                  label = cal_name or label
+                  for ev in recurring_ical_events.of(cal).between(start, end):
+                      if str(ev.get("STATUS", "")).upper() == "CANCELLED":
+                          continue
+                      s = ev["DTSTART"].dt
+                      e = ev["DTEND"].dt if "DTEND" in ev else None
+                      all_day = not isinstance(s, dt.datetime)
+                      if all_day:
+                          e = e or s + dt.timedelta(days=1)
+                          s_dt = dt.datetime.combine(s, dt.time(), tz)
+                          e_dt = dt.datetime.combine(e, dt.time(), tz)
+                      else:
+                          s_dt = s.astimezone(tz) if s.tzinfo else s.replace(tzinfo=tz)
+                          e_dt = (e.astimezone(tz) if e.tzinfo else e.replace(tzinfo=tz)) if e else s_dt
+                      feed_events.append({
+                          "title": str(ev.get("SUMMARY", "(no title)")),
+                          "location": str(ev.get("LOCATION", "")),
+                          "calendar": cal_name,
+                          "color": idx,
+                          "allDay": all_day,
+                          "start": int(s_dt.timestamp()),
+                          "end": int(e_dt.timestamp()),
+                          "time": "all day" if all_day else s_dt.strftime("%H:%M"),
+                          "until": "" if all_day else e_dt.strftime("%H:%M"),
+                      })
           except Exception as e:
-              warnings.append((name or "calendar") + ": " + str(e))
-              continue
+              # The copy we have is unreadable, whatever happened on the way.
+              data, offline, feed_events = None, False, []
+              err = "unreadable (" + (str(e)[:60] or e.__class__.__name__) + ")"
+          if err:
+              problems.append({"name": label, "error": err, "offline": offline, "lastCopy": data is not None})
           events.extend(feed_events)
 
       seen, unique = set(), []
@@ -135,7 +142,8 @@ widget "agenda" {
           label = "Today" if i == 0 else "Tomorrow" if i == 1 else d.strftime("%a %-d %b")
           out_days.append({"date": int(t0), "label": label, "events": items})
 
-      out(ok=not warnings or bool(events), error="; ".join(warnings), days=out_days,
+      out(ok=not problems or bool(events), problems=problems, days=out_days,
+          error="; ".join(p["name"] + ": " + p["error"] + (" (showing the last copy)" if p["lastCopy"] else "") for p in problems),
           total=sum(len(d["events"]) for d in out_days))
     '
   """ + " 14 ${sh(sys.timezone ?? "")}") every 10m json timeout 60s
@@ -147,7 +155,11 @@ widget "agenda" {
   let lines = flatten(flatten(shown.map(d => [[{head: d.label, empty: len(d.events) == 0}], d.events])))
   // Day headings and all-day events take one line, timed events two (start over end).
   let heights = lines.map(l => l.head ? 22 : l.allDay ? 18 : 25)
-  let room = (tileHeight ?? 300) - 72
+  // Calendars that didn't update: "offline" when it's only the network, else named on the tile.
+  let problems = cal.problems ?? []
+  let offline = len(problems) > 0 && all(problems, p => p.offline)
+  let failed = offline ? [] : problems.filter(p => !p.offline).map(p => p.name)
+  let room = (tileHeight ?? 300) - 72 - (len(failed) > 0 ? 18 : 0)
   let n = max(2, count(range(len(lines)), i => sum(heights.take(i + 1)) <= room))
   // Don't end on a day heading whose events didn't fit.
   let fit = n < len(lines) && lines[n - 1].head ? n - 1 : n
@@ -181,8 +193,10 @@ widget "agenda" {
     gap: 1
     Row {
       Text { text: "agenda"; style: muted; weight: 1 }
-      let offline = !cal.setup && cal.error != "" && cal.error != null
       Text { text: offline ? "offline" : fmtTime(now, "EEE d"); style: small; color: offline ? yellow : accent; width: 64; maxLines: 1; align: end }
+    }
+    if len(failed) > 0 {
+      Text { text: len(failed) == 1 ? "⚠ ${failed[0]} didn't update" : "⚠ ${len(failed)} calendars didn't update"; style: label; color: yellow; maxLines: 1 }
     }
     if cal == null {
       Text { text: "loading…"; style: small; color: muted }
@@ -209,7 +223,9 @@ widget "agenda" {
       scroll: true
       gap: 2
       padding: 12
-      if cal.error { Text { text: cal.error; style: small; color: yellow } }
+      for p in problems {
+        Text { text: "${p.name}: ${p.error}${p.lastCopy ? ", showing the last copy" : ""}"; style: small; color: yellow }
+      }
       for d in days key d.date {
         Text { text: d.label; color: accent; bold: true; padding: [0, 6, 0, 0] }
         if len(d.events) == 0 { Text { text: "nothing on"; style: small; color: muted } }
