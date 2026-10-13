@@ -1,0 +1,28 @@
+widget "lock screen" {
+  size: 1x1
+  minSize: 1x1
+
+  meta {
+    description: "Lock the phone screen with one tap."
+    version: "1.0"
+    license: "MIT"
+    category: "system"
+  }
+
+  requires { pacman: ["android-tools"] }
+
+  Box {
+    fill: true
+    align: center
+    onTap: run("timeout --kill-after=1s 5s adb shell input keyevent 26")
+    Canvas {
+      fill: true
+      let s = min(width, height) * 0.58
+      let cx = width / 2
+      let cy = height / 2 + (rows == 1 ? 0 : 0)
+      let r = s / 2
+      line(cx, cy - r, cx, cy - r * 0.05, stroke: foreground, width: 4, cap: round)
+      arc(cx, cy, r, 45, 270, stroke: foreground, width: 4, cap: round)
+    }
+  }
+}
