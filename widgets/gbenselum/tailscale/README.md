@@ -6,6 +6,11 @@ Shows the Tailscale status and the devices on your tailnet.
 - Connected: the tailnet name and one row per device, each with an `ip` button
   and, when the hostname resolved, a `host` button that copies it to the
   clipboard. If only this device is online, a note says so.
+- When Tailscale rebuilds the tunnel (it renames the `tun` interface and
+  reinstalls the device routes), the routes disappear for a moment. The header
+  then says `reconnecting…` and the last known device list stays, instead of
+  dropping to the "only this device is online" note. The list is kept across
+  restarts.
 - Disconnected: a button that opens the Tailscale app.
 
 ## Requirements

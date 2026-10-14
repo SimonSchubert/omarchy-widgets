@@ -4,7 +4,7 @@ widget "tailscale" {
   size: 6x5
   minSize: 3x4
 
-  meta { description: "List Tailscale peers, copy an IP or hostname, and open the Android app to toggle the VPN. Requires Tailscale installed and configured on this device."; version: "1.2"; license: "MIT"; category: "system" }
+  meta { owl: 4; description: "List Tailscale peers, copy an IP or hostname, and open the Android app to toggle the VPN. Requires Tailscale installed and configured on this device."; version: "1.3"; license: "MIT"; category: "system" }
 
   requires { pacman: ["iproute2", "bind"] }
 
@@ -21,10 +21,24 @@ widget "tailscale" {
   // phone is the only device online. The phone's own route is not a peer.
   source tun = cmd('ip -o -4 addr show 2>/dev/null | grep ": tun" | grep -oE "inet 100[.][0-9.]+" | cut -d" " -f2 | head -1') every 1m
 
+  // The peer list from the last time the tunnel had one. While Tailscale
+  // rebuilds the tunnel (it renames the tun interface and reinstalls the peer
+  // routes), the host routes vanish for a moment, which would otherwise drop
+  // the widget to "Only this device is online." Keep showing the last list,
+  // marked as reconnecting.
+  state lastPeers = "" persist
+
   let peers = lines(raw).map(l => words(l)).map(w => { ip: w[0], host: w[1] }).filter(p => p.ip != tun).sortBy(p => p.host ?? p.ip)
   let connected = words(tun).length > 0
-  let named = peers.filter(p => p.host)
+  let cached = lines(lastPeers).map(l => words(l)).map(w => { ip: w[0], host: w[1] }).filter(p => p.ip && p.ip != tun).sortBy(p => p.host ?? p.ip)
+  let shown = peers.length > 0 ? peers : cached
+  let reconnecting = connected && peers.length == 0 && cached.length > 0
+  let named = shown.filter(p => p.host)
   let tailnet = connected && named.length > 0 ? split(named[0].host, ".").drop(1).join(".") : null
+
+  // Remember the peers whenever the tunnel reports some, so a reconnect has a
+  // list to fall back to.
+  when peers.length > 0 { lastPeers = raw }
 
   // Tapping the tile opens the Tailscale app; the VPN is switched there.
   onTap: androidApp("com.tailscale.ipn")
@@ -55,9 +69,9 @@ widget "tailscale" {
       Mark { dim: 24; opacity: connected ? 1 : 0.5 }
       Box { width: 10; height: 10; radius: 5; background: connected ? green : red }
       Text {
-        text: connected ? "connected" : "disconnected"
+        text: connected ? (reconnecting ? "reconnecting…" : "connected") : "disconnected"
         style: small
-        color: connected ? green : red
+        color: connected ? (reconnecting ? muted : green) : red
       }
     }
 
@@ -66,12 +80,12 @@ widget "tailscale" {
         Text { text: tailnet; style: muted; fontSize: 11; maxLines: 1 }
       }
 
-      if peers.length > 0 {
+      if shown.length > 0 {
         Column {
           gap: 6
           weight: 1
           scroll: true
-          for p in peers key p.ip {
+          for p in shown key p.ip {
             Row {
               gap: 6
               align: center
