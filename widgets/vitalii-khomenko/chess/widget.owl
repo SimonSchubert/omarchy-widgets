@@ -4,7 +4,7 @@ widget "chess" {
   size: 6x7
   minSize: 4x4
   padding: 0
-  meta { description: "Full chess in a terminal tile: all rules, picture board with smooth moves, tap and keyboard play, six computer levels, hints, undo, clock and saved game. Written in Node.js, no extra packages"; version: "1.3"; license: "MIT"; category: "fun"; owl: 2 }
+  meta { description: "Full chess in a terminal tile: all rules, picture board with smooth moves, tap and keyboard play, six computer levels, hints, undo, clock and saved game. Written in Node.js, no extra packages"; version: "1.4"; license: "MIT"; category: "fun"; owl: 2 }
   requires { pacman: ["nodejs"] }
 
   // The game is one Node.js file that this command writes to ~/.cache/owl-chess/chess.js and starts.
@@ -388,7 +388,7 @@ function think(level, msOverride) {
 const fs = require('fs'), os = require('os'), path = require('path');
 const SAVE_FILE = path.join(os.homedir(), '.local', 'state', 'owl-chess', 'game.json');
 const CLOCKS = [{ name: 'Off', base: 0, inc: 0 }, { name: '3 min', base: 180, inc: 0 }, { name: '5 min', base: 300, inc: 0 }, { name: '10 min', base: 600, inc: 0 }, { name: '10+5', base: 600, inc: 5 }, { name: '15+10', base: 900, inc: 10 }];
-const G = { hist: [], keys: [], level: 3, playerWhite: true, flip: false, result: null, clock: 0, left: [0, 0], startFen: START_FEN };
+const G = { hist: [], keys: [], level: 3, playerWhite: true, flip: false, result: null, clock: 0, nextClock: 0, left: [0, 0], startFen: START_FEN };
 const PIECE_LETTER = ['', '', 'N', 'B', 'R', 'Q', 'K'];
 const mvFrom = m => m & 63, mvTo = m => (m >> 6) & 63, mvPromo = m => (m >> 12) & 7;
 const uciOf = m => sqName(mvFrom(m)) + sqName(mvTo(m)) + (mvPromo(m) ? '  nbrq'[mvPromo(m)] : '');
@@ -445,14 +445,14 @@ function playMove(m) {
 }
 function undoOne() { const e = G.hist.pop(); if (!e) return false; unmake(e.m); G.keys.pop(); return true; }
 function resetClock() { const c = CLOCKS[G.clock]; G.left = [c.base * 1000, c.base * 1000]; }
-function newGame() { setFen(START_FEN); G.startFen = START_FEN; G.hist = []; G.keys = [keyNow()]; G.result = null; resetClock(); }
+function newGame() { setFen(START_FEN); G.startFen = START_FEN; G.hist = []; G.keys = [keyNow()]; G.result = null; G.clock = G.nextClock; resetClock(); }
 function findMove(from, to, promo) {
   return legalMoves().filter(m => mvFrom(m) === from && mvTo(m) === to && (promo === undefined || mvPromo(m) === promo));
 }
 function save() {
   try {
     fs.mkdirSync(path.dirname(SAVE_FILE), { recursive: true });
-    fs.writeFileSync(SAVE_FILE, JSON.stringify({ v: 2, level: G.level, playerWhite: G.playerWhite, flip: G.flip, clock: G.clock, left: G.left, result: G.result, moves: G.hist.map(h => uciOf(h.m)) }));
+    fs.writeFileSync(SAVE_FILE, JSON.stringify({ v: 2, level: G.level, playerWhite: G.playerWhite, flip: G.flip, clock: G.clock, next: G.nextClock, left: G.left, result: G.result, moves: G.hist.map(h => uciOf(h.m)) }));
   } catch (e) { /* best effort */ }
 }
 function load() {
@@ -460,11 +460,13 @@ function load() {
   try {
     const d = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8'));
     if (d.level >= 1 && d.level <= LEVELS.length) G.level = d.level;
-    G.playerWhite = d.playerWhite !== false; G.flip = !!d.flip; if (d.clock >= 0 && d.clock < CLOCKS.length) G.clock = d.clock; resetClock();
+    G.playerWhite = d.playerWhite !== false; G.flip = !!d.flip; if (d.clock >= 0 && d.clock < CLOCKS.length) G.clock = d.clock;
+    G.nextClock = d.next >= 0 && d.next < CLOCKS.length ? d.next : G.clock; resetClock();
     for (const u of d.moves || []) {
       const from = u.charCodeAt(0) - 97 + (+u[1] - 1) * 8, to = u.charCodeAt(2) - 97 + (+u[3] - 1) * 8, pr = u[4] ? '  nbrq'.indexOf(u[4]) : undefined;
       const c = findMove(from, to, pr); if (!c.length) throw new Error('bad move'); playMove(c[0]);
     }
+    if (!G.hist.length) { G.clock = G.nextClock; resetClock(); }
     if (Array.isArray(d.left) && d.left.length === 2 && CLOCKS[G.clock].base) G.left = d.left.map(x => Math.max(0, +x || 0));
     G.result = d.result && d.result.over ? d.result : null;
   } catch (e) { newGame(); }
@@ -749,7 +751,7 @@ function drawMenu() {
   const items = [
     ['MENU', null], ['Level ' + G.level + '/' + LEVELS.length + ' ' + lv.name, null], ['pm', null],
     [U.arm === 'new' ? 'Tap again!' : 'New game', 'new', U.arm === 'new'], [G.playerWhite ? 'Play Black' : 'Play White', 'side', U.arm === 'side'],
-    ['Flip board', 'flip'], ['Clock: ' + CLOCKS[G.clock].name, 'clock'], ['Offer draw', 'draw'], [U.arm === 'resign' ? 'Tap again!' : 'Resign', 'resign', U.arm === 'resign'], ['Moves', 'moves'], ['Close', 'close']
+    ['Flip board', 'flip'], ['Clock: ' + CLOCKS[G.nextClock].name, 'clock'], ['Offer draw', 'draw'], [U.arm === 'resign' ? 'Tap again!' : 'Resign', 'resign', U.arm === 'resign'], ['Moves', 'moves'], ['Close', 'close']
   ];
   const step = H >= items.length * 2 + 1 ? 2 : 1; let y = Math.max(0, (H - (items.length * step - (step - 1))) >> 1);
   for (const it of items) {
@@ -1009,7 +1011,7 @@ function act(a) {
       });
       return;
     }
-    case 'clock': G.clock = (G.clock + 1) % CLOCKS.length; if (!G.hist.length) resetClock(); else toast('Clock applies to the next game', 2500); save(); break;
+    case 'clock': G.nextClock = (G.nextClock + 1) % CLOCKS.length; if (!G.hist.length) { G.clock = G.nextClock; resetClock(); } else toast('Clock applies to the next game', 2500); save(); break;
     case 'flip': G.flip = !G.flip; save(); break;
     case 'glyphs': ascii = !ascii; break;
     case 'lvm': G.level = Math.max(1, G.level - 1); save(); break;
