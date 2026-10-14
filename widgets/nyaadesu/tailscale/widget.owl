@@ -10,13 +10,15 @@ widget "tailscale" {
   state apiKey = "" persist
   state draft = ""
   state keyMsg = ""   // why the last key typed wasn't saved
+  state myId = "" persist   // the device marked as this phone, for phones where ip can't read the interfaces
   state busy = ""   // the device whose exit node routes are being changed, or "failed"
 
   // Only a well-formed key reaches the API and the shell commands, even one set with owl-send.
   let key = match(apiKey, "^tskey-[A-Za-z0-9_-]+$") != null ? apiKey : ""
   source api = http("https://api.tailscale.com/api/v2/tailnet/-/devices?fields=all", {Authorization: "Bearer ${key}"}) every 1m timeout 15s json status
-  // The Android app's VPN shows up here as an interface with a 100.64.0.0/10 address.
-  source local = cmd('ip -br -4 addr | awk \'{split($3, a, "/"); split(a[1], o, "."); if (o[1] == 100 && o[2] >= 64 && o[2] < 128) {print a[1]; exit}}\'') every 10s
+  // The Android app's VPN shows up here as an interface with a 100.64.0.0/10 address. Some phones don't let apps
+  // read the interfaces (ip fails with "Cannot bind netlink socket"); then this says "unavailable".
+  source local = cmd('if a=$(ip -br -4 addr 2>/dev/null); then echo "$a" | awk \'{split($3, a, "/"); split(a[1], o, "."); if (o[1] == 100 && o[2] >= 64 && o[2] < 128) {print a[1]; exit}}\'; else echo unavailable; fi') every 10s
   // The phone's exit node choice isn't in the API, but traffic through one has it as its first hop, at its 100.x address.
   source hop = cmd('tracepath -n -m 1 1.1.1.1 2>/dev/null | awk \'$1 == "1:" {print $2; exit}\'') every 20s
   // Where the phone's traffic reaches the internet (through the exit node when one is used).
@@ -32,8 +34,13 @@ widget "tailscale" {
     : ""
   let rejected = hasKey && (api.code == 401 || api.code == 403)
   let apiSays = api.out.message ?? ""
-  let vpnOn = local != null && local != ""
   let devices = (api.ok ? api.out.devices : null) ?? []
+  let ipOk = local != null && local != "unavailable"
+  // Without ip, the device marked as this phone tells whether it's connected, from the API (up to a minute late).
+  let myDev = myId == "" ? null : devices.find(d => d.id == myId)
+  let vpnOn = ipOk ? local != "" : myDev != null && myDev.connectedToControl == true
+  let myIp = ipOk ? local : myDev == null ? "" : (myDev.addresses ?? []).find(a => contains(a, ".")) ?? ""
+  let needPick = local == "unavailable" && myDev == null && api.ok == true
   let exitRoutes = ["0.0.0.0/0", "::/0"]
   let rows = devices.map(d => {
     id: d.id,
@@ -43,7 +50,7 @@ widget "tailscale" {
     on: d.connectedToControl,
     seen: d.lastSeen == null ? "" : replace(sub(d.lastSeen, 0, 16), "T", " ") + " UTC",
     update: d.updateAvailable,
-    phone: vpnOn && contains(d.addresses ?? [], local),
+    phone: d.id == myId || (ipOk && local != "" && contains(d.addresses ?? [], local)),
     // An exit node advertises the default routes; the admin (this API) enables them.
     offersExit: contains(d.advertisedRoutes ?? [], "0.0.0.0/0"),
     exitOn: contains(d.enabledRoutes ?? [], "0.0.0.0/0"),
@@ -55,9 +62,10 @@ widget "tailscale" {
   let sorted = rows.sortBy(d => (d.phone ? "0" : d.on ? "1" : "2") + lower(d.name))
   let exits = rows.filter(d => d.offersExit)
   let online = devices.count(d => d.connectedToControl)
-  let exitIp = vpnOn && match(hop ?? "", "^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.") != null ? hop : ""
-  let exitDev = exitIp == "" ? null : rows.find(d => d.ip == exitIp)
-  let exitLabel = !vpnOn ? "" : hop == null ? "…" : exitIp == "" ? "none" : exitDev == null ? exitIp : exitDev.name
+  // Only a tailnet device that offers to be an exit node counts as one: mobile carriers use 100.64.0.0/10 addresses too.
+  let exitDev = hop == null || hop == "" ? null : rows.find(d => d.offersExit && d.ip == hop)
+  let exitIp = exitDev == null ? "" : hop
+  let exitLabel = hop == null || api == null ? "…" : !api.ok ? "?" : exitDev == null ? "none" : exitDev.name
   let place = pub.ip == null ? "" : "${pub.ip}  ·  ${pub.city ?? "?"}, ${pub.country ?? "?"}"
   // Look up the public IP again as soon as the exit node changes.
   on exitIp { refresh() }
@@ -78,8 +86,8 @@ widget "tailscale" {
       Text { text: "tailscale"; style: muted; weight: 1 }
       Dot { on: vpnOn }
     }
-    Text { text: vpnOn ? "connected" : "off"; style: title; color: vpnOn ? green : muted }
-    Text { text: vpnOn ? local : "VPN not running"; style: small; font: mono; color: vpnOn ? foreground : muted }
+    Text { text: vpnOn ? "connected" : needPick ? "which?" : "off"; style: title; color: vpnOn ? green : muted }
+    Text { text: vpnOn ? myIp : needPick ? "tap: mark this phone" : "VPN not running"; style: small; font: mono; color: vpnOn ? foreground : muted }
     if vpnOn {
       Text { text: "exit: ${exitLabel}"; style: small; color: exitIp != "" ? accent : muted; maxLines: 1 }
     }
@@ -90,7 +98,7 @@ widget "tailscale" {
     } else {
       Text { text: "${api == null ? "…" : online}/${api == null ? "…" : len(devices)} devices online"; style: small }
     }
-    Button { text: vpnOn ? "open app" : "turn on"; color: vpnOn ? muted : accent; onTap: androidApp("com.tailscale.ipn") }
+    Button { text: vpnOn || needPick ? "open app" : "turn on"; color: vpnOn || needPick ? muted : accent; onTap: androidApp("com.tailscale.ipn") }
   }
 
   screen {
@@ -105,8 +113,8 @@ widget "tailscale" {
         Column {
           gap: 0
           weight: 1
-          Text { text: vpnOn ? "this phone is connected" : "this phone's VPN is off"; style: body; bold: true }
-          Text { text: vpnOn ? local : "turn it on in the Tailscale app"; style: small; font: mono; color: muted }
+          Text { text: vpnOn ? "this phone is connected" : needPick ? "which device is this phone?" : "this phone's VPN is off"; style: body; bold: true }
+          Text { text: vpnOn ? myIp : needPick ? "This phone can't read its network interfaces. Tap \"mine\" on its entry below." : "turn it on in the Tailscale app"; style: small; font: mono; color: muted }
         }
         Button { text: "open app"; onTap: androidApp("com.tailscale.ipn") }
       }
@@ -114,7 +122,7 @@ widget "tailscale" {
         gap: 4
         Row {
           Text { text: "exit node"; style: small; color: muted; width: 90 }
-          Text { text: !vpnOn ? "—" : exitIp == "" ? exitLabel : exitDev == null ? exitIp : "${exitDev.name}  (${exitIp})"; style: small; font: mono; color: exitIp != "" ? accent : foreground; maxLines: 1; weight: 1 }
+          Text { text: !vpnOn && !needPick ? "—" : exitIp == "" ? exitLabel : exitDev == null ? exitIp : "${exitDev.name}  (${exitIp})"; style: small; font: mono; color: exitIp != "" ? accent : foreground; maxLines: 1; weight: 1 }
         }
         Row {
           Text { text: "public IP"; style: small; color: muted; width: 90 }
@@ -170,6 +178,9 @@ widget "tailscale" {
                   Text { text: "${d.ip}  ·  ${d.os}${d.update ? "  ·  update" : ""}"; style: small; font: mono; color: muted; maxLines: 1 }
                 }
                 Text { text: d.on ? "online" : d.seen; style: small; color: d.on ? green : muted; width: 110; align: end; maxLines: 2 }
+                if !ipOk && (myDev == null || d.id == myId) {
+                  Button { text: d.id == myId ? "not mine" : "mine"; color: muted; onTap: myId = d.id == myId ? "" : d.id }
+                }
               }
               if d.offersExit {
                 Row {
