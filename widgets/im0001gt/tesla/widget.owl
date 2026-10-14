@@ -4,10 +4,10 @@ widget "tesla" {
   minSize: 3x3
   meta {
     description: "Read-only Tesla status: battery, range, lock, climate, tires and charge limit. It never wakes the car."
-    version: "1.4"
+    version: "1.5"
     license: "MIT"
     category: "home"
-    owl: 5
+    owl: 6
   }
   requires { pacman: ["curl", "jq", "openssl"] }
 
@@ -819,7 +819,7 @@ widget "tesla" {
               Button {
                 text: v.name
                 color: v.vin == car.vin ? accent : foreground
-                onTap: { vin = v.vin; run('mkdir -p ~/.config/omarchy-tesla ~/.cache/omarchy-tesla && umask 077 && printf \'%s\\n\' \'' + (match(str(v.vin ?? ""), "^([A-HJ-NPR-Z0-9]{17})$")[0] ?? "") + '\' > ~/.config/omarchy-tesla/which && touch ~/.cache/omarchy-tesla/force'); refresh() }
+                onTap: { vin = v.vin; run('mkdir -p ~/.config/omarchy-tesla ~/.cache/omarchy-tesla && umask 077 && printf \'%s\\n\' ' + sh(match(str(v.vin ?? ""), "^([A-HJ-NPR-Z0-9]{17})$")[0] ?? "") + ' > ~/.config/omarchy-tesla/which && touch ~/.cache/omarchy-tesla/force'); refresh() }
               }
             }
           }

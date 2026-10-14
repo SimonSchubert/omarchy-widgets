@@ -1,7 +1,7 @@
 widget "ppt maker" {
   size: 6x4
   minSize: 3x3
-  meta { owl: 5; description: "Type a topic and Claude Code makes a PowerPoint deck with real photos and diagrams: quick ones in a minute, or designed and checked ones. Edit or delete decks from the full screen"; version: "1.4"; license: "MIT"; category: "productivity" }
+  meta { owl: 6; description: "Type a topic and Claude Code makes a PowerPoint deck with real photos and diagrams: quick ones in a minute, or designed and checked ones. Edit or delete decks from the full screen"; version: "1.5"; license: "MIT"; category: "productivity" }
 
   requires { pacman: ["jq", "curl", "python", "python-lxml", "python-pillow"] }
 
@@ -64,17 +64,16 @@ widget "ppt maker" {
   let doneTitle = (len((st.file ?? '')) > 15 && sub((st.file ?? ''), len((st.file ?? '')) - 15, len((st.file ?? '')) - 14) == "-" && sub((st.file ?? ''), len((st.file ?? '')) - 10, len((st.file ?? '')) - 9) == "-") ? replace(sub((st.file ?? ''), 0, len((st.file ?? '')) - 15), "-", " ") : replace((st.file ?? ''), ".pptx", "")
   let editingTitle = (len(editing) > 15 && sub(editing, len(editing) - 15, len(editing) - 14) == "-" && sub(editing, len(editing) - 10, len(editing) - 9) == "-") ? replace(sub(editing, 0, len(editing) - 15), "-", " ") : replace(editing, ".pptx", "")
   let nextEditTitle = (len(nextEdit) > 15 && sub(nextEdit, len(nextEdit) - 15, len(nextEdit) - 14) == "-" && sub(nextEdit, len(nextEdit) - 10, len(nextEdit) - 9) == "-") ? replace(sub(nextEdit, 0, len(nextEdit) - 15), "-", " ") : replace(nextEdit, ".pptx", "")
-  let quickFlag = nextQuick ? "--quick" : ""
-  let ctxFlag = nextCtx != "" ? "--context ~/.cache/ppt/context.txt" : ""
-  let flags = nextEdit != "" ? "--edit '${replace(nextEdit, q, qq)}'" : "${quickFlag} ${ctxFlag}"
-  let ctxCmd = nextCtx != "" ? "printf '%s' '${replace(nextCtx, q, '’')}' > ~/.cache/ppt/context.txt; " : ""
   let base = "http://127.0.0.1:8765/"
   let list = lines(decks ?? "").filter(d => d != "" && gone.indexOf(d) < 0)
 
   on setup.state { refresh() }
   on st.state { refresh() }
   when ready && !busy && next != "" {
-    run("${ctxCmd}setsid ~/.local/share/pptmaker/ppt ${flags} '${replace(next, q, '’')}' >/dev/null 2>&1 &")
+    // Written out in full so the store can check every value goes in as sh(...).
+    run((nextCtx != ""
+      ? "printf '%s' ${sh(replace(nextCtx, q, '’'))} > ~/.cache/ppt/context.txt; setsid ~/.local/share/pptmaker/ppt " + (nextEdit != "" ? "--edit ${sh(nextEdit)}" : (nextQuick ? "--quick " : "") + "--context ~/.cache/ppt/context.txt")
+      : "setsid ~/.local/share/pptmaker/ppt " + (nextEdit != "" ? "--edit ${sh(nextEdit)}" : (nextQuick ? "--quick" : ""))) + " ${sh(replace(next, q, '’'))} >/dev/null 2>&1 &")
     sentAt = now
     next = ""
     nextEdit = ""
@@ -96,7 +95,7 @@ widget "ppt maker" {
         Text { text: "edit"; style: small; color: editing == f ? accent : foreground; width: 40; align: center; padding: [0, 6]; onTap: { editing = editing == f ? "" : f; confirmDel = "" } }
         // The first tap only asks; the second hides the row at once and deletes the file.
         if confirmDel == f {
-          Text { text: "sure?"; style: small; color: red; width: 56; align: center; padding: [0, 6]; onTap: { gone = gone + [f]; confirmDel = ""; run("rm -f -- ~/Decks/'${replace(f, q, qq)}'") } }
+          Text { text: "sure?"; style: small; color: red; width: 56; align: center; padding: [0, 6]; onTap: { gone = gone + [f]; confirmDel = ""; run("rm -f -- ~/Decks/${sh(f)}") } }
         } else {
           Text { text: "delete"; style: small; color: muted; width: 56; align: center; padding: [0, 6]; onTap: { confirmDel = f; editing = "" } }
         }

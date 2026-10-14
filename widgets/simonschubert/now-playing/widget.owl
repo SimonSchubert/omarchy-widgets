@@ -2,7 +2,7 @@ widget "now-playing" {
   size: 6x2
   minSize: 3x2
   requires { pacman: [] }
-  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile to open the app"; version: "1.1"; license: "MIT"; category: "fun"; owl: 5 }
+  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile to open the app"; version: "1.2"; license: "MIT"; category: "fun"; owl: 6 }
 
   // {available, playing, title, artist, album, app, package, position, duration, art}.
   // Android only shares other apps' sessions with notification access; without it, available is false.
@@ -68,7 +68,8 @@ widget "now-playing" {
   component Art(src, d) {
     Box {
       size: d
-      radius: 8
+      // Rounded as much as the launcher's corner style: square on edge, 8dp on round.
+      radius: 8 * corners
       clip: true
       align: center
       if src != null {

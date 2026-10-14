@@ -4,9 +4,9 @@ widget "terminal-profiles" {
   padding: 0
 
   meta {
-    owl: 5
+    owl: 6
     description: "Live terminal with profiles: switch commands from the chevron, manage them from the menu"
-    version: "1.1"
+    version: "1.2"
     license: "MIT"
     category: "dev"
   }
@@ -66,7 +66,7 @@ widget "terminal-profiles" {
       }
 
       // Changing command ends the old session and starts a new one.
-      Terminal { command: termCmd; weight: 1; fill: true }
+      Terminal { command: "exec bash -c ${sh(termCmd)}"; weight: 1; fill: true }
     }
 
     if dropOpen || dotsOpen {

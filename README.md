@@ -1,6 +1,6 @@
 # omarchy widgets
 
-The widget store for [omarchy-proot](https://github.com/SimonSchubert), the Android launcher that
+The widget store for [Omalauncher](https://github.com/SimonSchubert/omalauncher), the Android launcher that
 runs Arch Linux and draws home-screen widgets written in OWL, a small declarative widget language.
 
 Everything in `widgets/` has been reviewed. When a pull request is merged, CI builds `index.json`
@@ -48,8 +48,10 @@ The widget language is documented in [docs/LANGUAGE.md](docs/LANGUAGE.md).
   and warns about programs whose package isn't declared.
 - Updates raise the version. If an update changes the commands or packages, the app asks users to
   approve it again.
-- No hidden or surprising behavior. Commands that pipe downloads into a shell, delete
-  recursively, ask for root, decode base64 or use `eval` are flagged, and need a good reason and
+- Values go into commands as `${sh(value)}`, outside any quotes, or as numbers (`${int(n)}`):
+  anything else could run whatever a server or a file sends. CI rejects it.
+- No hidden or surprising behavior. Commands that pipe downloads into a shell or run
+  downloaded files, delete recursively, ask for root, decode base64 or use `eval` are flagged, and need a good reason and
   a clear description.
 - No personal data: tokens, personal paths or a hard-coded location.
 
