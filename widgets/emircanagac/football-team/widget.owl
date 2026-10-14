@@ -1,0 +1,391 @@
+widget "football-team" {
+  meta {
+    owl: 6
+    description: "Follow any football club: its next matches with kick-off countdown, live scores and recent results, from ESPN. Tap for the full fixture list and to pick a team"
+    version: "1.0"
+    license: "MIT"
+    category: "world"
+  }
+  page: 1
+  order: 2
+  size: 6x2
+  minSize: 5x2
+  padding: 0
+
+  // The club to follow, by ESPN team id; picked on the screen
+  state team = {id: "432", n: "Galatasaray"} persist
+  state picking = false
+  // what is typed in the picker, and what was sent to ESPN's search (2 letters or more)
+  state query = ""
+  state sq = ""
+
+  // full names (ESPN's short ones get cut: "Genclerbirli"), with Turkish letters
+  let names = {"Genclerbirligi": "Gençlerbirliği", "Fenerbahce": "Fenerbahçe", "Besiktas": "Beşiktaş", "Kasimpasa": "Kasımpaşa", "Goztepe": "Göztepe", "Eyupspor": "Eyüpspor", "Caykur Rizespor": "Çaykur Rizespor", "Istanbul Basaksehir": "Başakşehir", "Erzurum BB": "Erzurumspor", "Gaziantep FK": "Gaziantep", "Feyenoord Rotterdam": "Feyenoord", "Paris Saint-Germain": "PSG"}
+  let shortComps = {"tur.1": "Lig", "tur.cup": "Kupa", "uefa.champions": "UCL", "uefa.europa": "UEL", "uefa.europa.conf": "UECL", "eng.1": "PL", "eng.fa": "FA Cup", "eng.league_cup": "EFL Cup", "esp.1": "LaLiga", "ita.1": "Serie A", "ger.1": "BL", "fra.1": "L1", "club.friendly": "Friendly"}
+
+  // Matches come straight from ESPN over http, so the widget needs no Linux. The URLs follow
+  // the team: a new pick fetches at once.
+  source fx = http("https://site.api.espn.com/apis/site/v2/sports/soccer/all/teams/${team.id}/schedule?fixture=true") every 1m json timeout 20s status
+  source past = http("https://site.api.espn.com/apis/site/v2/sports/soccer/all/teams/${team.id}/schedule") every 15m json timeout 20s status
+  source sr = http("https://site.web.api.espn.com/apis/search/v2?limit=20&type=team&query=${replace(sq, " ", "%20")}") every 1h json timeout 15s status
+  source now = clock every 30s
+
+  // ---- the matches, from ESPN's schedule events
+  // the answer for another team (just switched) would be wrong: wait for this one's
+  let fresh = fx.out.team.id == team.id
+  let failed = !fresh && fx != null && !fx.ok
+  let evs = fresh ? flatten([(fx.out.events ?? []).map(e => {src: "n", e: e}), (past.out.team.id == team.id ? past.out.events ?? [] : []).map(e => {src: "p", e: e})]) : []
+  let p1 = evs.map(x => {src: x.src, e: x.e, c: x.e.competitions[0]})
+  let p2 = p1.map(x => {
+    src: x.src, id: x.e.id, ds: x.e.date ?? "", slug: x.e.league.slug ?? "", lab: x.e.league.abbreviation ?? x.e.league.name ?? "",
+    state: x.c.status.type.state, done: x.c.status.type.completed ?? false, det: x.c.status.type.shortDetail ?? "", dc: x.c.status.displayClock ?? "",
+    h: x.c.competitors.find(c => c.homeAway == "home"), a: x.c.competitors.find(c => c.homeAway == "away")
+  })
+  // ESPN's "2026-10-17T13:00Z" to Unix seconds (days from the civil date)
+  let p3 = p2.map(x => {
+    src: x.src, id: x.id, slug: x.slug, lab: x.lab, state: x.state, done: x.done, det: x.det, dc: x.dc, h: x.h, a: x.a,
+    y: int(sub(x.ds, 0, 4)) + 4800 - floor((14 - int(sub(x.ds, 5, 7))) / 12), mo: int(sub(x.ds, 5, 7)) + 12 * floor((14 - int(sub(x.ds, 5, 7))) / 12) - 3,
+    d: int(sub(x.ds, 8, 10)), s: int(sub(x.ds, 11, 13)) * 3600 + int(sub(x.ds, 14, 16)) * 60
+  })
+  let all = p3.map(x => {
+    src: x.src, id: x.id, state: x.state, done: x.done,
+    t: (x.d + floor((153 * x.mo + 2) / 5) + 365 * x.y + floor(x.y / 4) - floor(x.y / 100) + floor(x.y / 400) - 32045 - 2440588) * 86400 + x.s,
+    // displayClock stays at the last minute during breaks (45+3 at half-time); shortDetail then says HT
+    clock: contains(x.det, "'") || x.state != "in" ? x.dc : x.det,
+    comp: replace(replace(x.lab, "Turkish Super Lig", "Süper Lig"), "UEFA Champions League", "Champions League"),
+    cs: get(shortComps, x.slug, len(x.lab) > 9 ? join(words(x.lab).map(w => sub(w, 0, 1)), "") : x.lab),
+    kind: x.slug == "uefa.champions" ? "ucl" : x.slug == "uefa.europa" ? "uel" : x.slug == "uefa.europa.conf" ? "uecl" : x.slug == "club.friendly" ? "friendly" : contains(x.slug, "cup") || contains(x.slug, "super") || endsWith(x.slug, ".fa") ? "cup" : "league",
+    home: {id: x.h.team.id, n: get(names, x.h.team.displayName ?? x.h.team.shortDisplayName ?? "", x.h.team.displayName ?? x.h.team.shortDisplayName ?? ""), s: x.h.score.displayValue ?? x.h.score},
+    away: {id: x.a.team.id, n: get(names, x.a.team.displayName ?? x.a.team.shortDisplayName ?? "", x.a.team.displayName ?? x.a.team.shortDisplayName ?? ""), s: x.a.score.displayValue ?? x.a.score},
+    myHome: x.h.team.id == team.id,
+    // the result from our side by ESPN's winner flag, so penalties and aggregates count
+    res: x.state != "post" ? null : (x.h.team.id == team.id ? x.h.winner : x.a.winner) ? "W" : (x.h.team.id == team.id ? x.a.winner : x.h.winner) ? "L" : "D",
+    pens: contains(x.det, "Pen")
+  })
+  let live = all.filter(m => m.state == "in").first()
+  let nextM = all.filter(m => m.src == "n" && m.state == "pre").sortBy(m => m.t).take(5)
+  // played to the end: postponed and abandoned matches are "post" too, without a result; no friendlies
+  let lastM3 = all.filter(m => m.src == "p" && m.state == "post" && m.done && m.kind != "friendly").sortBy(m => -m.t).take(3)
+  let loaded = fresh
+  let nxt = nextM[0]
+  let shown = live ?? nxt
+
+
+  // ---- colors: the club's own, when it shows on the tile; the theme's otherwise
+  let tc = fx.out.team
+  let hexd = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"]
+  let c1 = lower(tc.color ?? "")
+  let lum = len(c1) == 6 ? (0.299 * indexOf(hexd, sub(c1, 0, 1)) + 0.587 * indexOf(hexd, sub(c1, 2, 3)) + 0.114 * indexOf(hexd, sub(c1, 4, 5))) / 15 : 0
+  let gold = get({"432": "#FDB912", "436": "#FFED00", "1895": "#E0E0E0"}, team.id, fresh && lum > 0.2 ? "#${c1}" : accent)
+  let second = get({"432": "#C8102E", "436": "#1B3F8B", "1895": "#000000"}, team.id, gold)
+  // the team color for text: mixed toward the theme text so it reads on dark and light themes alike
+  let ink = mix(gold, foreground, 0.35)
+  // European nights and cups stand out from league games by color
+  let kinds = {ucl: blue, uel: orange, uecl: green, cup: magenta, friendly: muted}
+  let soft = alpha(foreground, 0.85)
+
+  // ---- time
+  let left = nxt ? max(nxt.t - now, 0) : null
+  // past kick-off time but ESPN has not said it started yet
+  let kickoff = left != null && left <= 0
+  let countdown = left == null ? "" : kickoff ? "kick-off" : left >= 86400 ? "${floor(left / 86400)}d ${floor(left % 86400 / 3600)}h" : left >= 3600 ? "${floor(left / 3600)}h ${floor(left % 3600 / 60)}m" : "${ceil(left / 60)}m"
+  let today = fmtTime(now, "yyyyMMdd")
+  let tomorrow = fmtTime(now + 86400, "yyyyMMdd")
+  // day and month names in English whatever the phone's language: fmtTime would localize them
+  let tz = fmtTime(now, "Z")
+  let off = (startsWith(tz, "-") ? -1 : 1) * (num(sub(tz, 1, 3), 0) * 3600 + num(sub(tz, 3, 5), 0) * 60)
+  let dows = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"]
+  let mons = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+  // the tile lists the live match and the next one, then the last result; the screen has the rest
+  let list = flatten([live ? [live] : [], nextM]).take(2)
+  let lastM = lastM3[0]
+
+  // ---- the picker: ESPN's team search, football clubs first, women's and youth sides after
+  let results = sq == "" ? [] : flatten((sr.out.results ?? []).filter(r => r.type == "team").map(r => r.contents ?? []))
+    .filter(c => c.sport == "soccer" && contains(c.uid ?? "", "~t:"))
+    .map(c => {id: split(c.uid, "~t:")[1], n: get(names, c.displayName ?? "", c.displayName ?? ""), sub: c.subtitle ?? ""})
+    .sortBy(t => contains(lower(t.sub), "women") || contains(lower(t.sub), "friendly") || contains(t.sub, "U1") || contains(t.sub, "U2") ? 1 : 0)
+    .take(12)
+
+  // ---- crests to fetch, and the ones there are
+  let crestIds = unique(flatten([[team.id], flatten([live ? [live] : [], nextM, lastM3]).map(m => [m.home.id, m.away.id]), results.map(t => t.id)]))
+  // Crests, with Linux only: Image can't load a URL, so they are fetched once each into the
+  // cache the other ESPN widgets share. Without Linux this stays null and the lists show initials.
+  source crests = cmd("""
+    d=~/.cache/espn-logos/soccer
+    mkdir -p "$d"
+    for i in $(printf '%s' ${sh(join(crestIds, " "))}); do
+      case "$i" in ''|*[!0-9]*) continue;; esac
+      [ -s "$d/$i.png" ] || curl -fsm 10 -o "$d/$i.png" "https://a.espncdn.com/combiner/i?img=/i/teamlogos/soccer/500/$i.png&w=96&h=96" || rm -f "$d/$i.png"
+    done
+    ls "$d"
+  """) every 20s timeout 90s optional
+  let have = lines(crests ?? "")
+
+  onTap: screen()
+
+  // a club's crest, or its initial on a disc where there is none (no Linux, or ESPN has none)
+  component Crest(id, n, size) {
+    if indexOf(have, "${id}.png") >= 0 {
+      Image { src: "~/.cache/espn-logos/soccer/${id}.png"; size: size; fit: contain }
+    } else {
+      Box {
+        width: size
+        height: size
+        radius: size / 2
+        background: alpha(foreground, 0.12)
+        align: center
+        Text { text: upper(sub(n ?? "?", 0, 1)); fontSize: size * 0.45; bold: true; color: soft; align: center }
+      }
+    }
+  }
+
+  // won, drawn or lost, from our side: a letter on a tinted chip
+  component Result(m) {
+    // ESPN's winner flag (res) counts penalties and aggregates; the score is the fallback
+    let mine = num(m.myHome ? m.home.s : m.away.s, 0)
+    let theirs = num(m.myHome ? m.away.s : m.home.s, 0)
+    let r = m.res ?? (mine > theirs ? "W" : mine < theirs ? "L" : "D")
+    let rc = r == "W" ? green : r == "L" ? red : muted
+    Box {
+      width: 20
+      height: 18
+      radius: 4 * corners
+      background: alpha(rc, 0.2)
+      align: center
+      Text { text: r; style: small; bold: true; color: rc; align: center }
+    }
+  }
+
+  // a small pill: competition names, countdowns; sized to its text, as a Text alone would take the whole width
+  component Chip(text, color) {
+    Box {
+      width: len(text) * 7.5 + 18
+      padding: [8, 2]
+      radius: 10 * corners
+      background: alpha(color, 0.16)
+      Text { text: text; style: small; bold: true; color: color; align: center; maxLines: 1 }
+    }
+  }
+
+  // one match on the tile, said in words: NEXT / THEN / LAST, opponent, home or away, competition, and when (or the result, our goals first)
+  component Line(m, label) {
+    Row {
+      align: center
+      gap: 6
+      padding: [8, 3]
+      radius: 6 * corners
+      background: label == "NEXT" || label == "LIVE" ? alpha(ink, 0.12) : null
+      let d = fmtTime(m.t, "yyyyMMdd")
+      let opp = m.myHome ? m.away.n : m.home.n
+      let kc = get(kinds, m.kind, null)
+      let strong = label == "NEXT" || label == "LIVE"
+      // this week: weekday and time; later: the date
+      let when = d == today ? "Today ${fmtTime(m.t, "HH:mm")}" : d == tomorrow ? "Tmrw ${fmtTime(m.t, "HH:mm")}" : m.t - now < 6 * 86400 ? "${dows[floor((m.t + off) / 86400) % 7]} ${fmtTime(m.t, "HH:mm")}" : cols >= 4 ? "${fmtTime(m.t, "d")} ${mons[int(fmtTime(m.t, "M")) - 1]} ${fmtTime(m.t, "HH:mm")}" : "${fmtTime(m.t, "d")} ${mons[int(fmtTime(m.t, "M")) - 1]}"
+      // under four columns the label goes: the highlight still marks the next match
+      if cols >= 4 { Text { text: label; style: small; bold: true; color: label == "LIVE" ? red : strong ? ink : soft; width: 40; maxLines: 1 } }
+      Text { text: opp; style: len(opp) > 10 ? "small" : "body"; bold: strong; color: cols < 6 && kc != null ? kc : strong ? foreground : soft; weight: 1; maxLines: 1 }
+      if cols >= 5 {
+        Text { text: m.myHome ? "H" : "A"; style: small; bold: true; color: m.myHome ? ink : soft; width: 12; maxLines: 1 }
+        // the competition too when there is room; its color shows on the name either way
+        if cols >= 6 { Text { text: m.cs ?? m.comp; style: small; bold: kc != null; color: kc ?? soft; width: 44; maxLines: 1 } }
+      }
+      if m.state == "post" {
+        Row {
+          width: cols >= 5 ? 92 : cols >= 4 ? 84 : 72
+          justify: end
+          gap: 6
+          align: center
+          Result { m: m }
+          Text { text: "${m.myHome ? m.home.s : m.away.s}-${m.myHome ? m.away.s : m.home.s}"; style: body; bold: true; color: soft; width: 40; align: end; maxLines: 1 }
+        }
+      } else if m.state == "in" {
+        Text { text: "${m.myHome ? m.home.s : m.away.s}-${m.myHome ? m.away.s : m.home.s} ${m.clock}"; style: body; bold: true; color: red; width: cols >= 5 ? 92 : cols >= 4 ? 84 : 72; align: end; maxLines: 1 }
+      } else {
+        Text { text: when; style: small; bold: strong; color: strong ? foreground : soft; width: cols >= 5 ? 92 : cols >= 4 ? 84 : 72; align: end; maxLines: 1 }
+      }
+    }
+  }
+
+  // one match in the screen's lists: date, competition color, opponent, time or result
+  component MatchRow(m) {
+    let kc = get(kinds, m.kind, null)
+    let opp = m.myHome ? m.away : m.home
+    let played = m.state == "post"
+    Row {
+      align: center
+      gap: 8
+      padding: [10, 5]
+      radius: 10 * corners
+      background: alpha(foreground, 0.05)
+      Column {
+        width: 40
+        align: center
+        gap: 0
+        Text { text: "${dows[floor((m.t + off) / 86400) % 7]} ${fmtTime(m.t, "d")}"; style: small; bold: true; align: center; maxLines: 1 }
+        Text { text: mons[int(fmtTime(m.t, "M")) - 1]; style: small; color: soft; align: center }
+      }
+      Box { width: 3; height: 30; radius: 2; background: kc ?? alpha(foreground, 0.15) }
+      Crest { id: opp.id; n: opp.n; size: 24 }
+      Column {
+        weight: 1
+        gap: 1
+        Text { text: opp.n; style: len(opp.n) > 12 ? "small" : "body"; bold: true; maxLines: 1 }
+        Text { text: "${m.myHome ? "Home" : "Away"} · ${len(m.comp) > 12 ? m.cs ?? m.comp : m.comp}"; style: small; color: kc ?? soft; maxLines: 1 }
+      }
+      if played {
+        Row {
+          align: center
+          gap: 8
+          // our goals first, as on the tile; "p" when it went to penalties
+          Text { text: "${m.myHome ? m.home.s : m.away.s}-${m.myHome ? m.away.s : m.home.s}${m.pens ? "p" : ""}"; style: body; bold: true; width: m.pens ? 48 : 40; align: end }
+          Result { m: m }
+        }
+      } else if m.state == "in" {
+        Column {
+          width: 52
+          gap: 0
+          Text { text: "${m.myHome ? m.home.s : m.away.s}-${m.myHome ? m.away.s : m.home.s}"; style: body; bold: true; color: red; align: end; maxLines: 1 }
+          Text { text: m.clock; style: small; color: red; align: end; maxLines: 1 }
+        }
+      } else {
+        Text { text: fmtTime(m.t, "HH:mm"); style: body; bold: true; width: 52; align: end }
+      }
+    }
+  }
+
+  Box {
+    fill: true
+    Canvas {
+      rect(0, 0, width, height, fill: linear(0, 0, width, height, [alpha(gold, 0.12), alpha(gold, 0), alpha(second, 0), alpha(second, 0.14)]))
+    }
+    Column {
+      padding: [8, 12]
+      fill: true
+      gap: 4
+      Row {
+        align: center
+        gap: 8
+        padding: [8, 0]
+        Crest { id: team.id; n: team.n; size: 18 }
+        Text { text: upper(team.n); style: label; color: ink; bold: true; weight: 1; maxLines: 1 }
+        if live {
+          Chip { text: "● LIVE"; color: red }
+        } else if nxt {
+          Text { text: kickoff ? "kick-off" : cols >= 5 ? "next in ${countdown}" : "in ${countdown}"; style: small; color: soft; width: cols >= 5 ? 130 : 76; align: end; maxLines: 1 }
+        }
+      }
+      if !loaded {
+        Text { text: failed ? "couldn't load matches, retrying…" : fx == null || fx.ok ? "loading…" : "updating…"; style: body; color: failed ? red : soft; padding: [8, 0] }
+      } else {
+        Column {
+          weight: 1
+          gap: 0
+          justify: spaceEvenly
+          for m, i in list key m.id {
+            Line { m: m; label: m.state == "in" ? "LIVE" : i == 0 || (i == 1 && live) ? "NEXT" : "THEN" }
+          }
+          if len(list) == 0 {
+            Text { text: "no upcoming matches"; style: body; color: soft; padding: [8, 0] }
+          }
+          if lastM {
+            Line { m: lastM; label: "LAST" }
+          }
+        }
+      }
+    }
+  }
+
+
+  screen {
+    title: team.n
+    Column {
+      scroll: true
+      gap: 8
+      padding: 16
+      // crest and name side by side, the team picker on the right, all on one centered line
+      Row {
+        align: center
+        gap: 12
+        padding: [12, 10]
+        radius: 14 * corners
+        background: alpha(foreground, 0.05)
+        Crest { id: team.id; n: team.n; size: 40 }
+        Text { text: team.n; fontSize: len(team.n) > 13 ? 14 : len(team.n) > 9 ? 16 : 20; bold: true; color: ink; weight: 1; maxLines: 1 }
+        Box {
+          width: 96
+          padding: [0, 5]
+          radius: 14 * corners
+          border: 1
+          borderColor: alpha(accent, 0.6)
+          background: picking ? alpha(accent, 0.15) : null
+          onTap: { picking = !picking; query = ""; sq = "" }
+          Text { text: picking ? "done" : "change team"; style: small; bold: true; color: accent; align: center; maxLines: 1 }
+        }
+      }
+      // the picker takes the page while it is open, so either fits one screen
+      if picking {
+        Input {
+          placeholder: "e.g. PSG, Barcelona, Liverpool"
+          // searches as you type, from the second letter
+          onChange: { query = value; sq = len(trim(value)) >= 2 ? lower(trim(value)) : "" }
+          onSubmit: { query = value; sq = lower(trim(value)) }
+        }
+        if sq == "" {
+          Text { text: "type a club's name"; style: small; color: soft }
+        } else if sr == null {
+          Text { text: "searching…"; style: small; color: soft }
+        } else if !sr.ok {
+          Text { text: "couldn't reach ESPN, try again"; style: small; color: red }
+        } else if len(results) == 0 {
+          Text { text: "no club found for \"${trim(query)}\""; style: small; color: soft }
+        } else {
+          Grid {
+            columns: 2
+            gap: 6
+            for t in results key t.id {
+              Row {
+                padding: [8, 6]
+                radius: 6 * corners
+                align: center
+                gap: 8
+                background: t.id == team.id ? alpha(gold, 0.2) : alpha(foreground, 0.05)
+                onTap: { team = {id: t.id, n: t.n}; picking = false; query = ""; sq = "" }
+                Crest { id: t.id; n: t.n; size: 24 }
+                Column {
+                  weight: 1
+                  gap: 0
+                  Text { text: t.n; style: small; bold: t.id == team.id; color: t.id == team.id ? ink : foreground; maxLines: 1 }
+                  Text { text: t.sub; style: small; color: soft; fontSize: 10; maxLines: 1 }
+                }
+              }
+            }
+          }
+        }
+      } else if !loaded {
+        Text { text: failed ? "couldn't load matches, retrying every minute" : "loading…"; color: failed ? red : soft }
+      } else {
+        Row {
+          align: center
+          Text { text: "UPCOMING"; style: label; color: ink; weight: 1 }
+          if live {
+            Text { text: "● LIVE"; style: small; bold: true; color: red; width: 80; align: end }
+          } else if nxt {
+            Text { text: kickoff ? "kick-off" : "next in ${countdown}"; style: small; color: soft; width: 150; align: end; maxLines: 1 }
+          }
+        }
+        // the live match first, then the next five
+        for m in flatten([live ? [live] : [], nextM]) key m.id {
+          MatchRow { m: m }
+        }
+        if len(nextM) == 0 && !live {
+          Text { text: "no upcoming matches"; style: small; color: soft }
+        }
+        Text { text: "LAST MATCHES"; style: label; color: ink }
+        for m in lastM3 key m.id {
+          MatchRow { m: m }
+        }
+      }
+    }
+  }
+}
