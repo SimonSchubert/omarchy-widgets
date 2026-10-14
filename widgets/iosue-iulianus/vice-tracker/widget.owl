@@ -47,7 +47,10 @@ widget "vice-tracker" {
   let startDn = started ? days[0].dn : todayDn
   let rec = find(days, x => x.date == today)
   let cur = rec ?? {date: today, dn: todayDn, cigarette: 0, whiskey: 0, beer: 0, e: 0}
-  let compact = cols != null && cols < 4
+  // Narrow tiles (under 4 columns, or under 300dp on a small phone) show the emoji only.
+  let compact = cols != null && (cols < 4 || (tileWidth ?? 999) < 300)
+  // A 3x2 on a small phone: about 34dp per card.
+  let tiny = (tileWidth ?? 999) < 200
   let short = rows != null && rows < 3
 
   // Filing the queue under today: add each vice's queued amounts to today's record.
@@ -150,7 +153,7 @@ widget "vice-tracker" {
       Text {
         text: label
         height: 26
-        fontSize: (compact ? 15 : 20) - (len(label) > 4 ? (compact ? 3 : 4) : 0)
+        fontSize: tiny ? (len(label) >= 4 ? 11 : 14) : (compact ? 15 : 20) - (len(label) > 4 ? (compact ? 3 : 4) : 0)
         bold: true
         align: center
         color: over ? red : foreground
@@ -348,14 +351,14 @@ widget "vice-tracker" {
 
     // One card per vice; undo and the calendar on the right
     Row {
-      gap: compact ? 5 : 8
+      gap: tiny ? 4 : compact ? 5 : 8
       weight: 1
       Vice { glyph: "🚬"; name: "cigarette"; amount: 1; step: "+1"; unit: ""; weight: 1 }
       Vice { glyph: "🥃"; name: "whiskey"; amount: pourCl; step: "+${pourCl}"; unit: "cl"; weight: 1 }
       Vice { glyph: "🍺"; name: "beer"; amount: 1; step: "+1"; unit: ""; weight: 1 }
       Column {
-        gap: compact ? 5 : 8
-        width: compact ? 38 : 46
+        gap: tiny ? 4 : compact ? 5 : 8
+        width: tiny ? 30 : compact ? 38 : 46
         // Undo stands out while there's something to take back.
         Column {
           gap: 0
@@ -368,7 +371,7 @@ widget "vice-tracker" {
           background: !canUndo ? null : alpha(orange, 0.15)
           onTap: { haptic(); queue = queued ? take(queue, len(queue) - 1) : queue; days = queued ? days : undoDays; entries = queued ? entries : undoEntries }
           Text { text: "↶"; fontSize: 24; bold: true; align: center; color: !canUndo ? alpha(muted, 0.35) : orange }
-          Text { text: "undo"; style: small; bold: true; align: center; maxLines: 1; color: !canUndo ? alpha(muted, 0.35) : orange }
+          Text { text: "undo"; visible: (tileHeight ?? 999) >= 120; style: small; bold: true; align: center; maxLines: 1; color: !canUndo ? alpha(muted, 0.35) : orange }
         }
         Box {
           weight: 1
@@ -377,7 +380,19 @@ widget "vice-tracker" {
           border: 1
           borderColor: border
           onTap: { haptic(); monthBack = 0; selDate = null; importText = ""; importArmed = false; screen() }
-          Text { text: "📅"; align: center }
+          // A line-drawn calendar in the theme's colours, like Omarchy's icons.
+          Canvas {
+            width: 24
+            height: 24
+            let c = alpha(foreground, 0.8)
+            rect(3, 5, 18, 16, radius: 3 * corners, stroke: c, width: 1.6)
+            line(3, 10, 21, 10, stroke: c, width: 1.6)
+            line(8, 3, 8, 7, stroke: c, width: 1.6, cap: round)
+            line(16, 3, 16, 7, stroke: c, width: 1.6, cap: round)
+            for i in range(6) {
+              circle(7.5 + (i % 3) * 4.5, 13.5 + floor(i / 3) * 4, 1.1, fill: i == 4 ? accent : c)
+            }
+          }
         }
       }
     }
