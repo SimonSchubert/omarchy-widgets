@@ -35,7 +35,7 @@ widget "vice-tracker" {
   state selDate = null
   state selDn = null
 
-  source now = clock every 30s
+  source now = clock every 60s
   let today = fmtTime(now, "yyyy-MM-dd")
   // Noon today: stepping whole days back from it stays on the right date across DST changes.
   let noon = now - num(fmtTime(now, "H")) * 3600 - num(fmtTime(now, "m")) * 60 - num(fmtTime(now, "s")) + 43200
@@ -46,7 +46,7 @@ widget "vice-tracker" {
   let startDate = started ? days[0].date : today
   let startDn = started ? days[0].dn : todayDn
   let rec = find(days, x => x.date == today)
-  let cur = rec ?? {date: today, dn: todayDn, cigarette: 0, whiskey: 0, beer: 0, e: 0}
+  let cur = rec ?? {date: today, dn: todayDn, cigarette: 0, whiskey: 0, beer: 0}
   // Narrow tiles (under 4 columns, or under 300dp on a small phone) show the emoji only.
   let compact = cols != null && (cols < 4 || (tileWidth ?? 999) < 300)
   // A 3x2 on a small phone: about 34dp per card.
@@ -59,7 +59,7 @@ widget "vice-tracker" {
     whiskey: sum(queue.filter(q => q.v == "whiskey").map(q => q.a)),
     beer: sum(queue.filter(q => q.v == "beer").map(q => q.a))
   }
-  let filedRec = {date: today, dn: todayDn, cigarette: cur.cigarette + qSum.cigarette, whiskey: cur.whiskey + qSum.whiskey, beer: cur.beer + qSum.beer, e: cur.e + len(queue)}
+  let filedRec = {date: today, dn: todayDn, cigarette: cur.cigarette + qSum.cigarette, whiskey: cur.whiskey + qSum.whiskey, beer: cur.beer + qSum.beer}
   let filedAll = rec == null ? flatten([days, [filedRec]]) : days.map(x => x.date == today ? filedRec : x)
   let filedDays = drop(filedAll, max(len(filedAll) - 800, 0))
   let filedEntries = flatten([entries.filter(x => x.date == today), queue.map(q => {date: today, v: q.v, a: q.a})])
@@ -76,8 +76,7 @@ widget "vice-tracker" {
     dn: todayDn,
     cigarette: max(cur.cigarette - (lastE.v == "cigarette" ? lastE.a : 0), 0),
     whiskey: max(cur.whiskey - (lastE.v == "whiskey" ? lastE.a : 0), 0),
-    beer: max(cur.beer - (lastE.v == "beer" ? lastE.a : 0), 0),
-    e: max(cur.e - 1, 0)
+    beer: max(cur.beer - (lastE.v == "beer" ? lastE.a : 0), 0)
   }
   let undoDays = lastE == null ? days : undoRec.cigarette + undoRec.whiskey + undoRec.beer <= 0 ? days.filter(x => x.date != today) : days.map(x => x.date == today ? undoRec : x)
   let undoEntries = lastE == null ? entries : take(entries, len(entries) - 1)
@@ -107,7 +106,7 @@ widget "vice-tracker" {
   let editDate = selDate ?? today
   let editDn = selDate == null ? todayDn : selDn
   let editRec = find(days, x => x.date == editDate)
-  let editBase = editRec ?? {date: editDate, dn: editDn, cigarette: 0, whiskey: 0, beer: 0, e: 0}
+  let editBase = editRec ?? {date: editDate, dn: editDn, cigarette: 0, whiskey: 0, beer: 0}
   // Days from the first record on count as tracked; an earlier one can be marked clean,
   // which keeps a record at 0 and moves the start back to it.
   let editTracked = started && editDate >= startDate
@@ -175,16 +174,14 @@ widget "vice-tracker" {
       dn: editDn,
       cigarette: name == "cigarette" ? max(val - stepBy, 0) : editBase.cigarette,
       whiskey: name == "whiskey" ? max(val - stepBy, 0) : editBase.whiskey,
-      beer: name == "beer" ? max(val - stepBy, 0) : editBase.beer,
-      e: editBase.e
+      beer: name == "beer" ? max(val - stepBy, 0) : editBase.beer
     }
     let upRec = {
       date: editDate,
       dn: editDn,
       cigarette: name == "cigarette" ? val + stepBy : editBase.cigarette,
       whiskey: name == "whiskey" ? val + stepBy : editBase.whiskey,
-      beer: name == "beer" ? val + stepBy : editBase.beer,
-      e: editBase.e
+      beer: name == "beer" ? val + stepBy : editBase.beer
     }
     let upDays = editRec == null ? sortBy(flatten([days, [upRec]]), x => x.dn) : days.map(x => x.date == editDate ? upRec : x)
     let downDays = editRec == null ? days : days.map(x => x.date == editDate ? downRec : x)
@@ -306,7 +303,10 @@ widget "vice-tracker" {
   // Backup as JSON, so the history survives a new phone or removing the widget.
   let exportJson = "{\"app\":\"vice-tracker\",\"version\":1,\"pour\":${pourCl},\"goals\":{\"cigarette\":${goals.cigarette},\"whiskey\":${goals.whiskey},\"beer\":${goals.beer}},\"days\":[" + join(days.map(r => "{\"date\":\"${r.date}\",\"dn\":${r.dn},\"cigarette\":${r.cigarette},\"whiskey\":${r.whiskey},\"beer\":${r.beer}}"), ",") + "]}"
   let parsed = trim(importText) == "" ? null : parseJson(trim(importText))
-  let importDays = (parsed.days ?? []).filter(d => match(str(d.date), "^\\d{4}-\\d{2}-\\d{2}$") != null && num(d.dn, null) != null).map(d => {date: str(d.date), dn: num(d.dn, 0), cigarette: max(num(d.cigarette, 0), 0), whiskey: max(num(d.whiskey, 0), 0), beer: max(num(d.beer, 0), 0), e: 0})
+  // Imported days must have a day number that matches their date (it's what streaks count
+  // on), can't be in the future, and are sorted with one record per date.
+  let importRaw = sortBy((parsed.days ?? []).filter(d => num(d.dn, null) != null && num(d.dn, 0) <= todayDn && fmtTime(num(d.dn, 0) * 86400 + 43200, "yyyy-MM-dd") == str(d.date)), d => num(d.dn, 0))
+  let importDays = range(len(importRaw)).filter(i => i == 0 || importRaw[i].dn != importRaw[i - 1].dn).map(i => {date: str(importRaw[i].date), dn: num(importRaw[i].dn, 0), cigarette: max(num(importRaw[i].cigarette, 0), 0), whiskey: max(num(importRaw[i].whiskey, 0), 0), beer: max(num(importRaw[i].beer, 0), 0)})
   let importOk = parsed != null && parsed.app == "vice-tracker" && len(importDays) > 0
   let importGoals = {cigarette: max(num(parsed.goals.cigarette, 0), 0), whiskey: max(num(parsed.goals.whiskey, 0), 0), beer: max(num(parsed.goals.beer, 0), 0)}
 
@@ -569,7 +569,7 @@ widget "vice-tracker" {
           Button {
             text: importArmed ? "replace and import" : "import"
             color: importArmed ? orange : accent
-            onTap: { haptic(); days = importArmed ? drop(sortBy(importDays, d => d.dn), max(len(importDays) - 800, 0)) : days; goals = importArmed ? importGoals : goals; pour = importArmed ? clamp(num(parsed.pour, 5), 2, 15) : pour; entries = importArmed ? [] : entries; importText = importArmed ? "" : importText; importArmed = !importArmed }
+            onTap: { haptic(); days = importArmed ? drop(importDays, max(len(importDays) - 800, 0)) : days; goals = importArmed ? importGoals : goals; pour = importArmed ? clamp(num(parsed.pour, 5), 2, 15) : pour; entries = importArmed ? [] : entries; importText = importArmed ? "" : importText; importArmed = !importArmed }
           }
         }
       }
