@@ -23,15 +23,17 @@ source now = clock every 1m
 let fresh = date == fmtTime(now, "EEEE, MMMM d, yyyy")
 
 // One fetch a day, at 05:00 by the phone's clock. "at" runs even with the page off screen,
-// and needs no live source. armedAt isn't persisted, so a missed hour doesn't fire on the
-// next start: the source runs once at startup anyway.
+// and needs no live source. It re-arms a day on, not from `now`: off screen the clock doesn't
+// tick, so `now` is still before 05:00 and would give the same time, which `at` doesn't run
+// twice. armedAt isn't persisted, so a missed hour doesn't fire on the next start: the
+// source runs once at startup anyway.
 let midnight = now - (num(fmtTime(now, "H")) * 3600 + num(fmtTime(now, "m")) * 60)
 let fetchAt = midnight + 5 * 3600 + (midnight + 5 * 3600 > now ? 0 : 86400)
 state armedAt = 0
-when armedAt == 0 { armedAt = fetchAt }
+when armedAt == 0 && now != null { armedAt = fetchAt }
 at armedAt {
   refresh()
-  armedAt = fetchAt
+  armedAt = armedAt + 24h
 }
 
   onTap: screen()
