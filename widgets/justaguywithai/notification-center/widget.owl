@@ -1,0 +1,423 @@
+widget "notification center" {
+  size: 6x4
+  minSize: 3x2
+
+  meta {
+    owl: 7
+    description: "Batched notifications from apps you pick, delivered at the times of day you choose. Everything else stays in the shade."
+    version: "1.3"
+    license: "MIT"
+    category: "productivity"
+  }
+
+  source n = android.notifications
+  source now = clock every 30s
+
+  state watched = [] persist
+  state known = [] persist
+  state held = [] persist
+  state inbox = [] persist
+  state times = [480, 1080] persist
+  state addH = 8
+  state addM = 0
+  state armed = true persist
+  state due = 0 persist
+  state delivered = [] persist
+  state note = ""
+  state deliver = 0
+  state snap = []
+  state snapSig = ""
+  state token = 0
+  state query = ""
+  state batchOpen = false
+  state extra = [] persist
+
+  let items = n.items ?? []
+  let allowed = n == null || n.available != false
+  let palette = [accent, blue, magenta, cyan, green, orange, yellow, red]
+  let pkgRe = "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+  let sorted = times.filter(t => t >= 0 && t < 1440 && t == floor(t)).unique().sort()
+  let sod = now == null ? null : num(fmtTime(now, "H")) * 3600 + num(fmtTime(now, "m")) * 60 + num(fmtTime(now, "s"))
+  let midnight = sod == null ? null : now - sod
+  let later = sorted.find(m => midnight != null && midnight + m * 60 > now + 45)
+  let nextDue = len(sorted) == 0 || midnight == null ? 0 : later != null ? midnight + later * 60 : midnight + 86400 + sorted[0] * 60
+  let seen = items.filter(i => i.package != null && i.package != "" && i.package != "dev.omalauncher").map(i => {
+    package: i.package,
+    app: i.app != null && i.app != "" ? i.app : i.package,
+    icon: len(i.icon ?? "") < 400 ? (i.icon ?? "") : "",
+    profile: i.profile ?? ""
+  })
+  let merged = (seen + known.filter(k => k.package != null && !seen.any(s => s.package == k.package))).take(80)
+  let added = extra.filter(p => !merged.any(k => k.package == p)).map(p => {package: p, app: p, icon: "", profile: ""})
+  let pool = merged + added + watched.filter(p => !merged.any(k => k.package == p) && !extra.any(e => e == p)).map(p => {package: p, app: p, icon: "", profile: ""})
+  let q = lower(trim(query))
+  let apps = pool.filter(a => q == "" || contains(lower(a.app), q) || contains(lower(a.package), q)).sortBy(a => lower(a.app))
+  let qraw = trim(query)
+  let validPkg = match(qraw, pkgRe) != null && len(qraw) <= 180 && qraw != "dev.omalauncher"
+  let canAdd = validPkg && !pool.any(a => a.package == qraw)
+
+  let pack = armed ? items.filter(i => i.clearable == true && i.key != null && i.key != "" && i.package != null && i.package != "dev.omalauncher" && watched.any(p => p == i.package) && !held.any(h => h.key == i.key) && !inbox.any(h => h.key == i.key) && !delivered.any(k => k == i.key)).take(8).map(i => {
+    key: i.key,
+    app: i.app != null && i.app != "" ? i.app : i.package,
+    package: i.package,
+    icon: len(i.icon ?? "") < 400 ? (i.icon ?? "") : "",
+    title: sub(i.title ?? "", 0, 140),
+    text: sub(i.text ?? "", 0, 240),
+    time: i.time ?? 0,
+    profile: i.profile ?? ""
+  }) : []
+  let packSig = join(pack.map(p => p.key), "\n")
+
+  let names = held.map(h => h.app).unique()
+  let brief = len(held) == 0 ? "" : "${len(held)} from ${join(names.take(4), ", ")}${len(names) > 4 ? "…" : ""}"
+  let waiting = len(held) > 0
+  let released = inbox.map(h => {
+    key: h.key,
+    app: h.app ?? "",
+    package: h.package ?? "",
+    icon: h.icon ?? "",
+    title: h.title ?? "",
+    text: h.text ?? "",
+    time: h.time ?? 0,
+    profile: h.profile ?? "",
+    kind: "batch",
+    clearable: true
+  })
+  let feed = released.sortBy(h => -(h.time ?? 0))
+  let slots = tileHeight == null ? 4 : clamp(floor((tileHeight - 58) / 52), 1, 8)
+  let visible = feed.take(slots)
+  let caughtUp = len(feed) == 0 && !waiting
+  let deliverLine = !armed ? "paused" : waiting ? (due > now ? "${len(held)} batched · ${fmtTime(due, "HH:mm")}" : len(times) == 0 ? "${len(held)} batched · pick a time" : "${len(held)} batched · soon") : ""
+
+  when len(seen) > 0 {
+    known = merged
+  }
+  on items {
+    known = merged
+  }
+
+  when packSig != "" && packSig != snapSig {
+    snap = pack
+    snapSig = packSig
+    token = token + 1
+  }
+  every 5s {
+    snap = packSig == "" || packSig == snapSig ? snap : pack
+    snapSig = packSig == "" || packSig == snapSig ? snapSig : packSig
+    token = packSig == "" || packSig == snapSig ? token : token + 1
+  }
+  on token {
+    notification("dismiss", snap[0].key ?? "")
+    notification("dismiss", snap[1].key ?? "")
+    notification("dismiss", snap[2].key ?? "")
+    notification("dismiss", snap[3].key ?? "")
+    notification("dismiss", snap[4].key ?? "")
+    notification("dismiss", snap[5].key ?? "")
+    notification("dismiss", snap[6].key ?? "")
+    notification("dismiss", snap[7].key ?? "")
+    held = len(snap) == 0 ? held : (snap + held.filter(h => !snap.any(p => p.key == h.key))).take(40)
+  }
+
+  when armed && now != null && nextDue > now && due != nextDue {
+    due = nextDue
+  }
+  when (!armed || len(times) == 0) && due != 0 {
+    due = 0
+  }
+
+  at due {
+    note = len(held) == 0 ? note : brief
+    delivered = len(held) == 0 ? delivered : (held.map(h => h.key) + delivered.filter(k => !held.any(h => h.key == k))).take(200)
+    inbox = len(held) == 0 ? inbox : (held.filter(h => !inbox.any(i => i.key == h.key)) + inbox).take(40)
+    deliver = len(held) == 0 ? deliver : deliver + 1
+    held = []
+    due = 0
+    snapSig = ""
+  }
+  on deliver {
+    notify("Summary", note)
+  }
+
+  onTap: screen()
+
+  component Mark(app, src, d = 32) {
+    let tint = palette[len(app ?? "") % 8]
+    let letter = upper(sub(app ?? "?", 0, 1))
+    let has = src != null && src != ""
+    Box {
+      size: d
+      radius: d / 2
+      clip: true
+      align: center
+      background: has ? alpha(foreground, 0.08) : alpha(tint, 0.18)
+      if has {
+        Image { src: src; size: d; fit: contain }
+      } else {
+        Text { text: letter; bold: true; fontSize: d * 0.42; color: tint; align: center; width: d }
+      }
+    }
+  }
+
+  component Body(h, lines, who, age) {
+    Column {
+      gap: 0
+      fill: width
+      Text { text: "${who} · ${age}"; style: label; color: muted; maxLines: 1 }
+      if h.title != null && h.title != "" {
+        Text { text: h.title; bold: true; maxLines: 1 }
+      }
+      if lines > 0 && h.text != null && h.text != "" && h.text != h.title {
+        Text { text: h.text; style: small; color: muted; maxLines: lines }
+      }
+    }
+  }
+
+  component Item(h, lines = 1) {
+    let age = now == null || h.time == null || h.time == 0 ? "" : (now - h.time) < 45 ? "now" : (now - h.time) < 3600 ? "${floor((now - h.time) / 60)}m" : (now - h.time) < 86400 ? "${floor((now - h.time) / 3600)}h" : "${floor((now - h.time) / 86400)}d"
+    let safePkg = match(h.package ?? "", pkgRe) != null
+    let src = h.icon != null && h.icon != "" && !startsWith(h.icon, "/") && !contains(h.icon, "..") ? h.icon : !safePkg ? "" : h.profile == "work" || h.profile == "clone" ? "app:${h.package}@${h.profile}" : "app:${h.package}"
+    let who = h.profile != null && h.profile != "" ? "${h.app} · ${h.profile}" : h.app
+    Row {
+      gap: 8
+      align: top
+      Mark { app: h.app; src: src }
+      if h.kind == "live" {
+        Column { weight: 1; gap: 0; onTap: notification("open", h.key); Body { h: h; lines: lines; who: who; age: age } }
+      } else {
+        Column { weight: 1; gap: 0; onTap: androidApp(h.package); Body { h: h; lines: lines; who: who; age: age } }
+      }
+      if h.clearable == true && h.kind == "live" {
+        Box {
+          size: 24
+          align: center
+          onTap: notification("dismiss", h.key)
+          Text { text: "󰅖"; font: icon; fontSize: 14; color: muted; align: center }
+        }
+      }
+      if h.clearable == true && h.kind != "live" {
+        Box {
+          size: 24
+          align: center
+          onTap: inbox = inbox.filter(x => x.key != h.key)
+          Text { text: "󰅖"; font: icon; fontSize: 14; color: muted; align: center }
+        }
+      }
+    }
+  }
+
+  if !allowed {
+    Column {
+      fill: true
+      justify: center
+      gap: 6
+      Text { text: "notification center"; style: muted; maxLines: 1 }
+      Text { text: "needs notification access"; style: small }
+      Button { text: "allow"; onTap: notification("open", "") }
+    }
+  } else {
+    Column {
+      gap: 8
+      fill: true
+      Row {
+        align: center
+        Text { text: "notification center"; style: muted; maxLines: 1; weight: 1 }
+        if len(feed) > 0 {
+          Text { text: "${len(feed)}"; style: label; bold: true; color: accent; background: alpha(accent, 0.18); padding: [7, 1]; radius: 9; align: center; width: len("${len(feed)}") * 8 + 16 }
+        }
+      }
+      if deliverLine != "" {
+        Text { text: deliverLine; style: small; color: !armed ? yellow : muted; maxLines: 1 }
+      }
+      if caughtUp {
+        Column {
+          weight: 1
+          align: center
+          justify: center
+          gap: 4
+          Text { text: "󰄬"; font: icon; fontSize: 28; color: green; align: center }
+          Text { text: "all caught up"; style: small; color: muted; align: center }
+        }
+      } else if len(feed) == 0 {
+        Column {
+          weight: 1
+          align: center
+          justify: center
+          gap: 4
+          Text { text: "quiet until ${due > now ? fmtTime(due, "HH:mm") : "the next batch"}"; style: small; color: muted; align: center; maxLines: 2 }
+        }
+      } else {
+        Column {
+          gap: 10
+          weight: 1
+          for h in visible key "${h.kind}${h.key}" {
+            Item { h: h; lines: cols != null && cols < 4 ? 0 : 1 }
+          }
+          if len(feed) > len(visible) {
+            Text { text: "+${len(feed) - len(visible)} more"; style: label; color: muted }
+          }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "notification center"
+    if !allowed {
+      Column {
+        fill: true
+        justify: center
+        gap: 8
+        Text { text: "needs notification access"; style: title }
+        Button { text: "allow"; onTap: notification("open", "") }
+      }
+    } else {
+      Column {
+        scroll: true
+        gap: 16
+        if caughtUp {
+          Column {
+            align: center
+            gap: 4
+            Text { text: "󰄬"; font: icon; fontSize: 28; color: green; align: center }
+            Text { text: "all caught up"; style: small; color: muted; align: center }
+          }
+        }
+        if len(feed) > 0 {
+          Column {
+            gap: 12
+            for h in feed.take(30) key "${h.kind}${h.key}" {
+              Item { h: h; lines: 3 }
+            }
+          }
+        }
+        Row {
+          align: center
+          padding: [0, 6]
+          onTap: { batchOpen = !batchOpen; haptic() }
+          Text { text: "batch controls"; style: title; weight: 1 }
+          Text { text: batchOpen ? "−" : "+"; style: title; color: accent; width: 24; align: end }
+        }
+        if batchOpen {
+        if !armed || waiting {
+          Text {
+            text: !armed ? "paused — batched apps stay in the shade" : "${len(held)} batched · ${due > now ? fmtTime(due, "EEE HH:mm") : len(times) == 0 ? "pick a time" : "soon"}"
+            style: body
+            color: !armed ? yellow : foreground
+          }
+        }
+        Text { text: "schedule"; style: label; color: accent }
+        Row {
+          gap: 8
+          align: bottom
+          Column {
+            gap: 2
+            align: center
+            width: 88
+            Text { text: "h"; style: label; color: muted; align: center; width: 88 }
+            Row {
+              gap: 6
+              justify: center
+              Button { text: "−"; color: muted; onTap: { addH = (addH + 23) % 24; haptic() } }
+              Button { text: "+"; color: muted; onTap: { addH = (addH + 1) % 24; haptic() } }
+            }
+          }
+          Text { text: "${pad(addH, 2, "0")}:${pad(addM, 2, "0")}"; style: title; width: 72; align: center }
+          Column {
+            gap: 2
+            align: center
+            width: 88
+            Text { text: "m"; style: label; color: muted; align: center; width: 88 }
+            Row {
+              gap: 6
+              justify: center
+              Button { text: "−"; color: muted; onTap: { addM = (addM + 45) % 60; haptic() } }
+              Button { text: "+"; color: muted; onTap: { addM = (addM + 15) % 60; haptic() } }
+            }
+          }
+          Button { text: "add"; color: accent; onTap: { times = sort(times.filter(x => x >= 0 && x < 1440 && x == floor(x) && x != addH * 60 + addM) + [addH * 60 + addM]).take(8); haptic() } }
+        }
+        if len(sorted) > 0 {
+          Flow {
+            gap: 6
+            for t in sorted key t {
+              Button { text: "${pad(floor(t / 60), 2, "0")}:${pad(t % 60, 2, "0")}"; color: accent; onTap: { times = times.filter(x => x != t); haptic() } }
+            }
+          }
+          Text { text: "tap a time to remove it"; style: label; color: muted }
+        }
+        Row {
+          gap: 8
+          Button { text: armed ? "pause" : "resume"; color: armed ? muted : accent; onTap: { armed = !armed; haptic() } }
+          if waiting {
+            Button {
+              text: "deliver"
+              color: accent
+              onTap: {
+                note = brief
+                delivered = (held.map(h => h.key) + delivered.filter(k => !held.any(h => h.key == k))).take(200)
+                inbox = (held.filter(h => !inbox.any(i => i.key == h.key)) + inbox).take(40)
+                deliver = deliver + 1
+                held = []
+                snapSig = ""
+                haptic()
+              }
+            }
+          }
+          if len(held) + len(inbox) > 0 {
+            Button { text: "clear"; color: muted; onTap: { delivered = (held.map(h => h.key) + inbox.map(h => h.key) + delivered).take(200); held = []; inbox = []; haptic() } }
+          }
+        }
+        Column {
+          gap: 10
+          Text { text: "apps"; style: label; color: accent }
+          Text { text: "tap to toggle live/batch"; style: small; color: muted; maxLines: 2 }
+          Input {
+            text: query
+            placeholder: "search or com.example.app"
+            onChange: query = value
+            onSubmit: {
+              extra = match(trim(value), pkgRe) != null && len(trim(value)) <= 180 && trim(value) != "dev.omalauncher" ? (extra.filter(p => p != trim(value)) + [trim(value)]).take(20) : extra
+              watched = match(trim(value), pkgRe) != null && len(trim(value)) <= 180 && trim(value) != "dev.omalauncher" ? (watched.filter(p => p != trim(value)) + [trim(value)]).take(40) : watched
+              query = match(trim(value), pkgRe) != null ? "" : query
+              haptic()
+            }
+          }
+          if canAdd {
+            Text {
+              text: "add ${qraw}"
+              style: small
+              color: accent
+              onTap: {
+                extra = (extra.filter(p => p != qraw) + [qraw]).take(20)
+                watched = (watched.filter(p => p != qraw) + [qraw]).take(40)
+                query = ""
+                haptic()
+              }
+            }
+          }
+          if len(apps) == 0 && !canAdd {
+            Text { text: "no match"; style: small; color: muted }
+          }
+          for a in apps.take(40) key a.package {
+            let on = watched.any(p => p == a.package)
+            let src = a.icon != null && a.icon != "" && !startsWith(a.icon, "/") && !contains(a.icon, "..") ? a.icon : match(a.package ?? "", pkgRe) != null ? "app:${a.package}" : ""
+            Row {
+              gap: 10
+              align: center
+              onTap: {
+                watched = on ? watched.filter(p => p != a.package) : (watched + [a.package]).take(40)
+                haptic()
+              }
+              Mark { app: a.app; src: src; d: 28 }
+              Text { text: a.app; weight: 1; maxLines: 1; color: on ? foreground : muted }
+              Text { text: on ? "batch" : "live"; style: label; color: on ? accent : muted; width: 44; align: end }
+            }
+          }
+        }
+        }
+        Text { text: "This widget was created by Grok using Opencode."; style: small; color: muted; maxLines: 2 }
+        Spacer { height: 8 }
+      }
+    }
+  }
+}
