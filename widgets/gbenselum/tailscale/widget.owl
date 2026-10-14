@@ -4,7 +4,7 @@ widget "tailscale" {
   size: 6x5
   minSize: 3x4
 
-  meta { description: "List Tailscale peers, copy an IP or hostname, and open the Android app to toggle the VPN. Requires Tailscale installed and configured on this device."; version: "1.1"; license: "MIT"; category: "system" }
+  meta { description: "List Tailscale peers, copy an IP or hostname, and open the Android app to toggle the VPN. Requires Tailscale installed and configured on this device."; version: "1.2"; license: "MIT"; category: "system" }
 
   requires { pacman: ["iproute2", "bind"] }
 
@@ -15,11 +15,11 @@ widget "tailscale" {
   // back to asking 100.100.100.100 directly since the rootfs resolvers can't
   // reach it. Only /32 host routes are devices; a path like 100.64.0.0/10 is
   // a range, not a peer.
-  source raw = cmd('ip -o -4 route show table all 2>/dev/null | grep "dev tun" | cut -d" " -f1 | grep -v / | sort -u | grep "^100." | grep -v "^100.100.100.100" | while read -r ip; do name=$(getent hosts "$ip" 2>/dev/null | tr -s " " | cut -d" " -f2); [ -z "$name" ] && name=$(dig +short -x "$ip" @100.100.100.100 2>/dev/null | sed "s/\\.$//"); printf "%s %s\n" "$ip" "$name"; done') every 1m
+  source raw = cmd('ip -o -4 route show table all 2>/dev/null | grep "dev tun" | cut -d" " -f1 | grep -v / | sort -u | grep "^100." | grep -v "^100.100.100.100" | while read -r ip; do name=$(getent hosts "$ip" 2>/dev/null | tr -s " " | cut -d" " -f2); [ -z "$name" ] && name=$(dig +short +time=1 +tries=1 -x "$ip" @100.100.100.100 2>/dev/null | grep -v "^;" | head -1 | sed "s/\\.$//"); printf "%s %s\n" "$ip" "$name"; done') every 1m
 
   // A 100.x address on the tun interface means the VPN is up, even when this
   // phone is the only device online. The phone's own route is not a peer.
-  source tun = cmd('ip -o -4 addr show 2>/dev/null | grep ": tun" | grep -oE "inet 100[.][0-9.]+" | head -1') every 1m
+  source tun = cmd('ip -o -4 addr show 2>/dev/null | grep ": tun" | grep -oE "inet 100[.][0-9.]+" | cut -d" " -f2 | head -1') every 1m
 
   let peers = lines(raw).map(l => words(l)).map(w => { ip: w[0], host: w[1] }).filter(p => p.ip != tun).sortBy(p => p.host ?? p.ip)
   let connected = words(tun).length > 0
@@ -93,7 +93,6 @@ widget "tailscale" {
           gap: 10
           justify: center
           weight: 1
-          Text { text: "connected"; style: body; color: green }
           Text { text: "Only this device is online."; style: small; color: muted }
         }
       }
