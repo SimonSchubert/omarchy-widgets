@@ -4,7 +4,7 @@ widget "chess" {
   size: 6x7
   minSize: 4x4
   padding: 0
-  meta { description: "Full chess in a terminal tile: all rules, picture board with smooth moves, tap and keyboard play, six computer levels, hints, undo, clock and saved game. Written in Node.js, no extra packages"; version: "1.4"; license: "MIT"; category: "fun"; owl: 2 }
+  meta { description: "Full chess in a terminal tile: all rules, picture board, tap and keyboard play, six computer levels or two players, hints, undo, clock, pause and a saved game. Node.js only."; version: "1.7"; license: "MIT"; category: "fun"; owl: 2 }
   requires { pacman: ["nodejs"] }
 
   // The game is one Node.js file that this command writes to ~/.cache/owl-chess/chess.js and starts.
@@ -388,7 +388,7 @@ function think(level, msOverride) {
 const fs = require('fs'), os = require('os'), path = require('path');
 const SAVE_FILE = path.join(os.homedir(), '.local', 'state', 'owl-chess', 'game.json');
 const CLOCKS = [{ name: 'Off', base: 0, inc: 0 }, { name: '3 min', base: 180, inc: 0 }, { name: '5 min', base: 300, inc: 0 }, { name: '10 min', base: 600, inc: 0 }, { name: '10+5', base: 600, inc: 5 }, { name: '15+10', base: 900, inc: 10 }];
-const G = { hist: [], keys: [], level: 3, playerWhite: true, flip: false, result: null, clock: 0, nextClock: 0, left: [0, 0], startFen: START_FEN };
+const G = { hist: [], keys: [], level: 3, playerWhite: true, flip: false, result: null, clock: 0, nextClock: 0, left: [0, 0], mode: 0, nextMode: 0, autoFlip: false, paused: false, startFen: START_FEN };
 const PIECE_LETTER = ['', '', 'N', 'B', 'R', 'Q', 'K'];
 const mvFrom = m => m & 63, mvTo = m => (m >> 6) & 63, mvPromo = m => (m >> 12) & 7;
 const uciOf = m => sqName(mvFrom(m)) + sqName(mvTo(m)) + (mvPromo(m) ? '  nbrq'[mvPromo(m)] : '');
@@ -445,14 +445,14 @@ function playMove(m) {
 }
 function undoOne() { const e = G.hist.pop(); if (!e) return false; unmake(e.m); G.keys.pop(); return true; }
 function resetClock() { const c = CLOCKS[G.clock]; G.left = [c.base * 1000, c.base * 1000]; }
-function newGame() { setFen(START_FEN); G.startFen = START_FEN; G.hist = []; G.keys = [keyNow()]; G.result = null; G.clock = G.nextClock; resetClock(); }
+function newGame() { setFen(START_FEN); G.startFen = START_FEN; G.hist = []; G.keys = [keyNow()]; G.result = null; G.clock = G.nextClock; G.mode = G.nextMode; G.paused = false; U.offer = -1; resetClock(); }
 function findMove(from, to, promo) {
   return legalMoves().filter(m => mvFrom(m) === from && mvTo(m) === to && (promo === undefined || mvPromo(m) === promo));
 }
 function save() {
   try {
     fs.mkdirSync(path.dirname(SAVE_FILE), { recursive: true });
-    fs.writeFileSync(SAVE_FILE, JSON.stringify({ v: 2, level: G.level, playerWhite: G.playerWhite, flip: G.flip, clock: G.clock, next: G.nextClock, left: G.left, result: G.result, moves: G.hist.map(h => uciOf(h.m)) }));
+    fs.writeFileSync(SAVE_FILE, JSON.stringify({ v: 2, level: G.level, playerWhite: G.playerWhite, flip: G.flip, clock: G.clock, next: G.nextClock, mode: G.mode, nextMode: G.nextMode, autoFlip: G.autoFlip, paused: G.paused, left: G.left, result: G.result, moves: G.hist.map(h => uciOf(h.m)) }));
   } catch (e) { /* best effort */ }
 }
 function load() {
@@ -469,6 +469,8 @@ function load() {
     if (!G.hist.length) { G.clock = G.nextClock; resetClock(); }
     if (Array.isArray(d.left) && d.left.length === 2 && CLOCKS[G.clock].base) G.left = d.left.map(x => Math.max(0, +x || 0));
     G.result = d.result && d.result.over ? d.result : null;
+    G.mode = d.mode === 1 ? 1 : 0; G.nextMode = d.nextMode === 1 || d.nextMode === 0 ? d.nextMode : G.mode; if (!G.hist.length) G.mode = G.nextMode;
+    G.autoFlip = !!d.autoFlip; G.paused = !!d.paused && !G.result;
   } catch (e) { newGame(); }
 }
 function bookMove() {
@@ -524,7 +526,7 @@ function sprite(type, S) {
 }
 
 // 3x5 pixel font for coordinates
-const FONT = { a: '010101111101101', b: '110101110101110', c: '011100100100011', d: '110101101101110', e: '111100110100111', f: '111100110100100', g: '011100101101011', h: '101101111101101', 1: '010110010010111', 2: '110001010100111', 3: '110001010001110', 4: '101101111001001', 5: '111100110001110', 6: '011100111101111', 7: '111001010010010', 8: '111101111101111' };
+const FONT = { a: '010101111101101', b: '110101110101110', c: '011100100100011', d: '110101101101110', e: '111100110100111', f: '111100110100100', g: '011100101101011', h: '101101111101101', 1: '010110010010111', 2: '110001010100111', 3: '110001010001110', 4: '101101111001001', 5: '111100110001110', 6: '011100111101111', 7: '111001010010010', 8: '111101111101111', p: '111101111100100', u: '101101101101111', s: '011100010001110' };
 
 // palette-indexed frame buffer
 class Frame {
@@ -542,9 +544,10 @@ class Frame {
 }
 
 // ---- sixel encode / decode (P2=1: unset bits leave pixels alone, so colors can be layered)
-function sixelEncode(fr, x0, y0, w, h) {
+function sixelEncode(fr, x0, y0, w, h, padL) {
+  padL = padL || 0; const lead = padL ? '!' + padL + '?' : ''; // '?' sets no pixels: with P2=1 they stay as they are
   const used = new Set(); for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) used.add(fr.px[y * fr.w + x]);
-  let out = '\x1bP0;1;0q"1;1;' + w + ';' + h;
+  let out = '\x1bP0;1;0q"1;1;' + (w + padL) + ';' + h;
   for (const i of used) { const c = fr.pal[i]; out += '#' + i + ';2;' + Math.round(c[0] * 100 / 255) + ';' + Math.round(c[1] * 100 / 255) + ';' + Math.round(c[2] * 100 / 255); }
   const masks = new Map();
   for (let by = 0; by < h; by += 6) {
@@ -552,7 +555,7 @@ function sixelEncode(fr, x0, y0, w, h) {
     for (let r = 0; r < bh; r++) { const base = (y0 + by + r) * fr.w + x0; for (let x = 0; x < w; x++) { const c = fr.px[base + x]; let m = masks.get(c); if (!m) { m = new Uint8Array(w); masks.set(c, m); } m[x] |= 1 << r; } }
     let first = true;
     for (const [c, m] of masks) {
-      out += (first ? '' : '$') + '#' + c; first = false;
+      out += (first ? '' : '$') + '#' + c + lead; first = false;
       let x = 0; while (x < w) { let n = 1; while (x + n < w && m[x + n] === m[x]) n++; const ch = String.fromCharCode(63 + m[x]); out += n > 3 ? '!' + n + ch : ch.repeat(n); x += n; }
     }
     out += '-';
@@ -636,18 +639,18 @@ function flush(skipRows, clear) {
 // ---- state
 const M = { img: false, cw: 0, ch: 0, pix: false };
 let IMG = null;
-const U = { sel: -1, targets: [], cursor: 12, kb: false, last: null, hint: null, thinking: false, promo: null, msg: '', msgUntil: 0, arm: '', armUntil: 0, typed: '', res: { over: false }, hits: [], view: 'game', anim: null, busy: false, needClear: true, token: 0, clkLast: Date.now() };
-const viewBlack = () => G.playerWhite === G.flip;
-const humanSide = () => (G.playerWhite ? 0 : 1);
-const engineSide = () => (G.playerWhite ? 1 : 0);
+const U = { vs: 0, offer: -1, sel: -1, targets: [], cursor: 12, kb: false, last: null, hint: null, thinking: false, promo: null, msg: '', msgUntil: 0, arm: '', armUntil: 0, typed: '', res: { over: false }, hits: [], view: 'game', anim: null, busy: false, needClear: true, token: 0, clkLast: Date.now() };
+// mode 0: you against the computer; mode 1: two people on one phone (the side to move is the human, there is no engine)
+const viewBlack = () => (G.mode ? (G.autoFlip && U.vs === 1) !== G.flip : G.playerWhite === G.flip);
+const humanSide = () => (G.mode ? side : (G.playerWhite ? 0 : 1));
+const engineSide = () => (G.mode ? -1 : (G.playerWhite ? 1 : 0));
 function toast(t, ms) { U.msg = t; U.msgUntil = Date.now() + (ms || 3000); setTimeout(render, (ms || 3000) + 30); }
 
 // Layout: the biggest squares that fit, with a two-row bar (status + buttons) under the board.
 function layout() {
   let best = null;
   for (let sw = 2; sw <= 20; sw++) for (let sh = 1; sh <= 10; sh++) {
-    const lab = 8 * sw + 2 <= W ? 2 : 0, bw = 8 * sw + lab;
-    const fileRow = 8 * sh + 1 + 2 <= H ? 1 : 0, bh = 8 * sh + fileRow;
+    const lab = 0, bw = 8 * sw, fileRow = 0, bh = 8 * sh; // the coordinates sit in the corners of the squares, not around the board
     if (bw > W || bh + 2 > H) continue;
     const d = sw - 2 * sh, vis = sw * sh * 100 - (d > 0 ? d * d * 25 : d * d * 150);
     if (!best || vis > best.vis) best = { sw, sh, bw, bh, lab, fileRow, vis };
@@ -665,10 +668,12 @@ function statusLine() {
   if (Date.now() < U.msgUntil) return { t: U.msg, c: C.yellow };
   if (U.res.over) {
     const t = U.res.short || U.res.text;
-    return { t, c: U.res.win === -1 ? C.yellow : (U.res.win === humanSide() ? C.acc : C.red) };
+    return { t, c: U.res.win === -1 ? C.yellow : (G.mode || U.res.win === humanSide() ? C.acc : C.red) };
   }
+  if (G.paused) return { t: 'Paused', c: C.yellow };
   if (U.thinking) return { t: 'Thinking…', c: C.blue };
   if (U.promo) return { t: 'Promote to…', c: C.yellow };
+  if (G.mode) { const w = side ? 'Black' : 'White'; return { t: inCheck() ? w + ' in check!' : w + ' to move', c: inCheck() ? C.red : C.acc }; }
   if (side === humanSide()) return { t: inCheck() ? 'Check! Your move' : 'Your move', c: inCheck() ? C.red : C.acc };
   return { t: 'Opponent…', c: C.muted };
 }
@@ -697,8 +702,9 @@ function drawBoard(L) {
     if (pc) put(gx, gy, glyph(pc), (pc & 8) ? C.black : C.white, bgc, true);
     else if (isTarget) put(gx, gy, '•', mixc(C.fg, bgc, 0.2), bgc, true);
     if (U.kb && sq === U.cursor) put(px, py, '▏', C.fg, bgc, true);
-    // coordinates in the spare character of edge squares
-    if (sw >= 2 && c === 0 && !lab) put(px + (gi === 0 ? 1 : 0), py, String((sq >> 3) + 1), C.muted, bgc, false);
+    // coordinates in the corners of the edge squares: the rank top left, the file bottom right
+    if (sw >= 2 && c === 0) put(px, py, String((sq >> 3) + 1), C.muted, bgc, false);
+    if (sw >= 2 && r === 7 && px + sw - 1 !== gx) put(px + sw - 1, py + sh - 1, 'abcdefgh'[sq & 7], C.muted, bgc, false);
     U.hits.push({ x: px, y: py, w: sw, h: sh, sq });
   }
   if (lab) for (let r = 0; r < 8; r++) put(bx, by + r * sh + (sh >> 1), String((sqAtDisplay(r, 0) >> 3) + 1), C.muted, C.bg, false);
@@ -717,10 +723,10 @@ function row(y, defs, gap) {
 const fmtClock = ms => { const t = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
 function drawClocks(x, y) {
   if (!CLOCKS[G.clock].base) return 0;
-  const parts = [[humanSide(), 'You '], [engineSide(), 'Opp ']]; let w = 0; for (const p of parts) w += p[1].length + fmtClock(G.left[p[0]]).length + 1; w -= 1;
+  const parts = G.mode ? [[0, 'W '], [1, 'B ']] : [[humanSide(), 'You '], [engineSide(), 'Opp ']]; let w = 0; for (const p of parts) w += p[1].length + fmtClock(G.left[p[0]]).length + 1; w -= 1;
   let cx = x < 0 ? W - w - 1 : x;
   for (const [sd, lab] of parts) {
-    const t = fmtClock(G.left[sd]), run = !U.res.over && G.hist.length && side === sd, low = G.left[sd] < 30000;
+    const t = fmtClock(G.left[sd]), run = !U.res.over && !G.paused && G.hist.length && side === sd, low = G.left[sd] < 30000;
     put(cx, y, lab, C.muted, C.bg, false); cx += lab.length; put(cx, y, t, low ? C.red : (run ? C.fg : C.muted), C.bg, !!run); cx += t.length + 1;
   }
   return w;
@@ -729,38 +735,47 @@ function drawBar(L) {
   const st = statusLine();
   put(0, L.barY, ' ' + st.t.slice(0, W - 1), st.c, C.bg, true);
   let clockDone = false;
-  if (CLOCKS[G.clock].base && st.t.length + 28 <= W) { drawClocks(-1, L.barY); clockDone = true; }
+  if (CLOCKS[G.clock].base && st.t.length + 2 + drawClocks(-1, -1) <= W) { drawClocks(-1, L.barY); clockDone = true; } // drawClocks(-1, -1) only measures
   const y = L.barY + 1;
   if (U.promo) { row(y, [[glyph(5 | (side << 3)) + ' Q', { promo: 5 }, true], [glyph(4 | (side << 3)) + ' R', { promo: 4 }, true], [glyph(3 | (side << 3)) + ' B', { promo: 3 }, true], [glyph(2 | (side << 3)) + ' N', { promo: 2 }, true]], 1); return; }
-  const mine = side === humanSide() && !U.res.over && !U.thinking;
-  if (W >= 30) row(y, [['New', 'new', U.arm === 'new'], ['Undo', 'undo', false, !G.hist.length], ['Hint', 'hint', false, !mine], ['Flip', 'flip'], ['Menu', 'menu']], 1);
-  else row(y, [['Undo', 'undo', false, !G.hist.length], ['Hint', 'hint', false, !mine], ['Menu', 'menu']], 1);
+  const mine = side === humanSide() && !U.res.over && !U.thinking && !G.mode && !G.paused, pz = [G.paused ? 'Resume' : 'Pause', 'pause', G.paused, U.res.over && !G.paused];
+  if (W >= 30) row(y, [['New', 'new', U.arm === 'new'], ['Undo', 'undo', false, !G.hist.length || G.paused], ['Hint', 'hint', false, !mine], pz, ['Menu', 'menu']], 1);
+  else row(y, [['Undo', 'undo', false, !G.hist.length || G.paused], ['Hint', 'hint', false, !mine], pz, ['Menu', 'menu']], 1);
   // spare rows: last moves and captured material
   if (L.extra >= 1) {
     const caps = [[], []]; for (const h of G.hist) caps[h.by].push(h.cap & 7);
     const val = [0, 1, 3, 3, 5, 9, 0]; const mat = [0, 0]; for (const s of [0, 1]) for (const t of caps[s]) mat[s] += val[t];
-    const diff = mat[humanSide()] - mat[engineSide()];
+    const diff = G.mode ? mat[0] - mat[1] : mat[humanSide()] - mat[engineSide()];
     const last = G.hist.slice(-4).map((h, i, a) => { const n = G.hist.length - a.length + i; return (n % 2 === 0 ? (n / 2 + 1) + '.' : '') + h.san; }).join(' ');
-    put(1, y + 1, (last + (diff ? '  ' + (diff > 0 ? '+' : '') + diff : '')).slice(0, W - 1), C.muted, C.bg, false);
+    put(1, y + 1, (last + (diff ? '  ' + (G.mode ? (diff > 0 ? 'W+' + diff : 'B+' + -diff) : (diff > 0 ? '+' : '') + diff) : '')).slice(0, W - 1), C.muted, C.bg, false);
     if (CLOCKS[G.clock].base && !clockDone) drawClocks(-1, y + 1);
   }
 }
 function drawMenu() {
   fillRect(0, 0, W, H, C.bg); const lv = LEVELS[G.level - 1];
-  const bw = M.img ? Math.min(W, Math.max(14, Math.floor(W * 0.5))) : Math.min(W, 22), x = (W - bw) >> 1;
-  const items = [
-    ['MENU', null], ['Level ' + G.level + '/' + LEVELS.length + ' ' + lv.name, null], ['pm', null],
-    [U.arm === 'new' ? 'Tap again!' : 'New game', 'new', U.arm === 'new'], [G.playerWhite ? 'Play Black' : 'Play White', 'side', U.arm === 'side'],
-    ['Flip board', 'flip'], ['Clock: ' + CLOCKS[G.nextClock].name, 'clock'], ['Offer draw', 'draw'], [U.arm === 'resign' ? 'Tap again!' : 'Resign', 'resign', U.arm === 'resign'], ['Moves', 'moves'], ['Close', 'close']
-  ];
-  const step = H >= items.length * 2 + 1 ? 2 : 1; let y = Math.max(0, (H - (items.length * step - (step - 1))) >> 1);
-  for (const it of items) {
-    if (it[0] === 'MENU') { put(x + ((bw - 4) >> 1), y, 'MENU', C.acc, C.bg, true); }
-    else if (it[0] === 'pm') { const h = Math.floor((bw - 1) / 2); button(x, y, h, '−', 'lvm', false); button(x + bw - h, y, h, '+', 'lvp', false); }
-    else if (it[1] === null) put(x + ((bw - it[0].length) >> 1), y, it[0], C.fg, C.bg, true);
-    else button(x, y, bw, it[0], it[1], !!it[2]);
-    y += step;
-  }
+  const offered = U.offer === G.hist.length;
+  // buttons in the order they are paired: two columns on a normal screen, one on a narrow one
+  const defs = [[U.arm === 'new' ? 'Tap again!' : 'New game', 'new', U.arm === 'new'], [G.paused ? 'Resume game' : 'Pause game', 'pause', G.paused], ['Mode: ' + (G.nextMode ? '2 players' : 'Computer'), 'mode']];
+  if (G.mode) defs.push(['Flip board', 'flip'], ['Auto-flip: ' + (G.autoFlip ? 'On' : 'Off'), 'autoflip']); else defs.push([G.playerWhite ? 'Play Black' : 'Play White', 'side', U.arm === 'side'], ['Flip board', 'flip']);
+  defs.push(['Clock: ' + CLOCKS[G.nextClock].name, 'clock'], [offered ? 'Accept draw' : 'Offer draw', 'draw', offered], [U.arm === 'resign' ? 'Tap again!' : 'Resign', 'resign', U.arm === 'resign'], ['Moves', 'moves'], ['Close', 'close']);
+  const two = W >= 34, gx = 2, colW = two ? Math.floor((W - 4 - gx) / 2) : (M.img ? Math.min(W, Math.max(18, Math.floor(W * 0.6))) : Math.min(W, 22));
+  const totalW = two ? colW * 2 + gx : colW, x0 = (W - totalW) >> 1, per = two ? 2 : 1;
+  const seq = [{ k: 'title' }, { k: 'label' }]; if (!G.mode) seq.push({ k: 'pm' });
+  for (let i = 0; i < defs.length; i += per) seq.push({ k: 'btns', d: defs.slice(i, i + per) });
+  const height = step => seq.length * step - (step - 1) + 0, gapAfterTitle = 1;
+  const step = height(2) + 2 + (gapAfterTitle - 2) <= H ? 2 : 1; // keep the last two rows free for the notes below
+  const blockH = (seq.length - 1) * step + 1 - (step - gapAfterTitle);
+  let y = Math.max(0, (H - 2 - blockH) >> 1);
+  seq.forEach((r, i) => {
+    if (r.k === 'title') put(x0 + ((totalW - 4) >> 1), y, 'MENU', C.acc, C.bg, true);
+    else if (r.k === 'label') { const t = G.mode ? 'Two players' : 'Level ' + G.level + '/' + LEVELS.length + ' ' + lv.name; put(x0 + ((totalW - t.length) >> 1), y, t, C.fg, C.bg, true); }
+    else if (r.k === 'pm') { const h = Math.floor((totalW - 1) / 2); button(x0, y, h, '−', 'lvm', false); button(x0 + totalW - h, y, h, '+', 'lvp', false); }
+    else r.d.forEach((d, j) => { const w = r.d.length < per ? totalW : colW; button(x0 + j * (colW + gx), y, w, d[0], d[1], !!d[2]); });
+    y += i === 0 ? gapAfterTitle : step;
+  });
+  const dev = 'Developer: Vitalii Khomenko', pend = 'Applies from the next game';
+  put(Math.max(0, (W - dev.length) >> 1), H - 1, dev.slice(0, W), C.muted, C.bg, false);
+  if ((G.nextMode !== G.mode || G.nextClock !== G.clock) && y < H - 2) put(Math.max(0, (W - pend.length) >> 1), H - 2, pend.slice(0, W), C.yellow, C.bg, false);
 }
 function drawMoves() {
   fillRect(0, 0, W, H, C.bg); put((W - 5) >> 1, 0, 'MOVES', C.acc, C.bg, true);
@@ -771,10 +786,12 @@ function drawMoves() {
   button((W - 8) >> 1, H - 1, 8, 'Back', 'close', false);
 }
 function render() {
+  if (!U.started) return; // the first picture waits for the terminal's answers (see start)
+  if (!U.anim) U.vs = side;
   if (M.img) { if (!U.anim) renderImg(); return; }
   initBuf(); U.hits = [];
   if (U.view === 'menu') drawMenu(); else if (U.view === 'moves') drawMoves();
-  else { const L = layout(); drawBoard(L); drawBar(L); }
+  else { const L = layout(); drawBoard(L); if (G.paused) dimBoard(L); drawBar(L); }
   flush();
 }
 
@@ -809,9 +826,9 @@ const PCOL = { wf: [246, 242, 226], we: [8, 12, 10], bf: [28, 36, 32], be: [226,
 function imgLayout() {
   const availW = W * M.cw, availH = (H - 2) * M.ch;
   const sq = Math.max(24, Math.floor(Math.min(availW, availH) / 8));
-  const bxc = Math.max(0, Math.floor((availW - 8 * sq) / 2 / M.cw));
+  const off = Math.max(0, Math.floor((availW - 8 * sq) / 2)), bxc = Math.floor(off / M.cw), sub = off - bxc * M.cw; // centred to the pixel: whole cells plus a shift inside the cell
   const rows = Math.min(H - 2, Math.ceil(8 * sq / M.ch));
-  return { sq, bxc, rows, wpx: 8 * sq, barY: rows, extra: H - rows - 2 };
+  return { sq, bxc, sub, rows, wpx: 8 * sq, barY: rows, extra: H - rows - 2 };
 }
 function sqTint(sq, fr, ov) {
   let base = ((sq & 7) + (sq >> 3)) % 2 === 1 ? C.light : C.dark; const pc = ov && ov.has(sq) ? ov.get(sq) : bd[sq];
@@ -835,14 +852,31 @@ function composeBoard(L, ov) {
     if (U.targets.includes(s) && pc) fr.disc(x + sq / 2, y + sq / 2, sq * 0.46, fr.col(mixc(C.fg, bg, 0.3)), Math.max(2, k * 2));
     if (U.kb && s === U.cursor) { const a = fr.col(C.acc), t = Math.max(2, k); fr.rect(x, y, sq, t, a); fr.rect(x, y + sq - t, sq, t, a); fr.rect(x, y, t, sq, a); fr.rect(x + sq - t, y, t, sq, a); }
   }
+  if (G.paused) pausedOverlay(fr, sq);
   return fr;
 }
 const cellPos = (L, px, py) => '\x1b[' + (Math.floor(py / M.ch) + 1) + ';' + (L.bxc + Math.floor(px / M.cw) + 1) + 'H';
 function drawImageMode() {
   const L = imgLayout(); IMG = L;
   const fr = composeBoard(L, null);
-  flush.after = '\x1b[1;' + (L.bxc + 1) + 'H' + sixelEncode(fr, 0, 0, fr.w, fr.h);
+  flush.after = '\x1b[1;' + (L.bxc + 1) + 'H' + sixelEncode(fr, 0, 0, fr.w, fr.h, L.sub);
   return L;
+}
+// paused: the board goes darker and a pause sign with the word 'paused' sits in its middle
+function dimBoard(L) {
+  const x0 = L.bx, x1 = Math.min(W, L.bx + L.bw), y1 = Math.min(H, L.bh), dim = c => rgb(mixc(c.split(";").map(Number), [0, 0, 0], 0.42));
+  for (let y = 0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = y * W + x; FGs[i] = dim(FGs[i]); BGs[i] = dim(BGs[i]); }
+  const t = ' PAUSED ', cy = Math.min(H - 1, y1 >> 1);
+  put(Math.max(0, x0 + ((L.bw - t.length) >> 1)), cy, t, C.yellow, C.bg, true);
+}
+function pausedOverlay(fr, sq) {
+  const N = 8 * sq; fr.pal = fr.pal.map(c => mixc(c, [0, 0, 0], 0.42)); fr.map = new Map();
+  const k = Math.max(2, Math.round(sq / 9)), word = 'paused', tw = word.length * 4 * k - k, th = 5 * k, ih = 8 * k, gap = 3 * k, pad = 3 * k;
+  const bw = tw + 2 * pad, bh = ih + gap + th + 2 * pad, x0 = (N - bw) >> 1, y0 = (N - bh) >> 1, cx = N >> 1;
+  fr.rect(x0, y0, bw, bh, fr.col(mixc(C.bg, [0, 0, 0], 0.35)));
+  const ink = fr.col(C.yellow);
+  fr.rect(cx - 3 * k, y0 + pad, 2 * k, ih, ink); fr.rect(cx + k, y0 + pad, 2 * k, ih, ink);
+  fr.text(word, cx - (tw >> 1), y0 + pad + ih + gap, k, ink);
 }
 function renderImg() {
   initBuf(); U.hits = [];
@@ -855,7 +889,7 @@ function renderImg() {
   }
 }
 function squareAtPx(px, py) {
-  if (!IMG) return -1; const x = px - IMG.bxc * M.cw, y = py;
+  if (!IMG) return -1; const x = px - IMG.bxc * M.cw - IMG.sub, y = py;
   if (x < 0 || y < 0 || x >= IMG.wpx || y >= IMG.wpx) return -1;
   return sqAtDisplay(Math.floor(y / IMG.sq), Math.floor(x / IMG.sq));
 }
@@ -881,13 +915,13 @@ function animateImg(m, done) {
     const w = x1 - x0, h = y1 - y0, reg = Object.create(Frame.prototype); reg.w = w; reg.h = h; reg.pal = base.pal; reg.map = base.map; reg.px = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) reg.px.set(base.px.subarray((y0 + y) * base.w + x0, (y0 + y) * base.w + x0 + w), y * w);
     movers.forEach((mv, i) => reg.blit(mv.sp, boxes[i].x - x0, boxes[i].y - y0, mv.cf, mv.ce, mv.ce));
-    process.stdout.write('\x1b[?2026h' + cellPos(L, x0, y0).replace(/;(\d+)H$/, (q, c) => ';' + (+c) + 'H') + sixelEncode(reg, 0, 0, w, h) + '\x1b[?2026l');
+    process.stdout.write('\x1b[?2026h' + cellPos(L, x0, y0).replace(/;(\d+)H$/, (q, c) => ';' + (+c) + 'H') + sixelEncode(reg, 0, 0, w, h, L.sub) + '\x1b[?2026l');
     prev = boxes;
   };
   // first frame: the whole board with the mover on its start square
   const full = Object.create(Frame.prototype); Object.assign(full, { w: base.w, h: base.h, pal: base.pal, map: base.map, px: base.px.slice() });
   movers.forEach(mv => full.blit(mv.sp, mv.a.x, mv.a.y, mv.cf, mv.ce, mv.ce));
-  process.stdout.write('\x1b[?2026h' + '\x1b[1;' + (L.bxc + 1) + 'H' + sixelEncode(full, 0, 0, full.w, full.h) + '\x1b[?2026l'); prev = movers.map(mv => ({ x: mv.a.x, y: mv.a.y }));
+  process.stdout.write('\x1b[?2026h' + '\x1b[1;' + (L.bxc + 1) + 'H' + sixelEncode(full, 0, 0, full.w, full.h, L.sub) + '\x1b[?2026l'); prev = movers.map(mv => ({ x: mv.a.x, y: mv.a.y }));
   setTimeout(function tick() {
     const p = Math.min(1, (Date.now() - t0) / dur);
     if (p >= 1) { U.anim = null; U.busy = false; render(); done && done(); return; }
@@ -923,7 +957,7 @@ function afterMove(m) {
 }
 function maybeEngine() {
   U.res = gameResult();
-  if (U.res.over || side !== engineSide() || U.thinking || U.busy) { render(); return; }
+  if (G.paused || U.res.over || side !== engineSide() || U.thinking || U.busy) { render(); return; }
   U.thinking = true; const tok = ++U.token; render(); const t0 = Date.now();
   const finish = uci => setTimeout(() => {
     if (tok !== U.token || !U.thinking) return; U.thinking = false;
@@ -936,7 +970,7 @@ function maybeEngine() {
 }
 function humanMove(m) { playMove(m); afterMove(m); animate(m, () => maybeEngine()); }
 function trySelect(sq) {
-  if (U.thinking || U.busy || U.res.over || U.promo || side !== humanSide()) return;
+  if (G.paused || U.thinking || U.busy || U.res.over || U.promo || side !== humanSide()) return;
   const pc = bd[sq];
   if (U.sel >= 0 && U.targets.includes(sq)) {
     const c = findMove(U.sel, sq);
@@ -949,7 +983,7 @@ function trySelect(sq) {
 }
 function doPromo(t) { if (!U.promo) return; const c = findMove(U.promo.from, U.promo.to, t); if (c.length) humanMove(c[0]); }
 function confirmed(kind) {
-  if (!G.hist.length || U.res.over) return true;
+  if (U.res.over) return true; // a game in progress (even an empty one) needs a second tap
   if (U.arm === kind && Date.now() < U.armUntil) return true;
   U.arm = kind; U.armUntil = Date.now() + 4000; if (U.view === 'game') toast('Tap ' + (kind === 'new' ? 'New' : 'Side') + ' again to confirm', 4000); else setTimeout(render, 4050);
   render(); return false;
@@ -961,7 +995,7 @@ function renderBar() {
 }
 function clockTick() {
   const now = Date.now(), dt = now - U.clkLast; U.clkLast = now;
-  if (!CLOCKS[G.clock].base || U.view !== 'game' || U.res.over || !G.hist.length) return;
+  if (!CLOCKS[G.clock].base || U.view !== 'game' || U.res.over || !G.hist.length || G.paused) return;
   G.left[side] -= dt;
   if (G.left[side] <= 0) {
     G.left[side] = 0; cancelThink();
@@ -975,20 +1009,22 @@ function act(a) {
   if (a === 'menu') { U.view = 'menu'; return render(); }
   if (a === 'moves') { U.view = 'moves'; return render(); }
   if (a === 'close') { U.view = U.view === 'moves' ? 'menu' : 'game'; return render(); }
-  const okBusy = ['lvm', 'lvp', 'flip', 'glyphs'], okThinking = okBusy.concat(['new', 'side', 'undo', 'resign', 'clock']);
+  const okBusy = ['lvm', 'lvp', 'flip', 'glyphs'], okThinking = okBusy.concat(['new', 'side', 'undo', 'resign', 'clock', 'pause', 'mode', 'autoflip']);
   if (U.busy && !okBusy.includes(a)) return;
   if (U.thinking && !okThinking.includes(a)) return;
+  if (G.paused && ['undo', 'hint', 'resign', 'draw'].includes(a)) return; // paused: the board and the clocks are locked
   switch (a) {
     case 'new': if (!confirmed('new')) return; cancelThink(); newGame(); resetBoard(); maybeEngine(); return;
-    case 'side': if (!confirmed('side')) return; cancelThink(); G.playerWhite = !G.playerWhite; G.flip = false; newGame(); resetBoard(); maybeEngine(); return;
+    case 'side': if (G.mode || !confirmed('side')) return; cancelThink(); G.playerWhite = !G.playerWhite; G.flip = false; newGame(); resetBoard(); maybeEngine(); return;
     case 'undo': {
       if (!G.hist.length) return;
       if (G.result && G.result.time) { toast('The game is over', 2000); return; }
-      cancelThink(); G.result = null; undoOne(); if (G.hist.length && side === engineSide()) undoOne();
+      cancelThink(); G.result = null; U.offer = -1; undoOne(); if (G.hist.length && side === engineSide()) undoOne();
       const l = G.hist[G.hist.length - 1]; U.last = l ? { from: mvFrom(l.m), to: mvTo(l.m) } : null;
       U.sel = -1; U.targets = []; U.hint = null; U.promo = null; save(); U.res = gameResult(); maybeEngine(); return;
     }
     case 'hint': {
+      if (G.mode) { toast('No hints in 2-player games', 2500); return render(); }
       if (U.res.over || side !== humanSide()) return;
       U.thinking = true; const tok = ++U.token; toast('Looking for a move…', 5000); render();
       thinkAsync(5, 1200, r => { if (tok !== U.token) return; U.thinking = false; U.msgUntil = 0; const m = r.move ? moveFromUci(r.move) : 0; if (m) U.hint = { from: mvFrom(m), to: mvTo(m) }; render(); });
@@ -997,9 +1033,15 @@ function act(a) {
     case 'resign': {
       if (U.res.over) return;
       if (!(U.arm === 'resign' && Date.now() < U.armUntil)) { U.arm = 'resign'; U.armUntil = Date.now() + 4000; setTimeout(render, 4050); return render(); }
-      cancelThink(); G.result = { over: true, win: engineSide(), text: 'You resigned', short: 'You resigned' }; U.res = G.result; U.arm = ''; U.view = 'game'; save(); break;
+      cancelThink(); G.result = G.mode ? { over: true, win: side ^ 1, text: (side ? 'Black' : 'White') + ' resigned', short: (side ? 'Black' : 'White') + ' resigned' } : { over: true, win: engineSide(), text: 'You resigned', short: 'You resigned' }; U.res = G.result; U.arm = ''; U.view = 'game'; save(); break;
     }
     case 'draw': {
+      if (G.mode) { // two people: one offers, the other accepts with its own tap (the offer lapses with the next move)
+        if (U.res.over || G.hist.length < 2) { toast(U.res.over ? 'Not now' : 'Too early for a draw', 2000); U.view = 'game'; return render(); }
+        U.view = 'game';
+        if (U.offer !== G.hist.length) { U.offer = G.hist.length; toast('Draw offered: accept it in the Menu', 6000); return render(); }
+        G.result = { over: true, win: -1, text: 'Draw agreed', short: 'Draw agreed' }; U.res = G.result; U.offer = -1; save(); toast('Draw agreed', 3000); return render();
+      }
       if (U.res.over || side !== humanSide() || U.thinking) { toast('Not now', 1800); U.view = 'game'; return render(); }
       if (G.hist.length < 8) { toast('Too early for a draw', 2500); U.view = 'game'; return render(); }
       U.view = 'game'; U.thinking = true; const tok = ++U.token; toast('Opponent is thinking…', 4000); render();
@@ -1013,6 +1055,15 @@ function act(a) {
     }
     case 'clock': G.nextClock = (G.nextClock + 1) % CLOCKS.length; if (!G.hist.length) { G.clock = G.nextClock; resetClock(); } else toast('Clock applies to the next game', 2500); save(); break;
     case 'flip': G.flip = !G.flip; save(); break;
+    case 'autoflip': G.autoFlip = !G.autoFlip; save(); break;
+    case 'mode':
+      G.nextMode = G.nextMode ? 0 : 1;
+      if (!G.hist.length) { cancelThink(); G.mode = G.nextMode; U.arm = ''; resetBoard(); maybeEngine(); return; }
+      toast('Mode applies to the next game', 2500); save(); break;
+    case 'pause':
+      if (U.res.over) return;
+      if (!G.paused) { cancelThink(); G.paused = true; U.sel = -1; U.targets = []; U.hint = null; U.promo = null; U.arm = ''; U.view = 'game'; save(); render(); return; }
+      G.paused = false; U.clkLast = Date.now(); U.view = 'game'; save(); render(); maybeEngine(); return;
     case 'glyphs': ascii = !ascii; break;
     case 'lvm': G.level = Math.max(1, G.level - 1); save(); break;
     case 'lvp': G.level = Math.min(LEVELS.length, G.level + 1); save(); break;
@@ -1044,18 +1095,21 @@ function key(k) {
     case '\x1b[D': return move(0, -1);
     case '\r': case ' ': return trySelect(U.cursor);
     case '\x1b': U.sel = -1; U.targets = []; U.typed = ''; return render();
+    case 'p': return act('pause');
     case 'n': return act('new'); case 'u': return act('undo'); case '?': return act('hint'); case 'x': return act('flip'); case 'm': return act('menu');
     case '+': case '=': return act('lvp'); case '-': return act('lvm'); case 's': return act('side'); case 'i': return act('glyphs');
   }
-  if (k >= '1' && k <= '6' && !U.typed) { G.level = +k; save(); toast('Level ' + G.level + ': ' + LEVELS[G.level - 1].name, 2000); return render(); }
+  if (k >= '1' && k <= '6' && !U.typed && !G.mode) { G.level = +k; save(); toast('Level ' + G.level + ': ' + LEVELS[G.level - 1].name, 2000); return render(); }
   if (/^[a-h]$/i.test(k)) { U.typed = k.toLowerCase(); U.kb = true; return; }
   if (/^[1-8]$/.test(k) && U.typed) { const sq = U.typed.charCodeAt(0) - 97 + (+k - 1) * 8; U.typed = ''; U.cursor = sq; return trySelect(sq); }
 }
 function onData(buf) {
   let s = buf.toString('utf8');
   s = s.replace(/\x1b\[6;(\d+);(\d+)t/g, (q, h, w) => { M.ch = +h; M.cw = +w; return ''; })
-    .replace(/\x1b\[\?([\d;]*)c/g, (q, p) => { M.sixel = p.split(';').includes('4'); return ''; })
+    .replace(/\x1b\[([458]);(\d+);(\d+)t/g, (q, k, a, b) => { M['r' + (k === '4' ? 14 : k === '5' ? 15 : 18)] = [+a, +b]; return ''; })
+    .replace(/\x1b\[\?([\d;]*)c/g, (q, p) => { M.sixel = p.split(';').includes('4'); M.da = true; return ''; })
     .replace(/\x1b\[\?1016;(\d)\$y/g, (q, v) => { M.pixOk = +v === 1 || +v === 2; return ''; });
+  if (M.da && (!U.started || (!M.img && M.sixel && M.cw > 0 && M.ch > 0))) start(); // the DA1 answer comes last, so the others are in
   const re = /\x1b\[<(\d+);(\d+);(\d+)([Mm])|\x1b\[[A-D]|\x1b|[\s\S]/g; let m;
   while ((m = re.exec(s))) {
     if (m[4]) { if (m[4] === 'M' && (+m[1] & 3) === 0 && !(+m[1] & 32) && !(+m[1] & 64)) click(+m[2], +m[3]); }
@@ -1064,6 +1118,7 @@ function onData(buf) {
 }
 function cleanup() { process.stdout.write('\x1b[?1016l\x1b[?1000l\x1b[?1006l\x1b[?7h\x1b[?25h\x1b[?1049l'); try { process.stdin.setRawMode(false); } catch (e) { /* ignore */ } }
 function start() {
+  U.started = true;
   M.img = !!(M.sixel && M.cw > 0 && M.ch > 0 && !process.env.CHESS_NOIMG); M.pix = !!(M.img && M.pixOk);
   if (M.pix) process.stdout.write('\x1b[?1016h');
   U.needClear = true; render(); maybeEngine();
@@ -1079,12 +1134,11 @@ function main() {
   // ask the terminal for its cell size in pixels, sixel support and pixel mouse reports; fall back to text-only pieces
   setInterval(clockTick, 500);
   if (process.env.CHESS_CELL) { const [w, h] = process.env.CHESS_CELL.split('x'); M.cw = +w; M.ch = +h; M.sixel = true; start(); return; }
-  process.stdout.write('\x1b[16t\x1b[c\x1b[?1016$p');
-  setTimeout(start, 450);
+  process.stdout.write('\x1b[?1016$p\x1b[16t\x1b[14t\x1b[15t\x1b[18t\x1b[c'); // DA1 last: when it is answered the rest is too
+  setTimeout(() => { if (!U.started) start(); }, 4000); // no answer at all: text-only fallback (switches to the picture if the answer comes late)
 }
 if (!isMainThread) workerLoop();
 else if ((require.main === module || process.env.CHESS_RUN) && !process.env.CHESS_NOMAIN) main();
-
 CHESS_JS_EOF
 exec node ~/.cache/owl-chess/chess.js
 """
