@@ -4,7 +4,7 @@ widget "sudoku" {
   size: 6x7
   minSize: 4x4
   padding: 0
-  meta { description: "Sudoku in a terminal tile: every puzzle has exactly one solution. Picture grid, tap and keyboard play, pencil notes, check, hints, undo, pausable timer, 3 levels, saved game. Node.js only."; version: "1.5"; license: "MIT"; category: "fun"; owl: 2 }
+  meta { description: "Sudoku in a terminal tile: every puzzle has exactly one solution. Picture grid, tap and keyboard play, pencil notes, check, hints, undo, pausable timer, 3 levels, saved game. Node.js only."; version: "1.6"; license: "MIT"; category: "fun"; owl: 2 }
   requires { pacman: ["nodejs"] }
 
   // The game is one Node.js file that this command writes to ~/.cache/owl-sudoku/sudoku.js and starts.
@@ -140,9 +140,10 @@ class Frame {
   }
 }
 // P2=1: unset bits leave pixels alone
-function sixelEncode(fr, x0, y0, w, h) {
+function sixelEncode(fr, x0, y0, w, h, padL) {
+  padL = padL || 0; const lead = padL ? '!' + padL + '?' : ''; // '?' sets no pixels: with P2=1 they stay as they are
   const used = new Set(); for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) used.add(fr.px[y * fr.w + x]);
-  let out = '\x1bP0;1;0q"1;1;' + w + ';' + h;
+  let out = '\x1bP0;1;0q"1;1;' + (w + padL) + ';' + h;
   for (const i of used) { const c = fr.pal[i]; out += '#' + i + ';2;' + Math.round(c[0] * 100 / 255) + ';' + Math.round(c[1] * 100 / 255) + ';' + Math.round(c[2] * 100 / 255); }
   const masks = new Map();
   for (let by = 0; by < h; by += 6) {
@@ -150,7 +151,7 @@ function sixelEncode(fr, x0, y0, w, h) {
     for (let r = 0; r < bh; r++) { const base = (y0 + by + r) * fr.w + x0; for (let x = 0; x < w; x++) { const c = fr.px[base + x]; let m = masks.get(c); if (!m) { m = new Uint8Array(w); masks.set(c, m); } m[x] |= 1 << r; } }
     let first = true;
     for (const [c, m] of masks) {
-      out += (first ? '' : '$') + '#' + c; first = false;
+      out += (first ? '' : '$') + '#' + c + lead; first = false;
       let x = 0; while (x < w) { let n = 1; while (x + n < w && m[x + n] === m[x]) n++; const ch = String.fromCharCode(63 + m[x]); out += n > 3 ? '!' + n + ch : ch.repeat(n); x += n; }
     }
     out += '-';
@@ -364,6 +365,7 @@ function drawRules() {
   else button((W - 8) >> 1, H - 1, 8, 'Back', 'close', false);
 }
 function render() {
+  if (!U.started) return; // the first picture waits for the terminal's answers (see start)
   if (M.img) { renderImg(); return; }
   initBuf(); U.hits = [];
   if (U.view === 'menu') drawMenu(); else if (U.view === 'rules') drawRules();
@@ -375,8 +377,8 @@ function render() {
 function imgLayout() {
   const ph = padRows(), bottom = 2 + ph, availW = W * M.cw, availH = (H - bottom) * M.ch;
   const sq = Math.max(18, Math.floor(Math.min(availW, availH) / 9));
-  const bxc = Math.max(0, Math.floor((availW - 9 * sq) / 2 / M.cw)), rows = Math.min(H - bottom, Math.ceil(9 * sq / M.ch));
-  return { sq, bxc, rows, wpx: 9 * sq, barY: rows, ph, extra: H - rows - bottom };
+  const off = Math.max(0, Math.floor((availW - 9 * sq) / 2)), bxc = Math.floor(off / M.cw), sub = off - bxc * M.cw, rows = Math.min(H - bottom, Math.ceil(9 * sq / M.ch));
+  return { sq, bxc, sub, rows, wpx: 9 * sq, barY: rows, ph, extra: H - rows - bottom };
 }
 function composeBoard(L) {
   const sq = L.sq, N = 9 * sq, fr = new Frame(N, N), ctx = makeCtx();
@@ -404,7 +406,7 @@ function renderImg() {
   initBuf(); U.hits = [];
   if (U.view === 'game') {
     const L = imgLayout(); IMG = L; const fr = composeBoard(L);
-    flush.after = '\x1b[1;' + (L.bxc + 1) + 'H' + sixelEncode(fr, 0, 0, fr.w, fr.h);
+    flush.after = '\x1b[1;' + (L.bxc + 1) + 'H' + sixelEncode(fr, 0, 0, fr.w, fr.h, L.sub);
     drawBar(L);
     const clear = U.needClear; U.needClear = false; flush(L.rows, clear);
   } else {
@@ -419,7 +421,7 @@ function renderBar() {
   initBuf(); U.hits = []; drawBar(IMG); flush(IMG.rows, false);
 }
 function cellAtPx(px, py) {
-  if (!IMG) return -1; const x = px - IMG.bxc * M.cw, y = py;
+  if (!IMG) return -1; const x = px - IMG.bxc * M.cw - IMG.sub, y = py;
   if (x < 0 || y < 0 || x >= IMG.wpx || y >= IMG.wpx) return -1;
   return Math.floor(y / IMG.sq) * 9 + Math.floor(x / IMG.sq);
 }
@@ -477,7 +479,7 @@ function check() {
   render();
 }
 function confirmed(kind) {
-  if (G.solved || !G.undo.length) return true;
+  if (G.solved) return true; // a game in progress (even an untouched one) needs a second tap
   if (U.arm === kind && Date.now() < U.armUntil) return true;
   U.arm = kind; U.armUntil = Date.now() + 4000;
   if (U.view === 'game') toast('Tap New again to confirm', 4000); else setTimeout(render, 4050);
@@ -537,8 +539,10 @@ function key(k) {
 function onData(buf) {
   let s = buf.toString('utf8');
   s = s.replace(/\x1b\[6;(\d+);(\d+)t/g, (q, h, w) => { M.ch = +h; M.cw = +w; return ''; })
-    .replace(/\x1b\[\?([\d;]*)c/g, (q, p) => { M.sixel = p.split(';').includes('4'); return ''; })
+    .replace(/\x1b\[([458]);(\d+);(\d+)t/g, (q, k, a, b) => { M['r' + (k === '4' ? 14 : k === '5' ? 15 : 18)] = [+a, +b]; return ''; })
+    .replace(/\x1b\[\?([\d;]*)c/g, (q, p) => { M.sixel = p.split(';').includes('4'); M.da = true; return ''; })
     .replace(/\x1b\[\?1016;(\d)\$y/g, (q, v) => { M.pixOk = +v === 1 || +v === 2; return ''; });
+  if (M.da && (!U.started || (!M.img && M.sixel && M.cw > 0 && M.ch > 0))) start(); // the DA1 answer comes last, so the others are in
   const re = /\x1b\[<(\d+);(\d+);(\d+)([Mm])|\x1b\[[0-9;]*[A-Za-z~]|\x1b|[\s\S]/g; let m;
   while ((m = re.exec(s))) {
     if (m[4]) { if (m[4] === 'M' && (+m[1] & 3) === 0 && !(+m[1] & 32) && !(+m[1] & 64)) click(+m[2], +m[3]); }
@@ -547,6 +551,7 @@ function onData(buf) {
 }
 function cleanup() { save(); process.stdout.write('\x1b[?1016l\x1b[?1000l\x1b[?1006l\x1b[?7h\x1b[?25h\x1b[?1049l'); try { process.stdin.setRawMode(false); } catch (e) { /* ignore */ } }
 function start() {
+  U.started = true;
   M.img = !!(M.sixel && M.cw > 0 && M.ch > 0 && !process.env.SUDOKU_NOIMG); M.pix = !!(M.img && M.pixOk);
   if (M.pix) process.stdout.write('\x1b[?1016h');
   U.needClear = true; U.tick = Date.now(); render();
@@ -560,8 +565,8 @@ function main() {
   setInterval(timerTick, 1000);
   // ask the terminal for its cell size in pixels, sixel support and pixel mouse reports; fall back to a text-only grid
   if (process.env.SUDOKU_CELL) { const [w, h] = process.env.SUDOKU_CELL.split('x'); M.cw = +w; M.ch = +h; M.sixel = true; start(); return; }
-  process.stdout.write('\x1b[16t\x1b[c\x1b[?1016$p');
-  setTimeout(start, 450);
+  process.stdout.write('\x1b[?1016$p\x1b[16t\x1b[14t\x1b[15t\x1b[18t\x1b[c'); // DA1 last: when it is answered the rest is too
+  setTimeout(() => { if (!U.started) start(); }, 4000); // no answer at all: text-only fallback (switches to the picture if the answer comes late)
 }
 if ((require.main === module || process.env.SUDOKU_RUN) && !process.env.SUDOKU_NOMAIN) main();
 SUDOKU_JS_EOF
