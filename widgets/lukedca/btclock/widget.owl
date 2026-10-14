@@ -63,6 +63,15 @@ widget "btclock" {
   every 20s { idx = (idx + 1) % count }
   onTap: screen()
 
+  // Swipe left for the next face, right for the previous one.
+  state swipeX = 0
+  state swipeY = 0
+  when abs(swipeX) > 60 && abs(swipeX) > abs(swipeY) {
+    idx = swipeX < 0 ? (idx + 1) % count : (idx - 1 + count) % count
+    swipeX = 0
+    swipeY = 0
+  }
+
   component Panels(value, tint) {
     let n = 7
     let s = sub(value ?? "", 0, n)
@@ -88,6 +97,7 @@ widget "btclock" {
 
   Column {
     gap: 8
+    onDrag: { swipeX = swipeX + dx; swipeY = swipeY + dy }
     Row {
       align: center
       Text { text: cur == null ? "bitcoin…" : upper(cur.label); style: label; color: muted; weight: 1; maxLines: 1 }
