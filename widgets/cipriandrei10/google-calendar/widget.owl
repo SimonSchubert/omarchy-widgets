@@ -299,7 +299,7 @@ widget "google calendar" {
 
   // ---------- full screen ----------
   screen {
-    title: "calendar"
+    title: "google calendar"
     Column {
       gap: 10
       padding: 4
