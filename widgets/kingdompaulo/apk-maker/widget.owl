@@ -1,0 +1,1529 @@
+widget "Agentic APK Maker" {
+  page: 1
+  order: 4
+  size: 6x5
+  minSize: 3x3
+
+  meta { owl: 7; description: "Describe an Android app in a sentence: Claude Code, Codex or OpenCode writes it, builds it right on your phone and installs it. Sets up the Android SDK and Gradle for you."; version: "2.2"; license: "MIT"; category: "dev" }
+
+  requires { pacman: ["jq", "git", "curl", "unzip", "util-linux", "jdk17-openjdk", "android-tools"] }
+
+  // Backend: the apk-maker script, which this widget installs into ~/.local/share/apk-maker the
+  // first time it runs (see installer below); `apk-maker setup` then fetches the Android SDK and
+  // Gradle. Apps live in ~/apps, state in ~/.cache/apk-maker.
+  source ver = file("~/.local/share/apk-maker/VERSION")
+  source setup = file("~/.cache/apk-maker/setup.json") json
+  source slog = cmd("tail -n 40 ~/.cache/apk-maker/setup.log 2>/dev/null | cut -c1-200") every 5s
+  source job = file("~/.cache/apk-maker/job.json") json
+  source apps = file("~/.cache/apk-maker/apps.json") json
+  source log = cmd("tail -n 120 ~/.cache/apk-maker/log.txt 2>/dev/null | cut -c1-200") every 3s
+  source err = file("~/.cache/apk-maker/build-err.txt")
+  source now = clock every 1s
+  // "connected <device>" or "offline" ("missing" before the script is installed).
+  source adbs = cmd("[ -x ~/.local/bin/apk-maker ] || { echo missing; exit 0; }; ~/.local/bin/apk-maker adb") every 30s timeout 15s
+  // What's missing to build (empty = ready), and which agents are installed.
+  source doctor = cmd("[ -x ~/.local/bin/apk-maker ] && ~/.local/bin/apk-maker doctor") every 2m timeout 15s
+  // "?" while the script isn't there (mid-install): unknown, not "no agents".
+  source agentsOut = cmd("[ -x ~/.local/bin/apk-maker ] && ~/.local/bin/apk-maker agents || echo \"?\"") every 2m
+  // Are the detached build worker and setup still alive? Tells a real run from one that died.
+  source worker = cmd('a() { p=$(jq -r ".pid // 0" "$1" 2>/dev/null); [ -n "$p" ] && [ "$p" != 0 ] && kill -0 "$p" 2>/dev/null && echo alive || echo dead; }; echo "$(a ~/.cache/apk-maker/job.json) $(a ~/.cache/apk-maker/setup.json)"') every 5s
+
+  state agent = "claude" persist
+  state draft = ""
+  state tab = "job" persist
+  state sel = "" persist
+  state search = ""
+  state change = ""
+  state pairPort = "" persist
+  state pairCode = ""
+  state connPort = "" persist
+  state out = ""
+  state openUrl = ""
+  // Stop and delete take a second tap within 5 seconds.
+  state confirmAt = 0
+  state delSlug = ""
+  state delAt = 0
+  state doneKey = "" persist
+  state setupKey = "" persist
+  state installRun = 0
+  state installedAt = 0
+  state installOut = ""
+
+  let phase = job.phase ?? "idle"
+  let busy = phase == "queued" || phase == "agent" || phase == "building" || phase == "fixing" || phase == "installing"
+
+  // The backend this widget carries; an older or missing one is (re)installed.
+  let backendVersion = 4
+  let needInstall = ver != null && num(trim(ver), 0) < backendVersion
+  // `worker` polls every 5s, so a setup that just started (or is about to) counts as alive.
+  let setupAlive = worker == null || words(worker)[1] == "alive" || now - (setup.updated ?? 0) < 20 || now - installedAt < 20
+  // The installer ends by printing "apk-maker <n> installed"; anything else it printed is why it
+  // failed. One that never answers (killed with the launcher) counts as failed after a minute.
+  let installErr = last(lines(trim(installOut ?? "")).filter(l => trim(l) != "")) ?? ""
+  let installFailed = needInstall && ((installErr != "" && !contains(installOut, " installed")) || (installedAt > 0 && now - installedAt > 60))
+  // install (writing the script) → setup (SDK and Gradle) → agent (none installed) → ready
+  let stage = ver == null ? "loading" : needInstall ? (installFailed ? "installfail" : "install") : (setup.state == "running" || setup.state == null) && setupAlive ? "setup" : setup.state != "done" ? "failed" : agentsOut != null && trim(agentsOut) == "" ? "agent" : "ready"
+  let missing = stage != "ready"
+  let stageTitle = stage == "install" ? "installing" : stage == "installfail" ? "install didn't finish" : stage == "setup" ? "setting up · step ${setup.step ?? 1} of ${setup.steps ?? 5}" : stage == "failed" ? "setup didn't finish" : stage == "agent" ? "no coding agent" : "loading…"
+  let stageMsg = stage == "install" ? "writing the scripts…" : stage == "installfail" ? (installErr != "" ? installErr : "the installer stopped without answering") : stage == "setup" ? setup.msg ?? "" : stage == "failed" ? (setup.state == "running" ? "setup stopped before finishing" : setup.msg ?? "setup hasn't run yet") : stage == "agent" ? "Install Claude Code, Codex or OpenCode, then log in." : ""
+  let stageTint = stage == "failed" || stage == "installfail" ? red : stage == "agent" ? yellow : accent
+  let slogLines = reverse(lines(slog ?? "").filter(l => trim(l) != "")).take(30)
+  let problems = lines(trim(doctor ?? "")).filter(l => trim(l) != "")
+  let connected = startsWith(adbs, "connected")
+  let have = words(agentsOut ?? "").filter(w => w != "?")
+  let list = apps ?? []
+  let cur = list.find(a => a.slug == job.slug)
+  let picked = list.find(a => a.slug == sel) ?? cur
+  let jagent = job.agent ?? agent
+  let jname = cur.label ?? job.slug
+  let logLines = lines(log ?? "").filter(l => trim(l) != "")
+  let recent = reverse(logLines).take(60)
+  let lastLine = last(logLines.filter(l => !startsWith(l, "=="))) ?? ""
+  // 1 write, 2 build, 3 install; 4 = all done. A failed or stopped job shows the step it got to
+  // (job.at; a job from an older backend has only its message to go on).
+  let stopAt = job.at ?? (contains(job.msg ?? "", "build") ? "building" : contains(job.msg ?? "", "logged in") ? "agent" : "")
+  let sp = phase == "failed" || phase == "cancelled" ? stopAt : phase
+  let step = sp == "queued" || sp == "agent" ? 1 : sp == "building" || sp == "fixing" ? 2 : sp == "installing" || sp == "ready" ? 3 : sp == "done" ? 4 : 0
+  let elapsed = busy && job.started != null ? now - job.started : null
+  // busy but the worker process is gone: the job died without writing a final phase
+  let stalled = busy && words(worker ?? "")[0] == "dead" && job.updated != null && now - job.updated > 15
+  let tint = stalled ? orange : phase == "done" ? green : phase == "failed" || phase == "cancelled" ? red : phase == "ready" ? yellow : busy ? accent : muted
+  let phaseText = stalled ? "stalled" : phase == "queued" ? "starting" : phase == "agent" ? "writing" : phase == "fixing" ? "fixing" : phase == "done" ? "installed" : phase == "ready" ? "ready" : phase == "cancelled" ? "stopped" : phase
+  let needAuth = phase == "failed" && contains(job.msg ?? "", "logged in")
+  let lout = lower(trim(out ?? ""))
+  let outErr = contains(lout, "error") || contains(lout, "fail") || contains(lout, "cannot") || contains(lout, "could not") || contains(lout, "no app") || contains(lout, "not installed") || contains(lout, "denied") || contains(lout, "unable") || contains(lout, "already running") || contains(lout, "no job")
+  let errTail = last(lines(trim(err ?? "")).filter(l => trim(l) != "")) ?? ""
+  let showErr = errTail != "" && (phase == "failed" || phase == "fixing" || stalled)
+  let ideas = ["tip calculator", "unit converter", "habit tracker", "expense splitter", "workout timer", "flashcards"]
+  let shown = list.filter(x => search == "" || contains(lower(x.label ?? x.slug), lower(search))).take(30)
+  // Tile layouts: narrow (under 4 columns) drops the agent chips and the input for a
+  // "+ new app" button; short (under 4 rows) keeps just the job; tall adds the apps list.
+  let narrow = (cols ?? 6) < 4
+  let short = (rows ?? 5) < 4
+  let tall = (rows ?? 5) >= 5
+  let canStart = !busy && !missing && (agentsOut == null || len(have) == 0 || indexOf(have, agent) >= 0)
+  // Why a new job can't start, for the banner.
+  let canGo = canStart && trim(draft) != ""
+  let blockMsg = busy ? "a job is already running: wait for it or stop it" : missing ? "setup isn't finished yet" : "${agent} is not installed"
+
+  // The chosen agent isn't installed (the default, or one removed since): pick one that is.
+  when len(have) > 0 && indexOf(have, agent) < 0 { agent = have[0] }
+
+  // Added, or updated to a newer backend: install it. The retry buttons bump installRun too.
+  when needInstall { installRun = installRun + 1 }
+  // A new backend is in: re-ask it everything, rather than wait out the 2-minute polls.
+  on ver { refresh() }
+  when (setup.state == "done" || setup.state == "failed") && setupKey != "${setup.updated}" {
+    notify("APK Maker", setup.state == "done" ? "set up: describe an app to build it" : "setup failed: ${setup.msg}")
+    setupKey = "${setup.updated}"
+    // doctor and agents poll every 2 minutes: don't show what setup just fixed as missing.
+    refresh()
+  }
+
+  // installer:begin (generated by make-installer.sh from the apk-maker sources; edit those)
+  on installRun {
+    installedAt = now ?? 0
+    installOut = ""
+    installOut = run("""exec 2>&1
+set -e
+D="$HOME/.local/share/apk-maker"
+mkdir -p "$D/bin"
+cat > "$D/bin/apk-maker.new" <<'APKMAKER_FILE_EOF'
+#!/usr/bin/env bash
+# apk-maker: describe an Android app, let a coding agent build it, install it on this phone.
+#
+#   apk-maker new <claude|codex|opencode> <idea...>     scaffold, agent builds, install
+#   apk-maker change <slug> <agent> <request...>        agent edits an existing app, rebuild, install
+#   apk-maker retry <slug> [agent]                      continue building an app with the agent that made it
+#   apk-maker build | install | download <slug>         just that step (download: via the browser)
+#   apk-maker uninstall <slug>                          remove the app from the phone
+#   apk-maker delete <slug>                             delete the app's project and APK
+#   apk-maker pair <port> <code> | connect <port>       wireless debugging (once per phone)
+#   apk-maker adb                                       prints adb connection state
+#   apk-maker cancel | list
+#   apk-maker setup                                     fetch the Android SDK and Gradle, then a test build
+#   apk-maker doctor                                    prints what's missing to build (nothing = ready)
+#   apk-maker agents | version                          the installed agents | this script's version
+#
+# Installed by the Agentic APK Maker widget into ~/.local/share/apk-maker (this script, the app template,
+# AGENTS.md, Serve.java and, unless one is already there, the Android SDK).
+# State for the widget lives in ~/.cache/apk-maker: job.json (current job), apps.json (all apps),
+# log.txt (current job's log), setup.json and setup.log. Apps live in ~/apps/<slug>.
+set -uo pipefail
+
+VERSION=4
+# Bumped only when the toolchain changes, so a script update doesn't redo the test build.
+TOOLCHAIN=2
+DATA=${APKMAKER_HOME:-$HOME/.local/share/apk-maker}
+APPS=$HOME/apps
+CACHE=$HOME/.cache/apk-maker
+JOB=$CACHE/job.json
+LOG=$CACHE/log.txt
+SETUP=$CACHE/setup.json
+SLOG=$CACHE/setup.log
+SERVE_PORT=8765
+FIX_ROUNDS=3
+AGENT_TIMEOUT=${AGENT_TIMEOUT:-45m}   # kill an agent that hangs, so a job can't stick forever
+mkdir -p "$APPS" "$CACHE/apks"
+
+# setup records the SDK it found or installed; until then, the one it would install.
+ANDROID_HOME_ORIG=${ANDROID_HOME:-}
+SDK=$(cat "$DATA/sdk.path" 2>/dev/null)
+export ANDROID_HOME=${SDK:-$DATA/sdk} ANDROID_SDK_ROOT=${SDK:-$DATA/sdk}
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
+# Agents installed with mise aren't on the widget's PATH: add its shims and install dirs.
+export PATH="$JAVA_HOME/bin:$HOME/.local/bin:$HOME/.local/share/mise/shims:/usr/local/bin:$PATH"
+for d in "$HOME"/.local/share/mise/installs/*/latest "$HOME"/.local/share/mise/installs/*/latest/bin; do
+  [ -d "$d" ] && PATH="$PATH:$d"
+done
+
+now() { date +%s; }
+
+# job <phase> <msg>: update job.json, keeping the other fields. .at is the last working phase,
+# so the widget can show where a failed or stopped job got to.
+job() {
+  local tmp; tmp=$(mktemp "$CACHE/.job.XXXX")
+  jq -c --arg p "$1" --arg m "${2:-}" --argjson t "$(now)" \
+    '.phase=$p | .msg=$m | .updated=$t | .at=(if $p | IN("agent","building","fixing","installing") then $p else .at end)' \
+    "$JOB" > "$tmp" 2>/dev/null && mv "$tmp" "$JOB"
+  echo "== [$1] ${2:-}" >> "$LOG"
+}
+
+list_apps() {
+  local tmp; tmp=$(mktemp "$CACHE/.apps.XXXX")
+  for m in "$APPS"/*/.apkmaker.json; do [ -f "$m" ] && cat "$m"; done \
+    | jq -sc 'sort_by(-.updated)' > "$tmp" && mv "$tmp" "$CACHE/apps.json"
+}
+
+# meta <slug> <jq filter> [args...]: edit an app's .apkmaker.json.
+meta() {
+  local f="$APPS/$1/.apkmaker.json" tmp; shift
+  tmp=$(mktemp "$CACHE/.meta.XXXX")
+  jq -c "$@" "$f" > "$tmp" && mv "$tmp" "$f"
+  list_apps
+}
+
+adb_device() {
+  adb devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1; exit}'
+}
+
+# Reconnect after a reboot: the last port that worked, then whatever mDNS advertises.
+adb_reconnect() {
+  [ -n "$(adb_device)" ] && return 0
+  local port; port=$(cat "$CACHE/adb-port" 2>/dev/null)
+  [ -n "$port" ] && timeout 4 adb connect "127.0.0.1:$port" >/dev/null 2>&1
+  [ -n "$(adb_device)" ] && return 0
+  local svc; svc=$(timeout 4 adb mdns services 2>/dev/null | awk '/_adb-tls-connect/ {print $NF; exit}')
+  if [ -n "$svc" ]; then
+    timeout 4 adb connect "127.0.0.1:${svc##*:}" >/dev/null 2>&1 && [ -n "$(adb_device)" ] && echo "${svc##*:}" > "$CACHE/adb-port"
+  fi
+  [ -n "$(adb_device)" ]
+}
+
+adb_state() {
+  adb_reconnect
+  local d; d=$(adb_device)
+  if [ -n "$d" ]; then echo "connected $d"; else echo "offline"; fi
+}
+
+do_build() {
+  local slug=$1 dir="$APPS/$1"
+  echo "== gradle assembleRelease" >> "$LOG"
+  ( cd "$dir" && ./gradlew --console=plain -q assembleRelease ) >> "$LOG" 2> "$CACHE/build-err.txt"
+  local rc=$?
+  cat "$CACHE/build-err.txt" >> "$LOG"
+  if [ $rc -eq 0 ]; then
+    local apk; apk=$(ls -t "$dir"/app/build/outputs/apk/release/*.apk 2>/dev/null | head -1)
+    [ -n "$apk" ] || return 1
+    cp "$apk" "$CACHE/apks/$slug.apk"
+    local label; label=$(sed -n 's:.*name="app_name"[^>]*>\(.*\)</string>.*:\1:p' "$dir/app/src/main/res/values/strings.xml" | head -1)
+    meta "$slug" '.apk=$a | .label=($l | if .=="" then null else . end) // .label | .built=$t | .updated=$t | .status="built"' \
+      --arg a "$CACHE/apks/$slug.apk" --arg l "$label" --argjson t "$(now)"
+  fi
+  return $rc
+}
+
+# Serve built APKs to the phone's browser as a fallback when adb isn't connected.
+serve() {
+  if ! curl -sf -o /dev/null "http://127.0.0.1:$SERVE_PORT/"; then
+    setsid -f java -Xmx48m "$DATA/bin/Serve.java" "$SERVE_PORT" "$CACHE/apks" >/dev/null 2>&1
+    for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; curl -sf -o /dev/null "http://127.0.0.1:$SERVE_PORT/" && break; done
+  fi
+}
+
+# do_install <slug> [job]: with "job", progress goes to job.json (only the worker's run does
+# that; a standalone install would leave the job stuck on "installing").
+do_install() {
+  local slug=$1 injob=${2:-} pkg; pkg=$(jq -r .pkg "$APPS/$slug/.apkmaker.json")
+  if adb_reconnect; then
+    if [ -n "$injob" ]; then job installing "adb install"; else echo "== adb install $slug" >> "$LOG"; fi
+    if adb install -r "$CACHE/apks/$slug.apk" >> "$LOG" 2>&1; then
+      adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+      meta "$slug" '.status="installed" | .installed=$t' --argjson t "$(now)"
+      return 0
+    fi
+    echo "adb install failed; offering the browser download instead" >> "$LOG"
+  fi
+  serve
+  # An app installed earlier over adb stays installed; otherwise it waits for the download.
+  meta "$slug" '.status=(if .installed then "installed" else "ready" end)'
+  # Asked for by hand, the APK goes to the browser now: let the widget offer "open" from then on.
+  [ -n "$injob" ] || meta "$slug" '.downloaded=$t' --argjson t "$(now)"
+  return 2
+}
+
+run_agent() {
+  local agent=$1 dir=$2 prompt=$3 rc=0
+  AGENT_LOG_FROM=$(($(wc -l < "$LOG") + 1))
+  echo "== $agent: $(head -c 300 <<< "$prompt")" >> "$LOG"
+  case $agent in
+    claude)
+      # Only the stdout JSON stream is parsed; stderr (auth errors and the like) goes to the log raw.
+      ( cd "$dir" && timeout "$AGENT_TIMEOUT" env IS_SANDBOX=1 claude -p "$prompt" --dangerously-skip-permissions \
+          --output-format stream-json --verbose < /dev/null ) 2>>"$LOG" \
+        | jq -r --unbuffered '
+            if .type=="assistant" then .message.content[]? |
+              (if .type=="text" then .text
+               elif .type=="tool_use" then "→ \(.name) \(.input.command // .input.file_path // .input.pattern // "" | tostring | .[0:120])"
+               else empty end)
+            elif .type=="result" then "== done: \(.subtype)" else empty end' >> "$LOG" 2>/dev/null
+      rc=${PIPESTATUS[0]} ;;
+    codex)
+      timeout "$AGENT_TIMEOUT" codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -C "$dir" "$prompt" \
+        < /dev/null >> "$LOG" 2>&1
+      rc=$? ;;
+    opencode)
+      ( cd "$dir" && timeout "$AGENT_TIMEOUT" opencode run --auto "$prompt" < /dev/null ) >> "$LOG" 2>&1
+      rc=$? ;;
+    *) echo "unknown agent $agent" >> "$LOG"; return 1 ;;
+  esac
+  return $rc
+}
+
+# agent_needs_login <rc>: the agent failed with an auth error, so the job cannot succeed:
+# fail fast instead of burning the fix rounds on code that will not change. Only a failed
+# run's own output counts, so an app whose code says "not logged in" doesn't trip it.
+agent_needs_login() {
+  [ "${1:-0}" -ne 0 ] || return 1
+  tail -n +"${AGENT_LOG_FROM:-1}" "$LOG" | grep -v '^→' \
+    | grep -qiE 'not logged in|please run /login|invalid api key|authentication_error|401 unauthorized'
+}
+
+# project <dir> <pkg> <name> <label>: a copy of the template with its placeholders filled in.
+project() {
+  local dir=$1 pkg=$2
+  cp -r "$DATA/template" "$dir"
+  grep -rl '__PKG__\|__NAME__\|__LABEL__' "$dir" | xargs sed -i "s/__PKG__/$pkg/g; s/__NAME__/$3/g; s/__LABEL__/$4/g"
+  local src="$dir/app/src/main/java"
+  mkdir -p "$src/${pkg//.//}"
+  mv "$src/com/apkmaker/app/MainActivity.kt" "$src/${pkg//.//}/"
+  rmdir -p "$src/com/apkmaker/app" 2>/dev/null
+  true
+}
+
+scaffold() {
+  local slug=$1 dir="$APPS/$1" pkg="com.apkmaker.${1//-/_}"
+  local label; label=$(sed 's/-/ /g; s/\b\(.\)/\u\1/g' <<< "$slug")
+  project "$dir" "$pkg" "$slug" "$label"
+  cp "$DATA/AGENTS.md" "$dir/AGENTS.md"; ln -s AGENTS.md "$dir/CLAUDE.md"
+  ( cd "$dir" && git init -q && git add -A && git -c user.name=apk-maker -c user.email=apk-maker@localhost commit -qm scaffold )
+  jq -nc --arg s "$slug" --arg p "$pkg" --arg l "$label" --argjson t "$(now)" \
+    '{slug:$s, pkg:$p, label:$l, created:$t, updated:$t, status:"new", history:[]}' > "$dir/.apkmaker.json"
+}
+
+# The job itself: agent, then build-and-fix rounds, then install.
+work() {
+  local slug=$1 agent=$2 prompt=$3 dir="$APPS/$1"
+  meta "$slug" '.agent=$a | .history += [{t:$t, agent:$a, prompt:$p}] | .status="building" | .updated=$t' \
+    --arg a "$agent" --arg p "$prompt" --argjson t "$(now)"
+  job agent "$agent is writing the app"
+  run_agent "$agent" "$dir" "$prompt"
+  if agent_needs_login $?; then
+    meta "$slug" '.status="failed"'
+    job failed "$agent isn't logged in — open the terminal to log in, then retry"
+    return 1
+  fi
+  local round=0
+  while :; do
+    job building "gradle build"
+    if do_build "$slug"; then break; fi
+    round=$((round + 1))
+    if [ $round -gt $FIX_ROUNDS ]; then
+      meta "$slug" '.status="failed"'
+      job failed "build still failing after $FIX_ROUNDS fixes"; return 1
+    fi
+    job fixing "$agent fixing build errors ($round/$FIX_ROUNDS)"
+    run_agent "$agent" "$dir" "The Gradle build (./gradlew assembleRelease) failed. Fix it, then run the build again until it succeeds. Errors:
+$(grep -E 'e: |error:|ERROR|FAILURE|What went wrong' -A3 "$CACHE/build-err.txt" | head -60)"
+    if agent_needs_login $?; then
+      meta "$slug" '.status="failed"'
+      job failed "$agent isn't logged in — open the terminal to log in, then retry"
+      return 1
+    fi
+  done
+  ( cd "$dir" && git add -A && git -c user.name=apk-maker -c user.email=apk-maker@localhost commit -qm "$agent: $(head -c 60 <<< "$prompt")" ) 2>/dev/null
+  do_install "$slug" job
+  case $? in
+    0) job done "installed and opened" ;;
+    *) job ready "built; tap install to get it from the browser (adb not connected)" ;;
+  esac
+}
+
+# start <slug> <agent> <prompt>: run work() detached, one job at a time.
+job_active() {
+  jq -e '.phase | IN("queued","agent","building","fixing","installing")' "$JOB" >/dev/null 2>&1
+}
+
+# can_start <agent>: refuse before anything is created, so a refused job leaves no half-made app.
+can_start() {
+  command -v "$1" >/dev/null 2>&1 || { echo "$1 is not installed" >&2; exit 1; }
+  local pid; pid=$(jq -r '.pid // 0' "$JOB" 2>/dev/null)
+  if job_active && [ -n "$pid" ] && [ "$pid" -gt 1 ] && kill -0 "$pid" 2>/dev/null; then
+    echo "a job is already running: $(jq -r .slug "$JOB")" >&2; exit 1
+  fi
+}
+
+start() {
+  local slug=$1 agent=$2 prompt=$3
+  can_start "$agent"
+  : > "$LOG"; : > "$CACHE/build-err.txt"; rm -f "$CACHE/pid"
+  jq -nc --arg s "$slug" --arg a "$agent" --arg p "$prompt" --argjson t "$(now)" \
+    '{slug:$s, agent:$a, prompt:$p, phase:"queued", msg:"", started:$t, updated:$t, pid:0}' > "$JOB"
+  setsid -f bash -c 'echo $$ > "$1/pid"; exec "$0" _work "$2" "$3" "$4"' "$0" "$CACHE" "$slug" "$agent" "$prompt" \
+    >> "$LOG" 2>&1 < /dev/null
+  # Wait for the worker's pid: reading a stale one makes the widget call a live job stalled.
+  for _ in $(seq 50); do [ -s "$CACHE/pid" ] && break; sleep 0.1; done
+  local tmp; tmp=$(mktemp "$CACHE/.job.XXXX")
+  jq -c --argjson pid "$(cat "$CACHE/pid" 2>/dev/null || echo 0)" '.pid=$pid' "$JOB" > "$tmp" && mv "$tmp" "$JOB"
+  # Quiet for the widget, whose job card shows the new job; a terminal gets the slug.
+  [ -t 1 ] && echo "$slug"
+  true
+}
+
+# need_app <slug>: an app made here, by a plain slug, so nothing outside ~/apps is touched.
+need_app() {
+  [[ ${1:-} =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -f "$APPS/$1/.apkmaker.json" ] || { echo "no app ${1:-}" >&2; exit 1; }
+}
+
+# The first installed agent, for an app whose own agent has been removed since.
+first_agent() { "$0" agents | awk '{print $1}'; }
+
+slugify() {
+  tr '[:upper:]' '[:lower:]' <<< "$1" | tr -cs 'a-z0-9' ' ' \
+    | awk '{n=0; for(i=1;i<=NF && n<3;i++) if (length($i)>2 && $i !~ /^(app|an|the|and|for|with|that|make|build|create|simple|android|which|shows|show)$/) {printf "%s%s", (n?"-":""), $i; n++}}'
+}
+
+new_prompt() {
+  cat <<EOF
+Build this Android app in the current directory: $1
+
+The project is already scaffolded (Kotlin, Jetpack Compose, Material 3). Read AGENTS.md first and
+follow it. Give the app a short, fitting name in app/src/main/res/values/strings.xml (app_name).
+You are done only when ./gradlew assembleRelease succeeds.
+EOF
+}
+
+# ---- setup: everything a build needs, fetched once, each step skipped when already done ----
+
+# Pinned downloads: a changed file fails its checksum instead of running.
+CLT_URL=https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
+CLT_SHA=7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee
+# Google's build-tools are x86_64 only; these are the same tools built for aarch64.
+ARM_URL=https://github.com/lzhiyong/android-sdk-tools/releases/download/35.0.2/android-sdk-tools-static-aarch64.zip
+ARM_SHA=db1cea2c4454d5f9c5a802646b2d1cf560b4ee7badbe23e51ab8e1881bb50fc2
+WRAPPER_URL=https://raw.githubusercontent.com/gradle/gradle/v8.11.1
+JAR_SHA=2db75c40782f5e8ba1fc278a5574bab070adccb2d21ca5a6e5ed840888448046
+GRADLEW_SHA=9cbbb4d68ff7fb5211c4d58f598ac9d8664c05fdcd1e5f59b7f2c3ac1ee00af0
+STEPS=5
+
+# step <n> <msg>: report progress in setup.json for the widget.
+step() {
+  jq -nc --argjson n "$1" --argjson s $STEPS --arg m "$2" --argjson t "$(now)" --argjson pid $$ --argjson v $VERSION \
+    '{state:"running", step:$n, steps:$s, msg:$m, updated:$t, pid:$pid, version:$v}' > "$SETUP.tmp" && mv "$SETUP.tmp" "$SETUP"
+  echo "== [$1/$STEPS] $2" >> "$SLOG"
+}
+
+# finish <done|failed> <msg>
+finish() {
+  jq -c --arg st "$1" --arg m "$2" --argjson t "$(now)" '.state=$st | .msg=$m | .updated=$t' "$SETUP" > "$SETUP.tmp" \
+    && mv "$SETUP.tmp" "$SETUP"
+  echo "== $1: $2" >> "$SLOG"
+}
+
+die() { finish failed "$1"; exit 1; }
+
+sha_ok() { [ -f "$2" ] && echo "$1  $2" | sha256sum -c --quiet >/dev/null 2>&1; }
+
+# fetch <url> <sha256> <dest>
+fetch() {
+  sha_ok "$2" "$3" && return 0
+  mkdir -p "$(dirname "$3")"
+  curl -fsSL --retry 3 -o "$3.part" "$1" >> "$SLOG" 2>&1 || { rm -f "$3.part"; return 1; }
+  sha_ok "$2" "$3.part" || { echo "checksum mismatch: $1" >> "$SLOG"; rm -f "$3.part"; return 1; }
+  mv "$3.part" "$3"
+}
+
+aapt2_ok() { "$1/build-tools/35.0.0/aapt2" version >/dev/null 2>&1; }
+sdk_ok() { [ -n "$1" ] && [ -d "$1/platforms/android-35" ] && aapt2_ok "$1"; }
+
+do_setup() {
+  exec 9> "$CACHE/setup.lock"
+  flock -n 9 || { echo "setup is already running" >&2; exit 1; }
+  : > "$SLOG"
+  local dl=$CACHE/downloads sdk="" d
+  mkdir -p "$dl"
+
+  step 1 "checking the system"
+  for c in jq git curl unzip; do command -v "$c" >/dev/null 2>&1 || die "$c is missing: install the widget's packages"; done
+  [ -x "$JAVA_HOME/bin/java" ] || die "JDK 17 is missing: install jdk17-openjdk"
+  [ -d "$DATA/template/app" ] || die "the app template is missing: reinstall the widget"
+
+  step 2 "looking for an Android SDK"
+  # Reuse a working SDK (one set up by hand, or by an earlier run) instead of downloading 300 MB.
+  for d in "$(cat "$DATA/sdk.path" 2>/dev/null)" "${ANDROID_HOME_ORIG:-}" "$DATA/sdk" ${APKMAKER_SDK_SEARCH-/opt/android-sdk "$HOME/Android/Sdk"}; do
+    sdk_ok "$d" && { sdk=$d; break; }
+  done
+  if [ -z "$sdk" ]; then
+    sdk=$DATA/sdk
+    local sm=$sdk/cmdline-tools/latest/bin/sdkmanager
+    if [ ! -x "$sm" ]; then
+      step 2 "downloading the Android command-line tools (165 MB)"
+      fetch "$CLT_URL" "$CLT_SHA" "$dl/cmdline-tools.zip" || die "couldn't download the Android command-line tools"
+      rm -rf "$sdk/cmdline-tools" && mkdir -p "$sdk/cmdline-tools"
+      unzip -q "$dl/cmdline-tools.zip" -d "$sdk/cmdline-tools" && mv "$sdk/cmdline-tools/cmdline-tools" "$sdk/cmdline-tools/latest" \
+        || die "couldn't unpack the Android command-line tools"
+      rm -f "$dl/cmdline-tools.zip"
+    fi
+    step 3 "installing Android 15 SDK and build-tools (about 150 MB)"
+    yes 2>/dev/null | "$sm" --sdk_root="$sdk" --licenses >/dev/null 2>&1
+    echo "accepted the SDK licenses" >> "$SLOG"
+    # sdkmanager redraws a progress bar with \r: keep its messages, drop the bars.
+    local rc=0
+    "$sm" --sdk_root="$sdk" "platforms;android-35" "build-tools;35.0.0" > "$dl/sdkmanager.log" 2>&1 || rc=$?
+    tr '\r' '\n' < "$dl/sdkmanager.log" | grep -vE '^[[:space:]]*$|\] *[0-9]+%' >> "$SLOG"
+    rm -f "$dl/sdkmanager.log"
+    [ $rc -eq 0 ] || die "sdkmanager couldn't install the SDK: see the setup log"
+  fi
+
+  step 3 "checking the native build tools"
+  if ! aapt2_ok "$sdk"; then
+    [ "$(uname -m)" = aarch64 ] || die "aapt2 doesn't run on $(uname -m)"
+    step 3 "downloading build-tools for aarch64 (14 MB)"
+    fetch "$ARM_URL" "$ARM_SHA" "$dl/arm-tools.zip" || die "couldn't download the aarch64 build-tools"
+    unzip -qo -j "$dl/arm-tools.zip" 'build-tools/*' -d "$sdk/build-tools/35.0.0" || die "couldn't unpack the aarch64 build-tools"
+    chmod +x "$sdk"/build-tools/35.0.0/{aapt,aapt2,aidl,dexdump,split-select,zipalign}
+    rm -f "$dl/arm-tools.zip"
+    aapt2_ok "$sdk" || die "aapt2 still doesn't run"
+  fi
+  echo "$sdk" > "$DATA/sdk.path"
+  export ANDROID_HOME=$sdk ANDROID_SDK_ROOT=$sdk
+
+  step 4 "setting up the app template"
+  local t=$DATA/template
+  fetch "$WRAPPER_URL/gradle/wrapper/gradle-wrapper.jar" "$JAR_SHA" "$t/gradle/wrapper/gradle-wrapper.jar" \
+    && fetch "$WRAPPER_URL/gradlew" "$GRADLEW_SHA" "$t/gradlew" || die "couldn't download the Gradle wrapper"
+  chmod +x "$t/gradlew"
+  printf 'sdk.dir=%s\n' "$sdk" > "$t/local.properties"
+  # Tuned for building on a phone. The SDK's aapt2 replaces the x86_64 one AGP would download.
+  cat > "$t/gradle.properties" <<EOF
+org.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8
+org.gradle.daemon=true
+org.gradle.parallel=false
+org.gradle.workers.max=2
+org.gradle.caching=true
+kotlin.compiler.execution.strategy=in-process
+android.useAndroidX=true
+android.nonTransitiveRClass=true
+android.aapt2FromMavenOverride=$sdk/build-tools/35.0.0/aapt2
+EOF
+
+  # The first build downloads Gradle and the libraries; doing it now makes the first app fast
+  # and proves the toolchain works before an agent spends time on code.
+  if [ ! -f "$DATA/.built-$TOOLCHAIN" ]; then
+    step 5 "test build: downloading Gradle and libraries (5-15 min)"
+    local w=$CACHE/warmup
+    rm -rf "$w"; project "$w" com.apkmaker.warmup warmup Warmup
+    ( cd "$w" && ./gradlew --console=plain -q assembleRelease ) >> "$SLOG" 2>&1 || die "the test build failed: see the setup log"
+    rm -rf "$w"
+    touch "$DATA/.built-$TOOLCHAIN"
+  fi
+  finish done "ready to build"
+}
+
+cmd=${1:-}; shift || true
+case $cmd in
+  new)
+    agent=$1; shift; idea="$*"
+    [ -n "$idea" ] || { echo "usage: apk-maker new <agent> <idea>" >&2; exit 1; }
+    can_start "$agent"
+    base=$(slugify "$idea"); base=${base:-app}; slug=$base; i=2
+    while [ -e "$APPS/$slug" ]; do slug="$base-$i"; i=$((i + 1)); done
+    scaffold "$slug" && list_apps
+    start "$slug" "$agent" "$(new_prompt "$idea")" ;;
+  change)
+    slug=$1 agent=$2; shift 2
+    need_app "$slug"
+    start "$slug" "$agent" "Change this Android app (read AGENTS.md first): $*
+You are done only when ./gradlew assembleRelease succeeds." ;;
+  _work) work "$@"; list_apps ;;
+  build)
+    need_app "${1:-}"; : > "$LOG"; do_build "$1" && echo "$CACHE/apks/$1.apk" ;;
+  install)
+    need_app "${1:-}"; do_install "$1"; rc=$?; [ $rc -eq 2 ] && echo "http://127.0.0.1:$SERVE_PORT/$1.apk"; exit $rc ;;
+  serve) serve ;;
+  download)
+    need_app "${1:-}"; [ -f "$CACHE/apks/$1.apk" ] || { echo "$1 isn't built yet" >&2; exit 1; }
+    serve; meta "$1" '.downloaded=$t' --argjson t "$(now)"
+    echo "http://127.0.0.1:$SERVE_PORT/$1.apk" ;;
+  pair) adb pair "127.0.0.1:$1" "$2" ;;
+  connect) adb connect "127.0.0.1:$1" && [ -n "$(adb_device)" ] && echo "$1" > "$CACHE/adb-port" ;;
+  adb) adb_state ;;
+  cancel)
+    # A finished job keeps its result, and its old pid may belong to something else by now.
+    job_active || { echo "no job is running" >&2; exit 1; }
+    slug=$(jq -r '.slug // empty' "$JOB" 2>/dev/null)
+    pid=$(jq -r .pid "$JOB" 2>/dev/null)
+    [ -n "$pid" ] && [ "$pid" != 0 ] && kill -- -"$pid" 2>/dev/null
+    job cancelled "stopped"
+    # Don't leave the app stuck on "building": put it back to what it was.
+    if [ -n "$slug" ] && [ -d "$APPS/$slug" ]; then
+      meta "$slug" '.status=(if .apk then (if .installed then "installed" else "ready" end) else "cancelled" end)'
+    fi ;;
+  uninstall)
+    slug=${1:-}; need_app "$slug"
+    pkg=$(jq -r .pkg "$APPS/$slug/.apkmaker.json")
+    if adb_reconnect && adb uninstall "$pkg" >> "$LOG" 2>&1; then
+      meta "$slug" 'del(.installed) | .status=(if .apk then "ready" else "cancelled" end)'
+      echo "uninstalled $pkg"
+    else
+      echo "could not uninstall $pkg (is adb connected?)" >&2; exit 1
+    fi ;;
+  retry)
+    slug=${1:-}; need_app "$slug"
+    agent=${2:-$(jq -r '.agent // "claude"' "$APPS/$slug/.apkmaker.json")}
+    command -v "$agent" >/dev/null 2>&1 || agent=$(first_agent)
+    [ -n "$agent" ] || { echo "no coding agent is installed" >&2; exit 1; }
+    start "$slug" "$agent" "Continue building this Android app (read AGENTS.md first): finish it and make ./gradlew assembleRelease succeed." ;;
+  delete)
+    slug=${1:-}; need_app "$slug"
+    if job_active && [ "$(jq -r .slug "$JOB")" = "$slug" ]; then echo "$slug is still building: stop it first" >&2; exit 1; fi
+    rm -rf "${APPS:?}/$slug" "$CACHE/apks/$slug.apk"
+    # The last job was this app's: clear it, so the widget doesn't show an app that's gone.
+    if [ "$(jq -r '.slug // empty' "$JOB" 2>/dev/null)" = "$slug" ]; then rm -f "$JOB" "$LOG"; : > "$CACHE/build-err.txt"; fi
+    list_apps
+    echo "deleted $slug" ;;
+  list) list_apps; cat "$CACHE/apps.json" ;;
+  setup) do_setup ;;
+  doctor)
+    # One line per missing piece; the widget shows them. Nothing printed = ready.
+    for c in jq git adb curl unzip; do command -v "$c" >/dev/null 2>&1 || echo "missing $c"; done
+    [ -x "$JAVA_HOME/bin/java" ] || echo "missing JDK 17"
+    sdk_ok "$ANDROID_HOME" || echo "missing Android SDK"
+    [ -x "$DATA/template/gradlew" ] || echo "missing Gradle wrapper"
+    [ -n "$("$0" agents)" ] || echo "missing agent: install claude, codex or opencode"
+    true ;;
+  agents) for a in claude codex opencode; do command -v "$a" >/dev/null 2>&1 && printf '%s ' "$a"; done; echo ;;
+  version) echo "$VERSION" ;;
+  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac
+APKMAKER_FILE_EOF
+mv "$D/bin/apk-maker.new" "$D/bin/apk-maker"
+mkdir -p "$D/bin"
+cat > "$D/bin/Serve.java.new" <<'APKMAKER_FILE_EOF'
+// Serves ~/.cache/apk-maker/apks on 127.0.0.1 so the phone's browser can download and install an APK.
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
+import java.nio.file.*;
+
+public class Serve {
+    public static void main(String[] a) throws Exception {
+        Path dir = Paths.get(a[1]).toAbsolutePath().normalize();
+        HttpServer s = HttpServer.create(new InetSocketAddress("127.0.0.1", Integer.parseInt(a[0])), 0);
+        s.createContext("/", ex -> {
+            Path f = dir.resolve(ex.getRequestURI().getPath().substring(1)).normalize();
+            if (!f.startsWith(dir) || !Files.isRegularFile(f)) {
+                byte[] b = "apk-maker\n".getBytes();
+                ex.sendResponseHeaders(f.equals(dir) ? 200 : 404, b.length);
+                ex.getResponseBody().write(b);
+            } else {
+                ex.getResponseHeaders().set("Content-Type", "application/vnd.android.package-archive");
+                ex.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"" + f.getFileName() + "\"");
+                ex.sendResponseHeaders(200, Files.size(f));
+                Files.copy(f, ex.getResponseBody());
+            }
+            ex.close();
+        });
+        s.start();
+    }
+}
+APKMAKER_FILE_EOF
+mv "$D/bin/Serve.java.new" "$D/bin/Serve.java"
+mkdir -p "$D/."
+cat > "$D/AGENTS.md.new" <<'APKMAKER_FILE_EOF'
+# Android app project (built by apk-maker)
+
+You are building an Android app on an aarch64 Arch Linux system that runs on the phone itself.
+The finished APK is installed on this same phone.
+
+## Build
+
+- Build with `./gradlew --console=plain -q assembleRelease`. The task is done only when it succeeds.
+- The toolchain is fixed: JDK 17, Gradle 8.11.1, AGP 8.7.3, Kotlin 2.0.21, compileSdk/targetSdk 35,
+  build-tools 35.0.0 (the SDK path is in local.properties). Do not change these versions, the Gradle wrapper,
+  `gradle.properties` (here or in ~/.gradle), or `android.aapt2FromMavenOverride` (aapt2 is a custom aarch64 build).
+- RAM is limited (~2 GB free). Don't start extra Gradle daemons, emulators or parallel builds.
+- Don't run `adb`, install the APK or try to open the app: apk-maker does that after you finish.
+- The release build is signed with the debug key on purpose. Keep `isMinifyEnabled = false`.
+
+## Code
+
+- Kotlin + Jetpack Compose + Material 3, single `:app` module. Keep `applicationId` and `namespace` as they are.
+- Dependencies only from google() and mavenCentral(), compatible with the versions above
+  (the Compose BOM is 2024.12.01; Material icons extended is available).
+- Prefer no network and no runtime permissions unless the app needs them; when it does, declare them in
+  the manifest and request them at runtime.
+- Persist user data locally (SharedPreferences, DataStore or Room) when the app has any.
+- Follow the system dark/light theme; use dynamic color on Android 12+.
+- Make it look finished: real app name in `strings.xml`, sensible empty states, edge-to-edge insets handled.
+- Replace the placeholder launcher icon foreground (`res/drawable/ic_fg.xml`, a 108dp vector, keep
+  content inside the central 66dp) and background color (`res/values/colors.xml`) with ones that fit the app.
+- Keep the code in a few clear files; no tests needed.
+APKMAKER_FILE_EOF
+mv "$D/AGENTS.md.new" "$D/AGENTS.md"
+mkdir -p "$D/template"
+cat > "$D/template/.gitignore.new" <<'APKMAKER_FILE_EOF'
+.gradle/
+build/
+app/build/
+local.properties
+APKMAKER_FILE_EOF
+mv "$D/template/.gitignore.new" "$D/template/.gitignore"
+mkdir -p "$D/template/app"
+cat > "$D/template/app/build.gradle.kts.new" <<'APKMAKER_FILE_EOF'
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
+
+android {
+    namespace = "__PKG__"
+    compileSdk = 35
+    buildToolsVersion = "35.0.0"
+
+    defaultConfig {
+        applicationId = "__PKG__"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            // Signed with the debug key so it installs without a keystore.
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+    buildFeatures { compose = true }
+}
+
+dependencies {
+    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
+    implementation(composeBom)
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+}
+APKMAKER_FILE_EOF
+mv "$D/template/app/build.gradle.kts.new" "$D/template/app/build.gradle.kts"
+mkdir -p "$D/template/app/src/main"
+cat > "$D/template/app/src/main/AndroidManifest.xml.new" <<'APKMAKER_FILE_EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+APKMAKER_FILE_EOF
+mv "$D/template/app/src/main/AndroidManifest.xml.new" "$D/template/app/src/main/AndroidManifest.xml"
+mkdir -p "$D/template/app/src/main/java/com/apkmaker/app"
+cat > "$D/template/app/src/main/java/com/apkmaker/app/MainActivity.kt.new" <<'APKMAKER_FILE_EOF'
+package __PKG__
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+                Scaffold(modifier = Modifier.fillMaxSize()) { inner ->
+                    Box(Modifier.fillMaxSize().padding(inner), contentAlignment = Alignment.Center) {
+                        Text("Hello from __LABEL__")
+                    }
+                }
+            }
+        }
+    }
+}
+APKMAKER_FILE_EOF
+mv "$D/template/app/src/main/java/com/apkmaker/app/MainActivity.kt.new" "$D/template/app/src/main/java/com/apkmaker/app/MainActivity.kt"
+mkdir -p "$D/template/app/src/main/res/drawable"
+cat > "$D/template/app/src/main/res/drawable/ic_fg.xml.new" <<'APKMAKER_FILE_EOF'
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#89B4FA"
+        android:pathData="M54,34a20,20 0,1 1,0 40a20,20 0,1 1,0 -40z" />
+</vector>
+APKMAKER_FILE_EOF
+mv "$D/template/app/src/main/res/drawable/ic_fg.xml.new" "$D/template/app/src/main/res/drawable/ic_fg.xml"
+mkdir -p "$D/template/app/src/main/res/mipmap-anydpi-v26"
+cat > "$D/template/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml.new" <<'APKMAKER_FILE_EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_bg" />
+    <foreground android:drawable="@drawable/ic_fg" />
+</adaptive-icon>
+APKMAKER_FILE_EOF
+mv "$D/template/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml.new" "$D/template/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
+mkdir -p "$D/template/app/src/main/res/values"
+cat > "$D/template/app/src/main/res/values/colors.xml.new" <<'APKMAKER_FILE_EOF'
+<resources>
+    <color name="ic_bg">#1E1E2E</color>
+</resources>
+APKMAKER_FILE_EOF
+mv "$D/template/app/src/main/res/values/colors.xml.new" "$D/template/app/src/main/res/values/colors.xml"
+mkdir -p "$D/template/app/src/main/res/values"
+cat > "$D/template/app/src/main/res/values/strings.xml.new" <<'APKMAKER_FILE_EOF'
+<resources>
+    <string name="app_name">__LABEL__</string>
+</resources>
+APKMAKER_FILE_EOF
+mv "$D/template/app/src/main/res/values/strings.xml.new" "$D/template/app/src/main/res/values/strings.xml"
+mkdir -p "$D/template"
+cat > "$D/template/build.gradle.kts.new" <<'APKMAKER_FILE_EOF'
+plugins {
+    id("com.android.application") version "8.7.3" apply false
+    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+}
+APKMAKER_FILE_EOF
+mv "$D/template/build.gradle.kts.new" "$D/template/build.gradle.kts"
+mkdir -p "$D/template/gradle/wrapper"
+cat > "$D/template/gradle/wrapper/gradle-wrapper.properties.new" <<'APKMAKER_FILE_EOF'
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+APKMAKER_FILE_EOF
+mv "$D/template/gradle/wrapper/gradle-wrapper.properties.new" "$D/template/gradle/wrapper/gradle-wrapper.properties"
+mkdir -p "$D/template"
+cat > "$D/template/settings.gradle.kts.new" <<'APKMAKER_FILE_EOF'
+pluginManagement {
+    repositories { google(); mavenCentral(); gradlePluginPortal() }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories { google(); mavenCentral() }
+}
+rootProject.name = "__NAME__"
+include(":app")
+APKMAKER_FILE_EOF
+mv "$D/template/settings.gradle.kts.new" "$D/template/settings.gradle.kts"
+chmod +x "$D/bin/apk-maker"
+mkdir -p "$HOME/.local/bin" "$HOME/.cache/apk-maker"
+ln -sf "$D/bin/apk-maker" "$HOME/.local/bin/apk-maker"
+echo 4 > "$D/VERSION"
+# The SDK and Gradle downloads take minutes: they run on their own and report to setup.json.
+setsid -f "$D/bin/apk-maker" setup >/dev/null 2>&1 < /dev/null
+echo apk-maker 4 installed""")
+  }
+  // installer:end
+
+  // apk-maker prints a URL when a finished app has to come from the browser: open it.
+  // `out` is cleared before each command, so the same URL twice still opens twice.
+  on out { openUrl = startsWith(trim(value ?? ""), "http") ? trim(value) : "" }
+  when openUrl != "" {
+    url(openUrl)
+    openUrl = ""
+  }
+  // A new phase drops a pending "stop" confirmation.
+  on phase { confirmAt = 0 }
+  // Tell the user when a build finishes while they are looking at something else.
+  when (phase == "done" || phase == "ready" || phase == "failed") && doneKey != "${job.slug}:${job.started}:${phase}" {
+    notify("APK Maker", phase == "done" ? "${jname} is installed" : phase == "ready" ? "${jname} is built: tap install" : "${jname} failed: ${job.msg ?? "see the log"}")
+    doneKey = "${job.slug}:${job.started}:${phase}"
+  }
+
+  component Dot(c) {
+    Canvas { width: 8; height: 8; circle(4, 4, 4, fill: c) }
+  }
+
+  component Chip(name) {
+    let on = agent == name
+    // Until the agent list loads, no agent counts as missing.
+    let ok = agentsOut == null || len(have) == 0 || indexOf(have, name) >= 0
+    Text {
+      text: name
+      fontSize: 12
+      align: center
+      maxLines: 1
+      padding: [6, 4]
+      radius: 8 * corners
+      border: 1
+      opacity: ok ? 1 : 0.4
+      borderColor: on ? accent : border
+      color: on ? background : foreground
+      background: on ? accent : alpha(surface, 0.0)
+      onTap: { agent = ok ? name : agent; out = ok ? "" : "${name} is not installed"; haptic() }
+    }
+  }
+
+  component Agents {
+    Row {
+      gap: 6
+      Chip { name: "claude"; weight: 1 }
+      Chip { name: "codex"; weight: 1 }
+      Chip { name: "opencode"; weight: 1 }
+    }
+  }
+
+  // One coloured dot + label per status, so it reads the same everywhere.
+  component Pill(s) {
+    Row {
+      gap: 6
+      align: center
+      width: 96
+      justify: end
+      let c = s == "installed" ? green : s == "failed" || s == "cancelled" ? red : s == "ready" ? yellow : s == "built" ? cyan : s == "building" ? accent : s == "stalled" ? orange : muted
+      Dot { c: c }
+      Text { text: s == "cancelled" ? "stopped" : s; style: small; color: c; maxLines: 1 }
+    }
+  }
+
+  // write · build · install, the current one in the phase's colour.
+  component Steps(labels = true) {
+    Row {
+      gap: 4
+      for s, i in ["write", "build", "install"] {
+        Column {
+          weight: 1
+          gap: 2
+          let c = step > i + 1 || phase == "done" ? alpha(green, 0.8) : step == i + 1 ? tint : alpha(muted, 0.25)
+          Spacer { height: 3; fill: width; background: c; radius: 2 * corners }
+          if labels {
+            Text { text: s; fontSize: 10; color: step == i + 1 ? tint : muted; maxLines: 1 }
+          }
+        }
+      }
+    }
+  }
+
+  // The stored prompt wraps the user's idea in boilerplate; show just the idea.
+  component Idea(p) {
+    Text {
+      text: startsWith(p, "Continue building") ? "retry: finish the app and get the build passing" : replace(replace(first(lines(p)), "Build this Android app in the current directory: ", ""), "Change this Android app (read AGENTS.md first): ", "")
+      style: small
+      italic: true
+      color: muted
+      maxLines: 3
+    }
+  }
+
+  // Everything that can be done with one app, from the apps tab and the job tab.
+  component Actions(a) {
+    Flow {
+      gap: 6
+      // A browser download can't be seen from here, so after one, "open" is offered too.
+      if a.status == "installed" || a.downloaded != null {
+        Button { text: "open"; color: green; onTap: androidApp(a.pkg) }
+      }
+      if a.status == "ready" || a.status == "built" || a.status == "installed" {
+        Button { text: a.status == "installed" ? "reinstall" : "install"; color: a.status == "installed" ? foreground : yellow; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker install ${sh(a.slug)} 2>&1") } }
+        Button { text: "download"; onTap: { out = ""; out = run("~/.local/bin/apk-maker download ${sh(a.slug)} 2>&1") } }
+      }
+      if !busy && (a.status == "failed" || a.status == "cancelled" || a.status == "new" || a.status == "building") {
+        Button { text: "retry"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker retry ${sh(a.slug)} 2>&1"); tab = "job" } }
+      }
+      Button { text: "terminal"; onTap: terminal((a.agent ?? agent) == "codex" ? "cd ~/apps/${sh(a.slug)} && codex; exec bash" : (a.agent ?? agent) == "opencode" ? "cd ~/apps/${sh(a.slug)} && opencode; exec bash" : "cd ~/apps/${sh(a.slug)} && claude; exec bash", a.slug) }
+      Button { text: "copy id"; onTap: copy(a.pkg) }
+      if connected && a.status == "installed" {
+        Button { text: "uninstall"; color: red; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker uninstall ${sh(a.slug)} 2>&1") } }
+      }
+      // Deleting removes the project for good, so it takes a second tap.
+      if !(busy && a.slug == job.slug) {
+        if delSlug == a.slug && now - delAt < 5 {
+          Button { text: "really delete?"; color: red; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker delete ${sh(a.slug)} 2>&1"); delSlug = ""; sel = sel == a.slug ? "" : sel } }
+        } else {
+          Button { text: "delete"; color: red; onTap: { haptic(); delSlug = a.slug; delAt = now } }
+        }
+      }
+    }
+  }
+
+  component AppRow(a) {
+    Row {
+      align: center
+      gap: 6
+      onTap: { sel = a.slug; tab = "apps"; screen() }
+      Image { src: "app:${a.pkg}"; size: 18; visible: a.status == "installed" }
+      Text { text: a.label ?? a.slug; style: small; maxLines: 1; weight: 1 }
+      let s = a.status == "building" && !(busy && a.slug == job.slug) ? "stalled" : a.status
+      if narrow {
+        Dot { c: s == "installed" ? green : s == "failed" || s == "cancelled" ? red : s == "ready" ? yellow : s == "built" ? cyan : s == "building" ? accent : s == "stalled" ? orange : muted }
+      } else {
+        Pill { s: s }
+      }
+    }
+  }
+
+  // Where setup is, and the one thing to do about it.
+  component SetupCard(full = false) {
+    Column {
+      gap: 6
+      padding: 8
+      radius: 8 * corners
+      background: alpha(stageTint, 0.10)
+      border: 1
+      borderColor: alpha(stageTint, 0.6)
+      Row {
+        align: center
+        gap: 6
+        Dot { c: stageTint }
+        Text { text: stageTitle; bold: true; style: small; weight: 1; maxLines: 1 }
+      }
+      if stage == "install" || stage == "setup" {
+        Progress { value: stage == "install" ? 0 : (setup.step ?? 1) - 1; max: setup.steps ?? 5; height: 3; fill: width; color: accent; track: alpha(muted, 0.2); animate value: spring() }
+      }
+      if stageMsg != "" {
+        Text { text: stageMsg; style: small; color: stage == "failed" || stage == "installfail" ? red : muted; maxLines: full ? 4 : 2 }
+      }
+      Flow {
+        gap: 6
+        if stage == "failed" || stage == "installfail" {
+          Button { text: "retry"; color: accent; onTap: { haptic(); installRun = installRun + 1 } }
+        }
+        if stage == "agent" {
+          Button { text: "add an agent"; color: yellow; onTap: launcher("agents") }
+          Button { text: "check again"; onTap: refresh() }
+        }
+        if (stage == "setup" || stage == "failed") && !full {
+          Button { text: "log"; onTap: { tab = "setup"; screen() } }
+        }
+        if (stage == "setup" || stage == "failed") && full {
+          Button { text: "live log"; onTap: terminal("tail -n 50 -f ~/.cache/apk-maker/setup.log", "setup log") }
+        }
+      }
+    }
+  }
+
+  component Notice(msg, c, action = "", go = "") {
+    Row {
+      gap: 8
+      align: center
+      padding: [8, 6]
+      radius: 8 * corners
+      background: alpha(c, 0.14)
+      border: 1
+      borderColor: c
+      Text { text: msg; style: small; color: c; weight: 1; maxLines: 3 }
+      if action != "" && go == "login" {
+        Button { text: action; onTap: terminal(jagent == "codex" ? "codex login" : jagent == "opencode" ? "opencode auth login" : "claude", "login") }
+      }
+      if action != "" && go != "login" {
+        Button { text: action; onTap: { tab = "setup"; screen() } }
+      }
+    }
+  }
+
+  // Stopping kills a build that may be minutes in, so it takes a second tap within 5 seconds.
+  component Stop {
+    Row {
+      if now - confirmAt < 5 {
+        Button { text: "really stop?"; color: red; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker cancel 2>&1"); confirmAt = 0 } }
+      } else {
+        Button { text: "stop"; color: red; onTap: { haptic(); confirmAt = now } }
+      }
+    }
+  }
+
+  component Banner {
+    Row {
+      gap: 8
+      align: center
+      padding: [8, 6]
+      radius: 8 * corners
+      background: alpha(outErr ? red : accent, 0.14)
+      border: 1
+      borderColor: outErr ? red : accent
+      // A download URL has already opened in the browser: say what to do there instead.
+      Text { text: startsWith(trim(out ?? ""), "http") ? "downloading in the browser: open the APK there to install it" : trim(out ?? ""); style: small; color: outErr ? red : accent; weight: 1; maxLines: 3 }
+      Text { text: "✕"; color: muted; padding: [6, 2]; onTap: out = "" }
+    }
+  }
+
+  // The one or two things to do next with the current job.
+  component Next(showLog = true) {
+    Flow {
+      gap: 6
+      if busy {
+        if stalled {
+          Button { text: "retry"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker retry ${sh(job.slug)} 2>&1") } }
+        }
+        if showLog {
+          Button { text: "log"; onTap: { tab = "job"; screen() } }
+        }
+        Stop { }
+      } else {
+        if needAuth {
+          Button { text: "log in"; color: yellow; onTap: terminal(jagent == "codex" ? "codex login" : jagent == "opencode" ? "opencode auth login" : "claude", "login") }
+        }
+        if cur.status == "installed" || cur.downloaded != null {
+          Button { text: "open"; color: green; onTap: androidApp(cur.pkg) }
+        }
+        if cur.status == "ready" || cur.status == "built" {
+          Button { text: "install"; color: yellow; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker install ${sh(cur.slug)} 2>&1") } }
+        }
+        if phase == "failed" || phase == "cancelled" {
+          Button { text: "retry"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker retry ${sh(job.slug)} 2>&1") } }
+          if showLog {
+            Button { text: "log"; onTap: { tab = "job"; screen() } }
+          }
+        }
+      }
+    }
+  }
+
+  component NewInput(focusIt = false) {
+    Input {
+      text: draft
+      placeholder: busy ? "wait for ${jname}…" : missing ? "finish setup first" : "describe an app…"
+      focus: focusIt
+      onChange: draft = value
+      onSubmit: {
+        // An empty submit (the keyboard's enter on nothing) does nothing.
+        out = ""
+        out = run(canGo ? "~/.local/bin/apk-maker new ${sh(agent)} ${sh(trim(draft))} 2>&1" : trim(draft) == "" ? "true" : "echo ${sh(blockMsg)}")
+        sel = canGo ? "" : sel
+        tab = canGo ? "job" : tab
+        draft = canGo ? "" : draft
+      }
+    }
+  }
+
+  onTap: { tab = missing ? "setup" : tab; screen() }
+
+  Column {
+    gap: 6
+    fill: true
+
+    Row {
+      align: center
+      gap: 6
+      Text { text: narrow ? "APK Maker" : "Agentic APK Maker"; style: muted; weight: 1; maxLines: 1 }
+      if adbs != null {
+        Dot { c: missing ? orange : connected ? green : muted }
+        Text { text: missing ? "setup" : connected ? "adb" : "no adb"; style: small; color: muted; width: 48; align: end; maxLines: 1; onTap: { tab = "setup"; screen() } }
+      }
+    }
+
+    if missing {
+      SetupCard { }
+      if !short && (stage == "install" || stage == "setup") {
+        Text { text: "First setup downloads the Android SDK, Gradle and libraries (about 1 GB). You can leave this page."; style: small; color: muted; maxLines: 4 }
+      }
+      // Apps already made stay one tap away while setup runs.
+      if tall && len(list) > 0 {
+        Column {
+          gap: 6
+          weight: 1
+          scroll: true
+          Text { text: "apps · ${len(list)}"; style: label; color: muted }
+          for a in list.take(12) key a.slug {
+            AppRow { a: a }
+          }
+        }
+      }
+    } else {
+      if trim(out ?? "") != "" {
+        Banner { }
+      }
+
+      // current or last job
+      if job.phase != null {
+        Column {
+          gap: 4
+          padding: narrow ? 0 : 8
+          radius: 8 * corners
+          background: narrow ? alpha(surface, 0.0) : alpha(surface, 0.6)
+          Row {
+            align: center
+            gap: 6
+            Dot { c: tint }
+            Text { text: jname; bold: true; style: small; maxLines: 1; weight: 1 }
+            Text { text: elapsed != null && !narrow ? "${phaseText} · ${fmtDuration(elapsed)}" : phaseText; style: small; color: tint; width: narrow ? 72 : 120; align: end; maxLines: 1 }
+          }
+          Steps { labels: !narrow }
+          if !short {
+            Text { text: busy ? (narrow && elapsed != null ? "${fmtDuration(elapsed)} · ${lastLine}" : lastLine) : job.msg ?? ""; style: small; font: mono; color: needAuth ? yellow : phase == "failed" ? red : muted; maxLines: 2 }
+          }
+          Next { }
+        }
+      } else {
+        if !short {
+          Text { text: "Describe an app; an agent writes it, builds it and installs it here."; style: small; color: muted; maxLines: 3 }
+        }
+      }
+
+      if !narrow && !short && !busy {
+        Agents { }
+        NewInput { }
+      }
+
+      if !short && (narrow || tall) {
+        Column {
+          gap: 6
+          weight: 1
+          scroll: true
+          Text { text: len(list) == 0 ? "your apps show up here" : "apps · ${len(list)}"; style: label; color: muted }
+          for a in list.take(12) key a.slug {
+            AppRow { a: a }
+          }
+        }
+      } else {
+        if !short {
+          Spacer { weight: 1 }
+        }
+      }
+
+      if (narrow || short) && !busy {
+        Button { text: "+ new app"; color: accent; onTap: { tab = "new"; screen() } }
+      }
+    }
+  }
+
+  screen {
+    title: "Agentic APK Maker"
+    Column {
+      gap: 8
+      fill: true
+      padding: 4
+
+      Row {
+        gap: 6
+        align: center
+        for t in ["job", "apps", "new", "setup"] {
+          Text {
+            text: t
+            weight: 1
+            align: center
+            maxLines: 1
+            padding: [0, 6]
+            radius: 10 * corners
+            color: tab == t ? background : foreground
+            background: tab == t ? accent : surface
+            onTap: { tab = t; haptic() }
+          }
+        }
+        if !missing {
+          Dot { c: connected ? green : muted }
+          Text { text: connected ? "adb" : "no adb"; style: small; color: muted; width: 52; align: end; maxLines: 1 }
+        }
+      }
+
+      if trim(out ?? "") != "" {
+        Banner { }
+      }
+
+      if missing && tab != "setup" {
+        SetupCard { }
+      }
+      if !missing && len(problems) > 0 && tab != "setup" {
+        Notice { msg: "can't build yet: ${join(problems, ", ")}"; c: orange; action: "details" }
+      }
+      if needAuth {
+        Notice { msg: "${jagent} isn't logged in. Log in, then retry."; c: yellow; action: "log in"; go: "login" }
+      }
+
+      if tab == "job" {
+        if job.phase == null {
+          Column {
+            gap: 8
+            weight: 1
+            justify: center
+            align: center
+            Text { text: "no build yet"; style: title; color: muted }
+            Text { text: "describe an app and an agent builds it"; style: small; color: muted; align: center }
+            Button { text: "new app"; color: accent; onTap: tab = "new" }
+          }
+        } else {
+          Row {
+            align: center
+            gap: 8
+            Dot { c: tint }
+            Text { text: "${jname} · ${jagent}"; bold: true; maxLines: 1; weight: 1 }
+            Text { text: phaseText; color: tint; width: 110; align: end; maxLines: 1 }
+          }
+          Steps { }
+          if stalled {
+            Text { text: "the worker stopped without finishing: retry, or stop to clear it"; style: small; color: orange }
+          }
+          if job.updated != null {
+            Text { text: elapsed != null ? "running ${fmtDuration(elapsed)} · updated ${fmtTime(job.updated, "HH:mm:ss")}" : "${job.msg ?? ""} · ${fmtTime(job.updated, "MMM d HH:mm")}"; style: small; color: muted; maxLines: 2 }
+          }
+          if job.prompt != null {
+            Idea { p: job.prompt }
+          }
+          if showErr {
+            Column {
+              gap: 2
+              padding: 8
+              radius: 8 * corners
+              background: alpha(red, 0.12)
+              border: 1
+              borderColor: red
+              Text { text: "build error"; style: label; color: red }
+              Text { text: errTail; font: mono; fontSize: 10; color: red; maxLines: 3 }
+            }
+          }
+          Column {
+            gap: 1
+            weight: 1
+            scroll: true
+            padding: 8
+            background: surface
+            radius: 8 * corners
+            Text { text: len(logLines) == 0 ? "no log yet" : "log · newest first"; style: label; color: muted }
+            for l in recent {
+              Text {
+                text: l
+                font: mono
+                fontSize: 10
+                color: startsWith(l, "==") ? accent : startsWith(l, "→") ? cyan : contains(l, "error:") || contains(l, "ERROR") || startsWith(l, "e: ") || contains(l, "FAILURE") || contains(l, "What went wrong") ? red : foreground
+              }
+            }
+          }
+          Row {
+            gap: 8
+            align: center
+            if busy {
+              Next { showLog: false; weight: 1 }
+              Button { text: "live log"; onTap: terminal("tail -f ~/.cache/apk-maker/log.txt", "log") }
+            } else {
+              if cur != null {
+                Actions { a: cur; weight: 1 }
+              } else {
+                Spacer { weight: 1 }
+              }
+            }
+            Button { text: "copy log"; onTap: copy(log ?? "") }
+          }
+        }
+      }
+
+      if tab == "apps" {
+        Column {
+          gap: 8
+          weight: 1
+          scroll: true
+          if len(list) == 0 {
+            Text { text: "no apps yet: describe one on the new tab"; color: muted }
+            Button { text: "new app"; color: accent; onTap: tab = "new" }
+          } else {
+            if len(list) > 4 {
+              Input { text: search; placeholder: "filter apps…"; onChange: search = value }
+            }
+            if len(shown) == 0 {
+              Text { text: "no app matches “${search}”"; style: small; color: muted }
+            }
+            for a in shown key a.slug {
+              Column {
+                gap: 6
+                padding: 8
+                radius: 8 * corners
+                background: picked.slug == a.slug ? surface : alpha(surface, 0.0)
+                border: 1
+                borderColor: picked.slug == a.slug ? accent : border
+                onTap: sel = a.slug
+                Row {
+                  align: center
+                  gap: 8
+                  Image { src: "app:${a.pkg}"; size: 24; visible: a.status == "installed" }
+                  Text { text: a.label ?? a.slug; bold: true; maxLines: 1; weight: 1 }
+                  Pill { s: a.status == "building" && !(busy && a.slug == job.slug) ? "stalled" : a.status }
+                }
+                Text { text: "${a.agent ?? "?"} · ${len(a.history ?? [])} runs · ${fmtTime(a.updated, "MMM d HH:mm")}"; style: small; color: muted; maxLines: 1 }
+                if picked.slug == a.slug {
+                  let hist = last(a.history ?? [])
+                  if hist.prompt != null {
+                    Idea { p: first(a.history ?? []).prompt ?? hist.prompt }
+                  }
+                  Actions { a: a }
+                  Input {
+                    text: change
+                    placeholder: busy ? "wait for ${jname}…" : "ask ${agent} to change it…"
+                    onChange: change = value
+                    onSubmit: {
+                      out = ""
+                      out = run(canStart && trim(change) != "" ? "~/.local/bin/apk-maker change ${sh(a.slug)} ${sh(agent)} ${sh(trim(change))} 2>&1" : trim(change) == "" ? "true" : "echo ${sh(blockMsg)}")
+                      tab = canStart && trim(change) != "" ? "job" : tab
+                      change = canStart && trim(change) != "" ? "" : change
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if tab == "new" {
+        Column {
+          gap: 8
+          weight: 1
+          scroll: true
+          Text { text: "Describe an app in a sentence. The agent writes it, Gradle builds it, and it installs on this phone."; style: small; color: muted }
+          if busy {
+            Notice { msg: "${jname} is still building. Wait for it, or stop it on the job tab."; c: orange }
+          }
+          NewInput { focusIt: tab == "new" && !busy && !missing }
+          Text { text: "agent"; style: label; color: muted }
+          Agents { }
+          Text { text: "or start from an idea"; style: label; color: muted }
+          Grid {
+            columns: 2
+            gap: 6
+            for e in ideas {
+              Text {
+                text: e
+                style: small
+                align: center
+                maxLines: 1
+                padding: [8, 6]
+                radius: 8 * corners
+                border: 1
+                borderColor: draft == e ? accent : border
+                color: draft == e ? accent : foreground
+                onTap: { draft = e; haptic() }
+              }
+            }
+          }
+          if trim(draft) != "" {
+            Button {
+              text: canStart ? "build “${draft}” with ${agent}" : busy ? "wait for the current build" : "can't build yet"
+              color: canStart ? accent : muted
+              onTap: { haptic(); out = ""; out = run(canGo ? "~/.local/bin/apk-maker new ${sh(agent)} ${sh(trim(draft))} 2>&1" : "echo ${sh(blockMsg)}"); sel = canGo ? "" : sel; tab = canGo ? "job" : tab; draft = canGo ? "" : draft }
+            }
+          }
+        }
+      }
+
+      if tab == "setup" {
+        Column {
+          gap: 8
+          weight: 1
+          scroll: true
+          Text { text: "1 · build tools"; style: label; color: muted }
+          if missing {
+            SetupCard { full: true }
+          } else {
+            if len(problems) == 0 {
+              Row { gap: 6; align: center; Dot { c: green }  Text { text: "ready to build · agents: ${join(have, ", ")}"; style: small; weight: 1 } }
+            } else {
+              for p in problems {
+                Row { gap: 6; align: center; Dot { c: orange }  Text { text: p; style: small; color: orange; weight: 1 } }
+              }
+            }
+          }
+          Text { text: "APK Maker installs its scripts in ~/.local/share/apk-maker, then the Android SDK (unless one is already there), the Gradle wrapper and the libraries a first build needs. Apps go in ~/apps."; style: small; color: muted }
+          if stage != "ready" && len(slogLines) > 0 {
+            Column {
+              gap: 1
+              padding: 8
+              background: surface
+              radius: 8 * corners
+              Text { text: "setup log · newest first"; style: label; color: muted }
+              for l in slogLines {
+                Text { text: l; font: mono; fontSize: 10; maxLines: 2; color: startsWith(l, "==") ? accent : contains(l, "error") || contains(l, "fail") ? red : foreground }
+              }
+            }
+          }
+          Flow {
+            gap: 6
+            Button { text: "check again"; onTap: refresh() }
+            Button { text: "reinstall"; onTap: { haptic(); installRun = installRun + 1 } }
+          }
+
+          Text { text: "2 · install over adb (optional)"; style: label; color: muted }
+          Text { text: connected ? "adb is connected (${words(adbs)[1]}): apps install and open by themselves." : "Without adb, finished apps download in the browser and you install them from there. With adb they install and open by themselves. Set it up once:"; style: small }
+          if !connected {
+            Text { text: "a. Settings › About phone › Software information: tap Build number 7 times."; style: small; color: muted }
+            Text { text: "b. Developer options: turn on Wireless debugging (on Wi‑Fi)."; style: small; color: muted }
+            Text { text: "c. Open Settings in pop-up view so this stays visible, tap Pair device with pairing code, and enter the port (after the colon) and the code:"; style: small; color: muted }
+            Button { text: "open settings"; onTap: androidApp("com.android.settings") }
+            Row {
+              gap: 6
+              Input { text: pairPort; placeholder: "pair port"; weight: 1; focus: tab == "setup" && !connected && !missing; onChange: pairPort = value }
+              Input { text: pairCode; placeholder: "code"; weight: 1; onChange: pairCode = value }
+              Button {
+                text: "pair"
+                color: trim(pairPort) != "" && trim(pairCode) != "" ? accent : muted
+                onTap: { out = ""; out = run("[ -n ${sh(trim(pairPort))} ] && [ -n ${sh(trim(pairCode))} ] && ~/.local/bin/apk-maker pair ${sh(trim(pairPort))} ${sh(trim(pairCode))} 2>&1") }
+              }
+            }
+            Text { text: "d. Then the port under IP address & port on the Wireless debugging screen:"; style: small; color: muted }
+            Row {
+              gap: 6
+              Input { text: connPort; placeholder: "port"; weight: 1; onChange: connPort = value }
+              Button { text: "connect"; color: trim(connPort) != "" ? accent : muted; onTap: { out = ""; out = run("[ -n ${sh(trim(connPort))} ] && ~/.local/bin/apk-maker connect ${sh(trim(connPort))} 2>&1 && echo connected") } }
+            }
+            Text { text: "After a reboot only step d is needed, and APK Maker tries it on its own."; style: small; color: muted }
+          }
+        }
+      }
+    }
+  }
+}
+
