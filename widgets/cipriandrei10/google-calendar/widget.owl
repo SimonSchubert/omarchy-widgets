@@ -2,7 +2,7 @@ widget "google calendar" {
   size: 3x4
   minSize: 2x2
 
-  meta { owl: 6; description: "Upcoming events from one or more Google calendars (or any iCal link). Tap for the full agenda and settings: add calendars, colors, days ahead"; version: "1.1"; license: "MIT"; category: "productivity" }
+  meta { owl: 6; description: "Upcoming events from one or more Google calendars (or any iCal link). Tap for the full agenda and settings: add calendars, colors, days ahead"; version: "1.2"; license: "MIT"; category: "productivity" }
   requires { pacman: ["python", "python-icalendar", "python-recurring-ical-events"] }
 
   // Calendars are { name, url, color, on }, kept by the launcher, not in this file.
@@ -20,10 +20,12 @@ widget "google calendar" {
   let urlList = join(cals.map(c => c.on && match(c.url ?? "", "^(https|webcal)://[^'\"`$\\\\\\s]+$") != null ? c.url : "-"), " ")
 
   // Fetches every calendar's iCal feed, expands recurring events over the next `days`, and keeps
-  // the last good copy in ~/.cache/owl-gcal so the agenda still shows offline.
+  // the last good copy in ~/.cache/owl-gcal so the agenda still shows offline. Feeds come
+  // gzipped, and a feed whose events haven't changed reuses what was worked out from it last
+  // time, without parsing it or writing it to the cache again.
   source ev = cmd("""
     python3 -c 'import sys, textwrap; exec(textwrap.dedent(sys.argv[1]))' '
-      import sys, json, os, hashlib, urllib.request
+      import sys, json, os, hashlib, urllib.request, zlib
       from datetime import datetime, date, timedelta, timezone
       import icalendar, recurring_ical_events
       days = int(sys.argv[2]); urls = sys.argv[3].split()
@@ -37,18 +39,45 @@ widget "google calendar" {
           if url == "-": continue
           if url.startswith("webcal://"): url = "https://" + url[9:]
           path = os.path.join(cache, hashlib.sha1(url.encode()).hexdigest() + ".ics")
+          done = path[:-4] + ".json"
           try:
-              req = urllib.request.Request(url, headers={"User-Agent": "omalauncher-calendar"})
-              data = urllib.request.urlopen(req, timeout=20).read(cap + 1)
+              memo = json.load(open(done))
+          except Exception:
+              memo = {}
+          fresh = True
+          try:
+              req = urllib.request.Request(url, headers={"User-Agent": "omalauncher-calendar", "Accept-Encoding": "gzip"})
+              resp = urllib.request.urlopen(req, timeout=20)
+              data = resp.read(cap + 1)
+              if resp.headers.get("Content-Encoding", "").lower() == "gzip":
+                  data = zlib.decompressobj(31).decompress(data, cap + 1)
               if len(data) > cap: raise ValueError("feed over 64 MB")
-              cal = icalendar.Calendar.from_ical(data)
-              open(path, "wb").write(data)
           except Exception as e:
               msg = str(getattr(e, "code", "") or getattr(e, "reason", "") or e)[:80]
               if not os.path.exists(path):
                   out["errors"][i] = msg; continue
               out["errors"][i] = "offline, cached (" + msg + ")"
+              data = open(path, "rb").read(); fresh = False
+          # Google stamps every event with the time of the download (DTSTAMP) and lists attendees
+          # in any order, so compare the lines without those.
+          lines = []
+          for l in data.splitlines():
+              if l[:1] == b" " and lines: lines[-1] += l[1:]
+              else: lines.append(l)
+          lines = sorted(l for l in lines if not l.startswith(b"DTSTAMP"))
+          key = hashlib.sha1(bytes([10]).join(lines) + str((start.isoformat(), days, i, str(now.tzinfo))).encode()).hexdigest()
+          del lines
+          if memo.get("k") == key and os.path.exists(path):
+              out["names"][i] = memo["n"]; out["events"] += memo["e"]; continue
+          try:
+              cal = icalendar.Calendar.from_ical(data)
+              if fresh: open(path, "wb").write(data)
+          except Exception as e:
+              if not fresh or not os.path.exists(path):
+                  out["errors"][i] = str(e)[:80]; continue
+              out["errors"][i] = "unreadable, cached (" + str(e)[:60] + ")"
               cal = icalendar.Calendar.from_ical(open(path, "rb").read())
+          first = len(out["events"])
           out["names"][i] = str(cal.get("X-WR-CALNAME", ""))
           for ev in recurring_ical_events.of(cal).between(start, end):
               s = ev.get("DTSTART").dt; e = ev.get("DTEND").dt if ev.get("DTEND") else None
@@ -65,10 +94,11 @@ widget "google calendar" {
                       if d >= start.date():
                           out["events"].append(dict(item, d=d.isoformat(), a=True, s=0, e=0, n=(e - s).days))
                       d += timedelta(days=1)
+          json.dump({"k": key, "n": out["names"][i], "e": out["events"][first:]}, open(done, "w"), ensure_ascii=False)
       # Forget the copies of calendars that were removed or hidden.
       keep = {hashlib.sha1(("https://" + u[9:] if u.startswith("webcal://") else u).encode()).hexdigest() + ".ics" for u in urls}
       for f in os.listdir(cache):
-          if f.endswith(".ics") and f not in keep: os.remove(os.path.join(cache, f))
+          if f.endswith((".ics", ".json")) and f[:-4] + ".ics" not in keep and f[:-5] + ".ics" not in keep: os.remove(os.path.join(cache, f))
       out["events"].sort(key=lambda x: (x["d"], x["s"]))
       print(json.dumps(out, ensure_ascii=False))
     '
