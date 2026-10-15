@@ -13,15 +13,17 @@ widget "omacasino wallet" {
   // awk prints a running summary for every line. Sources stop while their page is off screen,
   // and a file() source then misses the changes; a stream starts over when the page is back,
   // replaying the file, so the tile is right the moment it's seen, with no clock or polling.
-  // The full screen, which keeps its sources running while open, reads the whole file.
+  // The awk sees every line, so the screen's numbers (balance, in play, per-game totals) come
+  // from it too; the screen reads only the file's end, for the recent list and the chart.
   // The launcher doesn't always stop an old copy of the stream when it starts it again, and an
   // idle ledger gives the old one nothing to write, so it would never notice; each start ends
   // older tails first, so one runs however many omacasino widgets are on the home screen.
   source summary = stream("""f="$HOME/.local/share/omacasino/ledger"; pkill -f "^tail -n .1 -F $f"; n=$( { wc -l < "$f"; } 2>/dev/null || echo 0)
     exec awk -v f="$f" -v day="$(date +%Y%m%d)" -v n="$n" '
-    function emit(  g, seen) {
+    function emit(  g, seen, games) {
       seen = ""; for (g in last) seen = seen (seen == "" ? "" : ",") "\"" g "\":" last[g]
-      printf "{\"b\":%d,\"h\":%d,\"tn\":%d,\"tc\":%d,\"ln\":\"%s\",\"ld\":%d,\"lt\":%d,\"last\":{%s}}\n", 1000 + b, h, tn, tc, ln, ld, lt, seen
+      games = ""; for (g in gn) games = games (games == "" ? "" : ",") "\"" g "\":{\"net\":" gn[g] ",\"n\":" (gc[g] + 0) "}"
+      printf "{\"b\":%d,\"h\":%d,\"tn\":%d,\"tc\":%d,\"ln\":\"%s\",\"ld\":%d,\"lt\":%d,\"e\":%d,\"last\":{%s},\"g\":{%s}}\n", 1000 + b, h, tn, tc, ln, ld, lt, e, seen, games
       fflush()
     }
     BEGIN {
@@ -35,31 +37,36 @@ widget "omacasino wallet" {
           if ($5 == "hold") h += $2
           else if ($1 != "rebuy" && $1 != "reset" && strftime("%Y%m%d", $3) == day) { tn += $2; if ($5 == "") tc++ }
           if (split($4, p, "-") >= 2) { g = p[1]; if (!(g in last) || p[2] + 0 > last[g]) last[g] = p[2] + 0 }
-          if ($5 != "hold") { ln = $1; ld = $2; lt = $3 }
+          if ($5 != "hold") {
+            ln = $1; ld = $2; lt = $3; e++
+            if ($1 != "rebuy" && $1 != "reset") { gn[$1] += $2; if ($5 == "") gc[$1]++ }
+          }
         }
         if (i >= n + 0 && NF >= 2) emit()
       }
     }'""") json
-  source ledger = file("~/.local/share/omacasino/ledger")
+  // The end of the ledger, for the screen's recent list and chart: a hand writes about three
+  // lines (hold, release, result), so 300 lines cover the last 100 or so changes. lines() keeps
+  // at most 1000 items, so the whole file can't be read this way once it grows. A tap opening
+  // the screen refreshes it, so it's current however long the tile has been on screen.
+  source recentLog = cmd("tail -n 300 \"$HOME/.local/share/omacasino/ledger\" 2>/dev/null") every 5m
 
-  let rows = lines(ledger ?? "").filter(l => trim(l) != "").map(l => {
+  let rows = lines(recentLog ?? "").filter(l => trim(l) != "").map(l => {
     name: words(l)[0] ?? "?", delta: num(words(l)[1], 0), t: num(words(l)[2], 0), kind: words(l)[4] ?? ""
   })
-  // The balance counts everything, stakes held by hands in play too. The lists and the chart
-  // leave holds out: a hand's hold and its release cancel, and its result line says what it did.
-  let balance = 1000 + sum(rows.map(r => r.delta))
-  let inPlay = -sum(rows.filter(r => r.kind == "hold").map(r => r.delta))
+  // The lists and the chart leave holds out: a hand's hold and its release cancel, and its
+  // result line says what it did.
   let settled = rows.filter(r => r.kind != "hold")
-  let games = unique(settled.map(r => r.name)).filter(n => n != "rebuy" && n != "reset")
-  let totals = games.map(g => { name: g, net: sum(settled.filter(r => r.name == g).map(r => r.delta)), n: count(settled.filter(r => r.name == g && r.kind == "")) })
+  let totals = keys(summary.g ?? {}).map(g => { name: g, net: get(summary.g, g, {}).net ?? 0, n: get(summary.g, g, {}).n ?? 0 })
     .sortBy(g => -abs(g.net))
-  // The tile's numbers, from the stream (1000 before anything is written).
+  // The numbers, from the stream (1000 before anything is written). The balance counts
+  // everything, stakes held by hands in play too.
   let tBal = summary.b ?? 1000
   let todayNet = summary.tn ?? 0
   let todayN = summary.tc ?? 0
   let tHeld = -(summary.h ?? 0)
 
-  onTap: screen()
+  onTap: { refresh(); screen() }
 
   Column {
     gap: 2
@@ -93,19 +100,18 @@ widget "omacasino wallet" {
         Column {
           gap: 0; weight: 1
           Text { text: "shared bankroll"; style: label }
-          Text { text: "${balance}"; style: huge; color: accent }
+          Text { text: "${tBal}"; style: huge; color: accent }
         }
-        Text { text: inPlay > 0 ? "${inPlay} in play" : "${len(settled)} entries"; style: muted; width: 120; align: end }
+        Text { text: tHeld > 0 ? "${tHeld} in play" : "${summary.e ?? 0} entries"; style: muted; width: 120; align: end }
       }
       if len(settled) > 1 {
-        // The balance after each of the last 200 changes.
-        let n = len(settled)
-        // Summed from where the last 200 begin, not from the start for each point.
-        let from = max(0, n - 200)
-        let base = 1000 + sum(settled.take(from).map(r => r.delta))
-        let recent = settled.drop(from).map(r => r.delta)
-        let tail = range(len(recent)).map(i => base + sum(recent.take(i + 1)))
-        Sparkline { values: tail; min: 0; max: max(tail) * 1.1; area: true; color: accent; fill: width; height: 80 }
+        // The balance after each change in that end of the file, holds left out. It's counted back
+        // from the stream's balance, since the file's start isn't read, so it ends at the balance
+        // shown above (lower by any stake still in play).
+        let recent = settled.map(r => r.delta)
+        let base = tBal - sum(recent)
+        let points = range(len(recent)).map(i => base + sum(recent.take(i + 1)))
+        Sparkline { values: points; min: 0; max: max(points) * 1.1; area: true; color: accent; fill: width; height: 80 }
       }
       Text { text: "by game"; style: label }
       if len(totals) == 0 {

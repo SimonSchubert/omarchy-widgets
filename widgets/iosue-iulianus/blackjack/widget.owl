@@ -27,9 +27,10 @@ widget "omacasino blackjack" {
   // the old one nothing to write, so it would never notice; each start ends older tails first.
   source summary = stream("""f="$HOME/.local/share/omacasino/ledger"; pkill -f "^tail -n .1 -F $f"; n=$( { wc -l < "$f"; } 2>/dev/null || echo 0)
     exec awk -v f="$f" -v day="$(date +%Y%m%d)" -v n="$n" '
-    function emit(  g, seen) {
+    function emit(  g, seen, games) {
       seen = ""; for (g in last) seen = seen (seen == "" ? "" : ",") "\"" g "\":" last[g]
-      printf "{\"b\":%d,\"h\":%d,\"tn\":%d,\"tc\":%d,\"ln\":\"%s\",\"ld\":%d,\"lt\":%d,\"last\":{%s}}\n", 1000 + b, h, tn, tc, ln, ld, lt, seen
+      games = ""; for (g in gn) games = games (games == "" ? "" : ",") "\"" g "\":{\"net\":" gn[g] ",\"n\":" (gc[g] + 0) "}"
+      printf "{\"b\":%d,\"h\":%d,\"tn\":%d,\"tc\":%d,\"ln\":\"%s\",\"ld\":%d,\"lt\":%d,\"e\":%d,\"last\":{%s},\"g\":{%s}}\n", 1000 + b, h, tn, tc, ln, ld, lt, e, seen, games
       fflush()
     }
     BEGIN {
@@ -43,7 +44,10 @@ widget "omacasino blackjack" {
           if ($5 == "hold") h += $2
           else if ($1 != "rebuy" && $1 != "reset" && strftime("%Y%m%d", $3) == day) { tn += $2; if ($5 == "") tc++ }
           if (split($4, p, "-") >= 2) { g = p[1]; if (!(g in last) || p[2] + 0 > last[g]) last[g] = p[2] + 0 }
-          if ($5 != "hold") { ln = $1; ld = $2; lt = $3 }
+          if ($5 != "hold") {
+            ln = $1; ld = $2; lt = $3; e++
+            if ($1 != "rebuy" && $1 != "reset") { gn[$1] += $2; if ($5 == "") gc[$1]++ }
+          }
         }
         if (i >= n + 0 && NF >= 2) emit()
       }
