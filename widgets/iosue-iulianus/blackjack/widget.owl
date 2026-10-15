@@ -26,22 +26,28 @@ widget "omacasino blackjack" {
   // launcher doesn't always stop the old one when it starts it again, and an idle ledger gives
   // the old one nothing to write, so it would never notice; each start ends older tails first.
   source summary = stream("""f="$HOME/.local/share/omacasino/ledger"; pkill -f "^tail -n .1 -F $f"; n=$( { wc -l < "$f"; } 2>/dev/null || echo 0)
-    tail -n +1 -F "$f" 2>/dev/null | awk -v day="$(date +%Y%m%d)" -v n="$n" '
+    exec awk -v f="$f" -v day="$(date +%Y%m%d)" -v n="$n" '
     function emit(  g, seen) {
       seen = ""; for (g in last) seen = seen (seen == "" ? "" : ",") "\"" g "\":" last[g]
       printf "{\"b\":%d,\"h\":%d,\"tn\":%d,\"tc\":%d,\"ln\":\"%s\",\"ld\":%d,\"lt\":%d,\"last\":{%s}}\n", 1000 + b, h, tn, tc, ln, ld, lt, seen
       fflush()
     }
-    BEGIN { if (n + 0 == 0) emit() }
-    NF >= 2 && !($4 != "" && $4 in ids) {
-      if ($4 != "") ids[$4] = 1
-      b += $2
-      if ($5 == "hold") h += $2
-      else if ($1 != "rebuy" && $1 != "reset" && strftime("%Y%m%d", $3) == day) { tn += $2; if ($5 == "") tc++ }
-      if (split($4, p, "-") >= 2) { g = p[1]; if (!(g in last) || p[2] + 0 > last[g]) last[g] = p[2] + 0 }
-      if ($5 != "hold") { ln = $1; ld = $2; lt = $3 }
-    }
-    NR >= n + 0 && NF >= 2 { emit() }'""") json optional
+    BEGIN {
+      if (n + 0 == 0) emit()
+      src = "exec tail -n +1 -F \"" f "\" 2>/dev/null"
+      while ((src | getline) > 0) {
+        i++
+        if (NF >= 2 && !($4 != "" && $4 in ids)) {
+          if ($4 != "") ids[$4] = 1
+          b += $2
+          if ($5 == "hold") h += $2
+          else if ($1 != "rebuy" && $1 != "reset" && strftime("%Y%m%d", $3) == day) { tn += $2; if ($5 == "") tc++ }
+          if (split($4, p, "-") >= 2) { g = p[1]; if (!(g in last) || p[2] + 0 > last[g]) last[g] = p[2] + 0 }
+          if ($5 != "hold") { ln = $1; ld = $2; lt = $3 }
+        }
+        if (i >= n + 0 && NF >= 2) emit()
+      }
+    }'""") json optional
   state sharedOn = true persist
   // Every line has an id ("<game>-<seq>-<time>"). `sent` holds this game's lines until they show
   // up in the file, so the bankroll is always the ledger plus what's still on its way, minus the
