@@ -22,8 +22,10 @@ widget "omacasino blackjack" {
   // running summary per line: the balance, and the highest line number seen from each game (to
   // tell which of this game's own lines have arrived). Sources stop while their page is off screen, and a file()
   // source would then miss changes; a stream starts over, so it's right as soon as the page is
-  // back. The command is the same in every omacasino widget, so they share one process.
-  source summary = stream("""f="$HOME/.local/share/omacasino/ledger"; n=$( { wc -l < "$f"; } 2>/dev/null || echo 0)
+  // back. The command is the same in every omacasino widget, so they share one process. The
+  // launcher doesn't always stop the old one when it starts it again, and an idle ledger gives
+  // the old one nothing to write, so it would never notice; each start ends older tails first.
+  source summary = stream("""f="$HOME/.local/share/omacasino/ledger"; pkill -f "^tail -n .1 -F $f"; n=$( { wc -l < "$f"; } 2>/dev/null || echo 0)
     tail -n +1 -F "$f" 2>/dev/null | awk -v day="$(date +%Y%m%d)" -v n="$n" '
     function emit(  g, seen) {
       seen = ""; for (g in last) seen = seen (seen == "" ? "" : ",") "\"" g "\":" last[g]

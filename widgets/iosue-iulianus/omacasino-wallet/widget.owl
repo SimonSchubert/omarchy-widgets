@@ -14,7 +14,10 @@ widget "omacasino wallet" {
   // and a file() source then misses the changes; a stream starts over when the page is back,
   // replaying the file, so the tile is right the moment it's seen, with no clock or polling.
   // The full screen, which keeps its sources running while open, reads the whole file.
-  source summary = stream("""f="$HOME/.local/share/omacasino/ledger"; n=$( { wc -l < "$f"; } 2>/dev/null || echo 0)
+  // The launcher doesn't always stop an old copy of the stream when it starts it again, and an
+  // idle ledger gives the old one nothing to write, so it would never notice; each start ends
+  // older tails first, so one runs however many omacasino widgets are on the home screen.
+  source summary = stream("""f="$HOME/.local/share/omacasino/ledger"; pkill -f "^tail -n .1 -F $f"; n=$( { wc -l < "$f"; } 2>/dev/null || echo 0)
     tail -n +1 -F "$f" 2>/dev/null | awk -v day="$(date +%Y%m%d)" -v n="$n" '
     function emit(  g, seen) {
       seen = ""; for (g in last) seen = seen (seen == "" ? "" : ",") "\"" g "\":" last[g]
