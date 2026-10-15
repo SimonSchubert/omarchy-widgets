@@ -1,5 +1,5 @@
-widget "blackjack" {
-  meta { description: "Blackjack against the dealer from a 6-deck shoe: hit, stand, double, split, surrender or insure on a felt table, with a persistent bankroll and a full-screen view of your history and stats"; version: "1.0"; license: "MIT"; category: "fun"; owl: 7 }
+widget "omacasino blackjack" {
+  meta { description: "Blackjack against the dealer from a 6-deck shoe: hit, stand, double, split, surrender or insure on a felt table, with full-screen stats and a bankroll shared with omacasino baccarat"; version: "1.1"; license: "MIT"; category: "fun"; owl: 7 }
   size: 6x4
   padding: 0
   minSize: 4x3
@@ -9,14 +9,78 @@ widget "blackjack" {
   // seeded from the clock.
   source now = clock every 1m
 
+  // The omacasino shared bankroll: with Linux, every omacasino game shares one bankroll through
+  // an append-only ledger, ~/.local/share/omacasino/ledger, one "<name> <delta> <time> <id>" line per
+  // change; the balance is 1000 plus all the deltas. A game writes a line when a hand settles
+  // (and for a rebuy or a reset), and between hands takes its chips from the balance. Without
+  // Linux, or with the setting off, the game keeps its own chips. Handlers can't run a command
+  // conditionally; the lines this game has written but not yet seen in the ledger are kept in
+  // `sent`, and written by the `writer` source below.
+  // A fifth word marks a line that isn't a hand's result: "hold" for a stake held while its hand
+  // is in play (and the release when it settles), "comm" for baccarat's commission box.
+  // The ledger is read through a stream that replays it and then follows it, printing a
+  // running summary per line: the balance, and the highest line number seen from each game (to
+  // tell which of this game's own lines have arrived). Sources stop while their page is off screen, and a file()
+  // source would then miss changes; a stream starts over, so it's right as soon as the page is
+  // back. The command is the same in every omacasino widget, so they share one process.
+  source summary = stream("""f="$HOME/.local/share/omacasino/ledger"; n=$( { wc -l < "$f"; } 2>/dev/null || echo 0)
+    tail -n +1 -F "$f" 2>/dev/null | awk -v day="$(date +%Y%m%d)" -v n="$n" '
+    function emit(  g, seen) {
+      seen = ""; for (g in last) seen = seen (seen == "" ? "" : ",") "\"" g "\":" last[g]
+      printf "{\"b\":%d,\"h\":%d,\"tn\":%d,\"tc\":%d,\"ln\":\"%s\",\"ld\":%d,\"lt\":%d,\"last\":{%s}}\n", 1000 + b, h, tn, tc, ln, ld, lt, seen
+      fflush()
+    }
+    BEGIN { if (n + 0 == 0) emit() }
+    NF >= 2 && !($4 != "" && $4 in ids) {
+      if ($4 != "") ids[$4] = 1
+      b += $2
+      if ($5 == "hold") h += $2
+      else if ($1 != "rebuy" && $1 != "reset" && strftime("%Y%m%d", $3) == day) { tn += $2; if ($5 == "") tc++ }
+      if (split($4, p, "-") >= 2) { g = p[1]; if (!(g in last) || p[2] + 0 > last[g]) last[g] = p[2] + 0 }
+      if ($5 != "hold") { ln = $1; ld = $2; lt = $3 }
+    }
+    NR >= n + 0 && NF >= 2 { emit() }'""") json optional
+  state sharedOn = true persist
+  // Every line has an id ("<game>-<seq>-<time>"). `sent` holds this game's lines until they show
+  // up in the file, so the bankroll is always the ledger plus what's still on its way, minus the
+  // stakes on the table: right at every moment, whenever the file is read, and self-healing.
+  state seq = 0 persist
+  // What this hand has held in the ledger (its stakes, written as they're placed), released
+  // when it settles.
+  state heldAmt = 0 persist
+  state sent = [] persist
+  let shared = linux && sharedOn
+  let wallet = summary.b ?? 1000
+  // A game numbers its lines in order (seq), so a sent line has arrived once the ledger has a
+  // line of this game's with that number or higher, however many lines came in between.
+  let lastSeen = get(summary.last ?? {}, "blackjack", -1)
+  let unseen = sent.filter(e => (e.s ?? -1) > lastSeen)
+  let balance = wallet + sum(unseen.map(e => e.d))
+  // Writing: an optional command source, not run(), so the game still works without Linux (a
+  // run() would make the store and the tile ask for Linux). Its command holds this game's lines
+  // that haven't reached the ledger, joined with "|" (OWL strings have no newline escape), and
+  // appends those whose id isn't there yet, so running it twice can't add a line twice. Every
+  // new line bumps `seq`, which refreshes it at once; the slow interval is only a fallback.
+  let pendingText = linux ? join(unseen.map(e => e.line ?? ""), "|") : ""
+  source writer = cmd("mkdir -p \"$HOME/.local/share/omacasino\" && printf %s ${sh(pendingText)} | flock -w 10 \"$HOME/.local/share/omacasino/ledger.lock\" awk -v f=\"$HOME/.local/share/omacasino/ledger\" 'BEGIN { RS = sprintf(\"%c\", 10); while ((getline l < f) > 0) { split(l, x, \" \"); have[x[4]] = 1 }; RS = \"|\" } NF { split($0, y, \" \"); if (!(y[4] in have)) { print $0 >> f; have[y[4]] = 1 } }'") every 24h optional
+  on seq { refresh() }
+  // Lines that have reached the file are forgotten.
+  when len(unseen) < len(sent) { sent = unseen }
+  // A game whose state starts over (removed and added again) would number its lines from 0
+  // again, and lines below the ledger's highest would count as arrived and never be written:
+  // carry on from the ledger's number instead.
+  when shared && lastSeen >= seq { seq = lastSeen + 1 }
+  // Between hands, the chips are the shared balance.
+  when shared && summary != null && !playing && chips != balance { chips = balance }
+
   state deck = [] persist
   state pos = 0 persist
   state player = [] persist
   state dealer = [] persist
   state phase = "bet" persist         // bet → (insure →) play (→ next → play after a split) → dealer → settle → done
   state doubled = false persist
-  state chips = 100 persist
-  state bet = 10 persist
+  state chips = 1000 persist
+  state bet = 25 persist
   state result = "" persist
   state result2 = "" persist          // the first hand's result after a split
   state net = 0 persist               // what the last round won or lost, over all hands
@@ -36,7 +100,7 @@ widget "blackjack" {
   // stats, and settings.
   state history = [] persist
   state bank = [] persist
-  state stats = { rounds: 0, hands: 0, bj: 0, busts: 0, bigWin: 0, streak: 0, best: 0, peak: 100, wagered: 0, rebuys: 0 } persist
+  state stats = { rounds: 0, hands: 0, bj: 0, busts: 0, bigWin: 0, streak: 0, best: 0, peak: 1000, wagered: 0, rebuys: 0 } persist
   state tab = "play" persist
   state confirmReset = false
   state felt = true persist
@@ -118,6 +182,9 @@ widget "blackjack" {
       : act == "surrender" && !canSurrender ? "" : act
     buzz = act != "" ? buzz + 1 : buzz
     chips = act == "double" || act == "split" ? chips - bet : chips
+    sent = shared && (act == "double" || act == "split") ? sent + [{ id: "blackjack-${seq}-${int(now ?? 0)}", s: seq, d: int(-bet), line: "blackjack ${int(-bet)} ${int(now ?? 0)} blackjack-${seq}-${int(now ?? 0)} hold" }] : sent
+    heldAmt = shared && (act == "double" || act == "split") ? heldAmt + bet : heldAmt
+    seq = shared && (act == "double" || act == "split") ? seq + 1 : seq
     doubled = act == "double" ? true : doubled
     isSplit = act == "split" ? true : isSplit
     splitAces = act == "split" ? player[0] % 13 == 0 : splitAces
@@ -162,6 +229,12 @@ widget "blackjack" {
     fx = outcome == "blackjack" && !isSplit ? "bj" : roundNet > 0 ? "win" : roundNet < 0 ? "lose" : ""
     fxSeq = fx != "" ? fxSeq + 1 : fxSeq
     fxOn = fx != ""
+    // The hand's held stakes come back, and the result goes in. A hold is released even if
+    // sharing was turned off mid-hand.
+    sent = (heldAmt > 0 ? sent + [{ id: "blackjack-${seq}-${int(now ?? 0)}", s: seq, d: int(heldAmt), line: "blackjack ${int(heldAmt)} ${int(now ?? 0)} blackjack-${seq}-${int(now ?? 0)} hold" }] : shared ? sent : [])
+      + (shared ? [{ id: "blackjack-${seq + (heldAmt > 0 ? 1 : 0)}-${int(now ?? 0)}", s: seq + (heldAmt > 0 ? 1 : 0), d: int(roundNet), line: "blackjack ${int(roundNet)} ${int(now ?? 0)} blackjack-${seq + (heldAmt > 0 ? 1 : 0)}-${int(now ?? 0)}" }] : [])
+    seq = seq + (heldAmt > 0 ? 1 : 0) + (shared ? 1 : 0)
+    heldAmt = 0
     chips = chipsAfter
     net = roundNet
     result = outcome
@@ -323,13 +396,14 @@ widget "blackjack" {
     }
   }
 
-  // A bet button drawn as a small chip, smaller than a Button, so five fit in a 4-column tile.
-  component BetChip(label, delta) {
+  // The omacasino chips (5, 25, 100, as in baccarat): a tap adds the chip to the bet, up to the
+  // bankroll. The bet stays for the next hand.
+  component ChipAdd(v, tint) {
     Box {
       width: 30; height: 30; radius: 15; align: center
-      border: 1; borderColor: alpha(foreground, 0.55)
-      onTap: { buzz = buzz + 1; bet = clamp(bet + delta, 5, max(5, chips - chips % 5)) }
-      Text { text: label; fontSize: 11; color: alpha(foreground, 0.85); align: center }
+      background: alpha(tint, 0.3); border: 1; borderColor: alpha(foreground, 0.45)
+      onTap: { buzz = buzz + 1; bet = min(bet + v, chips - chips % 5) }
+      Text { text: "${v}"; fontSize: 10; bold: true; color: v == 100 ? rgb(235, 230, 220) : foreground; align: center }
     }
   }
 
@@ -505,13 +579,18 @@ widget "blackjack" {
         }
         Spacer { weight: 1 }
         Row {
-          gap: roomy ? 5 : 4; fill: width; justify: center; height: 30; align: center
+          gap: 4; fill: width; justify: center; height: 30; align: center
           if phase == "insure" {
             // Before the dealer peeks: buy insurance (even money with a blackjack), or decline.
             if insCost >= 1 && chips >= insCost {
               Button {
                 text: pbj ? "even money" : "insure ${insCost}"; color: yellow
-                onTap: { buzz = buzz + 1; chips = chips - insCost; insurance = insCost; phase = "play" }
+                onTap: {
+                  buzz = buzz + 1; chips = chips - insCost; insurance = insCost; phase = "play"
+                  sent = shared ? sent + [{ id: "blackjack-${seq}-${int(now ?? 0)}", s: seq, d: int(-insCost), line: "blackjack ${int(-insCost)} ${int(now ?? 0)} blackjack-${seq}-${int(now ?? 0)} hold" }] : sent
+                  heldAmt = shared ? heldAmt + insCost : heldAmt
+                  seq = shared ? seq + 1 : seq
+                }
               }
             }
             Button { text: "no thanks"; color: muted; onTap: { buzz = buzz + 1; phase = "play" } }
@@ -529,17 +608,36 @@ widget "blackjack" {
             }
           } else if playing {
             Text { text: "${cardsLeft} cards in the shoe"; style: muted; align: center }
+          } else if chips < 5 && shared && (summary.h ?? 0) < 0 {
+            // A rebuy tops the balance up to 1000; with chips held by another game's hand it
+            // would come to more than that once they're back, so it waits for that hand.
+            Text { text: "${-(summary.h ?? 0)} in play in another game"; style: muted; align: center }
           } else if chips < 5 {
-            Button { text: "broke · new 100 chips"; onTap: {
-              buzz = buzz + 1; chips = 100; bet = 10; result = ""; net = 0; player = []; dealer = []; phase = "bet"
-              bank = (bank + [100]).drop(max(0, len(bank) + 1 - 200))
+            Button { text: "broke · new 1000 chips"; onTap: {
+              buzz = buzz + 1
+              sent = shared ? sent + [{ id: "blackjack-${seq}-${int(now ?? 0)}", s: seq, d: int(1000 - chips), line: "rebuy ${int(1000 - chips)} ${int(now ?? 0)} blackjack-${seq}-${int(now ?? 0)}" }] : sent
+              seq = shared ? seq + 1 : seq
+              chips = 1000; bet = 25; result = ""; net = 0; player = []; dealer = []; phase = "bet"
+              bank = (bank + [1000]).drop(max(0, len(bank) + 1 - 200))
               stats = { rounds: stats.rounds, hands: stats.hands, bj: stats.bj, busts: stats.busts, bigWin: stats.bigWin, streak: stats.streak, best: stats.best, peak: stats.peak, wagered: stats.wagered, rebuys: stats.rebuys + 1 }
             } }
           } else {
-            BetChip { label: "−10"; delta: -10 }
-            BetChip { label: "−5"; delta: -5 }
-            Button {
-              text: "deal ${bet}"
+            ChipAdd { v: 5; tint: red }
+            ChipAdd { v: 25; tint: green }
+            ChipAdd { v: 100; tint: rgb(28, 28, 30) }
+            if bet > 0 {
+              Box {
+                width: roomy ? 52 : 28; height: 30; radius: 15 * corners; align: center
+                border: 1; borderColor: alpha(foreground, 0.75)
+                onTap: { buzz = buzz + 1; bet = 0 }
+                Text { text: roomy ? "clear" : "✕"; fontSize: 11; color: alpha(foreground, 0.75); align: center }
+              }
+            }
+            if bet >= 5 {
+            Box {
+              width: round(len("deal ${bet}") * 7.2) + 18; height: 30; radius: 15 * corners; align: center
+              border: 1.5; borderColor: accent; background: alpha(accent, 0.15)
+              Text { text: "deal ${bet}"; fontSize: 12; bold: true; color: accent; align: center }
               onTap: {
                 buzz = buzz + 1
                 reshuffle = len(deck) != shoeSize || len(deck) - pos < reserve
@@ -550,6 +648,9 @@ widget "blackjack" {
                 dealer = [deck[pos + 1], deck[pos + 3]]
                 pos = pos + 4
                 chips = chips - bet
+                sent = shared ? sent + [{ id: "blackjack-${seq}-${int(now ?? 0)}", s: seq, d: int(-bet), line: "blackjack ${int(-bet)} ${int(now ?? 0)} blackjack-${seq}-${int(now ?? 0)} hold" }] : sent
+                heldAmt = shared ? bet : 0
+                seq = shared ? seq + 1 : seq
                 doubled = false
                 isSplit = false
                 splitAces = false
@@ -564,8 +665,7 @@ widget "blackjack" {
                 phase = dealer[0] % 13 == 0 ? "insure" : "play"
               }
             }
-            BetChip { label: "+5"; delta: 5 }
-            BetChip { label: "+10"; delta: 10 }
+            }
           }
         }
       }
@@ -768,6 +868,19 @@ widget "blackjack" {
           Row {
             align: center
             Column { gap: 0; weight: 1
+              Text { text: "shared bankroll" }
+              Text {
+                text: !linux ? "needs Linux; this game keeps its own chips"
+                  : sharedOn ? "one bankroll for omacasino blackjack and baccarat; the omacasino wallet widget (in the store) shows it"
+                  : "this game keeps its own chips; the omacasino wallet widget (in the store) shows the shared one"
+                style: small; color: muted
+              }
+            }
+            Button { text: sharedOn ? "on" : "off"; color: sharedOn && linux ? accent : muted; onTap: { buzz = buzz + 1; sharedOn = !sharedOn } }
+          }
+          Row {
+            align: center
+            Column { gap: 0; weight: 1
               Text { text: "table graphics" }
               Text { text: "the felt, the rail and the gold print"; style: small; color: muted }
             }
@@ -814,7 +927,7 @@ widget "blackjack" {
             align: center
             Column { gap: 0; weight: 1
               Text { text: "start over" }
-              Text { text: "100 chips, and clear the history and stats"; style: small; color: muted }
+              Text { text: shared ? "1000 chips for blackjack and baccarat, and clear the history and stats" : "1000 chips, and clear the history and stats"; style: small; color: muted }
             }
             if playing {
               Text { text: "finish the hand first"; style: small; color: muted; width: 140; align: end }
@@ -823,12 +936,14 @@ widget "blackjack" {
               text: confirmReset ? "tap again" : "reset"; color: confirmReset ? red : muted
               onTap: {
                 buzz = buzz + 1
-                chips = confirmReset ? 100 : chips
-                bet = confirmReset ? 10 : bet
+                sent = confirmReset && shared ? sent + [{ id: "blackjack-${seq}-${int(now ?? 0)}", s: seq, d: int(1000 - balance), line: "reset ${int(1000 - balance)} ${int(now ?? 0)} blackjack-${seq}-${int(now ?? 0)}" }] : sent
+                seq = confirmReset && shared ? seq + 1 : seq
+                chips = confirmReset ? 1000 : chips
+                bet = confirmReset ? 25 : bet
                 history = confirmReset ? [] : history
                 bank = confirmReset ? [] : bank
                 tally = confirmReset ? { win: 0, lose: 0, push: 0 } : tally
-                stats = confirmReset ? { rounds: 0, hands: 0, bj: 0, busts: 0, bigWin: 0, streak: 0, best: 0, peak: 100, wagered: 0, rebuys: 0 } : stats
+                stats = confirmReset ? { rounds: 0, hands: 0, bj: 0, busts: 0, bigWin: 0, streak: 0, best: 0, peak: 1000, wagered: 0, rebuys: 0 } : stats
                 result = confirmReset ? "" : result
                 net = confirmReset ? 0 : net
                 player = confirmReset ? [] : player
