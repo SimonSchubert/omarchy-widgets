@@ -4,7 +4,7 @@ widget "Agentic APK Maker" {
   size: 6x5
   minSize: 3x3
 
-  meta { owl: 7; description: "Describe an Android app in a sentence: Claude Code, Codex or OpenCode writes it, builds it right on your phone and installs it. Sets up the Android SDK and Gradle for you."; version: "2.3"; license: "MIT"; category: "dev" }
+  meta { owl: 7; description: "Describe an Android app in a sentence: Claude Code, Codex or OpenCode writes it, builds it right on your phone and installs it. Sets up the Android SDK and Gradle for you."; version: "2.4"; license: "MIT"; category: "dev" }
 
   requires { pacman: ["jq", "git", "curl", "unzip", "util-linux", "jdk17-openjdk", "android-tools"] }
 
@@ -946,7 +946,8 @@ echo apk-maker 5 installed""")
     }
   }
 
-  // write · build · install, the current one in the phase's colour.
+  // write · build · install, each in its own colour once reached (install green); a step
+  // that stalled, failed or was stopped shows the phase's colour instead.
   component Steps(labels = true) {
     Row {
       gap: 4
@@ -954,10 +955,13 @@ echo apk-maker 5 installed""")
         Column {
           weight: 1
           gap: 2
-          let c = step > i + 1 || phase == "done" ? alpha(green, 0.8) : step == i + 1 ? tint : alpha(muted, 0.25)
+          let own = i == 0 ? blue : i == 1 ? magenta : green
+          let bad = step == i + 1 && (stalled || phase == "failed" || phase == "cancelled")
+          let reached = step >= i + 1 || phase == "done"
+          let c = bad ? tint : reached ? own : alpha(muted, 0.25)
           Spacer { height: 3; fill: width; background: c; radius: 2 * corners }
           if labels {
-            Text { text: s; fontSize: 10; color: step == i + 1 ? tint : muted; maxLines: 1 }
+            Text { text: s; fontSize: 10; color: bad ? tint : step == i + 1 ? own : muted; maxLines: 1 }
           }
         }
       }
@@ -1103,7 +1107,7 @@ echo apk-maker 5 installed""")
       borderColor: outErr ? red : accent
       // A download URL has already opened in the browser: say what to do there instead.
       Text { text: startsWith(trim(out ?? ""), "http") ? "downloading in the browser: open the APK there to install it" : trim(out ?? ""); style: small; color: outErr ? red : accent; weight: 1; maxLines: 3 }
-      Text { text: "✕"; color: muted; padding: [6, 2]; onTap: out = "" }
+      Text { text: "✕"; width: 24; align: center; color: muted; padding: [6, 2]; onTap: out = "" }
     }
   }
 
