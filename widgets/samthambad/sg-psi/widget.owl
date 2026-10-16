@@ -6,8 +6,8 @@ widget "Singapore PSI" {
   padding: 12
 
   meta {
-    description: "Latest NEA 24-hour PSI readings for all five Singapore regions. Tap to open haze.gov.sg."
-    version: "1.0"
+    description: "Latest NEA 24-hour PSI and PM2.5 readings for all five Singapore regions. Tap to open haze.gov.sg."
+    version: "1.1"
     license: "MIT"
     category: "world"
   }
@@ -16,13 +16,14 @@ widget "Singapore PSI" {
   source response = http("https://api-open.data.gov.sg/v2/real-time/api/psi") every 10m json status
   let latest = response.out.data.items[0]
   let readings = latest.readings.psi_twenty_four_hourly
+  let pm25 = latest.readings.pm25_twenty_four_hourly
   let regions = ["north", "south", "east", "west", "central"]
   let ready = response.ok && response.out.code == 0 && readings != null
   onTap: url("https://www.haze.gov.sg/")
 
   Column {
     fill: true
-    gap: 3
+    gap: 2
     Text { text: "SINGAPORE"; fontSize: 11; color: muted }
     Text { text: "24-hour PSI"; fontSize: 18 }
     Text {
@@ -31,23 +32,39 @@ widget "Singapore PSI" {
       fontSize: 10
       color: muted
     }
+    Row {
+      fill: width
+      gap: 6
+      padding: [0, 1]
+      Text { text: "Region"; weight: 1; fontSize: 10; color: muted }
+      Text { text: "PM2.5"; width: 46; align: end; fontSize: 10; color: muted }
+      Text { text: "PSI"; width: 44; align: end; fontSize: 10; color: muted }
+    }
     for region in regions {
       let value = readings[region]
-      let tint = value == null ? muted : value <= 50 ? green : value <= 100 ? yellow : value <= 200 ? orange : value <= 300 ? red : magenta
+      let dust = pm25[region]
+      let dustTint = dust == null ? muted : dust <= 55 ? "#2fae5f" : dust <= 150 ? "#f0c000" : dust <= 250 ? "#ef9a00" : "#e5322d"
       Row {
         fill: width
         align: center
-        padding: [8, 2]
+        gap: 6
+        padding: [8, 1]
         background: surface
         Column {
           weight: 1
           gap: 0
-          Text { text: "${upper(sub(region, 0, 1))}${sub(region, 1)}"; fontSize: 14 }
+          Text { text: "${upper(sub(region, 0, 1))}${sub(region, 1)}"; fontSize: 13 }
         }
-        Text { text: value; width: 52; align: end; fontSize: 18; color: tint }
+        Text { text: dust; width: 46; align: end; fontSize: 17; color: dustTint }
+        Text { text: value; width: 44; align: end; fontSize: 13; color: alpha(foreground, 0.45) }
       }
     }
     Spacer { weight: 1 }
-    Text { text: "NEA · haze.gov.sg ↗"; fontSize: 10; color: muted }
+    Column {
+      fill: width
+      gap: 0
+      Text { text: "NEA · PSI & PM2.5 µg/m³"; fontSize: 10; color: muted }
+      Text { text: "haze.gov.sg ↗"; fontSize: 10; color: muted }
+    }
   }
 }
