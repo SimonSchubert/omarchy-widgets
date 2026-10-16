@@ -315,7 +315,10 @@ widget "google calendar" {
               gap: 6
               align: center
               Spacer { width: 3; height: 16; radius: 2; background: l.tint }
-              Text { text: l.when; style: small; color: l.when == "now" ? accent : muted; width: 58; maxLines: 1 }
+              // All-day events go without a time, so the column stays narrow.
+              if !l.a {
+                Text { text: l.when; style: small; color: l.when == "now" ? accent : muted; width: 40; maxLines: 1 }
+              }
               Text { text: l.t; style: small; weight: 1; maxLines: 1 }
             }
           }
