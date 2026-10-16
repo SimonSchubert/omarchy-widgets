@@ -4,9 +4,9 @@ widget "Agentic APK Maker" {
   size: 6x5
   minSize: 3x3
 
-  meta { owl: 7; description: "Describe an Android app in a sentence: Claude Code, Codex or OpenCode writes it, builds it right on your phone and installs it. Sets up the Android SDK and Gradle for you."; version: "2.4"; license: "MIT"; category: "dev" }
+  meta { owl: 7; description: "Describe an app: Claude Code, Codex or OpenCode writes it, builds it on your phone and installs it. Review every change, keep apps on GitHub, publish to Google Play."; version: "2.7"; license: "MIT"; category: "dev" }
 
-  requires { pacman: ["jq", "git", "curl", "unzip", "util-linux", "jdk17-openjdk", "android-tools"] }
+  requires { pacman: ["jq", "git", "curl", "unzip", "util-linux", "jdk17-openjdk", "android-tools", "openssl"] }
 
   // Backend: the apk-maker script, which this widget installs into ~/.local/share/apk-maker the
   // first time it runs (see installer below); `apk-maker setup` then fetches the Android SDK and
@@ -18,6 +18,18 @@ widget "Agentic APK Maker" {
   source apps = file("~/.cache/apk-maker/apps.json") json
   source log = cmd("tail -n 120 ~/.cache/apk-maker/log.txt 2>/dev/null | cut -c1-200") every 3s
   source err = file("~/.cache/apk-maker/build-err.txt")
+  // The Google Play account: {state: none/waiting/checking/connected/error, email, msg, personal, contact}.
+  source play = file("~/.cache/apk-maker/play.json") json
+  // The tester exchange (github.com/kingdompaulo/apk-maker-testers): its group and apps, and the
+  // ones this phone tests ({package: since}).
+  source community = file("~/.cache/apk-maker/community.json") json
+  source testing = file("~/.cache/apk-maker/testing.json") json
+  source communityPoll = cmd("[ -x ~/.local/bin/apk-maker ] && ~/.local/bin/apk-maker play community") every 30m timeout 30s
+  // GitHub (optional): gh's login and APK Maker's switches ({state: none/missing/connected, login,
+  // enabled, auto}). The sync follows pull requests merged or closed on GitHub.
+  source gh = file("~/.cache/apk-maker/github.json") json
+  source ghStatus = cmd("[ -x ~/.local/bin/apk-maker ] && ~/.local/bin/apk-maker github status >/dev/null") every 30m timeout 30s
+  source ghSync = cmd("[ -x ~/.local/bin/apk-maker ] && ~/.local/bin/apk-maker github sync") every 2m timeout 90s
   source now = clock every 1s
   // "connected <device>" or "offline" ("missing" before the script is installed).
   source adbs = cmd("[ -x ~/.local/bin/apk-maker ] || { echo missing; exit 0; }; ~/.local/bin/apk-maker adb") every 30s timeout 15s
@@ -48,12 +60,26 @@ widget "Agentic APK Maker" {
   state installRun = 0
   state installedAt = 0
   state installOut = ""
+  // The play tab: its app, the track to upload to, and drafts of what it asks for.
+  state playSel = "" persist
+  state track = "internal" persist
+  state groupDraft = ""
+  state testerDraft = ""
+  state contactDraft = ""
+  state discAt = 0
+  // A privacy policy read from disk, to share.
+  state policy = ""
+  // Discarding a change and making a repo public take a second tap within 5 seconds.
+  state discardAt = 0
+  state publicAt = 0
 
   let phase = job.phase ?? "idle"
-  let busy = phase == "queued" || phase == "agent" || phase == "building" || phase == "fixing" || phase == "installing"
+  let busy = phase == "queued" || phase == "agent" || phase == "checking" || phase == "building" || phase == "fixing" || phase == "art" || phase == "installing" || phase == "uploading"
+  // "app" builds and installs; "play-prepare" and "play-upload" are the Google Play jobs.
+  let kind = job.kind ?? "app"
 
   // The backend this widget carries; an older or missing one is (re)installed.
-  let backendVersion = 5
+  let backendVersion = 10
   let needInstall = ver != null && num(trim(ver), 0) < backendVersion
   // `worker` polls every 5s, so a setup that just started (or is about to) counts as alive.
   let setupAlive = worker == null || words(worker)[1] == "alive" || now - (setup.updated ?? 0) < 20 || now - installedAt < 20
@@ -79,19 +105,21 @@ widget "Agentic APK Maker" {
   let logLines = lines(log ?? "").filter(l => trim(l) != "")
   let recent = reverse(logLines).take(60)
   let lastLine = last(logLines.filter(l => !startsWith(l, "=="))) ?? ""
-  // 1 write, 2 build, 3 install; 4 = all done. A failed or stopped job shows the step it got to
+  // 1 write, 2 build, 3 install (listing · bundle · graphics, or check · bundle · upload, for Play);
+  // 4 = all done. A failed or stopped job shows the step it got to
   // (job.at; a job from an older backend has only its message to go on).
   let stopAt = job.at ?? (contains(job.msg ?? "", "build") ? "building" : contains(job.msg ?? "", "logged in") ? "agent" : "")
   let sp = phase == "failed" || phase == "cancelled" ? stopAt : phase
-  let step = sp == "queued" || sp == "agent" ? 1 : sp == "building" || sp == "fixing" ? 2 : sp == "installing" || sp == "ready" ? 3 : sp == "done" ? 4 : 0
+  let step = sp == "queued" || sp == "agent" || sp == "checking" ? 1 : sp == "building" || sp == "fixing" ? 2 : sp == "installing" || sp == "art" || sp == "uploading" || sp == "ready" ? 3 : sp == "done" ? 4 : 0
+  let stepNames = kind == "play-prepare" ? ["listing", "bundle", "graphics"] : kind == "play-upload" ? ["check", "bundle", "upload"] : ["write", "build", "install"]
   let elapsed = busy && job.started != null ? now - job.started : null
   // busy but the worker process is gone: the job died without writing a final phase
   let stalled = busy && words(worker ?? "")[0] == "dead" && job.updated != null && now - job.updated > 15
   let tint = stalled ? orange : phase == "done" ? green : phase == "failed" || phase == "cancelled" ? red : phase == "ready" ? yellow : busy ? accent : muted
-  let phaseText = stalled ? "stalled" : phase == "queued" ? "starting" : phase == "agent" ? "writing" : phase == "fixing" ? "fixing" : phase == "done" ? "installed" : phase == "ready" ? "ready" : phase == "cancelled" ? "stopped" : phase
+  let phaseText = stalled ? "stalled" : phase == "queued" ? "starting" : phase == "agent" ? "writing" : phase == "fixing" ? "fixing" : phase == "art" ? "graphics" : phase == "done" ? (kind == "play-prepare" ? "prepared" : kind == "play-upload" ? "uploaded" : "installed") : phase == "ready" ? "ready" : phase == "cancelled" ? "stopped" : phase
   let needAuth = phase == "failed" && contains(job.msg ?? "", "logged in")
   let lout = lower(trim(out ?? ""))
-  let outErr = contains(lout, "error") || contains(lout, "fail") || contains(lout, "cannot") || contains(lout, "could not") || contains(lout, "no app") || contains(lout, "not installed") || contains(lout, "denied") || contains(lout, "unable") || contains(lout, "already running") || contains(lout, "no job")
+  let outErr = contains(lout, "error") || contains(lout, "fail") || contains(lout, "cannot") || contains(lout, "could not") || contains(lout, "no app") || contains(lout, "not installed") || contains(lout, "denied") || contains(lout, "unable") || contains(lout, "already running") || contains(lout, "no job") || contains(lout, "refused") || contains(lout, "isn't") || contains(lout, "can't") || contains(lout, "not on google play") || contains(lout, "turn on") || contains(lout, "first") || contains(lout, "couldn't") || contains(lout, "keep it safe") || contains(lout, "didn't")
   let errTail = last(lines(trim(err ?? "")).filter(l => trim(l) != "")) ?? ""
   let showErr = errTail != "" && (phase == "failed" || phase == "fixing" || stalled)
   let ideas = ["tip calculator", "unit converter", "habit tracker", "expense splitter", "workout timer", "flashcards"]
@@ -105,6 +133,36 @@ widget "Agentic APK Maker" {
   // Why a new job can't start, for the banner.
   let canGo = canStart && trim(draft) != ""
   let blockMsg = busy ? "a job is already running: wait for it or stop it" : missing ? "setup isn't finished yet" : "${agent} is not installed"
+
+  // Google Play. The play tab works on one app: its own pick, else the apps tab's.
+  let pstate = play.state ?? "none"
+  let pconn = pstate == "connected"
+  let builtApps = list.filter(a => a.apk != null)
+  let papp = builtApps.find(a => a.slug == playSel) ?? builtApps.find(a => a.slug == sel) ?? first(builtApps)
+  let pp = papp.play ?? {}
+  let prepared = pp.prepared != null
+  let onPlay = pp.linked == true
+  let shots = pp.shots ?? 0
+  // Personal accounts made after Nov 13, 2023 must run a 12-tester, 14-day closed test first.
+  let personal = play.personal ?? true
+  let closedDays = pp.closedSince != null ? floor((now - pp.closedSince) / 86400) : 0
+  let testers = pp.testers ?? 0
+  let testDone = closedDays >= 14 && testers >= 12
+  let prodOk = play.personal == false || pp.production == true
+  let groupName = contains(pp.group ?? "", "@") ? split(pp.group, "@")[0] : ""
+  let invite = "I'm testing my Android app ${papp.label ?? papp.slug} and need testers for 2 weeks:\n1. Join the test group: https://groups.google.com/g/${groupName}\n2. Opt in: https://play.google.com/apps/testing/${papp.pkg}\n3. Install it from Google Play and keep it for 14 days.\nThanks!"
+  let trackLabel = track == "closed" ? "closed testing" : track == "production" ? "production" : "internal testing"
+  let canUpload = pconn && prepared && onPlay && !busy && (track != "production" || prodOk)
+  // An agent changed the app after its .aab was built: the next upload bundles the new code.
+  let stale = prepared && (last(papp.history ?? []).t ?? 0) > (pp.built ?? 0)
+  let cgroup = community.group ?? ""
+  let mine = list.map(a => a.pkg)
+  let capps = (community.apps ?? []).filter(x => indexOf(mine, x.pkg) < 0)
+  let listed = (community.apps ?? []).find(x => x.pkg == papp.pkg)
+  let testingN = len(keys(testing ?? {}))
+  // GitHub is logged in, and turned on for APK Maker (an existing gh login stays unused until then).
+  let gconn = gh.state == "connected"
+  let gon = gconn && gh.enabled == true
 
   // The chosen agent isn't installed (the default, or one removed since): pick one that is.
   when len(have) > 0 && indexOf(have, agent) < 0 { agent = have[0] }
@@ -134,7 +192,9 @@ cat > "$D/bin/apk-maker.new" <<'APKMAKER_FILE_EOF'
 #
 #   apk-maker new <claude|codex|opencode> <idea...>     scaffold, agent builds, install
 #   apk-maker change <slug> <agent> <request...>        agent edits an existing app, rebuild, install
+#   apk-maker accept | discard <slug>                   keep or drop a change (each waits on its own branch)
 #   apk-maker retry <slug> [agent]                      continue building an app with the agent that made it
+#   apk-maker again                                     the last job once more (a Play job to the same track)
 #   apk-maker build | install | download <slug>         just that step (download: via the browser)
 #   apk-maker uninstall <slug>                          remove the app from the phone
 #   apk-maker delete <slug>                             delete the app's project and APK
@@ -145,15 +205,38 @@ cat > "$D/bin/apk-maker.new" <<'APKMAKER_FILE_EOF'
 #   apk-maker doctor                                    prints what's missing to build (nothing = ready)
 #   apk-maker agents | version                          the installed agents | this script's version
 #
+# GitHub (optional):
+#   apk-maker github status | on | off | auto on|off   gh's login; on/off for APK Maker; new apps on GitHub
+#   apk-maker github publish <slug> [private|public]    a repo for the app (private unless asked)
+#   apk-maker github visibility <slug> private|public   changes become pull requests once it has one
+#   apk-maker github check <slug> | sync                look for private data | follow PRs merged or closed there
+#
+# Google Play (see "play" below):
+#   apk-maker play connect | key <file> | status | disconnect   the service account that uploads
+#   apk-maker play prepare <slug> [agent] [listing]     listing, API 36, signed .aab, graphics (a job)
+#   apk-maker play upload <slug> <internal|closed|production>    send it all to a Play track (a job)
+#   apk-maker play check <slug>                         is the app on Play yet (first upload done by hand)
+#   apk-maker play aab | backup <slug>                  the .aab / upload key backup, via the browser
+#   apk-maker play testers <slug> <group email>         the closed test's Google Group
+#   apk-maker play community | ask <slug>               the tester exchange: fetch its list | list this app
+#   apk-maker play testing <package> on|off             mark a community app as one this phone tests
+#   apk-maker play set <slug> testers <n> | production <yes|no>   closed-test progress, by hand
+#   apk-maker play set personal <yes|no> | contact <email>         account facts
+#
 # Installed by the Agentic APK Maker widget into ~/.local/share/apk-maker (this script, the app template,
-# AGENTS.md, Serve.java and, unless one is already there, the Android SDK).
+# AGENTS.md, Serve.java, PlayArt.java and, unless one is already there, the Android SDK).
 # State for the widget lives in ~/.cache/apk-maker: job.json (current job), apps.json (all apps),
-# log.txt (current job's log), setup.json and setup.log. Apps live in ~/apps/<slug>.
+# log.txt (current job's log), setup.json, setup.log and play.json (the Play account).
+# Apps live in ~/apps/<slug>; their Play upload keys in ~/.local/share/apk-maker/keys.
 set -uo pipefail
+# Everything this writes (state, logs, keys, apps) is for this user only.
+umask 077
 
-VERSION=5
+VERSION=10
 # Bumped only when the toolchain changes, so a script update doesn't redo the test build.
-TOOLCHAIN=2
+TOOLCHAIN=3
+# Google Play takes new apps and updates only when they target this API level.
+PLATFORM=android-36
 DATA=${APKMAKER_HOME:-$HOME/.local/share/apk-maker}
 APPS=$HOME/apps
 CACHE=$HOME/.cache/apk-maker
@@ -184,7 +267,7 @@ now() { date +%s; }
 job() {
   local tmp; tmp=$(mktemp "$CACHE/.job.XXXX")
   jq -c --arg p "$1" --arg m "${2:-}" --argjson t "$(now)" \
-    '.phase=$p | .msg=$m | .updated=$t | .at=(if $p | IN("agent","building","fixing","installing") then $p else .at end)' \
+    '.phase=$p | .msg=$m | .updated=$t | .at=(if $p | IN("agent","checking","building","fixing","art","installing","uploading") then $p else .at end)' \
     "$JOB" > "$tmp" 2>/dev/null && mv "$tmp" "$JOB"
   echo "== [$1] ${2:-}" >> "$LOG"
 }
@@ -237,7 +320,7 @@ do_build() {
     [ -n "$apk" ] || return 1
     cp "$apk" "$CACHE/apks/$slug.apk"
     local label; label=$(sed -n 's:.*name="app_name"[^>]*>\(.*\)</string>.*:\1:p' "$dir/app/src/main/res/values/strings.xml" | head -1)
-    meta "$slug" '.apk=$a | .label=($l | if .=="" then null else . end) // .label | .built=$t | .updated=$t | .status="built"' \
+    meta "$slug" '.apk=$a | .label=(($l | select(. != "")) // .label) | .built=$t | .updated=$t | .status="built"' \
       --arg a "$CACHE/apks/$slug.apk" --arg l "$label" --argjson t "$(now)"
   fi
   return $rc
@@ -245,6 +328,10 @@ do_build() {
 
 # Serve built APKs to the phone's browser as a fallback when adb isn't connected.
 serve() {
+  # One started by an older version doesn't know .aab files: replace it.
+  if curl -sf -o /dev/null "http://127.0.0.1:$SERVE_PORT/" && [ "$(curl -sf "http://127.0.0.1:$SERVE_PORT/.version")" != 2 ]; then
+    pkill -f "Serve.java $SERVE_PORT " 2>/dev/null; sleep 1
+  fi
   if ! curl -sf -o /dev/null "http://127.0.0.1:$SERVE_PORT/"; then
     setsid -f java -Xmx48m "$DATA/bin/Serve.java" "$SERVE_PORT" "$CACHE/apks" >/dev/null 2>&1
     for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; curl -sf -o /dev/null "http://127.0.0.1:$SERVE_PORT/" && break; done
@@ -257,10 +344,16 @@ do_install() {
   local slug=$1 injob=${2:-} pkg; pkg=$(jq -r .pkg "$APPS/$slug/.apkmaker.json")
   if adb_reconnect; then
     if [ -n "$injob" ]; then job installing "adb install"; else echo "== adb install $slug" >> "$LOG"; fi
-    if adb install -r "$CACHE/apks/$slug.apk" >> "$LOG" 2>&1; then
+    local o; o=$(adb install -r "$CACHE/apks/$slug.apk" 2>&1); echo "$o" >> "$LOG"
+    if [[ $o == *Success* ]]; then
       adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
       meta "$slug" '.status="installed" | .installed=$t' --argjson t "$(now)"
       return 0
+    fi
+    # A copy from Google Play is signed with Play's key: the browser can't replace it either.
+    if [[ $o == *UPDATE_INCOMPATIBLE* || $o == *"signatures do not match"* ]]; then
+      echo "can't install: the copy on the phone is signed differently (from Google Play?): uninstall it first" >> "$LOG"
+      return 3
     fi
     echo "adb install failed; offering the browser download instead" >> "$LOG"
   fi
@@ -329,15 +422,39 @@ scaffold() {
   local label; label=$(sed 's/-/ /g; s/\b\(.\)/\u\1/g' <<< "$slug")
   project "$dir" "$pkg" "$slug" "$label"
   cp "$DATA/AGENTS.md" "$dir/AGENTS.md"; ln -s AGENTS.md "$dir/CLAUDE.md"
-  ( cd "$dir" && git init -q && git add -A && git -c user.name=apk-maker -c user.email=apk-maker@localhost commit -qm scaffold )
+  git init -q "$dir" && hygiene "$dir" && gq "$dir" add -A && gq "$dir" commit -qm scaffold
   jq -nc --arg s "$slug" --arg p "$pkg" --arg l "$label" --argjson t "$(now)" \
     '{slug:$s, pkg:$p, label:$l, created:$t, updated:$t, status:"new", history:[]}' > "$dir/.apkmaker.json"
+}
+
+# build_fixing <slug> <agent> <build function> <what>: build; on errors the agent fixes them, up to
+# FIX_ROUNDS times. Without an agent (or with it logged out) the first failure ends the job.
+build_fixing() {
+  local slug=$1 agent=$2 build=$3 what=$4 round=0
+  while :; do
+    job building "$what"
+    if "$build" "$slug"; then return 0; fi
+    round=$((round + 1))
+    if [ -z "$agent" ] || ! command -v "$agent" >/dev/null 2>&1; then
+      job failed "the build failed: see the log"; return 1
+    fi
+    if [ $round -gt $FIX_ROUNDS ]; then
+      job failed "build still failing after $FIX_ROUNDS fixes"; return 1
+    fi
+    job fixing "$agent fixing build errors ($round/$FIX_ROUNDS)"
+    run_agent "$agent" "$APPS/$slug" "The Gradle build (./gradlew assembleRelease) failed. Fix it, then run the build again until it succeeds. Errors:
+$(grep -E 'e: |error:|ERROR|FAILURE|What went wrong' -A3 "$CACHE/build-err.txt" | head -60)"
+    if agent_needs_login $?; then
+      job failed "$agent isn't logged in — open the terminal to log in, then retry"
+      return 1
+    fi
+  done
 }
 
 # The job itself: agent, then build-and-fix rounds, then install.
 work() {
   local slug=$1 agent=$2 prompt=$3 dir="$APPS/$1"
-  meta "$slug" '.agent=$a | .history += [{t:$t, agent:$a, prompt:$p}] | .status="building" | .updated=$t' \
+  meta "$slug" '.agent=$a | .history += [{t:$t, agent:$a, prompt:$p}] | .status="building" | .updated=$t | if .pending then .pending.built=false else . end' \
     --arg a "$agent" --arg p "$prompt" --argjson t "$(now)"
   job agent "$agent is writing the app"
   run_agent "$agent" "$dir" "$prompt"
@@ -346,53 +463,56 @@ work() {
     job failed "$agent isn't logged in — open the terminal to log in, then retry"
     return 1
   fi
-  local round=0
-  while :; do
-    job building "gradle build"
-    if do_build "$slug"; then break; fi
-    round=$((round + 1))
-    if [ $round -gt $FIX_ROUNDS ]; then
-      meta "$slug" '.status="failed"'
-      job failed "build still failing after $FIX_ROUNDS fixes"; return 1
+  build_fixing "$slug" "$agent" do_build "gradle build" || { meta "$slug" '.status="failed"'; return 1; }
+  save "$slug" "$agent: $(head -1 <<< "$prompt" | sed 's/^Change this Android app (read AGENTS.md first): //; s/^Build this Android app in the current directory: //' | head -c 100)"
+  # GitHub: a change becomes (or updates) its pull request; the main branch is pushed; a new app gets a
+  # private repo when the user asked for that. None of it stops the install.
+  if pending "$slug"; then
+    meta "$slug" '.pending.built=true'
+    if [ -n "$(jq -r '.github.repo // empty' "$dir/.apkmaker.json")" ] && gh_on; then
+      job installing "pull request on GitHub"; open_pr "$slug" 2>> "$LOG"
     fi
-    job fixing "$agent fixing build errors ($round/$FIX_ROUNDS)"
-    run_agent "$agent" "$dir" "The Gradle build (./gradlew assembleRelease) failed. Fix it, then run the build again until it succeeds. Errors:
-$(grep -E 'e: |error:|ERROR|FAILURE|What went wrong' -A3 "$CACHE/build-err.txt" | head -60)"
-    if agent_needs_login $?; then
-      meta "$slug" '.status="failed"'
-      job failed "$agent isn't logged in — open the terminal to log in, then retry"
-      return 1
+  elif gh_on; then
+    if [ -n "$(jq -r '.github.repo // empty' "$dir/.apkmaker.json")" ]; then
+      job installing "pushing to GitHub"; push_app "$slug" "$(git -C "$dir" branch --show-current)" 2>> "$LOG"
+    elif jq -e '.auto != false' "$GHSTATE" >/dev/null 2>&1; then
+      job installing "putting it on GitHub (private)"; github_publish "$slug" private >> "$LOG" 2>&1
     fi
-  done
-  ( cd "$dir" && git add -A && git -c user.name=apk-maker -c user.email=apk-maker@localhost commit -qm "$agent: $(head -c 60 <<< "$prompt")" ) 2>/dev/null
+  fi
+  local try=""; pending "$slug" && try=": try it, then accept or discard the change"
   do_install "$slug" job
   case $? in
-    0) job done "installed and opened" ;;
-    *) job ready "built; tap install to get it from the browser (adb not connected)" ;;
+    0) job done "installed and opened$try" ;;
+    3) job ready "built, but the copy on the phone is signed differently (from Google Play?): uninstall it, then install" ;;
+    *) job ready "built; tap install to get it from the browser (adb not connected)$try" ;;
   esac
 }
 
-# start <slug> <agent> <prompt>: run work() detached, one job at a time.
 job_active() {
-  jq -e '.phase | IN("queued","agent","building","fixing","installing")' "$JOB" >/dev/null 2>&1
+  jq -e '.phase | IN("queued","agent","checking","building","fixing","art","installing","uploading")' "$JOB" >/dev/null 2>&1
 }
 
 # can_start <agent>: refuse before anything is created, so a refused job leaves no half-made app.
 can_start() {
-  command -v "$1" >/dev/null 2>&1 || { echo "$1 is not installed" >&2; exit 1; }
-  local pid; pid=$(jq -r '.pid // 0' "$JOB" 2>/dev/null)
-  if job_active && [ -n "$pid" ] && [ "$pid" -gt 1 ] && kill -0 "$pid" 2>/dev/null; then
-    echo "a job is already running: $(jq -r .slug "$JOB")" >&2; exit 1
-  fi
+  [ -z "$1" ] || command -v "$1" >/dev/null 2>&1 || { echo "$1 is not installed" >&2; exit 1; }
+  if job_running; then echo "a job is already running: $(jq -r .slug "$JOB")" >&2; exit 1; fi
 }
 
+# job_running: active and its worker still alive (a crashed one leaves job.json "active").
+job_running() {
+  local pid; pid=$(jq -r '.pid // 0' "$JOB" 2>/dev/null)
+  job_active && [ -n "$pid" ] && [ "$pid" -gt 1 ] && kill -0 "$pid" 2>/dev/null
+}
+
+# start <kind> <slug> <agent> <arg>: kind "app" runs work() with arg as the prompt; "play-prepare" and
+# "play-upload" the Play jobs (arg: listing / the track).
 start() {
-  local slug=$1 agent=$2 prompt=$3
+  local kind=$1 slug=$2 agent=$3 prompt=$4
   can_start "$agent"
   : > "$LOG"; : > "$CACHE/build-err.txt"; rm -f "$CACHE/pid"
-  jq -nc --arg s "$slug" --arg a "$agent" --arg p "$prompt" --argjson t "$(now)" \
-    '{slug:$s, agent:$a, prompt:$p, phase:"queued", msg:"", started:$t, updated:$t, pid:0}' > "$JOB"
-  setsid -f bash -c 'echo $$ > "$1/pid"; exec "$0" _work "$2" "$3" "$4"' "$0" "$CACHE" "$slug" "$agent" "$prompt" \
+  jq -nc --arg s "$slug" --arg a "$agent" --arg p "$prompt" --arg k "$kind" --argjson t "$(now)" \
+    '{kind:$k, slug:$s, agent:$a, prompt:(if $k == "app" then $p else null end), arg:(if $k == "app" then null else $p end), phase:"queued", msg:"", started:$t, updated:$t, pid:0}' > "$JOB"
+  setsid -f bash -c 'echo $$ > "$1/pid"; exec "$0" "_$2" "$3" "$4" "$5"' "$0" "$CACHE" "$kind" "$slug" "$agent" "$prompt" \
     >> "$LOG" 2>&1 < /dev/null
   # Wait for the worker's pid: reading a stale one makes the widget call a live job stalled.
   for _ in $(seq 50); do [ -s "$CACHE/pid" ] && break; sleep 0.1; done
@@ -424,6 +544,848 @@ The project is already scaffolded (Kotlin, Jetpack Compose, Material 3). Read AG
 follow it. Give the app a short, fitting name in app/src/main/res/values/strings.xml (app_name).
 You are done only when ./gradlew assembleRelease succeeds.
 EOF
+}
+
+# ---- reviewing changes: each change waits on its own branch until it's accepted or discarded ----
+#
+# A new app goes straight onto the main branch. A change starts a branch (change/<time>) from it; the
+# agent works there, the build is installed to try, and .pending in .apkmaker.json holds it until
+# "accept" merges it or "discard" drops it and puts the previous APK back. With GitHub connected, the
+# branch is also a pull request, and merging or closing it there counts too.
+
+# Kept out of git: this phone's paths (local.properties, gradle.properties), the app's history and Play
+# details (.apkmaker.json), screenshots of the phone's screen, builds and anything that looks like a key.
+PRIVATE_IGNORES=(.gradle/ build/ app/build/ local.properties gradle.properties .apkmaker.json play/shots/
+  '*.apk' '*.aab' '*.p12' '*.jks' '*.keystore' '*.pem' '*.pass' 'service-account*.json' .env)
+PRIVATE_FILES=(.apkmaker.json local.properties gradle.properties play/shots)
+
+# gq <dir> <git args...>: git in an app, committing as apk-maker (never the user's own name or email).
+gq() { local d=$1; shift; git -C "$d" -c user.name=apk-maker -c user.email=apk-maker@localhost "$@"; }
+
+# hygiene <dir>: the app's repo commits as apk-maker and ignores (and stops tracking) the private files.
+hygiene() {
+  local d=$1 l
+  git -C "$d" config user.name apk-maker && git -C "$d" config user.email apk-maker@localhost
+  touch "$d/.gitignore"; [ -z "$(tail -c1 "$d/.gitignore")" ] || echo >> "$d/.gitignore"
+  for l in "${PRIVATE_IGNORES[@]}"; do grep -qxF -- "$l" "$d/.gitignore" || printf '%s\n' "$l" >> "$d/.gitignore"; done
+  gq "$d" rm -r --cached -q --ignore-unmatch "${PRIVATE_FILES[@]}" >/dev/null 2>&1
+  true
+}
+
+# save <slug> <message>: commit whatever changed.
+save() {
+  local d=$APPS/$1; hygiene "$d"
+  gq "$d" add -A >/dev/null 2>&1 && gq "$d" commit -qm "$(head -c 200 <<< "$2")" >/dev/null 2>&1
+  true
+}
+
+pending() { jq -e '.pending != null' "$APPS/$1/.apkmaker.json" >/dev/null 2>&1; }
+pget() { jq -r ".pending.$2 // empty" "$APPS/$1/.apkmaker.json"; }
+
+# begin_change <slug> <request>: save the main branch, then branch off it for the change.
+begin_change() {
+  local slug=$1 d=$APPS/$1 base t
+  base=$(git -C "$d" branch --show-current); base=${base:-master}
+  # Older apps carry an older AGENTS.md: give the agent the current rules.
+  cp "$DATA/AGENTS.md" "$d/AGENTS.md" 2>/dev/null
+  save "$slug" "Save work in progress"
+  t=$(now)
+  gq "$d" checkout -q -b "change/$t" || { echo "couldn't start a branch for the change" >&2; return 1; }
+  # The APK from before the change, for discard.
+  if [ -f "$CACHE/apks/$slug.apk" ]; then cp "$CACHE/apks/$slug.apk" "$CACHE/apks/$slug.main.apk"; else rm -f "$CACHE/apks/$slug.main.apk"; fi
+  meta "$slug" '.pending={branch:$b, base:$base, t:$t, request:$r, built:false}' \
+    --arg b "change/$t" --arg base "$base" --argjson t "$t" --arg r "$2"
+}
+
+# The app's name, from its strings.xml.
+app_label() { sed -n 's:.*name="app_name"[^>]*>\(.*\)</string>.*:\1:p' "$APPS/$1/app/src/main/res/values/strings.xml" 2>/dev/null | head -1; }
+
+# finish_change <slug>: after the merge (here or on GitHub), forget the branch and the old APK.
+finish_change() {
+  local slug=$1 b; b=$(pget "$slug" branch)
+  gq "$APPS/$slug" branch -q -D "$b" >/dev/null 2>&1
+  rm -f "$CACHE/apks/$slug.main.apk"
+  meta "$slug" 'del(.pending) | .updated=$t' --argjson t "$(now)"
+}
+
+accept_change() {
+  local slug=$1 d=$APPS/$1 b base req repo
+  pending "$slug" || { echo "$slug has no change waiting" >&2; return 1; }
+  [ "$(pget "$slug" built)" = true ] || { echo "the change didn't build: retry it or discard it" >&2; return 1; }
+  b=$(pget "$slug" branch) base=$(pget "$slug" base) req=$(pget "$slug" request)
+  repo=$(jq -r '.github.repo // empty' "$d/.apkmaker.json")
+  save "$slug" "Finish: $(head -1 <<< "$req")"
+  # The pull request's branch has to match, so GitHub sees it merged once main has it.
+  if [ -n "$repo" ] && gh_on; then push_app "$slug" "$b" || return 1; fi
+  gq "$d" checkout -q "$base" && gq "$d" merge -q --no-ff "$b" -m "Accept: $(head -1 <<< "$req" | head -c 100)" >/dev/null 2>&1 || {
+    gq "$d" merge --abort >/dev/null 2>&1; gq "$d" checkout -q "$b"
+    echo "couldn't merge the change: see git in the terminal" >&2; return 1; }
+  if [ -n "$repo" ] && gh_on; then
+    push_app "$slug" "$base" && git -C "$d" -c credential.helper= -c 'credential.helper=!gh auth git-credential' push -q origin --delete "$b" >/dev/null 2>&1
+  fi
+  finish_change "$slug"
+  echo "accepted: $(head -1 <<< "$req")"
+}
+
+# discard_change <slug> [closed]: back to the main branch and its APK; "closed" when GitHub closed it.
+discard_change() {
+  local slug=$1 closed=${2:-} d=$APPS/$1 b base t pr repo label
+  pending "$slug" || { echo "$slug has no change waiting" >&2; return 1; }
+  b=$(pget "$slug" branch) base=$(pget "$slug" base) t=$(pget "$slug" t) pr=$(pget "$slug" pr)
+  repo=$(jq -r '.github.repo // empty' "$d/.apkmaker.json")
+  gq "$d" checkout -q -f "$base" && gq "$d" clean -fdq || { echo "couldn't go back to $base" >&2; return 1; }
+  gq "$d" branch -q -D "$b" >/dev/null 2>&1
+  if [ -n "$pr" ] && [ -z "$closed" ] && gh_on; then
+    gh pr close "$pr" -R "$repo" --delete-branch --comment "Discarded in APK Maker." >/dev/null 2>&1 \
+      || echo "couldn't close pull request #$pr on GitHub: close it there" >&2
+  fi
+  label=$(app_label "$slug")
+  if [ -f "$CACHE/apks/$slug.main.apk" ]; then
+    mv "$CACHE/apks/$slug.main.apk" "$CACHE/apks/$slug.apk"
+    meta "$slug" 'del(.pending) | del(.github.blocked) | .label=(($l | select(. != "")) // .label) | .history |= map(if .t >= $t then .discarded=true else . end) | .updated=$n' \
+      --arg l "$label" --argjson t "$t" --argjson n "$(now)"
+    # The changed build may be on the phone: put the old one back.
+    if [ "$(jq -r '.status' "$d/.apkmaker.json")" = installed ] && adb_reconnect; then
+      do_install "$slug" >/dev/null 2>&1 && { echo "discarded: the previous version is back on the phone"; return 0; }
+    fi
+    meta "$slug" '.status="ready"'
+    echo "discarded: tap install to put the previous version back"
+  else
+    rm -f "$CACHE/apks/$slug.apk"
+    meta "$slug" 'del(.pending) | del(.github.blocked) | del(.apk) | .status="cancelled" | .history |= map(if .t >= $t then .discarded=true else . end)' --argjson t "$t"
+    echo "discarded"
+  fi
+}
+
+# ---- GitHub (optional): each app can be a repo, private unless made public; changes are pull requests ----
+#
+# Uses the GitHub CLI's own login (gh auth login); the token stays in gh's config and is handed to git
+# only per push. Before anything is pushed, leak_check looks through every commit that would go.
+
+GHSTATE=$CACHE/github.json
+
+ghs() {
+  local tmp; tmp=$(mktemp "$CACHE/.gh.XXXX")
+  { cat "$GHSTATE" 2>/dev/null || echo '{}'; } | jq -c "$@" > "$tmp" && mv "$tmp" "$GHSTATE"
+}
+
+# Logged in, and turned on for APK Maker by the user (a gh login made for something else doesn't count).
+gh_on() { command -v gh >/dev/null 2>&1 && jq -e '.state == "connected" and .enabled == true' "$GHSTATE" >/dev/null 2>&1; }
+
+github_status() {
+  if ! command -v gh >/dev/null 2>&1; then ghs '.state="missing" | del(.login) | .msg=""'
+  else
+    local u; u=$(timeout 20 gh api user 2>/dev/null)
+    if [ -n "$(jq -r '.login // empty' <<< "$u" 2>/dev/null)" ]; then
+      ghs '.state="connected" | .login=$u.login | .email=($u.email // null) | .id=$u.id | .msg="" | .checked=$t' --argjson u "$u" --argjson t "$(now)"
+    else
+      ghs '.state="none" | del(.login, .email, .id) | .msg="" | .checked=$t' --argjson t "$(now)"
+    fi
+  fi
+  cat "$GHSTATE"; echo
+}
+
+ghpush() { git -C "$1" -c credential.helper= -c 'credential.helper=!gh auth git-credential' push -q origin "${@:2}"; }
+
+# leak_check <dir> [strict]: prints what in the branches' history must not reach GitHub (nothing = safe).
+# "strict" (before going public) also refuses identities already on GitHub, such as the user's email on a
+# pull request merged on GitHub's site.
+leak_check() {
+  local d=$1 strict=${2:-} names patch who e allowed="" what re
+  names=$(git -C "$d" log --branches --format= --name-only | sort -u)
+  grep -E '(^|/)(\.apkmaker\.json|local\.properties|gradle\.properties|\.env)$|\.(p12|jks|keystore|pem|pass|apk|aab)$|service-account[^/]*\.json$|(^|/)google-services\.json$|^play/shots/' <<< "$names" \
+    | head -5 | sed 's/^/private file in the history: /'
+  patch=$(git -C "$d" log --branches -p --format= --no-ext-diff 2>/dev/null)
+  while IFS=$'\t' read -r what re; do
+    grep -qE -- "$re" <<< "$patch" && echo "looks like $what in the code"
+  done <<'EOF'
+a private key	-----BEGIN [A-Z ]*PRIVATE KEY-----
+a Google service account key	"type": *"service_account"
+a Google API key	AIza[0-9A-Za-z_-]{35}
+a GitHub token	(gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,})
+an Anthropic API key	sk-ant-[A-Za-z0-9_-]{20,}
+an OpenAI API key	sk-(proj-)?[A-Za-z0-9_-]{32,}
+an AWS key	AKIA[0-9A-Z]{16}
+a Slack token	xox[abprs]-[A-Za-z0-9-]{10,}
+a keystore password	(store|key)Password *= *"[^"]+"
+EOF
+  # Personal details this phone knows about: the user's emails, the Play key's account, the home path.
+  for e in "$(git config --global user.email 2>/dev/null)" "$(jq -r '.email // empty' "$GHSTATE" 2>/dev/null)" \
+           "$(jq -r '.contact // empty' "$PSTATE" 2>/dev/null)" "$(jq -r '.client_email // empty' "$SA" 2>/dev/null)"; do
+    [ -n "$e" ] && grep -qiF -- "$e" <<< "$patch" && echo "your email $e is in the code"
+  done
+  grep -qF -- "$HOME/" <<< "$patch" && echo "a path on this phone ($HOME/…) is in the code"
+  # Commits must be apk-maker's (or GitHub's own, or already on GitHub).
+  [ -n "$strict" ] || allowed=$(git -C "$d" log --remotes --format='%ae%n%ce' 2>/dev/null | sort -u)
+  who=$(git -C "$d" log --branches --format='%ae%n%ce' | sort -u | grep -vxE 'apk-maker@localhost|noreply@github\.com|.*@users\.noreply\.github\.com' \
+    | grep -vxF -f <(printf '%s\n' "$allowed" | grep . || echo apk-maker@localhost))
+  [ -n "$who" ] && echo "commits by $(head -1 <<< "$who") (not apk-maker; merged on GitHub's site? Turn on Settings › Emails › Keep my email addresses private there)"
+  true
+}
+
+# clean_history <dir>: before a first push only, rewrite the history without the private files and with
+# every commit as apk-maker.
+clean_history() {
+  local d=$1
+  git -C "$d" log --branches --format= --name-only | grep -qxE '\.apkmaker\.json|local\.properties|gradle\.properties|play/shots/.*' \
+    || [ -n "$(git -C "$d" log --branches --format='%ae%n%ce' | grep -vx 'apk-maker@localhost')" ] || return 0
+  ( cd "$d" && FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f \
+      --index-filter "git rm -r --cached -q --ignore-unmatch ${PRIVATE_FILES[*]}" \
+      --env-filter 'export GIT_AUTHOR_NAME=apk-maker GIT_AUTHOR_EMAIL=apk-maker@localhost GIT_COMMITTER_NAME=apk-maker GIT_COMMITTER_EMAIL=apk-maker@localhost' \
+      -- --branches ) >/dev/null 2>&1 || { echo "couldn't clean the history" >&2; return 1; }
+  git -C "$d" for-each-ref --format='%(refname)' refs/original | xargs -r -n1 git -C "$d" update-ref -d
+  git -C "$d" reflog expire --expire=now --all && git -C "$d" gc -q --prune=now
+}
+
+# push_app <slug> <branch>: push after leak_check; a refusal is kept in .github.blocked for the widget.
+push_app() {
+  local slug=$1 br=$2 d=$APPS/$1 found
+  found=$(leak_check "$d")
+  if [ -n "$found" ]; then
+    meta "$slug" '.github.blocked=$m' --arg m "$(tr '\n' ';' <<< "$found" | sed 's/;$//; s/;/; /g')"
+    echo "not pushed to GitHub: $found" >&2; return 1
+  fi
+  ghpush "$d" "$br:$br" >> "$LOG" 2>&1 || { echo "couldn't push to GitHub: see the log" >&2; return 1; }
+  jq -e '.github.blocked' "$d/.apkmaker.json" >/dev/null 2>&1 && meta "$slug" 'del(.github.blocked)'
+  true
+}
+
+# github_publish <slug> <private|public>: a new repo with the app's history.
+github_publish() {
+  local slug=$1 vis=${2:-private} d=$APPS/$1 login name i=2 base found label
+  gh_on || { echo "connect GitHub first (setup tab)" >&2; return 1; }
+  [ -z "$(jq -r '.github.repo // empty' "$d/.apkmaker.json")" ] || { echo "$slug is on GitHub already" >&2; return 1; }
+  pending "$slug" && { echo "accept or discard the change waiting on $slug first" >&2; return 1; }
+  [[ $vis =~ ^(private|public)$ ]] || return 1
+  save "$slug" "Keep this phone's files out of git"
+  clean_history "$d" || return 1
+  found=$(leak_check "$d")
+  [ -z "$found" ] || { echo "not published, to keep it safe: $found" >&2; return 1; }
+  login=$(jq -r .login "$GHSTATE"); name=$slug
+  while gh repo view "$login/$name" >/dev/null 2>&1; do name=$slug-$i; i=$((i + 1)); done
+  label=$(jq -r '.label // .slug' "$d/.apkmaker.json" | tr -d '\n' | head -c 60)
+  gh repo create "$login/$name" "--$vis" --disable-wiki --description "$label: an Android app made with Agentic APK Maker" >/dev/null 2>>"$LOG" \
+    || { echo "GitHub didn't create the repo: see the log" >&2; return 1; }
+  git -C "$d" remote remove origin >/dev/null 2>&1
+  git -C "$d" remote add origin "https://github.com/$login/$name.git"
+  base=$(git -C "$d" branch --show-current)
+  meta "$slug" '.github={repo:$r, url:$u, visibility:$v, at:$t}' --arg r "$login/$name" --arg u "https://github.com/$login/$name" --arg v "$vis" --argjson t "$(now)"
+  push_app "$slug" "$base" || return 1
+  gh repo edit "$login/$name" --default-branch "$base" >/dev/null 2>&1
+  echo "on GitHub ($vis): https://github.com/$login/$name"
+}
+
+github_visibility() {
+  local slug=$1 vis=${2:-} d=$APPS/$1 repo found
+  repo=$(jq -r '.github.repo // empty' "$d/.apkmaker.json")
+  [ -n "$repo" ] || { echo "$slug isn't on GitHub" >&2; return 1; }
+  [[ $vis =~ ^(private|public)$ ]] || return 1
+  gh_on || { echo "connect GitHub first (setup tab)" >&2; return 1; }
+  if [ "$vis" = public ]; then
+    found=$(leak_check "$d" strict)
+    [ -z "$found" ] || { echo "kept private, to keep it safe: $found" >&2; return 1; }
+  fi
+  gh repo edit "$repo" --visibility "$vis" --accept-visibility-change-consequences >/dev/null 2>>"$LOG" \
+    || { echo "GitHub refused the change: see the log" >&2; return 1; }
+  meta "$slug" '.github.visibility=$v' --arg v "$vis"
+  echo "$repo is $vis now"
+}
+
+# open_pr <slug>: push the change's branch and, the first time, open its pull request.
+open_pr() {
+  local slug=$1 d=$APPS/$1 repo b base req agent url
+  repo=$(jq -r '.github.repo // empty' "$d/.apkmaker.json")
+  [ -n "$repo" ] && gh_on && pending "$slug" || return 0
+  b=$(pget "$slug" branch) base=$(pget "$slug" base) req=$(pget "$slug" request) agent=$(jq -r '.agent // "the agent"' "$d/.apkmaker.json")
+  push_app "$slug" "$b" || return 1
+  [ -n "$(pget "$slug" pr)" ] && return 0
+  url=$(cd "$d" && gh pr create -R "$repo" --base "$base" --head "$b" --title "$(head -1 <<< "$req" | head -c 100)" \
+    --body "$(printf '%s\n\nWritten by %s and built on the phone by Agentic APK Maker. Accept or discard it in the widget, or merge or close this pull request.' "$req" "$agent")" 2>>"$LOG") \
+    || { echo "couldn't open the pull request: see the log" >&2; return 1; }
+  meta "$slug" '.pending.pr=$n | .pending.prUrl=$u' --argjson n "${url##*/}" --arg u "$url"
+}
+
+# github_sync: pull requests merged or closed on GitHub are accepted or discarded here too.
+github_sync() {
+  gh_on || return 0
+  local m slug pr repo st b base d
+  for m in "$APPS"/*/.apkmaker.json; do
+    [ -f "$m" ] || continue
+    pr=$(jq -r '.pending.pr // empty' "$m"); repo=$(jq -r '.github.repo // empty' "$m")
+    [ -n "$pr" ] && [ -n "$repo" ] || continue
+    slug=$(jq -r .slug "$m"); d=$APPS/$slug
+    job_running && [ "$(jq -r .slug "$JOB")" = "$slug" ] && continue
+    st=$(timeout 30 gh pr view "$pr" -R "$repo" --json state -q .state 2>/dev/null)
+    case $st in
+      MERGED)
+        b=$(pget "$slug" branch) base=$(pget "$slug" base)
+        git -C "$d" -c credential.helper= -c 'credential.helper=!gh auth git-credential' fetch -q origin "$base" \
+          && gq "$d" checkout -q "$base" && gq "$d" merge -q --ff-only "origin/$base" >/dev/null 2>&1 \
+          && finish_change "$slug" && echo "$slug: merged on GitHub" ;;
+      CLOSED) discard_change "$slug" closed >/dev/null && echo "$slug: closed on GitHub, discarded" ;;
+    esac
+  done
+}
+
+github_cmd() {
+  umask 077
+  local sub=${1:-}; shift || true
+  case $sub in
+    status) github_status ;;
+    on|off) ghs '.enabled=($v == "on")' --arg v "$sub"; echo "GitHub $sub" ;;
+    auto) [[ ${1:-} =~ ^(on|off)$ ]] || exit 1; ghs '.auto=($v == "on")' --arg v "$1" ;;
+    publish) need_app "${1:-}"; github_publish "$1" "${2:-private}" ;;
+    visibility) need_app "${1:-}"; github_visibility "$1" "${2:-}" ;;
+    check) need_app "${1:-}"; f=$(leak_check "$APPS/$1"); if [ -n "$f" ]; then echo "$f"; exit 1; else echo "nothing private found"; fi ;;
+    sync) github_sync ;;
+    *) echo "usage: apk-maker github status | on | off | auto on|off | publish <slug> [private|public] | visibility <slug> private|public | check <slug> | sync" >&2; exit 1 ;;
+  esac
+}
+
+# ---- Google Play: a service account uploads; each app gets its own upload key ----
+#
+# What Google requires by hand, once: a developer account; a Cloud project with the Google Play Android
+# Developer API on, a service account in it and its JSON key (the widget's connect page takes the key);
+# that account invited in Play Console with release rights. Then, once per app: create it in Play Console
+# and upload its first .aab there (Play learns the package name from that upload; the API can't create
+# apps), and fill in the "App content" forms. After that everything goes through the API.
+
+PLAY=$DATA/play
+SA=$PLAY/service-account.json
+KEYS=$DATA/keys
+PSTATE=$CACHE/play.json
+API=https://androidpublisher.googleapis.com/androidpublisher/v3/applications
+UPAPI=https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications
+KEY_PORT=8766
+
+b64url() { base64 -w0 | tr '+/' '-_' | tr -d '='; }
+
+# pstate <jq filter> [args...]: edit play.json, the account's state for the widget.
+pstate() {
+  local tmp; tmp=$(mktemp "$CACHE/.play.XXXX")
+  { cat "$PSTATE" 2>/dev/null || echo '{}'; } | jq -c "$@" > "$tmp" && mv "$tmp" "$PSTATE"
+}
+
+# play_token [key file]: an access token for the service account, cached until it nearly expires.
+play_token() {
+  local sa=${1:-$SA} c=$CACHE/play-token.json
+  [ -f "$sa" ] || { echo "Google Play isn't connected: connect it on the widget's play tab" >&2; return 1; }
+  if [ -z "${1:-}" ] && [ -f "$c" ] && [ "$(jq -r '.exp // 0' "$c")" -gt $(($(now) + 120)) ]; then jq -r .token "$c"; return 0; fi
+  local email uri t h p key sig r tok
+  email=$(jq -r .client_email "$sa"); uri=$(jq -r '.token_uri // "https://oauth2.googleapis.com/token"' "$sa")
+  t=$(now)
+  h=$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)
+  p=$(jq -nc --arg e "$email" --arg a "$uri" --argjson t "$t" \
+    '{iss:$e, scope:"https://www.googleapis.com/auth/androidpublisher", aud:$a, iat:$t, exp:($t + 3600)}' | b64url)
+  key=$(mktemp "$CACHE/.key.XXXX")
+  jq -r .private_key "$sa" > "$key"
+  sig=$(printf '%s.%s' "$h" "$p" | openssl dgst -sha256 -sign "$key" 2>/dev/null | b64url)
+  rm -f "$key"
+  [ -n "$sig" ] || { echo "the key file's private key doesn't work: download a new JSON key" >&2; return 1; }
+  r=$(printf 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=%s.%s.%s' "$h" "$p" "$sig" | curl -sS --max-time 30 --data @- "$uri" 2>&1)
+  tok=$(jq -r '.access_token // empty' <<< "$r" 2>/dev/null)
+  if [ -z "$tok" ]; then
+    echo "Google refused the key: $(jq -r '.error_description // .error // empty' <<< "$r" 2>/dev/null || head -c 200 <<< "$r")" >&2
+    return 1
+  fi
+  [ -n "${1:-}" ] || jq -nc --arg k "$tok" --argjson e "$((t + $(jq -r '.expires_in // 3600' <<< "$r")))" '{token:$k, exp:$e}' > "$c"
+  echo "$tok"
+}
+
+# gp <METHOD> <url> [curl args...]: a Play API call; sets GP_CODE and GP_BODY, fails unless 2xx.
+gp() {
+  local m=$1 u=$2 out; shift 2
+  # The token goes in through a pipe, not the command line, where other programs could read it.
+  out=$(curl -sS --max-time 900 -X "$m" -K <(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN") "$@" -w '\n%{http_code}' "$u" 2>&1)
+  GP_CODE=${out##*$'\n'}; GP_BODY=${out%$'\n'*}
+  echo "   $m ${u#https://androidpublisher.googleapis.com/} → $GP_CODE" >> "$LOG"
+  [[ $GP_CODE == 2* ]] || { echo "   $(gp_err)" >> "$LOG"; return 1; }
+}
+gp_json() { gp "$1" "$2" -H 'Content-Type: application/json' --data-binary "$3"; }
+gp_err() { { jq -r '.error.message // empty' <<< "$GP_BODY" 2>/dev/null || head -c 300 <<< "$GP_BODY"; } | head -c 400; }
+
+# The last API error, as what to do about it.
+gp_explain() {
+  local m; m=$(gp_err); [ -n "$m" ] || m="HTTP $GP_CODE"
+  case $m in
+    *"has not been used in project"*|*"it is disabled"*)
+      echo "turn on the Google Play Android Developer API for the key's Cloud project, wait a few minutes, then retry" ;;
+    *"Package not found"*|*"package not found"*)
+      echo "not on Google Play yet: create the app in Play Console and upload its first .aab there by hand (play tab, step 3)" ;;
+    *"does not have permission"*|*"caller does not have"*|*"permission"*)
+      echo "the service account can't manage this app: in Play Console › Users and permissions, give $(jq -r .client_email "$SA") release rights for it" ;;
+    *"version code"*"already been used"*)
+      echo "Play already has this version: prepare again to build a newer one" ;;
+    *) echo "Google Play said: $m" ;;
+  esac
+}
+
+# ---- the account ----
+
+# play_key <file>: check a service account key with Google, then keep it.
+play_key() {
+  local in=$1
+  if ! jq -e '.type == "service_account" and (.private_key | length > 0) and (.client_email | length > 0)' "$in" >/dev/null 2>&1; then
+    pstate '.state="error" | .msg=$m | .checked=$t' --arg m "that file isn't a service account JSON key" --argjson t "$(now)"
+    echo "that file isn't a service account JSON key" >&2; return 1
+  fi
+  pstate '.state="checking" | .msg=""'
+  local err; err=$(play_token "$in" 2>&1 >/dev/null)
+  if [ -n "$err" ]; then
+    pstate '.state="error" | .msg=$m | .checked=$t' --arg m "$err" --argjson t "$(now)"
+    echo "$err" >&2; return 1
+  fi
+  mkdir -p "$PLAY"
+  cp "$in" "$SA.new" && chmod 600 "$SA.new" && mv "$SA.new" "$SA"
+  rm -f "$CACHE/play-token.json"
+  pstate '.state="connected" | .email=$e | .project=$p | .msg="" | .checked=$t' \
+    --arg e "$(jq -r .client_email "$SA")" --arg p "$(jq -r '.project_id // ""' "$SA")" --argjson t "$(now)"
+  echo "connected as $(jq -r .client_email "$SA")"
+}
+
+# A one-time page in the phone's browser that takes the key file (there's no file picker in here).
+play_connect() {
+  local tok in=$CACHE/.play-key-in
+  tok=$(head -c 12 /dev/urandom | b64url)
+  pkill -f "Serve.java receive $KEY_PORT " 2>/dev/null
+  rm -f "$in"
+  setsid -f bash -c 'java -Xmx48m "$1/bin/Serve.java" receive "$2" "$3" "$4" && "$5" play key "$4" >/dev/null 2>&1; rm -f "$4"' \
+    _ "$DATA" "$KEY_PORT" "$tok" "$in" "$0" >/dev/null 2>&1 < /dev/null
+  for _ in $(seq 30); do curl -s -o /dev/null "http://127.0.0.1:$KEY_PORT/" && break; sleep 0.5; done
+  pstate '.state=(if .email then .state else "waiting" end) | .msg="pick the key file in the browser"'
+  echo "http://127.0.0.1:$KEY_PORT/$tok"
+}
+
+play_status() {
+  if [ ! -f "$SA" ]; then pstate '.state="none" | del(.email, .project) | .msg=""'; cat "$PSTATE"; echo; return; fi
+  local err; err=$(play_token 2>&1 >/dev/null)
+  if [ -n "$err" ]; then pstate '.state="error" | .msg=$m | .checked=$t' --arg m "$err" --argjson t "$(now)"
+  else pstate '.state="connected" | .email=$e | .msg="" | .checked=$t' --arg e "$(jq -r .client_email "$SA")" --argjson t "$(now)"; fi
+  cat "$PSTATE"; echo
+}
+
+# ---- one app: listing, upload key, signed bundle, graphics ----
+
+# pmeta <slug> <jq filter> [args...]: edit the app's .play object.
+pmeta() { local s=$1 f=$2; shift 2; meta "$s" ".play=(.play // {}) | .play |= ($f)" "$@"; }
+
+listing_prompt() {
+  cat <<'EOF'
+Write the Google Play store listing for this Android app. Read the code first so it describes what the
+app really does. Don't change the app's code and don't run Gradle.
+
+1. Create play/listing.json with exactly these keys (plain text, no Markdown):
+   "title": the app's name on Play, at most 30 characters
+   "shortDescription": one sentence, at most 80 characters
+   "fullDescription": 2-4 short paragraphs, may include a list of features with "• ", at most 4000 characters
+   "releaseNotes": what this version brings, at most 500 characters
+   "category": the one Google Play category that fits best (e.g. "Tools", "Productivity", "Puzzle")
+   "dataCollected": true only if the app sends any user data off the phone
+2. Create play/privacy-policy.md: a short, honest privacy policy for this app: what it stores, where
+   (on the device only, if so), what it sends anywhere and to whom (nothing, if so), and a last line
+   "Contact: " followed by nothing (the developer adds an email).
+
+Follow Google Play's metadata policy: no emoji, ALL CAPS or "best", "#1", "free", "new", prices or
+promotions in the title; no calls to action such as "download now"; no keyword lists; no other apps' or
+companies' names; don't claim features the app doesn't have.
+EOF
+}
+
+# The agent's listing, cut to Play's limits; fails when the file is missing or not JSON.
+listing_ok() {
+  local f=$APPS/$1/play/listing.json tmp
+  jq -e '(.title | type == "string" and length > 0) and (.shortDescription | type == "string") and (.fullDescription | type == "string")' "$f" >/dev/null 2>&1 \
+    || return 1
+  tmp=$(mktemp "$CACHE/.listing.XXXX")
+  jq '.title |= .[0:30] | .shortDescription |= .[0:80] | .fullDescription |= .[0:4000] | .releaseNotes = ((.releaseNotes // "") | .[0:500])' "$f" > "$tmp" \
+    && mv "$tmp" "$f" && pmeta "$1" '.title=$l.title | .category=$l.category | .dataCollected=($l.dataCollected == true)' --argjson l "$(jq -c . "$f")"
+}
+
+# play_upload_key <slug>: the app's own upload key, made once and kept outside the project.
+play_upload_key() {
+  local slug=$1
+  [ -s "$KEYS/$slug.p12" ] && [ -s "$KEYS/$slug.pass" ] && return 0
+  mkdir -p "$KEYS"; chmod go-rwx "$KEYS"
+  local pass name
+  pass=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 28)
+  name=$(jq -r '.label // .slug' "$APPS/$slug/.apkmaker.json" | tr -dc 'A-Za-z0-9 ._-' | head -c 40)
+  keytool -genkeypair -keystore "$KEYS/$slug.p12" -storetype PKCS12 -storepass "$pass" -keypass "$pass" -alias upload \
+    -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=${name:-$slug}, O=APK Maker" >> "$LOG" 2>&1 || return 1
+  printf '%s\n' "$pass" > "$KEYS/$slug.pass"
+  chmod 600 "$KEYS/$slug.p12" "$KEYS/$slug.pass"
+  echo "made the upload key $KEYS/$slug.p12" >> "$LOG"
+}
+
+# play_versions <slug> <code>: target Android 16 and set the version, in app/build.gradle.kts.
+play_versions() {
+  local slug=$1 vc=$2 dir=$APPS/$1 g=$APPS/$1/app/build.gradle.kts
+  local vn="1.$((vc - 1))"
+  sed -i -E 's/(compileSdk *= *)(2[0-9]|3[0-5])\b/\136/; s/(targetSdk *= *)(2[0-9]|3[0-5])\b/\136/' "$g"
+  sed -i -E "s/(versionCode *= *)[0-9]+/\1$vc/; s/(versionName *= *)\"[^\"]*\"/\1\"$vn\"/" "$g"
+  grep -qE 'targetSdk *= *(3[6-9]|[4-9][0-9])' "$g" && grep -qE "versionCode *= *$vc\b" "$g" || {
+    echo "couldn't set targetSdk 36 and versionCode $vc in app/build.gradle.kts" >> "$LOG"; return 1; }
+  grep -q suppressUnsupportedCompileSdk "$dir/gradle.properties" 2>/dev/null \
+    || printf '\nandroid.suppressUnsupportedCompileSdk=36\n' >> "$dir/gradle.properties"
+  PLAY_VC=$vc PLAY_VN=$vn
+}
+
+# do_bundle <slug>: the release .aab, signed with the app's upload key.
+do_bundle() {
+  local slug=$1 dir=$APPS/$1 pass
+  pass=$(cat "$KEYS/$slug.pass")
+  rm -rf "$dir/app/build/outputs/bundle/release"
+  echo "== gradle bundleRelease (version ${PLAY_VN:-?}, code ${PLAY_VC:-?})" >> "$LOG"
+  ( cd "$dir" && ./gradlew --console=plain -q bundleRelease \
+      -Pandroid.injected.signing.store.file="$KEYS/$slug.p12" -Pandroid.injected.signing.store.password="$pass" \
+      -Pandroid.injected.signing.key.alias=upload -Pandroid.injected.signing.key.password="$pass" ) >> "$LOG" 2> "$CACHE/build-err.txt"
+  local rc=$?
+  cat "$CACHE/build-err.txt" >> "$LOG"
+  [ $rc -eq 0 ] || return $rc
+  local aab; aab=$(ls -t "$dir"/app/build/outputs/bundle/release/*.aab 2>/dev/null | head -1)
+  [ -n "$aab" ] || return 1
+  cp "$aab" "$CACHE/apks/$slug.aab"
+  pmeta "$slug" '.aab=$a | .vc=$c | .vn=$n | .built=$t' --arg a "$CACHE/apks/$slug.aab" --argjson c "$PLAY_VC" --arg n "$PLAY_VN" --argjson t "$(now)"
+}
+
+# play_build <slug> <agent> <code>: set the version, then build (the agent fixes errors).
+play_build() {
+  local slug=$1 agent=$2 vc=$3
+  play_upload_key "$slug" || { job failed "couldn't make the upload key: see the log"; return 1; }
+  play_versions "$slug" "$vc" || { job failed "couldn't set the version in app/build.gradle.kts: see the log"; return 1; }
+  build_fixing "$slug" "$agent" do_bundle "signed app bundle, version $PLAY_VN" || return 1
+  save "$slug" "Google Play: version $PLAY_VN ($vc)"
+  if gh_on && [ -n "$(jq -r '.github.repo // empty' "$APPS/$slug/.apkmaker.json")" ]; then push_app "$slug" "$(git -C "$APPS/$slug" branch --show-current)" 2>> "$LOG"; fi
+  true
+}
+
+# play_art <slug>: icon, feature graphic and, over adb, screenshots of the app running.
+play_art() {
+  local slug=$1 dir=$APPS/$1 pd=$APPS/$1/play res=$APPS/$1/app/src/main/res pkg title
+  pkg=$(jq -r .pkg "$dir/.apkmaker.json")
+  title=$(jq -r '.title // empty' "$pd/listing.json" 2>/dev/null); title=${title:-$(jq -r '.label // .slug' "$dir/.apkmaker.json")}
+  job art "store icon and feature graphic"
+  java -Xmx160m "$DATA/bin/PlayArt.java" icon "$res" "$pd/icon.png" >> "$LOG" 2>&1 \
+    && java -Xmx160m "$DATA/bin/PlayArt.java" feature "$res" "$title" "$pd/feature.png" >> "$LOG" 2>&1 \
+    || echo "couldn't draw the store graphics: see the log above" >> "$LOG"
+  # Screenshots need the app on screen: install it if it isn't, open it, capture, tap, capture.
+  if adb_reconnect; then
+    job art "screenshots over adb"
+    if ! adb shell pm path "$pkg" 2>/dev/null | grep -q package: && [ -f "$CACHE/apks/$slug.apk" ]; then
+      adb install -r "$CACHE/apks/$slug.apk" >> "$LOG" 2>&1 && meta "$slug" '.status="installed" | .installed=$t' --argjson t "$(now)"
+    fi
+    if adb shell pm path "$pkg" 2>/dev/null | grep -q package:; then
+      mkdir -p "$pd/shots"; rm -f "$pd"/shots/*.png
+      local size w h i
+      size=$(adb shell wm size 2>/dev/null | awk -F': ' '/size/ {s=$2} END {print s}' | tr -d '\r')
+      w=${size%x*}; h=${size#*x}; w=${w:-1080}; h=${h:-2400}
+      adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1
+      adb shell am force-stop "$pkg" >/dev/null 2>&1
+      adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+      sleep 4
+      for i in 1 2 3; do
+        adb exec-out screencap -p > "$CACHE/shot.png" 2>/dev/null \
+          && java -Xmx160m "$DATA/bin/PlayArt.java" shot "$CACHE/shot.png" "$pd/shots/$i.png" >> "$LOG" 2>&1
+        # A tap and a swipe to show a little more of the app.
+        [ $i = 1 ] && adb shell input tap $((w / 2)) $((h / 2)) >/dev/null 2>&1
+        [ $i = 2 ] && adb shell input swipe $((w / 2)) $((h * 2 / 3)) $((w / 2)) $((h / 3)) 300 >/dev/null 2>&1
+        sleep 2
+      done
+      rm -f "$CACHE/shot.png"
+      adb shell input keyevent KEYCODE_HOME >/dev/null 2>&1
+    fi
+  fi
+  local shots; shots=$(ls "$pd"/shots/*.png 2>/dev/null | wc -l)
+  pmeta "$slug" '.icon=$i | .feature=$f | .shots=$s' \
+    --argjson i "$([ -s "$pd/icon.png" ] && echo true || echo false)" --argjson f "$([ -s "$pd/feature.png" ] && echo true || echo false)" --argjson s "$shots"
+}
+
+# The prepare job: listing (agent), Android 16 + version + signed .aab, graphics.
+play_prepare() {
+  local slug=$1 agent=$2 relist=${3:-} dir=$APPS/$1 pd=$APPS/$1/play
+  mkdir -p "$pd"
+  if [ -n "$relist" ] || ! listing_ok "$slug"; then
+    job agent "$agent is writing the store listing"
+    run_agent "$agent" "$dir" "$(listing_prompt)"
+    if agent_needs_login $?; then job failed "$agent isn't logged in — open the terminal to log in, then retry"; return 1; fi
+    listing_ok "$slug" || { job failed "$agent didn't write a usable play/listing.json: retry, or write it in the terminal"; return 1; }
+    pmeta "$slug" '.listed=$t' --argjson t "$(now)"
+  fi
+  # A version newer than anything built or seen on Play.
+  local cur vc
+  cur=$(grep -oE 'versionCode *= *[0-9]+' "$dir/app/build.gradle.kts" | grep -oE '[0-9]+$' | head -1)
+  vc=$(jq -r --argjson c "${cur:-1}" '.play as $p | if $p.vc == null and $p.remote == null then $c else ([$p.vc // 0, $p.remote // 0] | max) + 1 end' "$dir/.apkmaker.json")
+  play_build "$slug" "$agent" "$vc" || return 1
+  play_art "$slug"
+  pmeta "$slug" '.prepared=$t' --argjson t "$(now)"
+  local shots; shots=$(ls "$pd"/shots/*.png 2>/dev/null | wc -l)
+  if [ "$shots" -ge 2 ]; then job done "ready for Play: version $PLAY_VN"
+  else job done "ready for Play: version $PLAY_VN (no screenshots: connect adb and prepare again, or add 2 in Play Console)"; fi
+}
+
+# ---- upload ----
+
+# The Play track name for the widget's word.
+track_id() { case $1 in internal) echo internal ;; closed) echo alpha ;; production) echo production ;; *) return 1 ;; esac; }
+
+# The edit: open it, or say why not. Sets EDIT.
+open_edit() {
+  local pkg=$1
+  gp POST "$API/$pkg/edits" -H 'Content-Type: application/json' --data-binary '{}' || return 1
+  EDIT=$(jq -r .id <<< "$GP_BODY")
+}
+
+commit_edit() {
+  local pkg=$1
+  gp POST "$API/$pkg/edits/$EDIT:commit" && return 0
+  # Some changes (a new app's first ones, for instance) must be sent for review in Play Console.
+  if gp_err | grep -q changesNotSentForReview; then
+    gp POST "$API/$pkg/edits/$EDIT:commit?changesNotSentForReview=true" && { SEND_REVIEW=1; return 0; }
+  fi
+  return 1
+}
+
+# images <pkg> <lang> <type> <files...>: replace that kind of store image.
+images() {
+  local pkg=$1 lang=$2 type=$3 f; shift 3
+  [ $# -gt 0 ] || return 0
+  gp DELETE "$API/$pkg/edits/$EDIT/listings/$lang/$type" || true
+  for f in "$@"; do
+    gp POST "$UPAPI/$pkg/edits/$EDIT/listings/$lang/$type?uploadType=media" -H 'Content-Type: image/png' --data-binary "@$f" || return 1
+  done
+}
+
+# play_apply_testers <slug>: the closed test's Google Groups (the app's own and, once it asked, the
+# community's), in the open edit.
+play_apply_testers() {
+  local slug=$1 pkg groups
+  pkg=$(jq -r .pkg "$APPS/$slug/.apkmaker.json")
+  groups=$(jq -c --arg c "$(jq -r '.group // empty' "$COMMUNITY" 2>/dev/null)" \
+    '[.play.group // empty, (if .play.community == true and $c != "" then $c else empty end)] | unique' "$APPS/$slug/.apkmaker.json")
+  [ "$groups" != "[]" ] || return 0
+  gp_json PUT "$API/$pkg/edits/$EDIT/testers/alpha" "{\"googleGroups\":$groups}"
+}
+
+# testers_now <slug>: set the groups on Play right away, when the app is there already.
+testers_now() {
+  local slug=$1 pkg
+  [ -f "$SA" ] && [ "$(jq -r '.play.linked // false' "$APPS/$slug/.apkmaker.json")" = true ] || return 2
+  pkg=$(jq -r .pkg "$APPS/$slug/.apkmaker.json")
+  LOG=$CACHE/play-check.log; : > "$LOG"
+  TOKEN=$(play_token) && open_edit "$pkg" && play_apply_testers "$slug" && commit_edit "$pkg"
+}
+
+# ---- the community tester exchange: a shared Google Group and a list of apps, on GitHub ----
+
+COMMUNITY_REPO=kingdompaulo/apk-maker-testers
+COMMUNITY=$CACHE/community.json
+TESTING=$CACHE/testing.json
+
+play_community() {
+  local raw=https://raw.githubusercontent.com/$COMMUNITY_REPO/main c a tmp
+  c=$(curl -sfL --max-time 20 "$raw/community.json") && a=$(curl -sfL --max-time 20 "$raw/apps.json") \
+    && jq -e 'type == "array"' <<< "$a" >/dev/null || { echo "couldn't reach the tester list" >&2; return 1; }
+  tmp=$(mktemp "$CACHE/.community.XXXX")
+  jq -c --argjson a "$a" --argjson t "$(now)" '. + {apps:$a, fetched:$t, repo:"'"$COMMUNITY_REPO"'"}' <<< "$c" > "$tmp" && mv "$tmp" "$COMMUNITY"
+}
+
+# The upload job: bundle, listing, graphics, release on the track, testers, commit.
+play_upload() {
+  local slug=$1 word=$2 dir=$APPS/$1 pd=$APPS/$1/play track pkg aab lang notes status m
+  track=$(track_id "$word") || { job failed "unknown track $word"; return 1; }
+  pkg=$(jq -r .pkg "$dir/.apkmaker.json")
+  aab=$CACHE/apks/$slug.aab
+  [ -f "$aab" ] || { job failed "prepare it for Play first"; return 1; }
+  job checking "connecting to Google Play"
+  TOKEN=$(play_token 2>>"$LOG") || { job failed "$(tail -1 "$LOG")"; return 1; }
+  if ! open_edit "$pkg"; then
+    [ "$GP_CODE" = 404 ] && pmeta "$slug" '.linked=false'
+    job failed "$(gp_explain)"; return 1
+  fi
+  pmeta "$slug" '.linked=true'
+
+  # Play refuses a version code it has seen: build a newer one if needed.
+  local remote vc
+  gp GET "$API/$pkg/edits/$EDIT/tracks" || { job failed "$(gp_explain)"; return 1; }
+  remote=$(jq '[.tracks[]?.releases[]?.versionCodes[]? | tonumber] | max // 0' <<< "$GP_BODY")
+  vc=$(jq -r '.play.vc // 0' "$dir/.apkmaker.json")
+  pmeta "$slug" '.remote=$r' --argjson r "$remote"
+  # The app changed after its .aab was built (an agent ran since): bundle the new code.
+  local stale; stale=$(jq -r '([.history[]? | select(.discarded != true) | .t] | max // 0) > (.play.built // 0)' "$dir/.apkmaker.json")
+  if [ "$vc" -le "$remote" ] || [ "$stale" = true ]; then
+    local next=$(( (vc > remote ? vc : remote) + 1 ))
+    if [ "$stale" = true ]; then echo "the app changed since its .aab was built: building version code $next" >> "$LOG"
+    else echo "Play already has version code $remote: building $next" >> "$LOG"; fi
+    play_build "$slug" "$(jq -r '.agent // empty' "$dir/.apkmaker.json")" $next || return 1
+    vc=$next
+    # The edit may have timed out during the build.
+    TOKEN=$(play_token 2>>"$LOG") && open_edit "$pkg" || { job failed "$(gp_explain)"; return 1; }
+  fi
+
+  job uploading "uploading version $(jq -r '.play.vn' "$dir/.apkmaker.json") ($(du -h "$aab" | cut -f1))"
+  gp POST "$UPAPI/$pkg/edits/$EDIT/bundles?uploadType=media" -H 'Content-Type: application/octet-stream' --data-binary "@$aab" \
+    || { job failed "$(gp_explain)"; return 1; }
+
+  gp GET "$API/$pkg/edits/$EDIT/details" && lang=$(jq -r '.defaultLanguage // empty' <<< "$GP_BODY")
+  lang=${lang:-en-US}
+  local contact; contact=$(jq -r '.contact // empty' "$PSTATE" 2>/dev/null)
+  if [ -n "$contact" ] && [ "$(jq -r '.contactEmail // empty' <<< "$GP_BODY")" != "$contact" ]; then
+    gp_json PATCH "$API/$pkg/edits/$EDIT/details" "$(jq -nc --arg e "$contact" '{contactEmail:$e}')" || echo "   couldn't set the contact email" >> "$LOG"
+  fi
+  if [ -f "$pd/listing.json" ]; then
+    job uploading "store listing and graphics ($lang)"
+    gp_json PUT "$API/$pkg/edits/$EDIT/listings/$lang" \
+      "$(jq -c --arg l "$lang" '{language:$l, title, shortDescription, fullDescription}' "$pd/listing.json")" \
+      || { job failed "$(gp_explain)"; return 1; }
+    [ -f "$pd/icon.png" ] && { images "$pkg" "$lang" icon "$pd/icon.png" || { job failed "$(gp_explain)"; return 1; }; }
+    [ -f "$pd/feature.png" ] && { images "$pkg" "$lang" featureGraphic "$pd/feature.png" || { job failed "$(gp_explain)"; return 1; }; }
+    local shots=("$pd"/shots/*.png)
+    [ -f "${shots[0]}" ] && { images "$pkg" "$lang" phoneScreenshots "${shots[@]}" || { job failed "$(gp_explain)"; return 1; }; }
+  fi
+
+  # The first release gets the listing's notes; later ones, the changes asked for since the last upload.
+  notes=$(jq -r '.releaseNotes // empty' "$pd/listing.json" 2>/dev/null)
+  local changes; changes=$(jq -r '(.play.uploaded // 0) as $u | if $u == 0 then empty else
+      [.history[]? | select(.t > $u and .discarded != true) | .prompt | split("\n")[0] | select(startswith("Change this Android app (read AGENTS.md first): "))
+       | ltrimstr("Change this Android app (read AGENTS.md first): ") | select(startswith("Continue:") | not)] | join("\n") end' \
+    "$dir/.apkmaker.json" 2>/dev/null)
+  [ -n "$changes" ] && notes=${changes:0:500}
+  release() {
+    jq -nc --arg t "$track" --arg n "$(jq -r .play.vn "$dir/.apkmaker.json")" --arg c "$vc" --arg s "$1" --arg l "$lang" --arg r "${notes:-Bug fixes and improvements.}" \
+      '{track:$t, releases:[{name:$n, versionCodes:[$c], status:$s, releaseNotes:[{language:$l, text:$r}]}]}'
+  }
+  job uploading "release on ${word} testing"
+  status=completed
+  if ! gp_json PUT "$API/$pkg/edits/$EDIT/tracks/$track" "$(release completed)"; then
+    # A new app stays a draft until its first release is rolled out in Play Console.
+    if gp_err | grep -qi draft; then
+      status=draft
+      gp_json PUT "$API/$pkg/edits/$EDIT/tracks/$track" "$(release draft)" || { job failed "$(gp_explain)"; return 1; }
+    else
+      job failed "$(gp_explain)"; return 1
+    fi
+  fi
+  if [ "$track" = alpha ]; then
+    play_apply_testers "$slug" || echo "   couldn't set the testers' group: $(gp_err)" >> "$LOG"
+  fi
+  SEND_REVIEW=
+  commit_edit "$pkg" || { job failed "$(gp_explain)"; return 1; }
+
+  pmeta "$slug" '.uploaded=$t | .tracks[$w]={vc:$c, vn:.vn, at:$t, status:$s, review:$r} | .remote=([.remote // 0, $c] | max)
+      | if $w == "closed" and $s == "completed" and .closedSince == null then .closedSince=$t else . end' \
+    --arg w "$word" --argjson c "$vc" --argjson t "$(now)" --arg s "$status" --argjson r "$([ -n "$SEND_REVIEW" ] && echo true || echo false)"
+  m="version $(jq -r .play.vn "$dir/.apkmaker.json") is on ${word}"
+  [ "$word" = production ] || m="$m testing"
+  if [ "$status" = draft ]; then m="$m as a draft: roll it out in Play Console (the app's first release has to be)"
+  elif [ -n "$SEND_REVIEW" ]; then m="$m: send the changes for review in Play Console › Publishing overview"; fi
+  job done "$m"
+}
+
+play_cmd() {
+  umask 077
+  local sub=${1:-}; shift || true
+  case $sub in
+    connect) play_connect ;;
+    key) play_key "${1:?usage: apk-maker play key <service-account.json>}" ;;
+    status) play_status ;;
+    disconnect) rm -f "$SA" "$CACHE/play-token.json"; pstate '.state="none" | del(.email, .project) | .msg=""'; echo "disconnected" ;;
+    prepare)
+      local slug=${1:-} agent=${2:-} relist=${3:-}
+      need_app "$slug"
+      pending "$slug" && { echo "accept or discard the change waiting on $slug first: Play gets the main version" >&2; exit 1; }
+      [ -n "$agent" ] || agent=$(jq -r '.agent // empty' "$APPS/$slug/.apkmaker.json")
+      command -v "$agent" >/dev/null 2>&1 || agent=$(first_agent)
+      # The agent is needed for the listing; without one, a listing must already be there.
+      if [ -z "$agent" ] && ! listing_ok "$slug"; then echo "no coding agent is installed to write the listing" >&2; exit 1; fi
+      start play-prepare "$slug" "$agent" "$relist" ;;
+    upload)
+      local slug=${1:-} word=${2:-}
+      need_app "$slug"
+      pending "$slug" && { echo "accept or discard the change waiting on $slug first: Play gets the main version" >&2; exit 1; }
+      track_id "$word" >/dev/null || { echo "track must be internal, closed or production" >&2; exit 1; }
+      [ -f "$SA" ] || { echo "connect Google Play first (play tab)" >&2; exit 1; }
+      [ -f "$CACHE/apks/$slug.aab" ] || { echo "prepare it for Play first" >&2; exit 1; }
+      start play-upload "$slug" "" "$word" ;;
+    check)
+      # Is the app on Play yet (its first .aab uploaded by hand)? Opens an edit and drops it.
+      local slug=${1:-}; need_app "$slug"
+      local pkg; pkg=$(jq -r .pkg "$APPS/$slug/.apkmaker.json")
+      LOG=$CACHE/play-check.log; : > "$LOG"
+      TOKEN=$(play_token) || exit 1
+      if open_edit "$pkg"; then
+        gp DELETE "$API/$pkg/edits/$EDIT" || true
+        pmeta "$slug" '.linked=true'
+        echo "found $pkg on Google Play: uploads from here work now"
+      else
+        [ "$GP_CODE" = 404 ] && pmeta "$slug" '.linked=false'
+        gp_explain >&2; exit 1
+      fi ;;
+    aab)
+      need_app "${1:-}"; [ -f "$CACHE/apks/$1.aab" ] || { echo "prepare it for Play first" >&2; exit 1; }
+      serve; echo "http://127.0.0.1:$SERVE_PORT/$1.aab" ;;
+    backup)
+      # The key and its password in one text file, offered to the browser for two minutes.
+      local slug=${1:-}; need_app "$slug"
+      [ -s "$KEYS/$slug.p12" ] || { echo "$slug has no upload key yet: prepare it for Play first" >&2; exit 1; }
+      # Any app on the phone can reach 127.0.0.1: an unguessable name keeps it to the browser.
+      local name; name=$slug-$(head -c 12 /dev/urandom | b64url | tr -dc 'A-Za-z0-9')-upload-key.txt
+      local b=$CACHE/apks/$name
+      { echo "APK Maker upload key for $slug ($(jq -r .pkg "$APPS/$slug/.apkmaker.json")). Keep this file private and safe."
+        echo "Google Play needs this key for every update. Lost it? Play Console › Setup › App signing › Request upload key reset."
+        echo "alias: upload"
+        echo "password: $(cat "$KEYS/$slug.pass")"
+        echo "To restore: decode the lines between BEGIN and END from base64 into ~/.local/share/apk-maker/keys/$slug.p12,"
+        echo "and the password in ~/.local/share/apk-maker/keys/$slug.pass"
+        echo "BEGIN"; base64 -w 76 "$KEYS/$slug.p12"; echo "END"; } > "$b"
+      serve
+      setsid -f bash -c 'sleep 120; rm -f "$0"' "$b" >/dev/null 2>&1 < /dev/null
+      pmeta "$slug" '.backedUp=$t' --argjson t "$(now)"
+      echo "http://127.0.0.1:$SERVE_PORT/$name" ;;
+    testers)
+      local slug=${1:-} group=${2:-}; need_app "$slug"
+      [[ $group =~ ^[^@[:space:]]+@[^@[:space:]]+\.[a-z]{2,}$ ]] || { echo "that isn't a group email (like my-testers@googlegroups.com)" >&2; exit 1; }
+      pmeta "$slug" '.group=$g' --arg g "$group"
+      # Already on Play: set it right away, without waiting for the next upload.
+      testers_now "$slug"
+      case $? in
+        0) echo "testers set: $group can test closed releases" ;;
+        2) echo "saved: it's set with the next closed-testing upload" ;;
+        *) echo "saved; Play said: $(gp_explain)" >&2; exit 1 ;;
+      esac ;;
+    community) play_community && jq -r '"\(.apps | length) apps want testers"' "$COMMUNITY" ;;
+    ask)
+      # Add the community group to the app's closed test, then the filled-in issue that lists it.
+      local slug=${1:-}; need_app "$slug"
+      play_community >/dev/null 2>&1
+      [ -n "$(jq -r '.group // empty' "$COMMUNITY" 2>/dev/null)" ] || { echo "the community group isn't set up yet: try again later" >&2; exit 1; }
+      pmeta "$slug" '.community=true'
+      testers_now "$slug"
+      [ $? -eq 1 ] && { echo "couldn't add the community group on Play: $(gp_explain)" >&2; exit 1; }
+      jq -r --arg r "$COMMUNITY_REPO" '"https://github.com/\($r)/issues/new?template=add-app.yml&title=" + ("[app] " + (.play.title // .label // .slug) | @uri)
+          + "&package=" + (.pkg | @uri) + "&name=" + ((.play.title // .label // .slug) | @uri)
+          + "&description=" + (((if $d == "" then (.history[0].prompt // "" | sub("^Build this Android app in the current directory: "; "") | split("\n")[0]) else $d end) | .[0:200]) | @uri)' --arg d "$(jq -r '.shortDescription // empty' "$APPS/$slug/play/listing.json" 2>/dev/null)" \
+        "$APPS/$slug/.apkmaker.json" ;;
+    testing)
+      # The community apps this phone tests, with the day each test began.
+      local pkg=${1:-} on=${2:-}
+      [[ $pkg =~ ^[a-zA-Z][a-zA-Z0-9_.]*$ && $on =~ ^(on|off)$ ]] || { echo "usage: apk-maker play testing <package> on|off" >&2; exit 1; }
+      local tmp; tmp=$(mktemp "$CACHE/.testing.XXXX")
+      { cat "$TESTING" 2>/dev/null || echo '{}'; } \
+        | jq -c --arg p "$pkg" --arg on "$on" --argjson t "$(now)" 'if $on == "on" then .[$p] = (.[$p] // $t) else del(.[$p]) end' > "$tmp" \
+        && mv "$tmp" "$TESTING" ;;
+    set)
+      case ${1:-} in
+        personal) [[ ${2:-} =~ ^(yes|no)$ ]] || exit 1; pstate '.personal=($v == "yes")' --arg v "$2" ;;
+        contact) [[ ${2:-} =~ ^[^@[:space:]]+@[^@[:space:]]+$ ]] || { echo "that isn't an email" >&2; exit 1; }; pstate '.contact=$v' --arg v "$2" ;;
+        *)
+          local slug=${1:-}; need_app "$slug"
+          case ${2:-} in
+            testers) [[ ${3:-} =~ ^[0-9]+$ ]] || exit 1; pmeta "$slug" '.testers=$n' --argjson n "$3" ;;
+            production) [[ ${3:-} =~ ^(yes|no)$ ]] || exit 1; pmeta "$slug" '.production=($v == "yes")' --arg v "$3" ;;
+            *) echo "usage: apk-maker play set <slug> testers <n> | production <yes|no>" >&2; exit 1 ;;
+          esac ;;
+      esac ;;
+    *) sed -n '/^# Google Play (see/,/^#$/p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  esac
 }
 
 # ---- setup: everything a build needs, fetched once, each step skipped when already done ----
@@ -467,7 +1429,7 @@ fetch() {
 }
 
 aapt2_ok() { "$1/build-tools/35.0.0/aapt2" version >/dev/null 2>&1; }
-sdk_ok() { [ -n "$1" ] && [ -d "$1/platforms/android-35" ] && aapt2_ok "$1"; }
+sdk_ok() { [ -n "$1" ] && [ -f "$1/platforms/$PLATFORM/android.jar" ] && aapt2_ok "$1"; }
 
 do_setup() {
   exec 9> "$CACHE/setup.lock"
@@ -483,13 +1445,19 @@ do_setup() {
 
   step 2 "looking for an Android SDK"
   # Reuse a working SDK (one set up by hand, or by an earlier run) instead of downloading 300 MB.
-  for d in "$(cat "$DATA/sdk.path" 2>/dev/null)" "${ANDROID_HOME_ORIG:-}" "$DATA/sdk" ${APKMAKER_SDK_SEARCH-/opt/android-sdk "$HOME/Android/Sdk"}; do
+  local dirs=("$(cat "$DATA/sdk.path" 2>/dev/null)" "${ANDROID_HOME_ORIG:-}" "$DATA/sdk" ${APKMAKER_SDK_SEARCH-/opt/android-sdk "$HOME/Android/Sdk"})
+  for d in "${dirs[@]}"; do
     sdk_ok "$d" && { sdk=$d; break; }
   done
   if [ -z "$sdk" ]; then
-    sdk=$DATA/sdk
-    local sm=$sdk/cmdline-tools/latest/bin/sdkmanager
-    if [ ! -x "$sm" ]; then
+    # One from an earlier version has everything but the newer platform: add that to it.
+    for d in "${dirs[@]}"; do
+      [ -n "$d" ] && aapt2_ok "$d" && { sdk=$d; break; }
+    done
+    sdk=${sdk:-$DATA/sdk}
+    local sm; sm=$(ls "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
+    if [ -z "$sm" ]; then
+      sm=$sdk/cmdline-tools/latest/bin/sdkmanager
       step 2 "downloading the Android command-line tools (165 MB)"
       fetch "$CLT_URL" "$CLT_SHA" "$dl/cmdline-tools.zip" || die "couldn't download the Android command-line tools"
       rm -rf "$sdk/cmdline-tools" && mkdir -p "$sdk/cmdline-tools"
@@ -497,15 +1465,19 @@ do_setup() {
         || die "couldn't unpack the Android command-line tools"
       rm -f "$dl/cmdline-tools.zip"
     fi
-    step 3 "installing Android 15 SDK and build-tools (about 150 MB)"
+    step 3 "installing the Android 16 SDK and build-tools (up to 150 MB)"
+    # sdkmanager's default heap can run a phone out of memory.
+    export SDKMANAGER_OPTS=-Xmx384m
     yes 2>/dev/null | "$sm" --sdk_root="$sdk" --licenses >/dev/null 2>&1
     echo "accepted the SDK licenses" >> "$SLOG"
+    # A half-written platform from an interrupted run blocks the install.
+    [ -f "$sdk/platforms/$PLATFORM/android.jar" ] || rm -rf "${sdk:?}/platforms/$PLATFORM"
     # sdkmanager redraws a progress bar with \r: keep its messages, drop the bars.
     local rc=0
-    "$sm" --sdk_root="$sdk" "platforms;android-35" "build-tools;35.0.0" > "$dl/sdkmanager.log" 2>&1 || rc=$?
+    "$sm" --sdk_root="$sdk" "platforms;$PLATFORM" "build-tools;35.0.0" > "$dl/sdkmanager.log" 2>&1 || rc=$?
     tr '\r' '\n' < "$dl/sdkmanager.log" | grep -vE '^[[:space:]]*$|\] *[0-9]+%' >> "$SLOG"
     rm -f "$dl/sdkmanager.log"
-    [ $rc -eq 0 ] || die "sdkmanager couldn't install the SDK: see the setup log"
+    [ $rc -eq 0 ] && [ -f "$sdk/platforms/$PLATFORM/android.jar" ] || die "sdkmanager couldn't install the SDK: see the setup log"
   fi
 
   step 3 "checking the native build tools"
@@ -538,6 +1510,8 @@ kotlin.compiler.execution.strategy=in-process
 android.useAndroidX=true
 android.nonTransitiveRClass=true
 android.aapt2FromMavenOverride=$sdk/build-tools/35.0.0/aapt2
+# AGP 8.7 knows API 35; 36 builds fine with it.
+android.suppressUnsupportedCompileSdk=36
 EOF
 
   # The first build downloads Gradle and the libraries; doing it now makes the first app fast
@@ -556,23 +1530,37 @@ EOF
 cmd=${1:-}; shift || true
 case $cmd in
   new)
-    agent=$1; shift; idea="$*"
+    agent=${1:-}; shift || true; idea="$*"
     [ -n "$idea" ] || { echo "usage: apk-maker new <agent> <idea>" >&2; exit 1; }
     can_start "$agent"
     base=$(slugify "$idea"); base=${base:-app}; slug=$base; i=2
     while [ -e "$APPS/$slug" ]; do slug="$base-$i"; i=$((i + 1)); done
     scaffold "$slug" && list_apps
-    start "$slug" "$agent" "$(new_prompt "$idea")" ;;
+    start app "$slug" "$agent" "$(new_prompt "$idea")" ;;
   change)
-    slug=$1 agent=$2; shift 2
+    slug=${1:-} agent=${2:-}
+    [ $# -ge 3 ] || { echo "usage: apk-maker change <slug> <agent> <request>" >&2; exit 1; }; shift 2
     need_app "$slug"
-    start "$slug" "$agent" "Change this Android app (read AGENTS.md first): $*
+    pending "$slug" && { echo "accept or discard the change waiting on $slug first" >&2; exit 1; }
+    can_start "$agent"
+    begin_change "$slug" "$*" || exit 1
+    start app "$slug" "$agent" "Change this Android app (read AGENTS.md first): $*
 You are done only when ./gradlew assembleRelease succeeds." ;;
-  _work) work "$@"; list_apps ;;
+  accept) need_app "${1:-}"; job_running && [ "$(jq -r .slug "$JOB")" = "$1" ] && { echo "$1 is still building: wait for it" >&2; exit 1; }
+    accept_change "$1" ;;
+  discard) need_app "${1:-}"; job_running && [ "$(jq -r .slug "$JOB")" = "$1" ] && { echo "$1 is still building: stop it first" >&2; exit 1; }
+    discard_change "$1" ;;
+  github) github_cmd "$@" ;;
+  _app|_work) work "$@"; list_apps ;;
+  _play-prepare) play_prepare "$@"; list_apps ;;
+  _play-upload) play_upload "$1" "$3"; list_apps ;;
   build)
     need_app "${1:-}"; : > "$LOG"; do_build "$1" && echo "$CACHE/apks/$1.apk" ;;
   install)
-    need_app "${1:-}"; do_install "$1"; rc=$?; [ $rc -eq 2 ] && echo "http://127.0.0.1:$SERVE_PORT/$1.apk"; exit $rc ;;
+    need_app "${1:-}"; do_install "$1"; rc=$?
+    [ $rc -eq 2 ] && echo "http://127.0.0.1:$SERVE_PORT/$1.apk"
+    [ $rc -eq 3 ] && echo "can't install: the copy on the phone is signed differently (from Google Play?): uninstall it first" >&2
+    exit $rc ;;
   serve) serve ;;
   download)
     need_app "${1:-}"; [ -f "$CACHE/apks/$1.apk" ] || { echo "$1 isn't built yet" >&2; exit 1; }
@@ -601,21 +1589,33 @@ You are done only when ./gradlew assembleRelease succeeds." ;;
     else
       echo "could not uninstall $pkg (is adb connected?)" >&2; exit 1
     fi ;;
+  again)
+    # The last job once more: a Play job reruns (to the same track), an app job continues its app.
+    k=$(jq -r '.kind // "app"' "$JOB" 2>/dev/null) s=$(jq -r '.slug // empty' "$JOB" 2>/dev/null)
+    a=$(jq -r '.agent // empty' "$JOB" 2>/dev/null) x=$(jq -r '.arg // empty' "$JOB" 2>/dev/null)
+    case $k in
+      play-upload) exec "$0" play upload "$s" "$x" ;;
+      play-prepare) exec "$0" play prepare "$s" "$a" ${x:+"$x"} ;;
+      *) exec "$0" retry "$s" ;;
+    esac ;;
   retry)
     slug=${1:-}; need_app "$slug"
     agent=${2:-$(jq -r '.agent // "claude"' "$APPS/$slug/.apkmaker.json")}
     command -v "$agent" >/dev/null 2>&1 || agent=$(first_agent)
     [ -n "$agent" ] || { echo "no coding agent is installed" >&2; exit 1; }
-    start "$slug" "$agent" "Continue building this Android app (read AGENTS.md first): finish it and make ./gradlew assembleRelease succeed." ;;
+    start app "$slug" "$agent" "Continue building this Android app (read AGENTS.md first): finish it and make ./gradlew assembleRelease succeed." ;;
   delete)
     slug=${1:-}; need_app "$slug"
-    if job_active && [ "$(jq -r .slug "$JOB")" = "$slug" ]; then echo "$slug is still building: stop it first" >&2; exit 1; fi
-    rm -rf "${APPS:?}/$slug" "$CACHE/apks/$slug.apk"
+    if job_running && [ "$(jq -r .slug "$JOB")" = "$slug" ]; then echo "$slug is still building: stop it first" >&2; exit 1; fi
+    # Its Play upload key stays in $KEYS: an app already on Play can't be updated without it.
+    # The GitHub repo, if any, stays: delete it on GitHub.
+    rm -rf "${APPS:?}/$slug" "$CACHE/apks/$slug.apk" "$CACHE/apks/$slug.aab" "$CACHE/apks/$slug.main.apk"
     # The last job was this app's: clear it, so the widget doesn't show an app that's gone.
     if [ "$(jq -r '.slug // empty' "$JOB" 2>/dev/null)" = "$slug" ]; then rm -f "$JOB" "$LOG"; : > "$CACHE/build-err.txt"; fi
     list_apps
     echo "deleted $slug" ;;
   list) list_apps; cat "$CACHE/apps.json" ;;
+  play) play_cmd "$@" ;;
   setup) do_setup ;;
   doctor)
     # One line per missing piece; the widget shows them. Nothing printed = ready.
@@ -627,40 +1627,558 @@ You are done only when ./gradlew assembleRelease succeeds." ;;
     true ;;
   agents) for a in claude codex opencode; do command -v "$a" >/dev/null 2>&1 && printf '%s ' "$a"; done; echo ;;
   version) echo "$VERSION" ;;
-  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
 APKMAKER_FILE_EOF
 mv "$D/bin/apk-maker.new" "$D/bin/apk-maker"
 mkdir -p "$D/bin"
 cat > "$D/bin/Serve.java.new" <<'APKMAKER_FILE_EOF'
-// Serves ~/.cache/apk-maker/apks on 127.0.0.1 so the phone's browser can download and install an APK.
+// Serves ~/.cache/apk-maker/apks on 127.0.0.1 so the phone's browser can download and install an APK
+// (or save an .aab for Play Console):
+//   java Serve.java <port> <dir>
+// With "receive", a one-time page instead: the browser picks a file (the Play service account key),
+// which is saved to <out>, then the server exits. Only /<token> answers, and it gives up after 15 min:
+//   java Serve.java receive <port> <token> <out>
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.*;
 
 public class Serve {
+    static final String VERSION = "2";
+
     public static void main(String[] a) throws Exception {
+        if (a[0].equals("receive")) { receive(Integer.parseInt(a[1]), a[2], Paths.get(a[3])); return; }
         Path dir = Paths.get(a[1]).toAbsolutePath().normalize();
         HttpServer s = HttpServer.create(new InetSocketAddress("127.0.0.1", Integer.parseInt(a[0])), 0);
         s.createContext("/", ex -> {
             Path f = dir.resolve(ex.getRequestURI().getPath().substring(1)).normalize();
-            if (!f.startsWith(dir) || !Files.isRegularFile(f)) {
-                byte[] b = "apk-maker\n".getBytes();
-                ex.sendResponseHeaders(f.equals(dir) ? 200 : 404, b.length);
-                ex.getResponseBody().write(b);
+            if (ex.getRequestURI().getPath().equals("/.version")) {
+                send(ex, 200, "text/plain", VERSION);
+            } else if (!f.startsWith(dir) || !Files.isRegularFile(f)) {
+                send(ex, f.equals(dir) ? 200 : 404, "text/plain", "apk-maker\n");
             } else {
-                ex.getResponseHeaders().set("Content-Type", "application/vnd.android.package-archive");
-                ex.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"" + f.getFileName() + "\"");
+                String name = f.getFileName().toString();
+                ex.getResponseHeaders().set("Content-Type", name.endsWith(".apk") ? "application/vnd.android.package-archive" : "application/octet-stream");
+                ex.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"" + name + "\"");
                 ex.sendResponseHeaders(200, Files.size(f));
                 Files.copy(f, ex.getResponseBody());
+                ex.close();
             }
-            ex.close();
         });
         s.start();
+    }
+
+    static void send(HttpExchange ex, int code, String type, String body) throws IOException {
+        byte[] b = body.getBytes("UTF-8");
+        ex.getResponseHeaders().set("Content-Type", type + "; charset=utf-8");
+        ex.sendResponseHeaders(code, b.length);
+        ex.getResponseBody().write(b);
+        ex.close();
+    }
+
+    static final String PAGE = String.join("\n",
+        "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+        "<title>APK Maker · Google Play key</title>",
+        "<style>body{font:16px system-ui,sans-serif;max-width:32em;margin:2em auto;padding:0 1em;color:#222;background:#fafafa}",
+        "@media(prefers-color-scheme:dark){body{color:#eee;background:#151515}}",
+        "button,input{font:inherit;padding:.7em;margin:.3em 0;width:100%}#m{margin-top:1em;font-weight:600}</style>",
+        "<h2>Connect Google Play</h2>",
+        "<p>Pick the service account's <b>JSON key</b> you downloaded from Google Cloud (usually in Downloads).",
+        "It stays on this phone: APK Maker uses it to upload your apps.</p>",
+        "<input type=\"file\" id=\"f\" accept=\".json,application/json\">",
+        "<button id=\"b\">Connect</button><div id=\"m\"></div>",
+        "<script>",
+        "b.onclick = async () => {",
+        "  const file = f.files[0]; if (!file) { m.textContent = 'Pick the .json file first.'; return; }",
+        "  const t = await file.text();",
+        "  try { const j = JSON.parse(t); if (j.type !== 'service_account' || !j.private_key || !j.client_email) throw 0; }",
+        "  catch (e) { m.textContent = 'That is not a service account key: create one in Google Cloud › Service accounts › Keys › Add key › JSON.'; return; }",
+        "  const r = await fetch(location.pathname, {method: 'POST', body: t});",
+        "  m.textContent = r.ok ? 'Done. Go back to the widget: it checks the key now. You can close this tab.' : 'Upload failed: ' + await r.text();",
+        "};",
+        "</script>",
+        "");
+
+    static void receive(int port, String token, Path out) throws Exception {
+        HttpServer s = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
+        s.createContext("/", ex -> {
+            if (!ex.getRequestURI().getPath().equals("/" + token)) { send(ex, 404, "text/plain", "not found"); return; }
+            if (ex.getRequestMethod().equals("POST")) {
+                byte[] b = ex.getRequestBody().readNBytes(65536);
+                Path tmp = out.resolveSibling(out.getFileName() + ".part");
+                Files.write(tmp, b);
+                Files.move(tmp, out, StandardCopyOption.REPLACE_EXISTING);
+                send(ex, 200, "text/plain", "ok");
+                // Let the response reach the browser, then stop.
+                new Thread(() -> { try { Thread.sleep(500); } catch (InterruptedException ignored) { } System.exit(0); }).start();
+            } else {
+                send(ex, 200, "text/html", PAGE);
+            }
+        });
+        s.start();
+        Thread.sleep(15 * 60 * 1000);
+        System.exit(1);
     }
 }
 APKMAKER_FILE_EOF
 mv "$D/bin/Serve.java.new" "$D/bin/Serve.java"
+mkdir -p "$D/bin"
+cat > "$D/bin/PlayArt.java.new" <<'APKMAKER_FILE_EOF'
+// Store graphics for Google Play, drawn from an app's own launcher icon (no image tools needed):
+//   java PlayArt.java icon <res dir> <out.png>                  512x512 icon
+//   java PlayArt.java feature <res dir> <title> <out.png>       1024x500 feature graphic
+//   java PlayArt.java shot <in.png> <out.png>                   screenshot cropped to Play's 2:1 limit
+// The icon is the adaptive icon's background color or vector, plus its foreground vector, cropped to
+// the 72dp a launcher shows. Vectors support paths, groups, clip-paths and solid or gradient colors.
+import java.awt.*;
+import java.awt.geom.*;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.nio.file.*;
+import java.util.*;
+import java.util.List;
+import javax.imageio.ImageIO;
+import javax.xml.parsers.DocumentBuilderFactory;
+import org.w3c.dom.*;
+
+public class PlayArt {
+    static final String A = "http://schemas.android.com/apk/res/android";
+    static Path res;
+    static Map<String, String> colors = new HashMap<>();
+
+    public static void main(String[] a) throws Exception {
+        System.setProperty("java.awt.headless", "true");
+        switch (a[0]) {
+            case "icon" -> { load(a[1]); ImageIO.write(icon(512, false), "png", new File(a[2])); }
+            case "feature" -> { load(a[1]); ImageIO.write(feature(a[2]), "png", new File(a[3])); }
+            case "shot" -> ImageIO.write(shot(ImageIO.read(new File(a[1]))), "png", new File(a[2]));
+            default -> throw new IllegalArgumentException(a[0]);
+        }
+    }
+
+    static void load(String dir) throws Exception {
+        res = Paths.get(dir);
+        try (var s = Files.newDirectoryStream(res, "values*")) {
+            for (Path v : s) {
+                if (!v.getFileName().toString().equals("values")) continue;
+                try (var f = Files.newDirectoryStream(v, "*.xml")) {
+                    for (Path x : f) {
+                        NodeList l = xml(x).getElementsByTagName("color");
+                        for (int i = 0; i < l.getLength(); i++) {
+                            Element e = (Element) l.item(i);
+                            colors.put(e.getAttribute("name"), e.getTextContent().trim());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    static Document xml(Path p) throws Exception {
+        var f = DocumentBuilderFactory.newInstance();
+        f.setNamespaceAware(true);
+        return f.newDocumentBuilder().parse(p.toFile());
+    }
+
+    // ---- icon ----
+
+    // The adaptive icon's layers, or null for a layer it doesn't have.
+    static String[] layers() throws Exception {
+        for (String d : new String[]{"mipmap-anydpi-v26", "mipmap-anydpi"}) {
+            Path p = res.resolve(d).resolve("ic_launcher.xml");
+            if (!Files.exists(p)) continue;
+            Element root = xml(p).getDocumentElement();
+            String bg = null, fg = null;
+            for (Node n = root.getFirstChild(); n != null; n = n.getNextSibling()) {
+                if (!(n instanceof Element e)) continue;
+                String v = e.getAttributeNS(A, "drawable");
+                if (e.getLocalName().equals("background")) bg = v;
+                if (e.getLocalName().equals("foreground")) fg = v;
+            }
+            return new String[]{bg, fg};
+        }
+        return new String[]{"#FFFFFF", "@drawable/ic_fg"};
+    }
+
+    static BufferedImage icon(int size, boolean transparentBg) throws Exception {
+        BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = gfx(img);
+        String[] l = layers();
+        // 108dp layers; a launcher shows the central 72dp.
+        double s = size / 72.0;
+        g.scale(s, s);
+        g.translate(-18, -18);
+        if (!transparentBg) layer(g, l[0]);
+        layer(g, l[1]);
+        g.dispose();
+        return img;
+    }
+
+    static void layer(Graphics2D g, String ref) throws Exception {
+        if (ref == null || ref.isEmpty()) return;
+        if (ref.startsWith("@drawable/") || ref.startsWith("@mipmap/")) {
+            String name = ref.substring(ref.indexOf('/') + 1);
+            for (String d : new String[]{"drawable", "drawable-v24", "drawable-anydpi", "mipmap-anydpi-v26"}) {
+                Path p = res.resolve(d).resolve(name + ".xml");
+                if (Files.exists(p)) { vector(g, xml(p).getDocumentElement(), 108); return; }
+            }
+            return;
+        }
+        Color c = color(ref);
+        if (c != null) { g.setColor(c); g.fill(new Rectangle2D.Double(0, 0, 108, 108)); }
+    }
+
+    // Draws a <vector> scaled to fill a box of `box` units.
+    static void vector(Graphics2D g, Element v, double box) {
+        if (!v.getLocalName().equals("vector")) return;
+        double vw = num(v.getAttributeNS(A, "viewportWidth"), 108), vh = num(v.getAttributeNS(A, "viewportHeight"), 108);
+        Graphics2D c = (Graphics2D) g.create();
+        c.scale(box / vw, box / vh);
+        children(c, v);
+        c.dispose();
+    }
+
+    static void children(Graphics2D g, Element parent) {
+        Shape clip = null;
+        for (Node n = parent.getFirstChild(); n != null; n = n.getNextSibling()) {
+            if (!(n instanceof Element e)) continue;
+            switch (e.getLocalName()) {
+                case "clip-path" -> {
+                    Shape s = PathParser.parse(e.getAttributeNS(A, "pathData"));
+                    clip = clip == null ? s : intersect(clip, s);
+                    g.clip(s);
+                }
+                case "group" -> {
+                    Graphics2D c = (Graphics2D) g.create();
+                    double px = num(e.getAttributeNS(A, "pivotX"), 0), py = num(e.getAttributeNS(A, "pivotY"), 0);
+                    c.translate(num(e.getAttributeNS(A, "translateX"), 0) + px, num(e.getAttributeNS(A, "translateY"), 0) + py);
+                    c.rotate(Math.toRadians(num(e.getAttributeNS(A, "rotation"), 0)));
+                    c.scale(num(e.getAttributeNS(A, "scaleX"), 1), num(e.getAttributeNS(A, "scaleY"), 1));
+                    c.translate(-px, -py);
+                    children(c, e);
+                    c.dispose();
+                }
+                case "path" -> path(g, e);
+            }
+        }
+    }
+
+    static Shape intersect(Shape a, Shape b) {
+        Area r = new Area(a);
+        r.intersect(new Area(b));
+        return r;
+    }
+
+    static void path(Graphics2D g, Element e) {
+        Path2D p = PathParser.parse(e.getAttributeNS(A, "pathData"));
+        if ("evenOdd".equals(e.getAttributeNS(A, "fillType"))) p.setWindingRule(Path2D.WIND_EVEN_ODD);
+        Paint fill = paint(e, "fillColor", p);
+        if (fill != null) {
+            Graphics2D c = (Graphics2D) g.create();
+            c.setComposite(AlphaComposite.SrcOver.derive((float) num(e.getAttributeNS(A, "fillAlpha"), 1)));
+            c.setPaint(fill);
+            c.fill(p);
+            c.dispose();
+        }
+        Paint stroke = paint(e, "strokeColor", p);
+        double w = num(e.getAttributeNS(A, "strokeWidth"), 0);
+        if (stroke != null && w > 0) {
+            Graphics2D c = (Graphics2D) g.create();
+            c.setComposite(AlphaComposite.SrcOver.derive((float) num(e.getAttributeNS(A, "strokeAlpha"), 1)));
+            int cap = switch (e.getAttributeNS(A, "strokeLineCap")) { case "round" -> BasicStroke.CAP_ROUND; case "square" -> BasicStroke.CAP_SQUARE; default -> BasicStroke.CAP_BUTT; };
+            int join = switch (e.getAttributeNS(A, "strokeLineJoin")) { case "round" -> BasicStroke.JOIN_ROUND; case "bevel" -> BasicStroke.JOIN_BEVEL; default -> BasicStroke.JOIN_MITER; };
+            c.setStroke(new BasicStroke((float) w, cap, join, (float) Math.max(1, num(e.getAttributeNS(A, "strokeMiterLimit"), 4))));
+            c.setPaint(stroke);
+            c.draw(p);
+            c.dispose();
+        }
+    }
+
+    // A solid color attribute, or an <aapt:attr name="android:fillColor"><gradient/></aapt:attr> child.
+    static Paint paint(Element e, String attr, Shape shape) {
+        String v = e.getAttributeNS(A, attr);
+        if (!v.isEmpty()) return color(v);
+        for (Node n = e.getFirstChild(); n != null; n = n.getNextSibling()) {
+            if (n instanceof Element a && a.getLocalName().equals("attr") && a.getAttribute("name").equals("android:" + attr)) {
+                for (Node m = a.getFirstChild(); m != null; m = m.getNextSibling()) {
+                    if (m instanceof Element gr && gr.getLocalName().equals("gradient")) return gradient(gr, shape.getBounds2D());
+                }
+            }
+        }
+        return null;
+    }
+
+    static Paint gradient(Element gr, Rectangle2D b) {
+        List<Float> stops = new ArrayList<>();
+        List<Color> cs = new ArrayList<>();
+        for (Node n = gr.getFirstChild(); n != null; n = n.getNextSibling()) {
+            if (n instanceof Element it && it.getLocalName().equals("item")) {
+                Color c = color(it.getAttributeNS(A, "color"));
+                if (c == null) continue;
+                stops.add((float) num(it.getAttributeNS(A, "offset"), stops.isEmpty() ? 0 : 1));
+                cs.add(c);
+            }
+        }
+        if (cs.isEmpty()) {
+            for (String k : new String[]{"startColor", "centerColor", "endColor"}) {
+                Color c = color(gr.getAttributeNS(A, k));
+                if (c != null) cs.add(c);
+            }
+            for (int i = 0; i < cs.size(); i++) stops.add(cs.size() == 1 ? 0f : (float) i / (cs.size() - 1));
+        }
+        if (cs.isEmpty()) return null;
+        if (cs.size() == 1) return cs.get(0);
+        float[] f = new float[stops.size()];
+        for (int i = 0; i < f.length; i++) f[i] = Math.min(1, Math.max(i == 0 ? 0 : f[i - 1] + 1e-4f, stops.get(i)));
+        Color[] c = cs.toArray(new Color[0]);
+        if ("radial".equals(gr.getAttributeNS(A, "type"))) {
+            float cx = (float) num(gr.getAttributeNS(A, "centerX"), b.getCenterX()), cy = (float) num(gr.getAttributeNS(A, "centerY"), b.getCenterY());
+            float r = (float) Math.max(0.01, num(gr.getAttributeNS(A, "gradientRadius"), b.getWidth() / 2));
+            return new RadialGradientPaint(cx, cy, r, f, c);
+        }
+        Point2D s = new Point2D.Double(num(gr.getAttributeNS(A, "startX"), b.getMinX()), num(gr.getAttributeNS(A, "startY"), b.getMinY()));
+        Point2D t = new Point2D.Double(num(gr.getAttributeNS(A, "endX"), b.getMaxX()), num(gr.getAttributeNS(A, "endY"), b.getMaxY()));
+        if (s.equals(t)) return c[0];
+        return new LinearGradientPaint(s, t, f, c);
+    }
+
+    static Color color(String v) {
+        if (v == null || v.isEmpty()) return null;
+        for (int i = 0; i < 5 && v.startsWith("@color/"); i++) v = colors.getOrDefault(v.substring(7), "");
+        switch (v) {
+            case "@android:color/white": return Color.WHITE;
+            case "@android:color/black": return Color.BLACK;
+            case "@android:color/transparent": return new Color(0, 0, 0, 0);
+        }
+        if (!v.startsWith("#")) return null;
+        String h = v.substring(1);
+        if (h.length() == 3 || h.length() == 4) {
+            StringBuilder b = new StringBuilder();
+            for (char ch : h.toCharArray()) b.append(ch).append(ch);
+            h = b.toString();
+        }
+        try {
+            long x = Long.parseLong(h, 16);
+            if (h.length() == 6) return new Color((int) x);
+            if (h.length() == 8) return new Color((int) (x >> 16) & 255, (int) (x >> 8) & 255, (int) x & 255, (int) (x >> 24) & 255);
+        } catch (NumberFormatException ignored) { }
+        return null;
+    }
+
+    static double num(String s, double d) {
+        if (s == null || s.isEmpty()) return d;
+        try { return Double.parseDouble(s.replaceAll("(dp|px|sp)$", "")); } catch (NumberFormatException e) { return d; }
+    }
+
+    static Graphics2D gfx(BufferedImage img) {
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        return g;
+    }
+
+    // ---- feature graphic: the icon on its own color, the name beside it ----
+
+    static BufferedImage feature(String title) throws Exception {
+        BufferedImage img = new BufferedImage(1024, 500, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = gfx(img);
+        BufferedImage ic = icon(300, false);
+        // The background is the icon's own edge color, so the icon blends in.
+        Color bg = new Color(ic.getRGB(2, 150));
+        g.setPaint(new GradientPaint(0, 0, bg, 1024, 500, shade(bg, luma(bg) > 0.5 ? -0.12 : 0.18)));
+        g.fillRect(0, 0, 1024, 500);
+        Shape r = new RoundRectangle2D.Double(90, 100, 300, 300, 80, 80);
+        g.setColor(new Color(0, 0, 0, 40));
+        g.fill(AffineTransform.getTranslateInstance(0, 8).createTransformedShape(r));
+        Graphics2D c = (Graphics2D) g.create();
+        c.clip(r);
+        c.drawImage(ic, 90, 100, null);
+        c.dispose();
+        g.setColor(luma(bg) > 0.55 ? new Color(0x1C1B1F) : Color.WHITE);
+        // The largest size at which the name fits in two lines beside the icon.
+        int size = 96;
+        List<String> lines;
+        while (true) {
+            g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, size));
+            lines = wrap(g.getFontMetrics(), title, 540);
+            if ((lines.size() <= 2 && lines.stream().allMatch(l -> g.getFontMetrics().stringWidth(l) <= 540)) || size <= 36) break;
+            size -= 4;
+        }
+        FontMetrics fm = g.getFontMetrics();
+        int lh = fm.getHeight(), y = 250 - lines.size() * lh / 2 + fm.getAscent();
+        for (String l : lines) { g.drawString(l, 450, y); y += lh; }
+        g.dispose();
+        return img;
+    }
+
+    static List<String> wrap(FontMetrics fm, String text, int width) {
+        List<String> out = new ArrayList<>();
+        String line = "";
+        for (String w : text.trim().split("\\s+")) {
+            String t = line.isEmpty() ? w : line + " " + w;
+            if (fm.stringWidth(t) > width && !line.isEmpty()) { out.add(line); line = w; } else line = t;
+        }
+        if (!line.isEmpty()) out.add(line);
+        return out;
+    }
+
+    static double luma(Color c) { return (0.299 * c.getRed() + 0.587 * c.getGreen() + 0.114 * c.getBlue()) / 255; }
+
+    static Color shade(Color c, double f) {
+        int[] v = {c.getRed(), c.getGreen(), c.getBlue()};
+        for (int i = 0; i < 3; i++) v[i] = (int) Math.max(0, Math.min(255, f < 0 ? v[i] * (1 + f) : v[i] + (255 - v[i]) * f));
+        return new Color(v[0], v[1], v[2]);
+    }
+
+    // ---- screenshots: Play rejects a side longer than twice the other, so trim the bars ----
+
+    static BufferedImage shot(BufferedImage in) {
+        int w = in.getWidth(), h = in.getHeight();
+        int nh = Math.min(h, 2 * w), nw = Math.min(w, 2 * h);
+        BufferedImage out = new BufferedImage(nw, nh, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = out.createGraphics();
+        // Keep the top (the app's title bar) and cut from the bottom (the navigation bar) first.
+        int cut = h - nh, top = Math.min(cut / 3, cut);
+        g.drawImage(in, 0, 0, nw, nh, (w - nw) / 2, top, (w - nw) / 2 + nw, top + nh, null);
+        g.dispose();
+        return out;
+    }
+
+    // ---- SVG path data, as Android's pathData uses it ----
+
+    static class PathParser {
+        final String s;
+        int i;
+
+        PathParser(String s) { this.s = s; }
+
+        static Path2D parse(String d) {
+            Path2D.Double p = new Path2D.Double();
+            if (d == null || d.isEmpty()) return p;
+            new PathParser(d).run(p);
+            return p;
+        }
+
+        void skip() { while (i < s.length() && (Character.isWhitespace(s.charAt(i)) || s.charAt(i) == ',')) i++; }
+
+        boolean more() {
+            skip();
+            if (i >= s.length()) return false;
+            char c = s.charAt(i);
+            return c == '-' || c == '+' || c == '.' || Character.isDigit(c);
+        }
+
+        double n() {
+            skip();
+            int st = i;
+            if (i < s.length() && (s.charAt(i) == '-' || s.charAt(i) == '+')) i++;
+            boolean dot = false, exp = false;
+            while (i < s.length()) {
+                char c = s.charAt(i);
+                if (Character.isDigit(c)) i++;
+                else if (c == '.' && !dot && !exp) { dot = true; i++; }
+                else if ((c == 'e' || c == 'E') && !exp) { exp = true; i++; if (i < s.length() && (s.charAt(i) == '-' || s.charAt(i) == '+')) i++; }
+                else break;
+            }
+            return Double.parseDouble(s.substring(st, i));
+        }
+
+        // Arc flags may be written without separators ("a4,4 0 011,1").
+        boolean flag() { skip(); return s.charAt(i++) == '1'; }
+
+        void run(Path2D.Double p) {
+            double x = 0, y = 0, sx = 0, sy = 0, cx = 0, cy = 0;
+            char cmd = 0, prev = 0;
+            while (true) {
+                skip();
+                if (i >= s.length()) break;
+                char c = s.charAt(i);
+                if (Character.isLetter(c) && c != 'e' && c != 'E') { cmd = c; i++; }
+                else if (cmd == 0) { i++; continue; }
+                boolean rel = Character.isLowerCase(cmd);
+                double ox = rel ? x : 0, oy = rel ? y : 0;
+                switch (Character.toUpperCase(cmd)) {
+                    case 'M' -> {
+                        x = ox + n(); y = oy + n(); p.moveTo(x, y); sx = x; sy = y;
+                        // Further pairs after a moveto are linetos.
+                        cmd = rel ? 'l' : 'L';
+                    }
+                    case 'L' -> { x = ox + n(); y = oy + n(); p.lineTo(x, y); }
+                    case 'H' -> { x = ox + n(); p.lineTo(x, y); }
+                    case 'V' -> { y = (rel ? y : 0) + n(); p.lineTo(x, y); }
+                    case 'C' -> {
+                        double x1 = ox + n(), y1 = oy + n(), x2 = ox + n(), y2 = oy + n();
+                        x = ox + n(); y = oy + n(); p.curveTo(x1, y1, x2, y2, x, y); cx = x2; cy = y2;
+                    }
+                    case 'S' -> {
+                        boolean cu = "CcSs".indexOf(prev) >= 0;
+                        double x1 = cu ? 2 * x - cx : x, y1 = cu ? 2 * y - cy : y, x2 = ox + n(), y2 = oy + n();
+                        x = ox + n(); y = oy + n(); p.curveTo(x1, y1, x2, y2, x, y); cx = x2; cy = y2;
+                    }
+                    case 'Q' -> {
+                        double x1 = ox + n(), y1 = oy + n();
+                        x = ox + n(); y = oy + n(); p.quadTo(x1, y1, x, y); cx = x1; cy = y1;
+                    }
+                    case 'T' -> {
+                        boolean q = "QqTt".indexOf(prev) >= 0;
+                        double x1 = q ? 2 * x - cx : x, y1 = q ? 2 * y - cy : y;
+                        x = ox + n(); y = oy + n(); p.quadTo(x1, y1, x, y); cx = x1; cy = y1;
+                    }
+                    case 'A' -> {
+                        double rx = n(), ry = n(), rot = n();
+                        boolean large = flag(), sweep = flag();
+                        double ex = ox + n(), ey = oy + n();
+                        arc(p, x, y, rx, ry, rot, large, sweep, ex, ey);
+                        x = ex; y = ey;
+                    }
+                    case 'Z' -> { p.closePath(); x = sx; y = sy; }
+                    default -> { i++; }
+                }
+                prev = cmd;
+                if (Character.toUpperCase(cmd) == 'Z') { cmd = 0; prev = 'Z'; }
+                // Implicit repeats: keep the command while numbers follow.
+                if (cmd != 0 && !more()) { /* next letter picks the command */ }
+            }
+        }
+
+        // Endpoint arc (SVG F.6.5) as a center arc.
+        static void arc(Path2D.Double p, double x1, double y1, double rx, double ry, double deg, boolean large, boolean sweep, double x2, double y2) {
+            if (rx == 0 || ry == 0) { p.lineTo(x2, y2); return; }
+            if (x1 == x2 && y1 == y2) return;
+            rx = Math.abs(rx); ry = Math.abs(ry);
+            double phi = Math.toRadians(deg % 360), cos = Math.cos(phi), sin = Math.sin(phi);
+            double dx = (x1 - x2) / 2, dy = (y1 - y2) / 2;
+            double xp = cos * dx + sin * dy, yp = -sin * dx + cos * dy;
+            double lam = xp * xp / (rx * rx) + yp * yp / (ry * ry);
+            if (lam > 1) { rx *= Math.sqrt(lam); ry *= Math.sqrt(lam); }
+            double num = rx * rx * ry * ry - rx * rx * yp * yp - ry * ry * xp * xp;
+            double den = rx * rx * yp * yp + ry * ry * xp * xp;
+            double k = Math.sqrt(Math.max(0, num / den)) * (large == sweep ? -1 : 1);
+            double cxp = k * rx * yp / ry, cyp = -k * ry * xp / rx;
+            double cx = cos * cxp - sin * cyp + (x1 + x2) / 2, cy = sin * cxp + cos * cyp + (y1 + y2) / 2;
+            double t1 = ang(1, 0, (xp - cxp) / rx, (yp - cyp) / ry);
+            double dt = ang((xp - cxp) / rx, (yp - cyp) / ry, (-xp - cxp) / rx, (-yp - cyp) / ry);
+            if (!sweep && dt > 0) dt -= 2 * Math.PI;
+            if (sweep && dt < 0) dt += 2 * Math.PI;
+            // Arc2D angles run counter-clockwise in a y-up space: negate them for y-down.
+            Arc2D.Double a = new Arc2D.Double(-rx, -ry, 2 * rx, 2 * ry, -Math.toDegrees(t1), -Math.toDegrees(dt), Arc2D.OPEN);
+            AffineTransform t = AffineTransform.getTranslateInstance(cx, cy);
+            t.rotate(phi);
+            p.append(t.createTransformedShape(a).getPathIterator(null), true);
+        }
+
+        static double ang(double ux, double uy, double vx, double vy) {
+            return Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+        }
+    }
+}
+APKMAKER_FILE_EOF
+mv "$D/bin/PlayArt.java.new" "$D/bin/PlayArt.java"
 mkdir -p "$D/."
 cat > "$D/AGENTS.md.new" <<'APKMAKER_FILE_EOF'
 # Android app project (built by apk-maker)
@@ -671,12 +2189,18 @@ The finished APK is installed on this same phone.
 ## Build
 
 - Build with `./gradlew --console=plain -q assembleRelease`. The task is done only when it succeeds.
-- The toolchain is fixed: JDK 17, Gradle 8.11.1, AGP 8.7.3, Kotlin 2.0.21, compileSdk/targetSdk 35,
+- The toolchain is fixed: JDK 17, Gradle 8.11.1, AGP 8.7.3, Kotlin 2.0.21, compileSdk/targetSdk 36 (Android 16, which Google Play requires),
   build-tools 35.0.0 (the SDK path is in local.properties). Do not change these versions, the Gradle wrapper,
   `gradle.properties` (here or in ~/.gradle), or `android.aapt2FromMavenOverride` (aapt2 is a custom aarch64 build).
 - RAM is limited (~2 GB free). Don't start extra Gradle daemons, emulators or parallel builds.
 - Don't run `adb`, install the APK or try to open the app: apk-maker does that after you finish.
-- The release build is signed with the debug key on purpose. Keep `isMinifyEnabled = false`.
+- The release build is signed with the debug key on purpose; apk-maker signs Play bundles itself and sets
+  `versionCode`/`versionName`. Keep `isMinifyEnabled = false`.
+- Android 16 draws apps edge to edge and ignores orientation locks on large screens: handle insets, and
+  make layouts work in landscape too.
+- Files in `play/` (store listing, privacy policy, graphics) are for Google Play: leave them unless asked.
+- Don't run git (no commits, branches or pushes): apk-maker commits your work and keeps each change on its own
+  branch for the user to accept or discard.
 
 ## Code
 
@@ -691,6 +2215,9 @@ The finished APK is installed on this same phone.
 - Replace the placeholder launcher icon foreground (`res/drawable/ic_fg.xml`, a 108dp vector, keep
   content inside the central 66dp) and background color (`res/values/colors.xml`) with ones that fit the app.
 - Keep the code in a few clear files; no tests needed.
+- The project may be published on GitHub, even publicly: never put API keys, passwords, tokens or personal
+  details (names, emails, phone numbers, addresses, paths on this phone) in the code or its files. If the app
+  needs a key, let the user enter it in the app's settings and keep it in its local storage.
 APKMAKER_FILE_EOF
 mv "$D/AGENTS.md.new" "$D/AGENTS.md"
 mkdir -p "$D/template"
@@ -699,6 +2226,18 @@ cat > "$D/template/.gitignore.new" <<'APKMAKER_FILE_EOF'
 build/
 app/build/
 local.properties
+gradle.properties
+.apkmaker.json
+play/shots/
+*.apk
+*.aab
+*.p12
+*.jks
+*.keystore
+*.pem
+*.pass
+service-account*.json
+.env
 APKMAKER_FILE_EOF
 mv "$D/template/.gitignore.new" "$D/template/.gitignore"
 mkdir -p "$D/template/app"
@@ -711,13 +2250,13 @@ plugins {
 
 android {
     namespace = "__PKG__"
-    compileSdk = 35
+    compileSdk = 36
     buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "__PKG__"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
     }
@@ -725,7 +2264,8 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so it installs without a keystore.
+            // Signed with the debug key so it installs without a keystore. Play bundles are signed
+            // with the app's upload key by `apk-maker play prepare`, which also sets the version.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -860,6 +2400,7 @@ networkTimeout=10000
 validateDistributionUrl=true
 zipStoreBase=GRADLE_USER_HOME
 zipStorePath=wrapper/dists
+distributionSha256Sum=f397b287023acdba1e9f6fc5ea72d22dd63669d59ed4a289a29b1a76eee151c6
 APKMAKER_FILE_EOF
 mv "$D/template/gradle/wrapper/gradle-wrapper.properties.new" "$D/template/gradle/wrapper/gradle-wrapper.properties"
 mkdir -p "$D/template"
@@ -878,10 +2419,10 @@ mv "$D/template/settings.gradle.kts.new" "$D/template/settings.gradle.kts"
 chmod +x "$D/bin/apk-maker"
 mkdir -p "$HOME/.local/bin" "$HOME/.cache/apk-maker"
 ln -sf "$D/bin/apk-maker" "$HOME/.local/bin/apk-maker"
-echo 5 > "$D/VERSION"
+echo 10 > "$D/VERSION"
 # The SDK and Gradle downloads take minutes: they run on their own and report to setup.json.
 setsid -f "$D/bin/apk-maker" setup >/dev/null 2>&1 < /dev/null
-echo apk-maker 5 installed""")
+echo apk-maker 10 installed""")
   }
   // installer:end
 
@@ -892,11 +2433,16 @@ echo apk-maker 5 installed""")
     url(openUrl)
     openUrl = ""
   }
+  // The play tab reads the privacy policy from disk to hand it to the share sheet.
+  when policy != "" {
+    share(policy)
+    policy = ""
+  }
   // A new phase drops a pending "stop" confirmation.
   on phase { confirmAt = 0 }
   // Tell the user when a build finishes while they are looking at something else.
   when (phase == "done" || phase == "ready" || phase == "failed") && doneKey != "${job.slug}:${job.started}:${phase}" {
-    notify("APK Maker", phase == "done" ? "${jname} is installed" : phase == "ready" ? "${jname} is built: tap install" : "${jname} failed: ${job.msg ?? "see the log"}")
+    notify("APK Maker", phase == "failed" ? "${jname} failed: ${job.msg ?? "see the log"}" : kind != "app" ? "${jname}: ${job.msg ?? "done"}" : cur.pending != null && cur.pending.built == true ? "${jname}: change ready to try, then accept or discard it" : phase == "done" ? "${jname} is installed" : "${jname} is built: tap install")
     doneKey = "${job.slug}:${job.started}:${phase}"
   }
 
@@ -940,18 +2486,18 @@ echo apk-maker 5 installed""")
       align: center
       width: 96
       justify: end
-      let c = s == "installed" ? green : s == "failed" || s == "cancelled" ? red : s == "ready" ? yellow : s == "built" ? cyan : s == "building" ? accent : s == "stalled" ? orange : muted
+      let c = s == "installed" ? green : s == "failed" || s == "cancelled" ? red : s == "ready" ? yellow : s == "built" || s == "review" ? cyan : s == "building" ? accent : s == "stalled" ? orange : muted
       Dot { c: c }
       Text { text: s == "cancelled" ? "stopped" : s; style: small; color: c; maxLines: 1 }
     }
   }
 
-  // write · build · install, each in its own colour once reached (install green); a step
-  // that stalled, failed or was stopped shows the phase's colour instead.
+  // write · build · install (or a Play job's steps), each in its own colour once reached (the
+  // last green); a step that stalled, failed or was stopped shows the phase's colour instead.
   component Steps(labels = true) {
     Row {
       gap: 4
-      for s, i in ["write", "build", "install"] {
+      for s, i in stepNames {
         Column {
           weight: 1
           gap: 2
@@ -996,6 +2542,9 @@ echo apk-maker 5 installed""")
       }
       Button { text: "terminal"; onTap: terminal((a.agent ?? agent) == "codex" ? "cd ~/apps/${sh(a.slug)} && codex; exec bash" : (a.agent ?? agent) == "opencode" ? "cd ~/apps/${sh(a.slug)} && opencode; exec bash" : "cd ~/apps/${sh(a.slug)} && claude; exec bash", a.slug) }
       Button { text: "copy id"; onTap: copy(a.pkg) }
+      if a.apk != null {
+        Button { text: "google play"; color: cyan; onTap: { playSel = a.slug; tab = "play"; screen() } }
+      }
       if connected && a.status == "installed" {
         Button { text: "uninstall"; color: red; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker uninstall ${sh(a.slug)} 2>&1") } }
       }
@@ -1010,6 +2559,89 @@ echo apk-maker 5 installed""")
     }
   }
 
+  // A change waits on its own branch until it's kept or dropped (on GitHub it's a pull request too).
+  component Review(a) {
+    let pd = a.pending
+    let working = busy && job.slug == a.slug
+    Column {
+      gap: 6
+      padding: 8
+      radius: 8 * corners
+      background: alpha(cyan, 0.10)
+      border: 1
+      borderColor: cyan
+      Row {
+        gap: 6
+        align: center
+        Dot { c: cyan }
+        Text { text: "change waiting for you"; bold: true; style: small; weight: 1; maxLines: 1 }
+        if pd.pr != null {
+          Text { text: "PR #${pd.pr}"; style: small; color: cyan; maxLines: 1 }
+        }
+      }
+      Text { text: pd.request; style: small; italic: true; maxLines: 3 }
+      if pd.prUrl != null {
+        Text { text: "Accepting here keeps the commits signed apk-maker. Merging on GitHub's site signs them with your GitHub email, unless GitHub's Keep my email addresses private is on."; style: small; color: muted }
+      }
+      Text { text: working ? "the agent is still on it" : pd.built ? "Try it on the phone, then keep it or drop it. Dropping it puts the previous version back." : "It didn't build: retry it, or discard it."; style: small; color: muted }
+      if !working {
+        Flow {
+          gap: 6
+          if pd.built {
+            Button { text: "accept"; color: green; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker accept ${sh(a.slug)} 2>&1") } }
+          }
+          if pd.prUrl != null {
+            Button { text: "see changes"; onTap: url(pd.prUrl) }
+          } else {
+            Button { text: "see changes"; onTap: terminal("cd ~/apps/${sh(a.slug)} && git -c color.ui=always diff --stat ${sh(pd.base)} && git -c color.ui=always diff ${sh(pd.base)} | less -R; exec bash", "changes") }
+          }
+          if now - discardAt < 5 {
+            Button { text: "really discard?"; color: red; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker discard ${sh(a.slug)} 2>&1"); discardAt = 0 } }
+          } else {
+            Button { text: "discard"; color: red; onTap: { haptic(); discardAt = now } }
+          }
+        }
+      }
+    }
+  }
+
+  // The app's GitHub repo: private unless made public, which takes a second tap.
+  component GitHubRow(a) {
+    let g = a.github
+    Column {
+      gap: 4
+      Row {
+        gap: 6
+        align: center
+        Dot { c: g == null ? muted : g.blocked != null ? red : g.visibility == "public" ? yellow : green }
+        Text { text: g == null ? "not on GitHub" : "${g.repo} · ${g.visibility}"; style: small; font: mono; weight: 1; maxLines: 1 }
+      }
+      if g.blocked != null {
+        Text { text: "Not pushed, to keep it safe: ${g.blocked}. Remove it from the code (ask the agent), then it goes up with the next change."; style: small; color: red; maxLines: 4 }
+      }
+      if g != null && g.visibility != "public" && now - publicAt < 5 {
+        Text { text: "Public means anyone can see the code, its history and the pull requests (your change requests). APK Maker checks for keys and personal details first."; style: small; color: yellow }
+      }
+      Flow {
+        gap: 6
+        if g == null {
+          Button { text: "put on GitHub (private)"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github publish ${sh(a.slug)} private 2>&1") } }
+        } else {
+          Button { text: "open on GitHub"; onTap: url(g.url) }
+          if g.visibility == "public" {
+            Button { text: "make private"; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github visibility ${sh(a.slug)} private 2>&1") } }
+          } else {
+            if now - publicAt < 5 {
+              Button { text: "really make public?"; color: yellow; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github visibility ${sh(a.slug)} public 2>&1"); publicAt = 0 } }
+            } else {
+              Button { text: "make public"; onTap: { haptic(); publicAt = now } }
+            }
+          }
+        }
+      }
+    }
+  }
+
   component AppRow(a) {
     Row {
       align: center
@@ -1017,9 +2649,9 @@ echo apk-maker 5 installed""")
       onTap: { sel = a.slug; tab = "apps"; screen() }
       Image { src: "app:${a.pkg}"; size: 18; visible: a.status == "installed" }
       Text { text: a.label ?? a.slug; style: small; maxLines: 1; weight: 1 }
-      let s = a.status == "building" && !(busy && a.slug == job.slug) ? "stalled" : a.status
+      let s = a.status == "building" && !(busy && a.slug == job.slug) ? "stalled" : a.pending != null && a.pending.built == true && a.status != "building" ? "review" : a.status
       if narrow {
-        Dot { c: s == "installed" ? green : s == "failed" || s == "cancelled" ? red : s == "ready" ? yellow : s == "built" ? cyan : s == "building" ? accent : s == "stalled" ? orange : muted }
+        Dot { c: s == "installed" ? green : s == "failed" || s == "cancelled" ? red : s == "ready" ? yellow : s == "built" || s == "review" ? cyan : s == "building" ? accent : s == "stalled" ? orange : muted }
       } else {
         Pill { s: s }
       }
@@ -1066,6 +2698,17 @@ echo apk-maker 5 installed""")
     }
   }
 
+  // A numbered step on the play tab, green once done.
+  component PStep(n, title, done) {
+    Row {
+      gap: 6
+      align: center
+      padding: [0, 4, 0, 0]
+      Dot { c: done ? green : muted }
+      Text { text: "${n} · ${title}"; style: label; color: done ? green : foreground; weight: 1; maxLines: 1 }
+    }
+  }
+
   component Notice(msg, c, action = "", go = "") {
     Row {
       gap: 8
@@ -1106,7 +2749,8 @@ echo apk-maker 5 installed""")
       border: 1
       borderColor: outErr ? red : accent
       // A download URL has already opened in the browser: say what to do there instead.
-      Text { text: startsWith(trim(out ?? ""), "http") ? "downloading in the browser: open the APK there to install it" : trim(out ?? ""); style: small; color: outErr ? red : accent; weight: 1; maxLines: 3 }
+      let o = trim(out ?? "")
+      Text { text: !startsWith(o, "http") ? o : contains(o, ":8766/") ? "the browser opened: pick the service account's JSON key there" : endsWith(o, ".aab") ? "downloading the .aab: upload it in Play Console (step 3)" : endsWith(o, "-upload-key.txt") ? "downloading the key backup: keep it somewhere safe and private" : contains(o, "github.com/") ? "the browser opened: submit the issue there to list your app" : "downloading in the browser: open the APK there to install it"; style: small; color: outErr ? red : accent; weight: 1; maxLines: 4 }
       Text { text: "✕"; width: 24; align: center; color: muted; padding: [6, 2]; onTap: out = "" }
     }
   }
@@ -1117,7 +2761,7 @@ echo apk-maker 5 installed""")
       gap: 6
       if busy {
         if stalled {
-          Button { text: "retry"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker retry ${sh(job.slug)} 2>&1") } }
+          Button { text: "retry"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker again 2>&1") } }
         }
         if showLog {
           Button { text: "log"; onTap: { tab = "job"; screen() } }
@@ -1130,11 +2774,14 @@ echo apk-maker 5 installed""")
         if cur.status == "installed" || cur.downloaded != null {
           Button { text: "open"; color: green; onTap: androidApp(cur.pkg) }
         }
+        if cur.pending != null && cur.pending.built == true {
+          Button { text: "review"; color: cyan; onTap: { sel = cur.slug; tab = "apps"; screen() } }
+        }
         if cur.status == "ready" || cur.status == "built" {
           Button { text: "install"; color: yellow; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker install ${sh(cur.slug)} 2>&1") } }
         }
         if phase == "failed" || phase == "cancelled" {
-          Button { text: "retry"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker retry ${sh(job.slug)} 2>&1") } }
+          Button { text: "retry"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker again 2>&1") } }
           if showLog {
             Button { text: "log"; onTap: { tab = "job"; screen() } }
           }
@@ -1261,7 +2908,7 @@ echo apk-maker 5 installed""")
       Row {
         gap: 6
         align: center
-        for t in ["job", "apps", "new", "setup"] {
+        for t in ["job", "apps", "new", "setup", "play"] {
           Text {
             text: t
             weight: 1
@@ -1335,6 +2982,9 @@ echo apk-maker 5 installed""")
               Text { text: errTail; font: mono; fontSize: 10; color: red; maxLines: 3 }
             }
           }
+          if !busy && cur.pending != null {
+            Review { a: cur }
+          }
           Column {
             gap: 1
             weight: 1
@@ -1399,7 +3049,7 @@ echo apk-maker 5 installed""")
                   gap: 8
                   Image { src: "app:${a.pkg}"; size: 24; visible: a.status == "installed" }
                   Text { text: a.label ?? a.slug; bold: true; maxLines: 1; weight: 1 }
-                  Pill { s: a.status == "building" && !(busy && a.slug == job.slug) ? "stalled" : a.status }
+                  Pill { s: a.status == "building" && !(busy && a.slug == job.slug) ? "stalled" : a.pending != null && a.pending.built == true && a.status != "building" ? "review" : a.status }
                 }
                 Text { text: "${a.agent ?? "?"} · ${len(a.history ?? [])} runs · ${fmtTime(a.updated, "MMM d HH:mm")}"; style: small; color: muted; maxLines: 1 }
                 if picked.slug == a.slug {
@@ -1407,16 +3057,22 @@ echo apk-maker 5 installed""")
                   if hist.prompt != null {
                     Idea { p: first(a.history ?? []).prompt ?? hist.prompt }
                   }
+                  if a.pending != null {
+                    Review { a: a }
+                  }
                   Actions { a: a }
+                  if gon {
+                    GitHubRow { a: a }
+                  }
                   Input {
                     text: change
-                    placeholder: busy ? "wait for ${jname}…" : "ask ${agent} to change it…"
+                    placeholder: busy ? "wait for ${jname}…" : a.pending != null ? "accept or discard the change first" : "ask ${agent} to change it…"
                     onChange: change = value
                     onSubmit: {
                       out = ""
-                      out = run(canStart && trim(change) != "" ? "~/.local/bin/apk-maker change ${sh(a.slug)} ${sh(agent)} ${sh(trim(change))} 2>&1" : trim(change) == "" ? "true" : "echo ${sh(blockMsg)}")
-                      tab = canStart && trim(change) != "" ? "job" : tab
-                      change = canStart && trim(change) != "" ? "" : change
+                      out = run(canStart && a.pending == null && trim(change) != "" ? "~/.local/bin/apk-maker change ${sh(a.slug)} ${sh(agent)} ${sh(trim(change))} 2>&1" : trim(change) == "" ? "true" : "echo ${sh(blockMsg)}")
+                      tab = canStart && a.pending == null && trim(change) != "" ? "job" : tab
+                      change = canStart && a.pending == null && trim(change) != "" ? "" : change
                     }
                   }
                 }
@@ -1527,6 +3183,314 @@ echo apk-maker 5 installed""")
               Button { text: "connect"; color: trim(connPort) != "" ? accent : muted; onTap: { out = ""; out = run("[ -n ${sh(trim(connPort))} ] && ~/.local/bin/apk-maker connect ${sh(trim(connPort))} 2>&1 && echo connected") } }
             }
             Text { text: "After a reboot only step d is needed, and APK Maker tries it on its own."; style: small; color: muted }
+          }
+
+          Text { text: "3 · GitHub (optional)"; style: label; color: muted }
+          Row {
+            gap: 6
+            align: center
+            Dot { c: gon ? green : gconn ? yellow : muted }
+            Text { text: gon ? "connected as ${gh.login}" : gconn ? "the GitHub CLI is logged in as ${gh.login}: not used until you turn it on" : gh.state == "missing" ? "the GitHub CLI isn't installed: install the github-cli package, then check" : "not connected"; style: small; weight: 1; maxLines: 2 }
+          }
+          Text { text: "Every change waits for you to accept or discard it, with or without GitHub. With GitHub, each app's code is also backed up online in its own place on your GitHub account (private unless you make it public), and you can read every change there before you accept it."; style: small; color: muted }
+          Text { text: "Before every push APK Maker checks the code and its history for keys, passwords, your emails and this phone's paths, and refuses if it finds any. This phone's settings, the app's history, Play details, upload keys and screenshots never go to GitHub, and commits are signed apk-maker, not with your name."; style: small; color: muted }
+          if gconn && !gon {
+            Text { text: "Tap \"use GitHub for my apps\" to let APK Maker save your apps' code to this GitHub account. Until then it doesn't touch the account."; style: small }
+          }
+          if gon {
+            Text { text: "\"Stop using GitHub\": APK Maker stops sending anything to GitHub. Your apps and what's already on GitHub stay as they are."; style: small }
+            Text { text: gh.auto != false ? "\"Save new apps to GitHub\" is on: each new app is saved privately to your GitHub account right after its first build. Tap it to keep new apps only on this phone; you can still put one on GitHub later from its page." : "\"Save new apps to GitHub\" is off: new apps stay only on this phone until you tap \"put on GitHub\" on an app's page. Tap it to save every new app to GitHub on its own."; style: small }
+          }
+          Flow {
+            gap: 6
+            if !gconn {
+              if gh.state != "missing" {
+                Button { text: "connect GitHub"; color: accent; onTap: terminal("gh auth login -h github.com -p https -w && ~/.local/bin/apk-maker github status >/dev/null && ~/.local/bin/apk-maker github on >/dev/null && echo 'Connected: go back to the widget.'; exec bash", "GitHub") }
+              }
+            } else {
+              Button { text: gon ? "stop using GitHub" : "use GitHub for my apps"; color: gon ? foreground : accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github ${sh(gon ? "off" : "on")} 2>&1") } }
+              if gon {
+                Button { text: gh.auto != false ? "save new apps to GitHub ✓" : "save new apps to GitHub"; color: gh.auto != false ? green : foreground; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github auto ${sh(gh.auto != false ? "off" : "on")} 2>&1") } }
+              }
+            }
+            Button { text: "check"; onTap: { out = ""; out = run("~/.local/bin/apk-maker github status >/dev/null 2>&1; true") } }
+          }
+        }
+      }
+
+      // Google Play: connect the account once, then per app prepare → first upload by hand →
+      // app content by hand → uploads over the API, and the closed test new personal accounts need.
+      if tab == "play" {
+        Column {
+          gap: 8
+          weight: 1
+          scroll: true
+
+          Text { text: "1 · Google Play account"; style: label; color: muted }
+          Row {
+            gap: 6
+            align: center
+            Dot { c: pconn ? green : pstate == "error" ? red : pstate == "waiting" || pstate == "checking" ? accent : muted }
+            Text { text: pconn ? "connected · ${play.email}" : pstate == "error" ? "not connected: ${play.msg ?? ""}" : pstate == "waiting" ? "waiting for the key file in the browser…" : pstate == "checking" ? "checking the key with Google…" : "not connected"; style: small; weight: 1; maxLines: 3; color: pstate == "error" ? red : foreground }
+          }
+          Row {
+            gap: 6
+            for o in ["personal", "organization"] {
+              let on = (o == "personal") == personal
+              Text {
+                text: o == "personal" ? "personal account" : "organization account"
+                style: small
+                align: center
+                maxLines: 1
+                weight: 1
+                padding: [6, 4]
+                radius: 8 * corners
+                border: 1
+                borderColor: on ? accent : border
+                color: on ? background : foreground
+                background: on ? accent : alpha(surface, 0.0)
+                onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker play set personal ${sh(o == "personal" ? "yes" : "no")} 2>&1") }
+              }
+            }
+          }
+          Text { text: personal ? "Personal accounts made after Nov 13, 2023 need a closed test with 12 testers for 14 days before an app can go to production: step 7 helps with it." : "Organization accounts (and older personal ones) can go to production right away."; style: small; color: muted }
+          if !pconn {
+            Text { text: "a. Make a Google Play developer account: US$25 once, plus an ID check that can take a few days."; style: small }
+            Flow { gap: 6; Button { text: "sign up"; onTap: url("https://play.google.com/console/signup") } }
+            Text { text: "b. In Google Cloud, make a project (any name), then turn on the Google Play Android Developer API in it."; style: small }
+            Flow { gap: 6; Button { text: "open the API page"; onTap: url("https://console.cloud.google.com/apis/library/androidpublisher.googleapis.com") } }
+            Text { text: "c. IAM › Service accounts › Create service account: a name is enough, skip the roles. Open it › Keys › Add key › Create new key › JSON. The key downloads to this phone."; style: small }
+            Flow { gap: 6; Button { text: "service accounts"; onTap: url("https://console.cloud.google.com/iam-admin/serviceaccounts") } }
+            Text { text: "d. Give the key to APK Maker: a page opens in the browser to pick it. It stays on this phone."; style: small }
+            Flow { gap: 6; Button { text: "connect key"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker play connect 2>&1") } } }
+          } else {
+            Text { text: "e. Play Console › Users and permissions › Invite new users: paste this email and allow Release to production, Release apps to testing tracks, Manage testing tracks and Manage store presence (or Admin). It can take a few minutes to apply."; style: small }
+            Flow {
+              gap: 6
+              Button { text: "copy email"; onTap: copy(play.email ?? "") }
+              Button { text: "users and permissions"; onTap: url("https://play.google.com/console/users-and-permissions") }
+              Button { text: "check"; onTap: { out = ""; out = run("~/.local/bin/apk-maker play status >/dev/null 2>&1; true") } }
+              if now - discAt < 5 {
+                Button { text: "really disconnect?"; color: red; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker play disconnect 2>&1"); discAt = 0 } }
+              } else {
+                Button { text: "disconnect"; color: red; onTap: discAt = now }
+              }
+            }
+            Row {
+              gap: 6
+              Input { text: contactDraft; placeholder: play.contact ?? "contact email for your store listings"; weight: 1; onChange: contactDraft = value }
+              Button { text: "save"; color: trim(contactDraft) != "" ? accent : muted; onTap: { out = ""; out = run("[ -n ${sh(trim(contactDraft))} ] && ~/.local/bin/apk-maker play set contact ${sh(trim(contactDraft))} 2>&1 && echo saved"); contactDraft = "" } }
+            }
+          }
+
+          Text { text: "2 · app"; style: label; color: muted }
+          if papp == null {
+            Text { text: "Build an app first: Play takes the apps that build here."; style: small; color: muted }
+          } else {
+            Grid {
+              columns: 3
+              gap: 6
+              for a in builtApps.take(16) key a.slug {
+                Text {
+                  text: a.label ?? a.slug
+                  style: small
+                  maxLines: 1
+                  padding: [6, 4]
+                  radius: 8 * corners
+                  border: 1
+                  borderColor: a.slug == papp.slug ? accent : border
+                  color: a.slug == papp.slug ? background : foreground
+                  background: a.slug == papp.slug ? accent : alpha(surface, 0.0)
+                  onTap: { playSel = a.slug; haptic() }
+                }
+              }
+            }
+            Row {
+              gap: 8
+              align: center
+              Image { src: "app:${papp.pkg}"; size: 32; visible: papp.status == "installed" }
+              Column {
+                weight: 1
+                Text { text: pp.title ?? papp.label ?? papp.slug; bold: true; maxLines: 1 }
+                Text { text: "${papp.pkg}${pp.vn != null ? " · version ${pp.vn} (${pp.vc})" : ""}"; style: small; font: mono; color: muted; maxLines: 1 }
+              }
+            }
+            if !onPlay {
+              Text { text: "Its package name ${papp.pkg} can't change once it's on Play."; style: small; color: muted }
+            }
+
+            if papp.pending != null {
+              Notice { msg: "A change is waiting for you: accept or discard it first (apps tab). Play gets the accepted version."; c: cyan }
+            }
+            PStep { n: 3; title: "prepare it"; done: prepared }
+            Text { text: prepared ? "${fmtTime(pp.prepared, "MMM d HH:mm")} · listing${pp.category != null ? " (${pp.category})" : ""} · ${pp.icon == true ? "icon · " : ""}${pp.feature == true ? "feature graphic · " : ""}${shots} screenshots · signed .aab" : "${agent} writes the store listing and a privacy policy. Then APK Maker targets Android 16, makes the app's own upload key, builds a signed .aab, and draws the icon and feature graphic (with adb, it also opens the app and takes screenshots)."; style: small; color: muted }
+            if prepared && shots < 2 {
+              Text { text: connected ? "Fewer than 2 screenshots: Play needs 2. Prepare again, and leave the phone alone while the app opens." : "Play needs 2 screenshots: connect adb on the setup tab and prepare again, or add them in Play Console."; style: small; color: yellow }
+            }
+            if stale {
+              Text { text: "The app changed since it was prepared: uploading builds the new code first. Prepare a new version to also redo the listing and screenshots."; style: small; color: yellow }
+            }
+            if prepared && pp.backedUp == null {
+              Text { text: "Back up the upload key: every update has to be signed with it."; style: small; color: yellow }
+            }
+            Flow {
+              gap: 6
+              Button { text: prepared ? "prepare a new version" : "prepare"; color: accent; onTap: { haptic(); out = ""; out = run(canStart ? "~/.local/bin/apk-maker play prepare ${sh(papp.slug)} ${sh(agent)} 2>&1" : "echo ${sh(blockMsg)}"); tab = canStart ? "job" : tab } }
+              if prepared {
+                Button { text: "edit listing"; onTap: terminal("nano ~/apps/${sh(papp.slug)}/play/listing.json", "listing") }
+                Button { text: "rewrite listing"; onTap: { haptic(); out = ""; out = run(canStart ? "~/.local/bin/apk-maker play prepare ${sh(papp.slug)} ${sh(agent)} listing 2>&1" : "echo ${sh(blockMsg)}"); tab = canStart ? "job" : tab } }
+                Button { text: "back up key"; color: pp.backedUp == null ? yellow : foreground; onTap: { out = ""; out = run("~/.local/bin/apk-maker play backup ${sh(papp.slug)} 2>&1") } }
+              }
+            }
+
+            PStep { n: 4; title: "put it on Play (once, by hand)"; done: onPlay }
+            if onPlay {
+              Text { text: "It's on Google Play: uploads now go through the API."; style: small; color: muted }
+            } else {
+              Text { text: "Play learns a new app's package name from its first upload, so that one is by hand:"; style: small }
+              Text { text: "a. Play Console › Create app: name, default language, App, Free; accept the declarations."; style: small; color: muted }
+              Text { text: "b. Test and release › Testing › Internal testing › Create new release. Keep Google's app signing, upload ${papp.slug}.aab from Downloads, then Next › Save."; style: small; color: muted }
+              Text { text: "c. Tap check: after that APK Maker uploads by itself."; style: small; color: muted }
+              Flow {
+                gap: 6
+                Button { text: "download .aab"; color: prepared ? foreground : muted; onTap: { out = ""; out = run(prepared ? "~/.local/bin/apk-maker play aab ${sh(papp.slug)} 2>&1" : "echo prepare it first: step 3") } }
+                Button { text: "Play Console"; onTap: url("https://play.google.com/console") }
+                Button { text: "check"; color: pconn && prepared ? accent : muted; onTap: { haptic(); out = ""; out = run(pconn ? "~/.local/bin/apk-maker play check ${sh(papp.slug)} 2>&1" : "echo connect Google Play first: step 1") } }
+              }
+            }
+
+            PStep { n: 5; title: "app content (once, by hand)"; done: pp.uploaded != null }
+            Text { text: "Play Console › Policy and programs › App content: privacy policy, app access, ads, content rating, target audience and data safety${pp.dataCollected == false ? " (the listing says no data leaves the phone)" : ""}. Then Store settings: category${pp.category != null ? " (${pp.category})" : ""} and contact details."; style: small }
+            Text { text: "For the privacy policy, share the one the agent wrote into a Google Doc (Share › anyone with the link) or Google Sites, add your email, and paste its link."; style: small; color: muted }
+            Flow {
+              gap: 6
+              Button { text: "share privacy policy"; color: prepared ? foreground : muted; onTap: { out = ""; out = prepared ? "" : "prepare it first: step 3"; policy = run("cat ~/apps/${sh(papp.slug)}/play/privacy-policy.md 2>/dev/null") } }
+              Button { text: "Play Console"; onTap: url("https://play.google.com/console") }
+            }
+
+            PStep { n: 6; title: "upload"; done: pp.uploaded != null }
+            Row {
+              gap: 6
+              for t in ["internal", "closed", "production"] {
+                let on = track == t
+                let locked = t == "production" && !prodOk
+                Text {
+                  text: t
+                  style: small
+                  align: center
+                  maxLines: 1
+                  weight: 1
+                  padding: [6, 4]
+                  radius: 8 * corners
+                  border: 1
+                  opacity: locked ? 0.45 : 1
+                  borderColor: on ? accent : border
+                  color: on ? background : foreground
+                  background: on ? accent : alpha(surface, 0.0)
+                  onTap: { track = t; haptic() }
+                }
+              }
+            }
+            Text { text: track == "internal" ? "Internal testing: up to 100 testers you add by email in Play Console. Available within minutes." : track == "closed" ? "Closed testing: the Google Group in step 7. Google reviews the first release (hours to a few days)." : prodOk ? "Production: everyone on Google Play, after Google's review." : "Production opens once the closed test is done and Google grants access (step 7)."; style: small; color: muted }
+            for t in ["internal", "closed", "production"] {
+              let r = get(pp.tracks ?? {}, t, null)
+              if r != null {
+                Text { text: "${t}: ${r.vn} · ${fmtTime(r.at, "MMM d HH:mm")}${r.status == "draft" ? " · draft: roll it out in Play Console" : r.review == true ? " · send for review in Play Console" : ""}"; style: small; color: r.status == "draft" || r.review == true ? yellow : green; maxLines: 2 }
+              }
+            }
+            Button {
+              text: "upload to ${trackLabel}"
+              color: canUpload ? accent : muted
+              onTap: { haptic(); out = ""; out = run(canUpload ? "~/.local/bin/apk-maker play upload ${sh(papp.slug)} ${sh(track)} 2>&1" : "echo ${sh(!pconn ? "connect Google Play first: step 1" : !prepared ? "prepare it first: step 3" : !onPlay ? "do the first upload by hand, then check: step 4" : busy ? blockMsg : "production opens after the closed test: step 7")}"); tab = canUpload ? "job" : tab }
+            }
+
+            if personal {
+              PStep { n: 7; title: "closed test · 12 testers · 14 days"; done: pp.production == true }
+              Text { text: "a. Make a Google Group for testers (groups.google.com › Create group; Who can join: Anyone on the web) and save its email here:"; style: small }
+              Row {
+                gap: 6
+                Input { text: groupDraft; placeholder: pp.group ?? "my-app-testers@googlegroups.com"; weight: 1; onChange: groupDraft = value }
+                Button { text: "save"; color: trim(groupDraft) != "" ? accent : muted; onTap: { out = ""; out = run("[ -n ${sh(trim(groupDraft))} ] && ~/.local/bin/apk-maker play testers ${sh(papp.slug)} ${sh(trim(groupDraft))} 2>&1"); groupDraft = "" } }
+              }
+              Flow { gap: 6; Button { text: "Google Groups"; onTap: url("https://groups.google.com/my-groups") } }
+              Text { text: "b. Upload to closed testing (step 6). Once Google approves it, the test runs."; style: small }
+              Text { text: "c. Invite at least 12 people (ask for 15 or more: some drop out). They join the group, opt in, and install the app from Play."; style: small }
+              Flow {
+                gap: 6
+                if groupName != "" {
+                  Button { text: "invite testers"; color: accent; onTap: share(invite) }
+                  Button { text: "copy opt-in link"; onTap: copy("https://play.google.com/apps/testing/${papp.pkg}") }
+                } else {
+                  Text { text: "save the group's email first (a)"; style: small; color: muted }
+                }
+              }
+              Text { text: "Short of people? Swap with other APK Maker users: the community group becomes a tester of this app, and the app goes on the shared list (below)."; style: small }
+              Flow {
+                gap: 6
+                if listed != null {
+                  Text { text: "listed until ${listed.until}"; style: small; color: green }
+                } else {
+                  Button { text: "ask the community"; color: cyan; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker play ask ${sh(papp.slug)} 2>&1") } }
+                }
+              }
+              Text { text: "d. Track it. Play Console › Closed testing › Testers shows how many opted in. A tester who leaves loses their days, so ask them to stay 14 days."; style: small }
+              Progress { value: min(closedDays, 14); max: 14; height: 4; fill: width; color: testDone ? green : accent; track: alpha(muted, 0.2) }
+              Text { text: pp.closedSince == null ? "starts with the first closed-testing upload" : "day ${closedDays} of 14 · ${testers} of 12 testers opted in"; style: small; color: testDone ? green : muted }
+              Row {
+                gap: 6
+                Input { text: testerDraft; placeholder: "testers opted in now"; weight: 1; onChange: testerDraft = value }
+                Button { text: "save"; color: trim(testerDraft) != "" ? accent : muted; onTap: { out = ""; out = run("~/.local/bin/apk-maker play set ${sh(papp.slug)} testers ${sh(trim(testerDraft))} 2>&1 || echo enter a number"); testerDraft = "" } }
+              }
+              Text { text: testDone ? "e. Done: Play Console › Dashboard › Apply for production, then answer the three short forms about your test. Google answers within about a week." : "e. After 14 days with 12 or more testers: apply for production in Play Console's dashboard."; style: small; color: testDone ? green : muted }
+              Flow {
+                gap: 6
+                if testDone {
+                  Button { text: "Play Console"; color: accent; onTap: url("https://play.google.com/console") }
+                }
+                Button { text: pp.production == true ? "production access ✓" : "Google granted production"; color: pp.production == true ? green : foreground; onTap: { out = ""; out = run("~/.local/bin/apk-maker play set ${sh(papp.slug)} production ${sh(pp.production == true ? "no" : "yes")} 2>&1") } }
+              }
+            }
+          }
+
+          // The tester exchange: test other users' closed tests, so they test yours.
+          Text { text: "community testers · ${len(capps)} apps"; style: label; color: muted }
+          Text { text: "APK Maker users test each other's closed tests. Join the group once with the Google account on this phone. Then, for each app: opt in, install it from Play, keep it 14 days, and really use it (Google asks how testers used an app)."; style: small; color: muted }
+          if cgroup == "" {
+            Text { text: "The community group is still being set up: check back soon."; style: small; color: yellow }
+          }
+          Flow {
+            gap: 6
+            if cgroup != "" {
+              Button { text: "join the group"; color: accent; onTap: url(startsWith(community.groupUrl ?? "", "https://groups.google.com/") ? community.groupUrl : "https://groups.google.com") }
+            }
+            Button { text: "how it works"; onTap: url("https://github.com/${community.repo ?? "kingdompaulo/apk-maker-testers"}#readme") }
+            Button { text: "refresh"; onTap: { out = ""; out = run("~/.local/bin/apk-maker play community 2>&1") } }
+          }
+          if len(capps) > 0 {
+            Text { text: testingN == 0 ? "You aren't testing any yet: about as many as the testers you need is fair." : "You're testing ${testingN}. Keep each one 14 days."; style: small }
+          }
+          for x in capps.take(30) key x.pkg {
+            let since = get(testing ?? {}, x.pkg, null)
+            Column {
+              gap: 4
+              padding: 8
+              radius: 8 * corners
+              border: 1
+              borderColor: since != null ? green : border
+              Row {
+                gap: 6
+                align: center
+                Text { text: x.name; bold: true; maxLines: 1; weight: 1 }
+                Text { text: since != null ? (now - since >= 14 * 86400 ? "done ✓" : "day ${floor((now - since) / 86400) + 1} of 14") : "until ${x.until}"; style: small; color: since != null ? green : muted; maxLines: 1 }
+              }
+              Text { text: x.description; style: small; color: muted; maxLines: 3 }
+              Flow {
+                gap: 6
+                Button { text: "opt in"; color: since == null ? accent : foreground; onTap: url("https://play.google.com/apps/testing/${x.pkg}") }
+                Button { text: "install"; onTap: url("https://play.google.com/store/apps/details?id=${x.pkg}") }
+                Button { text: since != null ? "stop testing" : "I'm testing it"; color: since != null ? muted : green; onTap: { haptic(); out = run("~/.local/bin/apk-maker play testing ${sh(x.pkg)} ${sh(since != null ? "off" : "on")} 2>&1") } }
+              }
+            }
           }
         }
       }
