@@ -4,7 +4,7 @@ widget "Agentic APK Maker" {
   size: 6x5
   minSize: 3x3
 
-  meta { owl: 7; description: "Describe an app: Claude Code, Codex or OpenCode writes it, builds it on your phone and installs it. Review every change, keep apps on GitHub, publish to Google Play."; version: "2.7"; license: "MIT"; category: "dev" }
+  meta { owl: 7; description: "Describe an app: Claude Code, Codex or OpenCode writes it, builds it on your phone and installs it. Review every change, keep apps on GitHub, publish to Google Play."; version: "2.11"; license: "MIT"; category: "dev" }
 
   requires { pacman: ["jq", "git", "curl", "unzip", "util-linux", "jdk17-openjdk", "android-tools", "openssl"] }
 
@@ -25,8 +25,8 @@ widget "Agentic APK Maker" {
   source community = file("~/.cache/apk-maker/community.json") json
   source testing = file("~/.cache/apk-maker/testing.json") json
   source communityPoll = cmd("[ -x ~/.local/bin/apk-maker ] && ~/.local/bin/apk-maker play community") every 30m timeout 30s
-  // GitHub (optional): gh's login and APK Maker's switches ({state: none/missing/connected, login,
-  // enabled, auto}). The sync follows pull requests merged or closed on GitHub.
+  // GitHub (optional): gh's logins on this phone and the ones APK Maker may use ({state: none/missing/connected,
+  // accounts, allowed, account: where new apps go, auto}). The sync follows pull requests merged or closed on GitHub.
   source gh = file("~/.cache/apk-maker/github.json") json
   source ghStatus = cmd("[ -x ~/.local/bin/apk-maker ] && ~/.local/bin/apk-maker github status >/dev/null") every 30m timeout 30s
   source ghSync = cmd("[ -x ~/.local/bin/apk-maker ] && ~/.local/bin/apk-maker github sync") every 2m timeout 90s
@@ -72,6 +72,9 @@ widget "Agentic APK Maker" {
   // Discarding a change and making a repo public take a second tap within 5 seconds.
   state discardAt = 0
   state publicAt = 0
+  // "sign out" of a GitHub account takes a second tap within 5 seconds.
+  state signL = ""
+  state signAt = 0
 
   let phase = job.phase ?? "idle"
   let busy = phase == "queued" || phase == "agent" || phase == "checking" || phase == "building" || phase == "fixing" || phase == "art" || phase == "installing" || phase == "uploading"
@@ -79,7 +82,7 @@ widget "Agentic APK Maker" {
   let kind = job.kind ?? "app"
 
   // The backend this widget carries; an older or missing one is (re)installed.
-  let backendVersion = 10
+  let backendVersion = 14
   let needInstall = ver != null && num(trim(ver), 0) < backendVersion
   // `worker` polls every 5s, so a setup that just started (or is about to) counts as alive.
   let setupAlive = worker == null || words(worker)[1] == "alive" || now - (setup.updated ?? 0) < 20 || now - installedAt < 20
@@ -160,9 +163,13 @@ widget "Agentic APK Maker" {
   let capps = (community.apps ?? []).filter(x => indexOf(mine, x.pkg) < 0)
   let listed = (community.apps ?? []).find(x => x.pkg == papp.pkg)
   let testingN = len(keys(testing ?? {}))
-  // GitHub is logged in, and turned on for APK Maker (an existing gh login stays unused until then).
+  // GitHub is logged in; the accounts APK Maker may use (a gh login stays unused until picked), and the
+  // one new apps go to. Each app syncs with the account its repo is on, while that one is in use.
   let gconn = gh.state == "connected"
-  let gon = gconn && gh.enabled == true
+  let gnames = (gh.accounts ?? []).map(x => x.login)
+  let gused = gh.allowed ?? []
+  let gacct = gh.account
+  let gon = gconn && len(gused) > 0
 
   // The chosen agent isn't installed (the default, or one removed since): pick one that is.
   when len(have) > 0 && indexOf(have, agent) < 0 { agent = have[0] }
@@ -206,7 +213,10 @@ cat > "$D/bin/apk-maker.new" <<'APKMAKER_FILE_EOF'
 #   apk-maker agents | version                          the installed agents | this script's version
 #
 # GitHub (optional):
-#   apk-maker github status | on | off | auto on|off   gh's login; on/off for APK Maker; new apps on GitHub
+#   apk-maker github status | auto on|off              gh's logins on this phone | new apps on GitHub
+#   apk-maker github use <login> | logout <login> | add  account for new apps | stop syncing it | sign in another
+#   apk-maker github resume <login>                    sync that account's apps again (new apps keep going where they go)
+#   apk-maker github signout <login>                   sign this phone out of that account (gh forgets its login)
 #   apk-maker github publish <slug> [private|public]    a repo for the app (private unless asked)
 #   apk-maker github visibility <slug> private|public   changes become pull requests once it has one
 #   apk-maker github check <slug> | sync                look for private data | follow PRs merged or closed there
@@ -232,7 +242,7 @@ set -uo pipefail
 # Everything this writes (state, logs, keys, apps) is for this user only.
 umask 077
 
-VERSION=10
+VERSION=14
 # Bumped only when the toolchain changes, so a script update doesn't redo the test build.
 TOOLCHAIN=3
 # Google Play takes new apps and updates only when they target this API level.
@@ -333,7 +343,7 @@ serve() {
     pkill -f "Serve.java $SERVE_PORT " 2>/dev/null; sleep 1
   fi
   if ! curl -sf -o /dev/null "http://127.0.0.1:$SERVE_PORT/"; then
-    setsid -f java -Xmx48m "$DATA/bin/Serve.java" "$SERVE_PORT" "$CACHE/apks" >/dev/null 2>&1
+    setsid -f java -Xmx48m "$DATA/bin/Serve.java" "$SERVE_PORT" "$CACHE/apks" >/dev/null 2>&1 8>&-
     for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; curl -sf -o /dev/null "http://127.0.0.1:$SERVE_PORT/" && break; done
   fi
 }
@@ -367,6 +377,8 @@ do_install() {
 
 run_agent() {
   local agent=$1 dir=$2 prompt=$3 rc=0
+  # A GitHub token from an earlier step of the job isn't the agent's to use.
+  unset GH_TOKEN
   AGENT_LOG_FROM=$(($(wc -l < "$LOG") + 1))
   echo "== $agent: $(head -c 300 <<< "$prompt")" >> "$LOG"
   case $agent in
@@ -469,15 +481,15 @@ work() {
   # private repo when the user asked for that. None of it stops the install.
   if pending "$slug"; then
     meta "$slug" '.pending.built=true'
-    if [ -n "$(jq -r '.github.repo // empty' "$dir/.apkmaker.json")" ] && gh_on; then
+    if app_gh "$slug"; then
       job installing "pull request on GitHub"; open_pr "$slug" 2>> "$LOG"
     fi
-  elif gh_on; then
-    if [ -n "$(jq -r '.github.repo // empty' "$dir/.apkmaker.json")" ]; then
+  elif [ -n "$(app_account "$slug")" ]; then
+    if app_gh "$slug"; then
       job installing "pushing to GitHub"; push_app "$slug" "$(git -C "$dir" branch --show-current)" 2>> "$LOG"
-    elif jq -e '.auto != false' "$GHSTATE" >/dev/null 2>&1; then
-      job installing "putting it on GitHub (private)"; github_publish "$slug" private >> "$LOG" 2>&1
     fi
+  elif gh_on && jq -e '.auto != false and .account != null' "$GHSTATE" >/dev/null 2>&1; then
+    job installing "putting it on GitHub (private)"; github_publish "$slug" private >> "$LOG" 2>&1
   fi
   local try=""; pending "$slug" && try=": try it, then accept or discard the change"
   do_install "$slug" job
@@ -513,7 +525,7 @@ start() {
   jq -nc --arg s "$slug" --arg a "$agent" --arg p "$prompt" --arg k "$kind" --argjson t "$(now)" \
     '{kind:$k, slug:$s, agent:$a, prompt:(if $k == "app" then $p else null end), arg:(if $k == "app" then null else $p end), phase:"queued", msg:"", started:$t, updated:$t, pid:0}' > "$JOB"
   setsid -f bash -c 'echo $$ > "$1/pid"; exec "$0" "_$2" "$3" "$4" "$5"' "$0" "$CACHE" "$kind" "$slug" "$agent" "$prompt" \
-    >> "$LOG" 2>&1 < /dev/null
+    >> "$LOG" 2>&1 < /dev/null 8>&-
   # Wait for the worker's pid: reading a stale one makes the widget call a live job stalled.
   for _ in $(seq 50); do [ -s "$CACHE/pid" ] && break; sleep 0.1; done
   local tmp; tmp=$(mktemp "$CACHE/.job.XXXX")
@@ -579,6 +591,13 @@ save() {
   true
 }
 
+# git_lock [now]: one accept, discard, publish or GitHub sync at a time, so the background sync never
+# moves an app's branches while a tap is moving them too. "now" gives up at once instead of waiting.
+git_lock() {
+  exec 8> "$CACHE/git.lock"
+  if [ "${1:-}" = now ]; then flock -n 8; else flock -w 120 8 || { echo "another git step is still running: try again" >&2; exit 1; }; fi
+}
+
 pending() { jq -e '.pending != null' "$APPS/$1/.apkmaker.json" >/dev/null 2>&1; }
 pget() { jq -r ".pending.$2 // empty" "$APPS/$1/.apkmaker.json"; }
 
@@ -609,22 +628,25 @@ finish_change() {
 }
 
 accept_change() {
-  local slug=$1 d=$APPS/$1 b base req repo
+  local slug=$1 d=$APPS/$1 b base req gh=""
   pending "$slug" || { echo "$slug has no change waiting" >&2; return 1; }
   [ "$(pget "$slug" built)" = true ] || { echo "the change didn't build: retry it or discard it" >&2; return 1; }
   b=$(pget "$slug" branch) base=$(pget "$slug" base) req=$(pget "$slug" request)
-  repo=$(jq -r '.github.repo // empty' "$d/.apkmaker.json")
+  app_gh "$slug" && gh=1
   save "$slug" "Finish: $(head -1 <<< "$req")"
-  # The pull request's branch has to match, so GitHub sees it merged once main has it.
-  if [ -n "$repo" ] && gh_on; then push_app "$slug" "$b" || return 1; fi
+  # The pull request's branch has to match, so GitHub sees it merged once main has it. GitHub being
+  # unreachable, or leak_check refusing the push, doesn't stop the change being accepted here.
+  local note=" (not on GitHub yet: it goes up with the next accepted change)"
+  if [ -n "$gh" ] && ! push_app "$slug" "$b" 2>/dev/null; then gh=""; else note=""; fi
   gq "$d" checkout -q "$base" && gq "$d" merge -q --no-ff "$b" -m "Accept: $(head -1 <<< "$req" | head -c 100)" >/dev/null 2>&1 || {
     gq "$d" merge --abort >/dev/null 2>&1; gq "$d" checkout -q "$b"
     echo "couldn't merge the change: see git in the terminal" >&2; return 1; }
-  if [ -n "$repo" ] && gh_on; then
-    push_app "$slug" "$base" && git -C "$d" -c credential.helper= -c 'credential.helper=!gh auth git-credential' push -q origin --delete "$b" >/dev/null 2>&1
+  if [ -n "$gh" ]; then
+    if push_app "$slug" "$base" 2>/dev/null; then ghpush "$d" --delete "$b" >/dev/null 2>&1
+    else note=" (not on GitHub yet: it goes up with the next accepted change)"; fi
   fi
   finish_change "$slug"
-  echo "accepted: $(head -1 <<< "$req")"
+  echo "accepted: $(head -1 <<< "$req")$note"
 }
 
 # discard_change <slug> [closed]: back to the main branch and its APK; "closed" when GitHub closed it.
@@ -635,7 +657,7 @@ discard_change() {
   repo=$(jq -r '.github.repo // empty' "$d/.apkmaker.json")
   gq "$d" checkout -q -f "$base" && gq "$d" clean -fdq || { echo "couldn't go back to $base" >&2; return 1; }
   gq "$d" branch -q -D "$b" >/dev/null 2>&1
-  if [ -n "$pr" ] && [ -z "$closed" ] && gh_on; then
+  if [ -n "$pr" ] && [ -z "$closed" ] && app_gh "$slug"; then
     gh pr close "$pr" -R "$repo" --delete-branch --comment "Discarded in APK Maker." >/dev/null 2>&1 \
       || echo "couldn't close pull request #$pr on GitHub: close it there" >&2
   fi
@@ -659,8 +681,11 @@ discard_change() {
 
 # ---- GitHub (optional): each app can be a repo, private unless made public; changes are pull requests ----
 #
-# Uses the GitHub CLI's own login (gh auth login); the token stays in gh's config and is handed to git
-# only per push. Before anything is pushed, leak_check looks through every commit that would go.
+# Uses the GitHub CLI's logins (gh auth login); tokens stay in gh's config and are handed to gh and git
+# per command through GH_TOKEN, so gh's own active account is never changed. APK Maker uses only the
+# accounts the user picked (.allowed); .account is the one new apps go to, and each app keeps syncing with
+# the account that owns its repo. Logging out only takes an account off .allowed: nothing is deleted.
+# Before anything is pushed, leak_check looks through every commit that would go.
 
 GHSTATE=$CACHE/github.json
 
@@ -669,20 +694,133 @@ ghs() {
   { cat "$GHSTATE" 2>/dev/null || echo '{}'; } | jq -c "$@" > "$tmp" && mv "$tmp" "$GHSTATE"
 }
 
-# Logged in, and turned on for APK Maker by the user (a gh login made for something else doesn't count).
-gh_on() { command -v gh >/dev/null 2>&1 && jq -e '.state == "connected" and .enabled == true' "$GHSTATE" >/dev/null 2>&1; }
+# Some account is in use: one the user picked (a gh login made for something else doesn't count).
+gh_on() { command -v gh >/dev/null 2>&1 && jq -e '(.allowed // []) | length > 0' "$GHSTATE" >/dev/null 2>&1; }
+
+# use_account <login>: later gh and git calls act as that account, when APK Maker may use it.
+use_account() {
+  local l=$1 label
+  unset GH_TOKEN
+  jq -e --arg l "$l" '(.allowed // []) | index($l)' "$GHSTATE" >/dev/null 2>&1 || return 1
+  label=$(jq -r --arg l "$l" '[(.accounts // [])[] | select(.login == $l) | .label][0] // empty' "$GHSTATE")
+  [ -n "$label" ] || return 1
+  GH_TOKEN=$(gh auth token -h github.com -u "$label" 2>/dev/null) && [ -n "$GH_TOKEN" ] || { unset GH_TOKEN; return 1; }
+  export GH_TOKEN
+}
+
+# app_account <slug>: the account that owns the app's repo (nothing when it isn't on GitHub).
+app_account() { jq -r '(.github.account // ((.github.repo // "") | split("/")[0])) // empty' "$APPS/$1/.apkmaker.json" 2>/dev/null; }
+
+# app_gh <slug>: the app is on GitHub under an account still in use; gh and git now act as that account.
+app_gh() { local a; unset GH_TOKEN; a=$(app_account "$1"); [ -n "$a" ] && gh_on && use_account "$a"; }
+
+# apps_of <login>: the slugs of the apps on GitHub under that account.
+apps_of() {
+  local m s
+  for m in "$APPS"/*/.apkmaker.json; do
+    [ -f "$m" ] || continue
+    s=${m%/.apkmaker.json}; s=${s##*/}
+    [ "$(app_account "$s")" = "$1" ] && echo "$s"
+  done
+  true
+}
 
 github_status() {
-  if ! command -v gh >/dev/null 2>&1; then ghs '.state="missing" | del(.login) | .msg=""'
+  if ! command -v gh >/dev/null 2>&1; then ghs '.state="missing" | .accounts=[] | .msg=""'
   else
-    local u; u=$(timeout 20 gh api user 2>/dev/null)
-    if [ -n "$(jq -r '.login // empty' <<< "$u" 2>/dev/null)" ]; then
-      ghs '.state="connected" | .login=$u.login | .email=($u.email // null) | .id=$u.id | .msg="" | .checked=$t' --argjson u "$u" --argjson t "$(now)"
+    local label t u list='[]' n=0 ok=0
+    # Each of gh's logins, asked of GitHub: the name gh keeps for a login isn't always who its token is.
+    while read -r label; do
+      [ -n "$label" ] || continue
+      n=$((n + 1))
+      t=$(gh auth token -h github.com -u "$label" 2>/dev/null) || continue
+      u=$(GH_TOKEN=$t timeout 20 gh api user 2>/dev/null) || continue
+      ok=$((ok + 1))
+      list=$(jq -c --arg l "$label" --argjson u "$u" \
+        'if any(.[]; .login == $u.login) then . else . + [{label: $l, login: $u.login, email: ($u.email // null), id: $u.id}] end' <<< "$list")
+    done < <(timeout 20 gh auth status -h github.com --json hosts --jq '.hosts["github.com"] // [] | sort_by(.active | not) | .[].login' 2>/dev/null)
+    if [ "$n" -gt 0 ] && [ "$list" = '[]' ]; then
+      ghs '.msg="couldn'"'"'t reach GitHub to check the login" | .checked=$t' --argjson t "$(now)"
     else
-      ghs '.state="none" | del(.login, .email, .id) | .msg="" | .checked=$t' --argjson t "$(now)"
+      # Before accounts, "on" meant gh's active login: that one stays in use. The emails of every
+      # account seen are kept for leak_check. When every login answered, accounts signed out of since
+      # (with gh auth logout) are no longer in use.
+      ghs '.accounts=$a | .state=(if ($a | length) > 0 then "connected" else "none" end) | .msg="" | .checked=$t
+        | if has("allowed") then . else .allowed=(if .enabled == true and ($a | length) > 0 then [$a[0].login] else [] end) | .account=(.allowed[0] // null) end
+        | if $all then .allowed=[.allowed[] | select(. as $l | any($a[]; .login == $l))]
+            | (if .account != null and (.account as $c | .allowed | index($c)) == null then .account=null else . end) else . end
+        | .emails=((.emails // {}) + ([$a[] | select(.email != null) | {(.login): .email}] | add // {}) + (if .email != null and .login != null then {(.login): .email} else {} end))
+        | .login=.account | del(.enabled, .email, .id)' --argjson a "$list" --argjson t "$(now)" --argjson all "$([ "$ok" -eq "$n" ] && echo true || echo false)"
     fi
   fi
   cat "$GHSTATE"; echo
+}
+
+# github_use <login>: new apps go to that account, one of gh's logins on this phone. The account before
+# keeps syncing the apps it has (with none, it's dropped).
+github_use() {
+  local l=$1 prev
+  jq -e --arg l "$l" 'any((.accounts // [])[]; .login == $l)' "$GHSTATE" >/dev/null 2>&1 \
+    || { echo "$l isn't signed in on this phone: add it first" >&2; return 1; }
+  prev=$(jq -r '.account // empty' "$GHSTATE")
+  if [ -n "$prev" ] && [ "$prev" != "$l" ] && [ -z "$(apps_of "$prev")" ]; then ghs '.allowed -= [$p]' --arg p "$prev"; fi
+  ghs '.account=$l | .login=$l | .allowed=(((.allowed // []) - [$l]) + [$l])' --arg l "$l"
+  echo "new apps go to $l on GitHub"
+}
+
+# github_resume <login>: APK Maker syncs that account's apps again, after a logout. New apps keep going
+# to the account they go to (to this one, when none is picked).
+github_resume() {
+  local l=$1
+  jq -e --arg l "$l" 'any((.accounts // [])[]; .login == $l)' "$GHSTATE" >/dev/null 2>&1 \
+    || { echo "$l isn't signed in on this phone: add it first" >&2; return 1; }
+  ghs '.allowed=(((.allowed // []) - [$l]) + [$l]) | if .account == null then .account=$l | .login=$l else . end' --arg l "$l"
+  echo "syncing with $l again"
+}
+
+# github_logout <login>: APK Maker stops syncing with that account. Its repos, the apps on this phone and
+# gh's own login stay as they are; using the account again picks up where it left off.
+github_logout() {
+  local l=$1 n
+  jq -e --arg l "$l" '(.allowed // []) | index($l)' "$GHSTATE" >/dev/null 2>&1 || { echo "APK Maker isn't using $l" >&2; return 1; }
+  ghs '.allowed -= [$l] | if .account == $l then .account=null | .login=null else . end' --arg l "$l"
+  n=$(apps_of "$l" | grep -c .)
+  case $n in
+    0) echo "logged out of $l" ;;
+    1) echo "logged out of $l: its app stays on GitHub and on this phone but doesn't sync any more" ;;
+    *) echo "logged out of $l: its $n apps stay on GitHub and on this phone but don't sync any more" ;;
+  esac
+}
+
+# github_signout <login>: this phone forgets the account's login (gh auth logout), so nothing here can use it
+# any more. As with logout, its repos and the apps on this phone stay as they are.
+github_signout() {
+  local l=$1 label n
+  label=$(jq -r --arg l "$l" '[(.accounts // [])[] | select(.login == $l) | .label][0] // empty' "$GHSTATE")
+  [ -n "$label" ] || { echo "this phone isn't signed in to $l" >&2; return 1; }
+  timeout 30 gh auth logout -h github.com -u "$label" >/dev/null 2>&1 \
+    || { echo "couldn't sign out of $l: run gh auth logout in a terminal" >&2; return 1; }
+  ghs '.allowed=((.allowed // []) - [$l]) | .accounts=((.accounts // []) | map(select(.login != $l)))
+    | if .account == $l then .account=null | .login=null else . end
+    | .state=(if (.accounts | length) > 0 then "connected" else "none" end)' --arg l "$l"
+  github_status >/dev/null
+  n=$(apps_of "$l" | grep -c .)
+  if [ "$n" -gt 0 ]; then echo "signed out of $l: its apps stay on GitHub and on this phone but don't sync any more"
+  else echo "signed out of $l on this phone"; fi
+}
+
+# github_add: sign in to another account (in a terminal), then use it for new apps. gh makes a new login
+# its active one; the one before is put back, for whatever else uses gh.
+github_add() {
+  local prev now new
+  prev=$(gh auth status -h github.com --json hosts --jq '.hosts["github.com"] // [] | .[] | select(.active) | .login' 2>/dev/null)
+  gh auth login -h github.com -p https -w || return 1
+  now=$(gh auth status -h github.com --json hosts --jq '.hosts["github.com"] // [] | .[] | select(.active) | .login' 2>/dev/null)
+  new=$(gh api user --jq .login 2>/dev/null)
+  if [ -n "$prev" ] && [ "$prev" != "$now" ]; then gh auth switch -h github.com -u "$prev" >/dev/null 2>&1; fi
+  github_status >/dev/null
+  [ -n "$new" ] || { echo "couldn't check the new login with GitHub" >&2; return 1; }
+  github_use "$new"
 }
 
 ghpush() { git -C "$1" -c credential.helper= -c 'credential.helper=!gh auth git-credential' push -q origin "${@:2}"; }
@@ -691,13 +829,25 @@ ghpush() { git -C "$1" -c credential.helper= -c 'credential.helper=!gh auth git-
 # "strict" (before going public) also refuses identities already on GitHub, such as the user's email on a
 # pull request merged on GitHub's site.
 leak_check() {
-  local d=$1 strict=${2:-} names patch who e allowed="" what re
+  local d=$1 strict=${2:-} names who allowed=""
   names=$(git -C "$d" log --branches --format= --name-only | sort -u)
   grep -E '(^|/)(\.apkmaker\.json|local\.properties|gradle\.properties|\.env)$|\.(p12|jks|keystore|pem|pass|apk|aab)$|service-account[^/]*\.json$|(^|/)google-services\.json$|^play/shots/' <<< "$names" \
     | head -5 | sed 's/^/private file in the history: /'
-  patch=$(git -C "$d" log --branches -p --format= --no-ext-diff 2>/dev/null)
+  # The code and the commit messages, which quote the user's requests.
+  leak_text "$(git -C "$d" log --branches -p --format=%B --no-ext-diff 2>/dev/null)" "the code"
+  # Commits must be apk-maker's (or GitHub's own, or already on GitHub).
+  [ -n "$strict" ] || allowed=$(git -C "$d" log --remotes --format='%ae%n%ce' 2>/dev/null | sort -u)
+  who=$(git -C "$d" log --branches --format='%ae%n%ce' | sort -u | grep -vxE 'apk-maker@localhost|noreply@github\.com|.*@users\.noreply\.github\.com' \
+    | grep -vxF -f <(printf '%s\n' "$allowed" | grep . || echo apk-maker@localhost))
+  [ -n "$who" ] && echo "commits by $(head -1 <<< "$who") (not apk-maker; merged on GitHub's site? Turn on Settings › Emails › Keep my email addresses private there)"
+  true
+}
+
+# leak_text <text> <where>: prints the keys and personal details in the text (nothing = safe).
+leak_text() {
+  local text=$1 where=$2 e what re
   while IFS=$'\t' read -r what re; do
-    grep -qE -- "$re" <<< "$patch" && echo "looks like $what in the code"
+    grep -qE -- "$re" <<< "$text" && echo "looks like $what in $where"
   done <<'EOF'
 a private key	-----BEGIN [A-Z ]*PRIVATE KEY-----
 a Google service account key	"type": *"service_account"
@@ -710,16 +860,11 @@ a Slack token	xox[abprs]-[A-Za-z0-9-]{10,}
 a keystore password	(store|key)Password *= *"[^"]+"
 EOF
   # Personal details this phone knows about: the user's emails, the Play key's account, the home path.
-  for e in "$(git config --global user.email 2>/dev/null)" "$(jq -r '.email // empty' "$GHSTATE" 2>/dev/null)" \
-           "$(jq -r '.contact // empty' "$PSTATE" 2>/dev/null)" "$(jq -r '.client_email // empty' "$SA" 2>/dev/null)"; do
-    [ -n "$e" ] && grep -qiF -- "$e" <<< "$patch" && echo "your email $e is in the code"
-  done
-  grep -qF -- "$HOME/" <<< "$patch" && echo "a path on this phone ($HOME/…) is in the code"
-  # Commits must be apk-maker's (or GitHub's own, or already on GitHub).
-  [ -n "$strict" ] || allowed=$(git -C "$d" log --remotes --format='%ae%n%ce' 2>/dev/null | sort -u)
-  who=$(git -C "$d" log --branches --format='%ae%n%ce' | sort -u | grep -vxE 'apk-maker@localhost|noreply@github\.com|.*@users\.noreply\.github\.com' \
-    | grep -vxF -f <(printf '%s\n' "$allowed" | grep . || echo apk-maker@localhost))
-  [ -n "$who" ] && echo "commits by $(head -1 <<< "$who") (not apk-maker; merged on GitHub's site? Turn on Settings › Emails › Keep my email addresses private there)"
+  while read -r e; do
+    [ -n "$e" ] && grep -qiF -- "$e" <<< "$text" && echo "your email $e is in $where"
+  done < <(git config --global user.email 2>/dev/null; jq -r '(.emails // {})[], (.email // empty)' "$GHSTATE" 2>/dev/null
+           jq -r '.contact // empty' "$PSTATE" 2>/dev/null; jq -r '.client_email // empty' "$SA" 2>/dev/null)
+  grep -qF -- "$HOME/" <<< "$text" && echo "a path on this phone ($HOME/…) is in $where"
   true
 }
 
@@ -753,7 +898,9 @@ push_app() {
 # github_publish <slug> <private|public>: a new repo with the app's history.
 github_publish() {
   local slug=$1 vis=${2:-private} d=$APPS/$1 login name i=2 base found label
-  gh_on || { echo "connect GitHub first (setup tab)" >&2; return 1; }
+  login=$(jq -r '.account // empty' "$GHSTATE" 2>/dev/null)
+  [ -n "$login" ] && gh_on || { echo "pick a GitHub account for new apps first (setup tab)" >&2; return 1; }
+  use_account "$login" || { echo "$login isn't signed in on this phone any more: add it again (setup tab)" >&2; return 1; }
   [ -z "$(jq -r '.github.repo // empty' "$d/.apkmaker.json")" ] || { echo "$slug is on GitHub already" >&2; return 1; }
   pending "$slug" && { echo "accept or discard the change waiting on $slug first" >&2; return 1; }
   [[ $vis =~ ^(private|public)$ ]] || return 1
@@ -761,7 +908,7 @@ github_publish() {
   clean_history "$d" || return 1
   found=$(leak_check "$d")
   [ -z "$found" ] || { echo "not published, to keep it safe: $found" >&2; return 1; }
-  login=$(jq -r .login "$GHSTATE"); name=$slug
+  name=$slug
   while gh repo view "$login/$name" >/dev/null 2>&1; do name=$slug-$i; i=$((i + 1)); done
   label=$(jq -r '.label // .slug' "$d/.apkmaker.json" | tr -d '\n' | head -c 60)
   gh repo create "$login/$name" "--$vis" --disable-wiki --description "$label: an Android app made with Agentic APK Maker" >/dev/null 2>>"$LOG" \
@@ -769,7 +916,7 @@ github_publish() {
   git -C "$d" remote remove origin >/dev/null 2>&1
   git -C "$d" remote add origin "https://github.com/$login/$name.git"
   base=$(git -C "$d" branch --show-current)
-  meta "$slug" '.github={repo:$r, url:$u, visibility:$v, at:$t}' --arg r "$login/$name" --arg u "https://github.com/$login/$name" --arg v "$vis" --argjson t "$(now)"
+  meta "$slug" '.github={repo:$r, account:$a, url:$u, visibility:$v, at:$t}' --arg r "$login/$name" --arg a "$login" --arg u "https://github.com/$login/$name" --arg v "$vis" --argjson t "$(now)"
   push_app "$slug" "$base" || return 1
   gh repo edit "$login/$name" --default-branch "$base" >/dev/null 2>&1
   echo "on GitHub ($vis): https://github.com/$login/$name"
@@ -780,7 +927,7 @@ github_visibility() {
   repo=$(jq -r '.github.repo // empty' "$d/.apkmaker.json")
   [ -n "$repo" ] || { echo "$slug isn't on GitHub" >&2; return 1; }
   [[ $vis =~ ^(private|public)$ ]] || return 1
-  gh_on || { echo "connect GitHub first (setup tab)" >&2; return 1; }
+  app_gh "$slug" || { echo "APK Maker is logged out of $(app_account "$slug") on GitHub: use it again in setup" >&2; return 1; }
   if [ "$vis" = public ]; then
     found=$(leak_check "$d" strict)
     [ -z "$found" ] || { echo "kept private, to keep it safe: $found" >&2; return 1; }
@@ -793,12 +940,18 @@ github_visibility() {
 
 # open_pr <slug>: push the change's branch and, the first time, open its pull request.
 open_pr() {
-  local slug=$1 d=$APPS/$1 repo b base req agent url
+  local slug=$1 d=$APPS/$1 repo b base req agent url found
   repo=$(jq -r '.github.repo // empty' "$d/.apkmaker.json")
-  [ -n "$repo" ] && gh_on && pending "$slug" || return 0
+  [ -n "$repo" ] && app_gh "$slug" && pending "$slug" || return 0
   b=$(pget "$slug" branch) base=$(pget "$slug" base) req=$(pget "$slug" request) agent=$(jq -r '.agent // "the agent"' "$d/.apkmaker.json")
   push_app "$slug" "$b" || return 1
   [ -n "$(pget "$slug" pr)" ] && return 0
+  # The request is the pull request's text: it gets the same check as the code.
+  found=$(leak_text "$req" "the change request")
+  if [ -n "$found" ]; then
+    meta "$slug" '.github.blocked=$m' --arg m "$(tr '\n' ';' <<< "$found" | sed 's/;$//; s/;/; /g')"
+    echo "no pull request on GitHub: $found" >&2; return 1
+  fi
   url=$(cd "$d" && gh pr create -R "$repo" --base "$base" --head "$b" --title "$(head -1 <<< "$req" | head -c 100)" \
     --body "$(printf '%s\n\nWritten by %s and built on the phone by Agentic APK Maker. Accept or discard it in the widget, or merge or close this pull request.' "$req" "$agent")" 2>>"$LOG") \
     || { echo "couldn't open the pull request: see the log" >&2; return 1; }
@@ -813,14 +966,16 @@ github_sync() {
     [ -f "$m" ] || continue
     pr=$(jq -r '.pending.pr // empty' "$m"); repo=$(jq -r '.github.repo // empty' "$m")
     [ -n "$pr" ] && [ -n "$repo" ] || continue
-    slug=$(jq -r .slug "$m"); d=$APPS/$slug
+    d=${m%/.apkmaker.json}; slug=${d##*/}
     job_running && [ "$(jq -r .slug "$JOB")" = "$slug" ] && continue
+    app_gh "$slug" || continue
     st=$(timeout 30 gh pr view "$pr" -R "$repo" --json state -q .state 2>/dev/null)
     case $st in
       MERGED)
         b=$(pget "$slug" branch) base=$(pget "$slug" base)
         git -C "$d" -c credential.helper= -c 'credential.helper=!gh auth git-credential' fetch -q origin "$base" \
-          && gq "$d" checkout -q "$base" && gq "$d" merge -q --ff-only "origin/$base" >/dev/null 2>&1 \
+          && gq "$d" checkout -q "$base" && { gq "$d" merge -q --ff-only "origin/$base" >/dev/null 2>&1 \
+            || { gq "$d" merge -q --no-ff "origin/$base" -m "Merge what GitHub merged" >/dev/null 2>&1 || { gq "$d" merge --abort >/dev/null 2>&1; false; }; }; } \
           && finish_change "$slug" && echo "$slug: merged on GitHub" ;;
       CLOSED) discard_change "$slug" closed >/dev/null && echo "$slug: closed on GitHub, discarded" ;;
     esac
@@ -832,13 +987,21 @@ github_cmd() {
   local sub=${1:-}; shift || true
   case $sub in
     status) github_status ;;
-    on|off) ghs '.enabled=($v == "on")' --arg v "$sub"; echo "GitHub $sub" ;;
+    use) [ -n "${1:-}" ] || exit 1; github_use "$1" ;;
+    resume) [ -n "${1:-}" ] || exit 1; github_resume "$1" ;;
+    logout) [ -n "${1:-}" ] || exit 1; github_logout "$1" ;;
+    signout) [ -n "${1:-}" ] || exit 1; github_signout "$1" ;;
+    add) github_add ;;
+    # Before accounts: on = gh's active login, off = log out of the account for new apps.
+    on) github_status >/dev/null; github_use "$(jq -r '.accounts[0].login // empty' "$GHSTATE")" ;;
+    off) github_logout "$(jq -r '.account // empty' "$GHSTATE")" ;;
     auto) [[ ${1:-} =~ ^(on|off)$ ]] || exit 1; ghs '.auto=($v == "on")' --arg v "$1" ;;
-    publish) need_app "${1:-}"; github_publish "$1" "${2:-private}" ;;
-    visibility) need_app "${1:-}"; github_visibility "$1" "${2:-}" ;;
+    publish) need_app "${1:-}"; git_lock; github_publish "$1" "${2:-private}" ;;
+    visibility) need_app "${1:-}"; git_lock; github_visibility "$1" "${2:-}" ;;
     check) need_app "${1:-}"; f=$(leak_check "$APPS/$1"); if [ -n "$f" ]; then echo "$f"; exit 1; else echo "nothing private found"; fi ;;
-    sync) github_sync ;;
-    *) echo "usage: apk-maker github status | on | off | auto on|off | publish <slug> [private|public] | visibility <slug> private|public | check <slug> | sync" >&2; exit 1 ;;
+    # Busy: the next sync, two minutes on, catches up.
+    sync) git_lock now || exit 0; github_sync ;;
+    *) echo "usage: apk-maker github status | use <login> | resume <login> | logout <login> | signout <login> | add | auto on|off | publish <slug> [private|public] | visibility <slug> private|public | check <slug> | sync" >&2; exit 1 ;;
   esac
 }
 
@@ -1009,7 +1172,8 @@ play_upload_key() {
   local pass name
   pass=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 28)
   name=$(jq -r '.label // .slug' "$APPS/$slug/.apkmaker.json" | tr -dc 'A-Za-z0-9 ._-' | head -c 40)
-  keytool -genkeypair -keystore "$KEYS/$slug.p12" -storetype PKCS12 -storepass "$pass" -keypass "$pass" -alias upload \
+  # The password goes in through the environment, not the command line, where other programs could read it.
+  KS_PASS=$pass keytool -genkeypair -keystore "$KEYS/$slug.p12" -storetype PKCS12 -storepass:env KS_PASS -keypass:env KS_PASS -alias upload \
     -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=${name:-$slug}, O=APK Maker" >> "$LOG" 2>&1 || return 1
   printf '%s\n' "$pass" > "$KEYS/$slug.pass"
   chmod 600 "$KEYS/$slug.p12" "$KEYS/$slug.pass"
@@ -1054,7 +1218,7 @@ play_build() {
   play_versions "$slug" "$vc" || { job failed "couldn't set the version in app/build.gradle.kts: see the log"; return 1; }
   build_fixing "$slug" "$agent" do_bundle "signed app bundle, version $PLAY_VN" || return 1
   save "$slug" "Google Play: version $PLAY_VN ($vc)"
-  if gh_on && [ -n "$(jq -r '.github.repo // empty' "$APPS/$slug/.apkmaker.json")" ]; then push_app "$slug" "$(git -C "$APPS/$slug" branch --show-current)" 2>> "$LOG"; fi
+  if app_gh "$slug"; then push_app "$slug" "$(git -C "$APPS/$slug" branch --show-current)" 2>> "$LOG"; fi
   true
 }
 
@@ -1185,7 +1349,11 @@ play_community() {
   c=$(curl -sfL --max-time 20 "$raw/community.json") && a=$(curl -sfL --max-time 20 "$raw/apps.json") \
     && jq -e 'type == "array"' <<< "$a" >/dev/null || { echo "couldn't reach the tester list" >&2; return 1; }
   tmp=$(mktemp "$CACHE/.community.XXXX")
-  jq -c --argjson a "$a" --argjson t "$(now)" '. + {apps:$a, fetched:$t, repo:"'"$COMMUNITY_REPO"'"}' <<< "$c" > "$tmp" && mv "$tmp" "$COMMUNITY"
+  # Anyone can list an app there: keep only well-formed entries, once each, with their text cut short.
+  jq -c --argjson a "$a" --argjson t "$(now)" '. + {fetched:$t, repo:"'"$COMMUNITY_REPO"'",
+      apps:([$a[] | objects | select((.pkg | type) == "string" and (.pkg | test("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$")) and (.pkg | length) <= 150)
+        | {pkg, name: ((.name // .pkg) | tostring | .[0:50]), description: ((.description // "") | tostring | .[0:300]), until: ((.until // "") | tostring | .[0:10])}]
+        | unique_by(.pkg))}' <<< "$c" > "$tmp" && mv "$tmp" "$COMMUNITY"
 }
 
 # The upload job: bundle, listing, graphics, release on the track, testers, commit.
@@ -1547,9 +1715,9 @@ case $cmd in
     start app "$slug" "$agent" "Change this Android app (read AGENTS.md first): $*
 You are done only when ./gradlew assembleRelease succeeds." ;;
   accept) need_app "${1:-}"; job_running && [ "$(jq -r .slug "$JOB")" = "$1" ] && { echo "$1 is still building: wait for it" >&2; exit 1; }
-    accept_change "$1" ;;
+    git_lock; accept_change "$1" ;;
   discard) need_app "${1:-}"; job_running && [ "$(jq -r .slug "$JOB")" = "$1" ] && { echo "$1 is still building: stop it first" >&2; exit 1; }
-    discard_change "$1" ;;
+    git_lock; discard_change "$1" ;;
   github) github_cmd "$@" ;;
   _app|_work) work "$@"; list_apps ;;
   _play-prepare) play_prepare "$@"; list_apps ;;
@@ -2419,16 +2587,17 @@ mv "$D/template/settings.gradle.kts.new" "$D/template/settings.gradle.kts"
 chmod +x "$D/bin/apk-maker"
 mkdir -p "$HOME/.local/bin" "$HOME/.cache/apk-maker"
 ln -sf "$D/bin/apk-maker" "$HOME/.local/bin/apk-maker"
-echo 10 > "$D/VERSION"
+echo 14 > "$D/VERSION"
 # The SDK and Gradle downloads take minutes: they run on their own and report to setup.json.
 setsid -f "$D/bin/apk-maker" setup >/dev/null 2>&1 < /dev/null
-echo apk-maker 10 installed""")
+echo apk-maker 14 installed""")
   }
   // installer:end
 
   // apk-maker prints a URL when a finished app has to come from the browser: open it.
   // `out` is cleared before each command, so the same URL twice still opens twice.
-  on out { openUrl = startsWith(trim(value ?? ""), "http") ? trim(value) : "" }
+  // Only the links the backend prints: its own downloads and pages, and the tester list on GitHub.
+  on out { openUrl = startsWith(trim(value ?? ""), "http://127.0.0.1:") || startsWith(trim(value ?? ""), "https://github.com/") ? trim(value) : "" }
   when openUrl != "" {
     url(openUrl)
     openUrl = ""
@@ -2608,33 +2777,58 @@ echo apk-maker 10 installed""")
   // The app's GitHub repo: private unless made public, which takes a second tap.
   component GitHubRow(a) {
     let g = a.github
+    let owner = g.account ?? split(g.repo ?? "", "/")[0]
+    // Not using the app's account (stopped, or signed out of it): the repo stays, APK Maker just doesn't push or check it.
+    let off = g != null && indexOf(gused, owner) < 0
+    let signedIn = indexOf(gnames, owner) >= 0
     Column {
       gap: 4
       Row {
         gap: 6
         align: center
-        Dot { c: g == null ? muted : g.blocked != null ? red : g.visibility == "public" ? yellow : green }
-        Text { text: g == null ? "not on GitHub" : "${g.repo} · ${g.visibility}"; style: small; font: mono; weight: 1; maxLines: 1 }
+        Dot { c: g == null ? muted : off ? orange : g.blocked != null ? red : g.visibility == "public" ? yellow : green }
+        Text { text: g == null ? "not on GitHub" : off ? "GitHub · ${owner} · not syncing" : "GitHub · ${owner} · ${g.visibility ?? "private"}"; style: small; color: off ? orange : foreground; weight: 1; maxLines: 1 }
       }
-      if g.blocked != null {
-        Text { text: "Not pushed, to keep it safe: ${g.blocked}. Remove it from the code (ask the agent), then it goes up with the next change."; style: small; color: red; maxLines: 4 }
+      if g != null {
+        Text { text: g.repo; style: small; font: mono; color: muted; maxLines: 1 }
       }
-      if g != null && g.visibility != "public" && now - publicAt < 5 {
+      if g == null && !(gon && gacct != null) {
+        Text { text: gconn ? "Pick a GitHub account for APK Maker on the setup tab to back this app up there." : "Connect GitHub on the setup tab to back this app up there (optional)."; style: small; color: muted; maxLines: 3 }
+      }
+      if off {
+        Text { text: signedIn ? "APK Maker isn't using ${owner}, so changes to this app stay on this phone and aren't sent to GitHub. Nothing was deleted." : "This phone is signed out of ${owner}, so changes to this app stay on this phone and aren't sent to GitHub. Nothing was deleted: sign in again to sync it."; style: small; color: muted; maxLines: 4 }
+      }
+      if g.blocked != null && !off {
+        Text { text: "Not sent to GitHub, to keep it safe: ${g.blocked}. Remove it (ask the agent, or discard the change), then it goes up with the next change."; style: small; color: red; maxLines: 4 }
+      }
+      if g != null && !off && g.visibility != "public" && now - publicAt < 5 {
         Text { text: "Public means anyone can see the code, its history and the pull requests (your change requests). APK Maker checks for keys and personal details first."; style: small; color: yellow }
       }
       Flow {
         gap: 6
         if g == null {
-          Button { text: "put on GitHub (private)"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github publish ${sh(a.slug)} private 2>&1") } }
+          if gon && gacct != null {
+            Button { text: "put on GitHub (private, ${gacct})"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github publish ${sh(a.slug)} private 2>&1") } }
+          } else {
+            Button { text: "set up GitHub"; onTap: { tab = "setup"; haptic() } }
+          }
         } else {
           Button { text: "open on GitHub"; onTap: url(g.url) }
-          if g.visibility == "public" {
-            Button { text: "make private"; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github visibility ${sh(a.slug)} private 2>&1") } }
-          } else {
-            if now - publicAt < 5 {
-              Button { text: "really make public?"; color: yellow; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github visibility ${sh(a.slug)} public 2>&1"); publicAt = 0 } }
+          if off {
+            if signedIn {
+              Button { text: "sync with ${owner} again"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github resume ${sh(owner)} 2>&1") } }
             } else {
-              Button { text: "make public"; onTap: { haptic(); publicAt = now } }
+              Button { text: "sign in to GitHub"; color: accent; onTap: terminal("~/.local/bin/apk-maker github add && echo 'Done: go back to the widget.'; exec bash", "GitHub") }
+            }
+          } else {
+            if g.visibility == "public" {
+              Button { text: "make private"; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github visibility ${sh(a.slug)} private 2>&1") } }
+            } else {
+              if now - publicAt < 5 {
+                Button { text: "really make public?"; color: yellow; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github visibility ${sh(a.slug)} public 2>&1"); publicAt = 0 } }
+              } else {
+                Button { text: "make public"; onTap: { haptic(); publicAt = now } }
+              }
             }
           }
         }
@@ -2642,6 +2836,57 @@ echo apk-maker 10 installed""")
     }
   }
 
+  // A GitHub login on this phone: whether APK Maker uses it, its apps, and use / stop using / sign out.
+  component GhAccount(l) {
+    let used = indexOf(gused, l) >= 0
+    let n = len(list.filter(a => a.github != null && (a.github.account ?? split(a.github.repo ?? "", "/")[0]) == l))
+    let asking = signL == l && now - signAt < 5
+    Column {
+      gap: 6
+      padding: 8
+      radius: 8 * corners
+      border: 1
+      borderColor: l == gacct ? green : border
+      Row {
+        gap: 6
+        align: center
+        Dot { c: used ? green : muted }
+        Text { text: l; bold: true; font: mono; style: small; weight: 1; maxLines: 1 }
+        Text { text: l == gacct ? "new apps go here" : used ? "in use" : "not used"; style: small; color: used ? green : muted; maxLines: 1 }
+      }
+      Text { text: "${n == 0 ? "no apps" : n == 1 ? "1 app" : "${n} apps"} on GitHub with this account${n > 0 && !used ? ", not syncing" : ""}"; style: small; color: muted; maxLines: 2 }
+      if asking {
+        Text { text: "Sign this phone out of ${l}? Other tools here that use GitHub are signed out of it too. You can sign in again with \"add another account\"."; style: small; color: red }
+      }
+      Flow {
+        gap: 6
+        if l != gacct {
+          Button { text: "use for new apps"; color: accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github use ${sh(l)} 2>&1") } }
+        }
+        if used {
+          Button { text: "stop using"; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github logout ${sh(l)} 2>&1") } }
+        }
+        if asking {
+          Button { text: "really sign out?"; color: red; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github signout ${sh(l)} 2>&1"); signL = "" } }
+        } else {
+          Button { text: "sign out"; color: red; onTap: { haptic(); signL = l; signAt = now } }
+        }
+      }
+    }
+  }
+
+  // One line on every app card: on GitHub or not, with which account, and whether it syncs.
+  component GhLine(a) {
+    let g = a.github
+    let owner = g.account ?? split(g.repo ?? "", "/")[0]
+    let off = g != null && indexOf(gused, owner) < 0
+    Row {
+      gap: 6
+      align: center
+      Dot { c: g == null ? alpha(muted, 0.5) : off ? orange : g.blocked != null ? red : green }
+      Text { text: g == null ? "not on GitHub" : off ? "GitHub · ${owner} · not syncing" : "GitHub · ${owner} · ${g.visibility ?? "private"}"; style: small; color: g == null ? muted : off ? orange : foreground; weight: 1; maxLines: 1 }
+    }
+  }
   component AppRow(a) {
     Row {
       align: center
@@ -3052,6 +3297,9 @@ echo apk-maker 10 installed""")
                   Pill { s: a.status == "building" && !(busy && a.slug == job.slug) ? "stalled" : a.pending != null && a.pending.built == true && a.status != "building" ? "review" : a.status }
                 }
                 Text { text: "${a.agent ?? "?"} · ${len(a.history ?? [])} runs · ${fmtTime(a.updated, "MMM d HH:mm")}"; style: small; color: muted; maxLines: 1 }
+                if picked.slug != a.slug {
+                  GhLine { a: a }
+                }
                 if picked.slug == a.slug {
                   let hist = last(a.history ?? [])
                   if hist.prompt != null {
@@ -3061,9 +3309,7 @@ echo apk-maker 10 installed""")
                     Review { a: a }
                   }
                   Actions { a: a }
-                  if gon {
-                    GitHubRow { a: a }
-                  }
+                  GitHubRow { a: a }
                   Input {
                     text: change
                     placeholder: busy ? "wait for ${jname}…" : a.pending != null ? "accept or discard the change first" : "ask ${agent} to change it…"
@@ -3189,27 +3435,32 @@ echo apk-maker 10 installed""")
           Row {
             gap: 6
             align: center
-            Dot { c: gon ? green : gconn ? yellow : muted }
-            Text { text: gon ? "connected as ${gh.login}" : gconn ? "the GitHub CLI is logged in as ${gh.login}: not used until you turn it on" : gh.state == "missing" ? "the GitHub CLI isn't installed: install the github-cli package, then check" : "not connected"; style: small; weight: 1; maxLines: 2 }
+            Dot { c: gacct != null ? green : gconn ? yellow : muted }
+            Text { text: gacct != null ? "new apps go to ${gacct}" : gconn ? "signed in on this phone as ${join(gnames, ", ")}: not used until you pick an account" : gh.state == "missing" ? "the GitHub CLI isn't installed: install the github-cli package, then check" : "not connected"; style: small; weight: 1; maxLines: 2 }
           }
-          Text { text: "Every change waits for you to accept or discard it, with or without GitHub. With GitHub, each app's code is also backed up online in its own place on your GitHub account (private unless you make it public), and you can read every change there before you accept it."; style: small; color: muted }
-          Text { text: "Before every push APK Maker checks the code and its history for keys, passwords, your emails and this phone's paths, and refuses if it finds any. This phone's settings, the app's history, Play details, upload keys and screenshots never go to GitHub, and commits are signed apk-maker, not with your name."; style: small; color: muted }
-          if gconn && !gon {
-            Text { text: "Tap \"use GitHub for my apps\" to let APK Maker save your apps' code to this GitHub account. Until then it doesn't touch the account."; style: small }
+          if gh.msg != null && gh.msg != "" {
+            Text { text: gh.msg; style: small; color: yellow }
           }
-          if gon {
-            Text { text: "\"Stop using GitHub\": APK Maker stops sending anything to GitHub. Your apps and what's already on GitHub stay as they are."; style: small }
-            Text { text: gh.auto != false ? "\"Save new apps to GitHub\" is on: each new app is saved privately to your GitHub account right after its first build. Tap it to keep new apps only on this phone; you can still put one on GitHub later from its page." : "\"Save new apps to GitHub\" is off: new apps stay only on this phone until you tap \"put on GitHub\" on an app's page. Tap it to save every new app to GitHub on its own."; style: small }
+          // One card per GitHub login on this phone: use it, stop using it, or sign the phone out of it.
+          if gconn {
+            Text { text: gacct == null ? "Tap \"use for new apps\" on an account to let APK Maker save your apps' code there. Until then it doesn't touch any account." : "Apps already on GitHub keep syncing with the account they're on; new apps go to the one marked \"new apps go here\"."; style: small }
+            for l in gnames key l {
+              GhAccount { l: l }
+            }
+            Text { text: "\"Stop using\": APK Maker stops sending changes to that account and checking it for merged changes, but the phone stays signed in. \"Sign out\": this phone forgets the GitHub login, so other tools here that use GitHub (such as the coding agents) lose it too. Either way nothing is deleted: your apps stay on this phone and their copies on GitHub stay as they are."; style: small; color: muted }
+          }
+          if gacct != null {
+            Text { text: gh.auto != false ? "\"Save new apps to GitHub\" is on: each new app is saved privately to ${gacct} right after its first build. Tap it to keep new apps only on this phone; you can still put one on GitHub later from its page." : "\"Save new apps to GitHub\" is off: new apps stay only on this phone until you tap \"put on GitHub\" on an app's page. Tap it to save every new app to GitHub on its own."; style: small }
           }
           Flow {
             gap: 6
             if !gconn {
               if gh.state != "missing" {
-                Button { text: "connect GitHub"; color: accent; onTap: terminal("gh auth login -h github.com -p https -w && ~/.local/bin/apk-maker github status >/dev/null && ~/.local/bin/apk-maker github on >/dev/null && echo 'Connected: go back to the widget.'; exec bash", "GitHub") }
+                Button { text: "connect GitHub"; color: accent; onTap: terminal("~/.local/bin/apk-maker github add && echo 'Connected: go back to the widget.'; exec bash", "GitHub") }
               }
             } else {
-              Button { text: gon ? "stop using GitHub" : "use GitHub for my apps"; color: gon ? foreground : accent; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github ${sh(gon ? "off" : "on")} 2>&1") } }
-              if gon {
+              Button { text: "add another account"; onTap: terminal("~/.local/bin/apk-maker github add && echo 'Done: go back to the widget.'; exec bash", "GitHub") }
+              if gacct != null {
                 Button { text: gh.auto != false ? "save new apps to GitHub ✓" : "save new apps to GitHub"; color: gh.auto != false ? green : foreground; onTap: { haptic(); out = ""; out = run("~/.local/bin/apk-maker github auto ${sh(gh.auto != false ? "off" : "on")} 2>&1") } }
               }
             }
