@@ -4,7 +4,7 @@ widget "Agentic APK Maker" {
   size: 6x5
   minSize: 3x3
 
-  meta { owl: 7; description: "Describe an app: Claude Code, Codex or OpenCode writes it, builds it on your phone and installs it. Review every change, keep apps on GitHub, publish to Google Play."; version: "2.11"; license: "MIT"; category: "dev" }
+  meta { owl: 7; description: "Describe an app: Claude Code, Codex or OpenCode writes it, builds it on your phone and installs it. Review every change, keep apps on GitHub, publish to Google Play."; version: "2.12"; license: "MIT"; category: "dev" }
 
   requires { pacman: ["jq", "git", "curl", "unzip", "util-linux", "jdk17-openjdk", "android-tools", "openssl"] }
 
