@@ -124,6 +124,10 @@ widget "google calendar" {
   let tileLines = lines.take(max(2, (rows ?? 4) * 3))
   let tileFit = len(tileLines) > 0 && last(tileLines).h ? tileLines.take(len(tileLines) - 1) : tileLines
   let todayCount = count(upcoming, e => e.d == dayKeys[0])
+  // Two columns wide there's no room for a time column, so each event gets its day and time
+  // under the title instead (m1n1m0th42's small layout, from #52).
+  let narrow = (cols ?? 3) < 3
+  let narrowFit = upcoming.take(max(2, (rows ?? 2) * 2 - 1))
   let errCount = len(keys(data.errors ?? {}))
 
   // Quick add, from m1n1m0th42's calendar widget (store PR #52, MIT): turns "dentist friday at 3pm"
@@ -273,6 +277,31 @@ widget "google calendar" {
       Spacer { weight: 1 }
       Text { text: "nothing in the next ${days} days"; style: small; color: muted; align: center }
       Spacer { weight: 1 }
+    } else if narrow {
+      Column {
+        gap: 5
+        weight: 1
+        clip: true
+        for l in narrowFit {
+          Row {
+            gap: 6
+            align: center
+            Spacer { width: 3; height: 30; radius: 2; background: l.tint }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: l.t; style: small; maxLines: 1 }
+              Text {
+                text: (l.d == dayKeys[0] ? "today" : l.d == dayKeys[1] ? "tmrw" : lower(fmtTime(l.a ? now + indexOf(dayKeys, l.d) * 86400 : l.s, "EEE d"))) + (l.a ? "" : " · " + l.when)
+                style: small
+                fontSize: 11
+                color: l.when == "now" ? accent : muted
+                maxLines: 1
+              }
+            }
+          }
+        }
+      }
     } else {
       Column {
         gap: 3
@@ -286,9 +315,7 @@ widget "google calendar" {
               gap: 6
               align: center
               Spacer { width: 3; height: 16; radius: 2; background: l.tint }
-              if (cols ?? 3) >= 3 {
-                Text { text: l.when; style: small; color: l.when == "now" ? accent : muted; width: 58; maxLines: 1 }
-              }
+              Text { text: l.when; style: small; color: l.when == "now" ? accent : muted; width: 58; maxLines: 1 }
               Text { text: l.t; style: small; weight: 1; maxLines: 1 }
             }
           }
@@ -299,7 +326,7 @@ widget "google calendar" {
 
   // ---------- full screen ----------
   screen {
-    title: "google calendar"
+    title: "calendar"
     Column {
       gap: 10
       padding: 4
