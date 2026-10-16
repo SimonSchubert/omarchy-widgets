@@ -1,12 +1,13 @@
-widget "persik kediri" {
-  meta { owl: 5; description: "Persik Kediri di Super League Indonesia: posisi, form, laga berikutnya dan klasemen, dari FotMob"; version: "2.1"; license: "MIT"; category: "sport" }
+widget "liga indonesia" {
+  meta { owl: 5; description: "Klub favoritmu (default Persik Kediri) di Super League Indonesia: posisi, form, laga berikutnya dan klasemen, dari FotMob"; version: "2.2"; license: "MIT"; category: "sport" }
   size: 6x5
   minSize: 3x3
 
   requires { pacman: ["curl", "jq"] }
 
-  // The club to follow, by FotMob team id (Persik Kediri); also set it in the jq --arg below.
-  let clubId = 165197
+  // The club to follow, by FotMob team id (default Persik Kediri). Pick another in the
+  // screen's "ganti" tab, or from a script: owl-send 70-liga-indonesia.owl set clubId <id>
+  state clubId = 165197 persist
 
   // FotMob's league page carries the whole season (table + every fixture) in __NEXT_DATA__.
   // Team crests are cached once in ~/.cache/liga-id/<team id>.png.
@@ -14,13 +15,19 @@ widget "persik kediri" {
     d=~/.cache/liga-id; mkdir -p "$d"
     curl -fs --compressed -m 25 -A Mozilla/5.0 https://www.fotmob.com/leagues/8983/overview/super-league \
     | sed -n 's/.*<script id="__NEXT_DATA__" type="application\/json">\(.*\)<\/script>.*/\1/p' \
-    | jq -c --arg club 165197 '
+    | jq -c '
       def nm: sub(" F\\.?C\\.?$"; "");
       def tm: .utcTime | sub("\\.[0-9]+Z$"; "Z") | fromdate;
       .props.pageProps as $p
       | ($p.fixtures.allMatches | map({id, round, h: (.home.shortName | nm), a: (.away.shortName | nm),
-          hid: .home.id, aid: .away.id, t: (.status | tm), s: .status.scoreStr, fin: .status.finished,
-          live: (.status.started and (.status.finished | not)), min: (.status.liveTime.short // null)})) as $m
+          hid: (.home.id | tonumber), aid: (.away.id | tonumber), t: (.status | tm), s: .status.scoreStr,
+          fin: .status.finished, live: (.status.started and (.status.finished | not)),
+          min: (.status.liveTime.short // null)}
+        # hr: the result from the home side, for whichever club the widget follows.
+        | if .s and (.fin or .live) then
+            (.s | split(" - ") | map(tonumber? // 0)) as $g
+            | . + {hr: (if $g[0] > $g[1] then "W" elif $g[0] < $g[1] then "L" else "D" end)}
+          else . end)) as $m
       | {season: $p.details.selectedSeason,
          round: ($m | map(select(.fin | not)) | sort_by(.t) | first | .round // null),
          table: [$p.table[0].data.table.all[] | {r: .idx, n: (.shortName | nm), id, p: .played, w: .wins,
@@ -28,13 +35,7 @@ widget "persik kediri" {
          live: ($m | map(select(.live))),
          next: ($m | map(select((.fin or .live) | not)) | sort_by(.t) | .[0:9]),
          last: ($m | map(select(.fin)) | sort_by(.t) | .[-9:] | reverse),
-         club: ($m | map(select(.hid == $club or .aid == $club)) | sort_by(.t) | map(
-           . + {home: (.hid == $club)}
-           | if .s and (.fin or .live) then
-               (.s | split(" - ") | map(tonumber? // 0)) as $g
-               | ((if .home then $g[0] - $g[1] else $g[1] - $g[0] end)) as $diff
-               | . + {res: (if $diff > 0 then "W" elif $diff < 0 then "L" else "D" end)}
-             else . end))}' > "$d/data.tmp"
+         matches: ($m | sort_by(.t))}' > "$d/data.tmp"
     # jq exits 0 on empty input, so keep the last good copy unless this one has data.
     [ -s "$d/data.tmp" ] && mv -f "$d/data.tmp" "$d/data.json"
     [ -s "$d/data.json" ] || exit 1
@@ -48,7 +49,12 @@ widget "persik kediri" {
   let table = liga.table ?? []
   let live = liga.live ?? []
   let club = table.find(t => t.id == clubId)
-  let games = liga.club ?? []
+  let clubName = club.n == "Persik" ? "Persik Kediri" : club.n
+  let games = (liga.matches ?? []).filter(m => m.hid == clubId || m.aid == clubId).map(m => {
+    id: m.id, round: m.round, h: m.h, a: m.a, hid: m.hid, aid: m.aid, t: m.t, s: m.s,
+    fin: m.fin, live: m.live, min: m.min, home: m.hid == clubId,
+    res: m.hr == null ? null : m.hid == clubId ? m.hr : m.hr == "W" ? "L" : m.hr == "L" ? "W" : "D"
+  })
   let played = games.filter(m => m.fin)
   let upcoming = games.filter(m => !m.fin && !m.live)
   let liveGame = games.find(m => m.live)
@@ -58,7 +64,7 @@ widget "persik kediri" {
   // The club's neighbours in the table: one or two above and below.
   let aroundN = (rows ?? 5) >= 6 ? 5 : 3
   let around = table.drop(clamp((club.r ?? 1) - 1 - floor(aroundN / 2), 0, max(0, len(table) - aroundN))).take(aroundN)
-  state tab = "persik"
+  state tab = "klub"
 
   onTap: screen()
 
@@ -118,7 +124,7 @@ widget "persik kediri" {
     Row {
       gap: 6
       align: center
-      Text { text: m.h; fontSize: fs; maxLines: fs >= 13 ? 2 : 1; weight: 1; align: end; bold: m.hid == "${clubId}" }
+      Text { text: m.h; fontSize: fs; maxLines: fs >= 13 ? 2 : 1; weight: 1; align: end; bold: m.hid == clubId }
       Crest { id: m.hid }
       Column {
         gap: 0
@@ -132,7 +138,7 @@ widget "persik kediri" {
         }
       }
       Crest { id: m.aid }
-      Text { text: m.a; fontSize: fs; maxLines: fs >= 13 ? 2 : 1; weight: 1; bold: m.aid == "${clubId}" }
+      Text { text: m.a; fontSize: fs; maxLines: fs >= 13 ? 2 : 1; weight: 1; bold: m.aid == clubId }
     }
   }
 
@@ -162,7 +168,7 @@ widget "persik kediri" {
         Column {
           gap: 0
           weight: 1
-          Text { text: club.n == "Persik" ? "Persik Kediri" : club.n; style: title; maxLines: 1 }
+          Text { text: clubName; style: title; maxLines: 1 }
           Text { text: "super league · pekan ${liga.round ?? "-"}"; style: muted; maxLines: 1 }
         }
         Column {
@@ -211,21 +217,38 @@ widget "persik kediri" {
   }
 
   screen {
-    title: club.n == "Persik" ? "Persik Kediri" : (club.n ?? "super league")
+    title: clubName ?? "super league"
     Column {
       gap: 8
       padding: 12
       Row {
         gap: 6
-        TabButton { name: "persik" }
+        TabButton { name: "klub" }
         TabButton { name: "tabel" }
         TabButton { name: "liga" }
+        TabButton { name: "ganti" }
       }
       Column {
         scroll: true
         weight: 1
         gap: 8
-        if tab == "tabel" {
+        if tab == "ganti" {
+          // Pick the club to follow; the choice is kept across restarts.
+          Text { text: "pilih tim favorit"; style: label; color: accent }
+          for t in table.sortBy(t => lower(t.n)) key t.id {
+            Row {
+              gap: 10
+              align: center
+              padding: [8, 6]
+              radius: 6
+              background: t.id == clubId ? alpha(accent, 0.18) : null
+              onTap: { clubId = t.id; tab = "klub" }
+              Crest { id: t.id; sz: 24 }
+              Text { text: t.n == "Persik" ? "Persik Kediri" : t.n; weight: 1; maxLines: 1; bold: t.id == clubId; color: t.id == clubId ? accent : foreground }
+              Text { text: "#${t.r}"; style: small; color: muted; width: 36; align: end }
+            }
+          }
+        } else if tab == "tabel" {
           TableHead { full: true }
           for t in table key t.id { TableRow { t: t; full: true } }
           Spacer { height: 4 }
@@ -283,7 +306,7 @@ widget "persik kediri" {
           }
         }
       }
-      Button { text: "buka di fotmob"; onTap: url("https://www.fotmob.com/teams/${int(clubId)}/overview/persik") }
+      Button { text: "buka di fotmob"; onTap: url("https://www.fotmob.com/teams/${int(clubId)}/overview/${lower(replace(club.n ?? "team", " ", "-"))}") }
     }
   }
 }
