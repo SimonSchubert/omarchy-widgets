@@ -4,7 +4,7 @@ widget "Agentic APK Maker" {
   size: 6x5
   minSize: 3x3
 
-  meta { owl: 7; description: "Describe an Android app in a sentence: Claude Code, Codex or OpenCode writes it, builds it right on your phone and installs it. Sets up the Android SDK and Gradle for you."; version: "2.2"; license: "MIT"; category: "dev" }
+  meta { owl: 7; description: "Describe an Android app in a sentence: Claude Code, Codex or OpenCode writes it, builds it right on your phone and installs it. Sets up the Android SDK and Gradle for you."; version: "2.3"; license: "MIT"; category: "dev" }
 
   requires { pacman: ["jq", "git", "curl", "unzip", "util-linux", "jdk17-openjdk", "android-tools"] }
 
@@ -53,7 +53,7 @@ widget "Agentic APK Maker" {
   let busy = phase == "queued" || phase == "agent" || phase == "building" || phase == "fixing" || phase == "installing"
 
   // The backend this widget carries; an older or missing one is (re)installed.
-  let backendVersion = 4
+  let backendVersion = 5
   let needInstall = ver != null && num(trim(ver), 0) < backendVersion
   // `worker` polls every 5s, so a setup that just started (or is about to) counts as alive.
   let setupAlive = worker == null || words(worker)[1] == "alive" || now - (setup.updated ?? 0) < 20 || now - installedAt < 20
@@ -151,7 +151,7 @@ cat > "$D/bin/apk-maker.new" <<'APKMAKER_FILE_EOF'
 # log.txt (current job's log), setup.json and setup.log. Apps live in ~/apps/<slug>.
 set -uo pipefail
 
-VERSION=4
+VERSION=5
 # Bumped only when the toolchain changes, so a script update doesn't redo the test build.
 TOOLCHAIN=2
 DATA=${APKMAKER_HOME:-$HOME/.local/share/apk-maker}
@@ -323,6 +323,9 @@ project() {
 
 scaffold() {
   local slug=$1 dir="$APPS/$1" pkg="com.apkmaker.${1//-/_}"
+  # A package segment must start with a letter and not be a Java keyword ("2048-game", "class").
+  [[ ${pkg##*.} =~ ^([0-9].*|abstract|assert|boolean|break|byte|case|catch|char|class|const|continue|default|do|double|else|enum|extends|final|finally|float|for|goto|if|implements|import|instanceof|int|interface|long|native|new|package|private|protected|public|return|short|static|strictfp|super|switch|synchronized|this|throw|throws|transient|try|void|volatile|while|true|false|null)$ ]] \
+    && pkg="com.apkmaker.app_${pkg##*.}"
   local label; label=$(sed 's/-/ /g; s/\b\(.\)/\u\1/g' <<< "$slug")
   project "$dir" "$pkg" "$slug" "$label"
   cp "$DATA/AGENTS.md" "$dir/AGENTS.md"; ln -s AGENTS.md "$dir/CLAUDE.md"
@@ -875,10 +878,10 @@ mv "$D/template/settings.gradle.kts.new" "$D/template/settings.gradle.kts"
 chmod +x "$D/bin/apk-maker"
 mkdir -p "$HOME/.local/bin" "$HOME/.cache/apk-maker"
 ln -sf "$D/bin/apk-maker" "$HOME/.local/bin/apk-maker"
-echo 4 > "$D/VERSION"
+echo 5 > "$D/VERSION"
 # The SDK and Gradle downloads take minutes: they run on their own and report to setup.json.
 setsid -f "$D/bin/apk-maker" setup >/dev/null 2>&1 < /dev/null
-echo apk-maker 4 installed""")
+echo apk-maker 5 installed""")
   }
   // installer:end
 
