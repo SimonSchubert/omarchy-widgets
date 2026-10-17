@@ -217,7 +217,8 @@ status() {
   if [ -d "$REPO/.git" ]; then
     has=true
     remote=$(g remote get-url origin 2>/dev/null | sed -E 's#^https://github.com/##; s#\.git$##')
-    sync
+    # skipped while save/restore holds the lock, or it would put the live files back mid-restore
+    ( flock -n 9 && sync ) 9>~/.cache/owl-layout.lock
     changes=$(g status --porcelain | grep -c . || true)
     changed=$(g status --porcelain | sed 's/^...//' | head -20 | jq -R . | jq -s .)
     if g rev-parse -q --verify "origin/$BRANCH" >/dev/null; then ahead=$(g rev-list --count "origin/$BRANCH..HEAD")
@@ -239,7 +240,7 @@ case $cmd in
   status) status ;;
   *)
     exec 9>~/.cache/owl-layout.lock
-    flock -n 9 || die "another backup action is still running"
+    flock -w 20 9 || die "another backup action is still running"
     case $cmd in
       save) save "$1" ;; upload) upload "$1" ;; bundle) bundle "$1" ;;
       login) login ;; link) link "$1" ;; restore) restore ;;
@@ -249,7 +250,7 @@ esac
 OWL_LAYOUT_EOF
     cmp -s "$n" ~/.local/bin/owl-layout || { mkdir -p ~/.local/bin && cp "$n" ~/.local/bin/owl-layout && chmod +x ~/.local/bin/owl-layout; }
     bash ~/.local/bin/owl-layout status
-  """) every 30s json timeout 30s
+  """) every 5m json timeout 30s
   source log = file("~/.cache/owl-layout.log")
   source setupFile = file("~/omalauncher-setup.sh")
   source now = clock every 1m
