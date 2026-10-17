@@ -1,7 +1,7 @@
 widget "radio" {
   size: 6x2
-  minSize: 3x2
-  meta { description: "World radio: pick a country, then one of its most popular stations, and it plays in the background with the current track"; version: "1.0"; license: "MIT"; category: "media"; owl: 8 }
+  minSize: 3x1
+  meta { description: "World radio: pick a country, then one of its most popular stations, and it plays in the background with the current track"; version: "1.1"; license: "MIT"; category: "media"; owl: 8 }
 
   // mpg123 is the player because mpv and ffmpeg pull in bubblewrap, which can't run here.
   // It only plays MP3, so the station lists ask radio-browser for MP3 streams.
@@ -87,6 +87,28 @@ widget "radio" {
     }
   }
 
+  // One row high: flag, name and track on two lines, play button.
+  if (rows ?? 2) < 2 {
+    Row {
+      align: center
+      gap: 10
+      fill: true
+      Flag { code: flag; w: 28 }
+      Column {
+        weight: 1
+        gap: 0
+        Row { gap: 6; align: center
+          if playing { Equalizer { } }
+          Text { text: station == null ? "radio" : station.name; bold: true; maxLines: 1; weight: 1 }
+        }
+        Text {
+          text: station == null ? "tap to pick a station" : playing ? (track != "" ? track : "playing") : "stopped"
+          style: small; color: playing ? foreground : muted; maxLines: 1
+        }
+      }
+      if station != null { PlayButton { on: playing } }
+    }
+  } else {
   Row {
     align: center
     gap: 12
@@ -111,6 +133,7 @@ widget "radio" {
       }
     }
     if station != null { PlayButton { on: playing } }
+  }
   }
 
   screen {
