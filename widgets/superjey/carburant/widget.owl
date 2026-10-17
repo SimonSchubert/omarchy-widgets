@@ -130,7 +130,8 @@ widget "carburant" {
           borderColor: border
           radius: 8 * (corners ?? 1)
           padding: [8, 6]
-          onTap: url("geo:${r.lat},${r.lon}?q=${sh("station essence ${r.name} ${r.city}")}")
+          // enc() needs owl 8, so the few characters that would break the geo: query are escaped by hand
+          onTap: url("geo:${r.lat},${r.lon}?q=${replace(replace(replace(replace("station essence ${r.name} ${r.city}", "%", "%25"), "&", "%26"), "#", "%23"), " ", "%20")}")
           Column {
             gap: 0
             weight: 1
