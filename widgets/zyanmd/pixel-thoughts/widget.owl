@@ -52,12 +52,7 @@ EOF
   let skyMode = isLight ? "day" : isSunset ? "sunset" : isAurora ? "aurora" : "night"
 
   let fileNotes = (rawNotes == null || rawNotes == "" || rawNotes == []) ? [] : rawNotes
-  let fallbackNotes = [
-    {"id": 1729166000, "text": "bintang-bintang pixel di langit malam ✨", "time": 1729166000},
-    {"id": 1729165000, "text": "catat apa saja yang terpikirkan hari ini 💭", "time": 1729165000},
-    {"id": 1729164000, "text": "ide cemerlang selalu datang tiba-tiba 💡", "time": 1729164000}
-  ]
-  let notes = len(fileNotes) > 0 ? fileNotes : fallbackNotes
+  let notes = fileNotes
   let totalNotes = len(notes)
   let validIndex = totalNotes > 0 ? (noteIndex % totalNotes + totalNotes) % totalNotes : 0
   let currentNote = totalNotes > 0 ? notes[validIndex] : {"text": "belum ada catatan", "time": now}
