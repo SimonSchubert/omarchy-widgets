@@ -13,12 +13,12 @@ A responsive and dynamic home-screen photo widget for Omalauncher.
   - Cloud share links with automatic direct-link resolution (Google Drive, Dropbox, Imgur).
   - Android device storage (`/storage/...`, `~/Pictures`).
 - **Interactive Configuration**: Tap the widget to open a full-screen sheet with real-time download status, high-resolution preview, and quick access to device pictures.
-- **Duplicate Manager**: Easily duplicate or clean up multiple photo widgets across your home-screen pages.
 
 ## Requirements
 
 Declared in `requires`:
 - `python`
+- `python-pillow`
 - `curl`
 
 ## Author
