@@ -1,0 +1,86 @@
+widget "quran" {
+  size: 6x3
+  minSize: 3x2
+  requires { pacman: [] }
+  meta {
+    owl: 7
+    description: "A Quran ayah in Arabic with an English translation. Tap for the full ayah with copy and share. Keeps the last ayah when offline."
+    version: "1.0"
+    license: "MIT"
+    category: "news"
+  }
+
+  source day = http("https://ummahapi.com/api/quran/random?translations=en&script=uthmani") every 2h json timeout 10s
+  state last = null persist
+
+  let fresh = day.arabic == null || day.translations.en == null
+    ? null
+    : {
+        arabic: trim(replace(day.arabic, "\n", " ")),
+        text: trim(replace(day.translations.en, "\n", " ")),
+        ref: day.surah_name + " " + day.surah_number + ":" + day.ayah_number
+      }
+
+  let shown = fresh ?? last
+  let long = len(shown.text ?? "") > 180
+
+  // Keep the last ayah so the tile still has one offline
+  on fresh.text { last = fresh }
+
+  onTap: screen()
+
+  Column {
+    gap: 6
+    Row {
+      align: center
+      Text {
+        text: fresh == null && last != null ? "last ayah" : "ayah of the day"
+        style: label
+        color: muted
+        weight: 1
+      }
+      Text { text: "QURAN"; style: label; color: accent; width: 48; align: end }
+    }
+    Text {
+      text: shown.arabic ?? "…"
+      style: body
+      fontSize: 19
+      maxLines: 2
+      align: end
+    }
+    Text {
+      text: shown.text ?? "…"
+      style: body
+      fontSize: long ? 13 : 15
+      maxLines: long ? 3 : 2
+      italic: true
+      weight: 1
+    }
+    Text { text: shown.ref ?? ""; style: label; color: accent; align: end }
+  }
+
+  screen {
+    title: "${shown.ref ?? "Quran ayah"}"
+    Column {
+      scroll: true
+      gap: 12
+      padding: 8
+      Text { text: shown.arabic ?? "…"; style: body; fontSize: 26; maxLines: 60; align: end }
+      Text { text: shown.text ?? "…"; style: body; fontSize: 20; maxLines: 60 }
+      Text { text: shown.ref ?? ""; color: accent }
+      Row {
+        gap: 8
+        Button {
+          text: "copy"
+          onTap: { copy("${shown.arabic}\n${shown.text} — ${shown.ref}"); haptic() }
+        }
+        Button {
+          text: "share"
+          onTap: share("${shown.arabic}\n${shown.text} — ${shown.ref}")
+        }
+        Button { text: "close"; onTap: close() }
+      }
+      Text { text: "Quran text and translation from UmmahAPI"; style: small; color: muted }
+    }
+  }
+}
