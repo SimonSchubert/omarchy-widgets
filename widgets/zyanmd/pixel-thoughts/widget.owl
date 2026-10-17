@@ -8,7 +8,7 @@ widget "pixel thoughts" {
   meta {
     owl: 8
     description: "Catatan pikiran spontan memanjang dengan latar belakang animasi langit pixel adaptif tema."
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "productivity"
     author: "zyanmd"
@@ -41,7 +41,9 @@ EOF
   source themeName = file("~/.local/state/omarchy/current/theme.name")
   source themeColors = file("~/.local/state/omarchy/current/theme/colors.toml")
 
-  state noteIndex = 0
+  state textFont = "mono" persist
+  state switchSpeed = 8 persist
+  state manualOffset = 0 persist
   state filterQuery = ""
 
   let activeTheme = lower(themeName != "" ? themeName : (sys.theme ?? ""))
@@ -51,13 +53,12 @@ EOF
 
   let skyMode = isLight ? "day" : isSunset ? "sunset" : isAurora ? "aurora" : "night"
 
-  let fileNotes = (rawNotes == null || rawNotes == "" || rawNotes == []) ? [] : rawNotes
-  let notes = fileNotes
+  let notes = (rawNotes == null || rawNotes == "" || rawNotes == []) ? [] : rawNotes
   let totalNotes = len(notes)
-  let validIndex = totalNotes > 0 ? (noteIndex % totalNotes + totalNotes) % totalNotes : 0
-  let currentNote = totalNotes > 0 ? notes[validIndex] : {"text": "belum ada catatan", "time": now}
-
-  every 12s { noteIndex = totalNotes > 0 ? (noteIndex + 1) % totalNotes : 0 }
+  let currentNow = now ?? 0
+  let autoStep = (totalNotes > 1 && switchSpeed > 0) ? floor(currentNow / switchSpeed) : 0
+  let validIndex = totalNotes > 0 ? ((autoStep + manualOffset) % totalNotes + totalNotes) % totalNotes : 0
+  let currentNote = totalNotes > 0 ? notes[validIndex] : {"text": "tulis pikiran kamu…", "time": currentNow}
 
   // --- 1. BACKGROUND SIANG: AWAN PIXEL & MATAHARI (UNTUK TEMA PUTIH/TERANG) ---
   component DaytimeBackground() {
@@ -400,17 +401,81 @@ EOF
 
     Column {
       fill: true
-      padding: [22, 14]
+      padding: [18, 12]
       justify: center
       align: center
 
       Text {
         text: currentNote.text ?? "tulis pikiran kamu…"
+        font: textFont
         style: title
         bold: true
         align: center
         maxLines: 3
         color: foreground
+      }
+
+      if totalNotes > 1 {
+        Spacer { height: 6 }
+        Row {
+          align: center
+          justify: center
+          gap: 12
+
+          Box {
+            width: 32
+            padding: [4, 2]
+            radius: 4 * (corners ?? 1)
+            background: alpha(surface, 0.45)
+            align: center
+            onTap: {
+              manualOffset = manualOffset - 1
+              haptic()
+            }
+            Text {
+              text: "‹"
+              font: mono
+              bold: true
+              fontSize: 14
+              align: center
+              color: isLight ? "#1d4e89" : alpha(foreground, 0.8)
+            }
+          }
+
+          Text {
+            text: "${validIndex + 1} / ${totalNotes}"
+            width: 54
+            font: mono
+            fontSize: 10
+            bold: true
+            align: center
+            color: isLight ? alpha("#1d4e89", 0.8) : alpha(foreground, 0.6)
+            onTap: {
+              manualOffset = manualOffset + 1
+              haptic()
+            }
+          }
+
+          Box {
+            width: 32
+            padding: [4, 2]
+            radius: 4 * (corners ?? 1)
+            background: alpha(surface, 0.45)
+            align: center
+            onTap: {
+              manualOffset = manualOffset + 1
+              haptic()
+            }
+            Text {
+              text: "›"
+              font: mono
+              bold: true
+              fontSize: 14
+              align: center
+              color: isLight ? "#1d4e89" : alpha(foreground, 0.8)
+            }
+          }
+        }
       }
     }
   }
@@ -445,6 +510,145 @@ EOF
             placeholder: "Ketik ide, catatan, atau isi kepala kamu…"
             clear: true
             onSubmit: run("dir=~/.local/share/pixel-thoughts; f=\"$dir/notes.json\"; mkdir -p \"$dir\"; [ -f \"$f\" ] || echo '[]' > \"$f\"; jq --arg t ${sh(value)} --argjson now ${int(now)} '. = [{\"id\": $now, \"text\": $t, \"time\": $now}] + .' \"$f\" > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+          }
+        }
+
+        // --- PENGATURAN WIDGET: FONT PIXEL & KECEPATAN PERGANTIAN TEKS ---
+        Column {
+          fill: width
+          gap: 8
+          padding: 10
+          background: isLight ? alpha("#ffffff", 0.9) : alpha(surface, 0.85)
+          border: 1
+          borderColor: isLight ? alpha("#6fb0e8", 0.5) : alpha(accent, 0.35)
+          radius: 8 * (corners ?? 1)
+
+          Row {
+            fill: width
+            align: center
+            Text {
+              text: "⚙ Pengaturan Widget"
+              style: label
+              bold: true
+              color: isLight ? "#1d4e89" : accent
+              weight: 1
+            }
+            Text {
+              text: switchSpeed == 0 ? "rotasi mati" : "ganti tiap ${switchSpeed}s"
+              style: small
+              font: mono
+              color: muted
+              width: 120
+              align: end
+            }
+          }
+
+          // 1. Pemilihan Font Pixel
+          Column {
+            fill: width
+            gap: 4
+            Text {
+              text: "Font Pixel / Gaya Tulisan:"
+              style: small
+              bold: true
+              color: isLight ? "#10233b" : foreground
+            }
+            Row {
+              fill: width
+              gap: 6
+              for f in [["mono", "Monospace"], ["sans", "Sans Pixel"], ["serif", "Serif Retro"]] key f[0] {
+                Box {
+                  weight: 1
+                  padding: [8, 6]
+                  radius: 6 * (corners ?? 1)
+                  background: textFont == f[0] ? accent : (isLight ? alpha("#6fb0e8", 0.15) : alpha(surface, 0.6))
+                  border: 1
+                  borderColor: textFont == f[0] ? accent : (isLight ? alpha("#6fb0e8", 0.3) : alpha(border, 0.4))
+                  align: center
+                  onTap: {
+                    textFont = f[0]
+                    haptic()
+                  }
+                  Text {
+                    text: f[1]
+                    fontSize: 11
+                    bold: textFont == f[0]
+                    align: center
+                    color: textFont == f[0] ? (isLight ? "#ffffff" : background) : (isLight ? "#10233b" : foreground)
+                  }
+                }
+              }
+            }
+          }
+
+          // 2. Kecepatan Pergantian Teks
+          Column {
+            fill: width
+            gap: 4
+            Text {
+              text: "Kecepatan Pergantian Teks:"
+              style: small
+              bold: true
+              color: isLight ? "#10233b" : foreground
+            }
+            Row {
+              fill: width
+              gap: 5
+              for sp in [[5, "5s"], [8, "8s"], [12, "12s"], [20, "20s"], [0, "Mati"]] key sp[1] {
+                Box {
+                  weight: 1
+                  padding: [7, 5]
+                  radius: 6 * (corners ?? 1)
+                  background: switchSpeed == sp[0] ? accent : (isLight ? alpha("#6fb0e8", 0.15) : alpha(surface, 0.6))
+                  border: 1
+                  borderColor: switchSpeed == sp[0] ? accent : (isLight ? alpha("#6fb0e8", 0.3) : alpha(border, 0.4))
+                  align: center
+                  onTap: {
+                    switchSpeed = sp[0]
+                    haptic()
+                  }
+                  Text {
+                    text: sp[1]
+                    fontSize: 11
+                    bold: switchSpeed == sp[0]
+                    align: center
+                    color: switchSpeed == sp[0] ? (isLight ? "#ffffff" : background) : (isLight ? "#10233b" : foreground)
+                  }
+                }
+              }
+            }
+          }
+
+          // Status & Preview Pikiran Aktif
+          Row {
+            fill: width
+            align: center
+            gap: 6
+            Text {
+              text: "Aktif (${validIndex + 1}/${totalNotes}):"
+              style: small
+              font: mono
+              color: muted
+              width: 85
+            }
+            Text {
+              text: "\"" + (currentNote.text ?? "") + "\""
+              style: small
+              font: textFont
+              bold: true
+              weight: 1
+              maxLines: 1
+              color: isLight ? "#1d4e89" : accent
+            }
+            if totalNotes > 1 {
+              Button {
+                text: "ganti ↻"
+                onTap: {
+                  manualOffset = manualOffset + 1
+                  haptic()
+                }
+              }
+            }
           }
         }
 
@@ -502,6 +706,7 @@ EOF
 
               Text {
                 text: n.text ?? ""
+                font: textFont
                 style: body
                 color: isLight ? "#10233b" : foreground
               }
