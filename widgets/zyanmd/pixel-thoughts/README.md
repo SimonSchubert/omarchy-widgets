@@ -11,9 +11,9 @@ Widget catatan pikiran spontan memanjang (*elongated scratchpad & thought banner
 - **🧘 Desain Bersih & Minimalis**:
   - Home-screen tile menampilkan teks pikiran dan latar belakang animasi pixel adaptif.
   - Ukuran banner memanjang `6x2` (responsif hingga `6x3` atau `4x2`).
-  - **Rotasi Pikiran Fleksibel**: Otomatis berganti secara mulus jika terdapat lebih dari satu catatan, dilengkapi kontrol navigasi `‹` `1 / N` `›` langsung di tile.
+  - **Rotasi Pikiran Fleksibel**: Otomatis berganti secara mulus jika terdapat lebih dari satu catatan, tanpa tombol di tile.
   - **Pemilihan Font Pixel**: Pilihan gaya tulisan retro sesuai selera (*Monospace*, *Sans Pixel*, atau *Serif Retro*).
-  - **Kecepatan Pergantian Teks**: Pilihan interval pergantian teks (`5s`, `8s`, `12s`, `20s`) atau mode `Mati` (rotasi manual).
+  - **Kecepatan Pergantian Teks**: Pilihan interval pergantian teks (`5s`, `8s`, `12s`, `20s`, `30s`) di layar penuh.
 
 - **🎨 4 Suasana Langit Pixel Adaptif Tema**:
   Latar belakang dan palet warna kanvas otomatis berganti mengikuti tema aktif Omalauncher tanpa warna paten (*zero hardcoded colors*):
