@@ -5,7 +5,7 @@ widget "nasa photo of the day" {
   minSize: 3x3
   padding: 0
 
-  meta { owl: 7; description: "NASA's picture of the day: swipe through the last week of photos on the tile, tap for a full-screen view with the story behind each one."; version: "1.1"; license: "MIT"; category: "world" }
+  meta { owl: 7; description: "NASA's picture of the day: swipe through the last week of photos on the tile, tap for a full-screen view with the story behind each one."; version: "1.2"; license: "MIT"; category: "world" }
 
   requires { pacman: ["curl", "file"] }
 
@@ -15,9 +15,11 @@ widget "nasa photo of the day" {
 
   // Each photo is fetched once and kept in ~/.cache/nasa, as a small copy for the tile
   // and a phone-sized one for the screen. Slot i points at whatever sits at i in the
-  // list above, and s<i>.txt names the files (small, big, credit, story); the names
-  // carry the download's time, so a redone download is read again. The slot paths never
-  // move, which is what lets the tile follow the day's photos.
+  // list above, and s<i>.txt names the two files (small, big, credit, story). A photo
+  // is named after the day it is for, so a slot's names move exactly when its photo
+  // does: the tile reads the new picture, and keeps the one it has while the day has
+  // not turned. Nothing points at the pictures but the slot files, so there is no link
+  // to go missing from under the tile.
   source s0 = file("~/.cache/nasa/s0.txt")
   source s1 = file("~/.cache/nasa/s1.txt")
   source s2 = file("~/.cache/nasa/s2.txt")
@@ -106,7 +108,9 @@ widget "nasa photo of the day" {
 
     # Point slot i at what is in the cache now, and write down what it is: the names,
     # the date, the words, and how many pixels the big copy is, so the screen can
-    # give the picture the shape it really has.
+    # give the picture the shape it really has. Both copies are named after the day
+    # and are renamed into place by the download above, so they are whole by the time
+    # they are written here: the tile never reads a name that is not there yet.
     i=0
     while [ $i -lt $k ]; do
       dt=$(cat "$d/d$i.part")
@@ -114,30 +118,30 @@ widget "nasa photo of the day" {
       c=$(sed "s/<[^>]*>//g;s/&amp;/\\&/g;s/&nbsp;/ /g;s/&quot;/\"/g;s/&#8217;/\\x27/g" "$d/c$i.part")
       t=$(sed "s/<[^>]*>//g;s/&amp;/\\&/g;s/&nbsp;/ /g;s/&quot;/\"/g;s/&#8217;/\\x27/g;s/&#8212;/ - /g" "$d/x$i.part" | tr "\n\t" "  ")
       if [ -s "$d/$dt-t.jpg" ] && [ -s "$d/$dt-f.jpg" ]; then
-        v=$(stat -c %Y "$d/$dt-f.jpg")
         sz=$(file -b "$d/$dt-f.jpg" 2>/dev/null | grep -oE "[0-9]+ *x *[0-9]+" | head -1)
         pw=${sz%x*}; pw=${pw// /}
         ph=${sz#*x}; ph=${ph// /}
-        printf "%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n" "t$i-$v.jpg" "f$i-$v.jpg" "$dt" "$a" "$c" "$t" "$pw" "$ph" > "$d/s$i.txt.part"
-        # Nothing to do when the slot already says this: swapping the files about
-        # under the tile would make it read a picture that isn't there any more.
+        printf "%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n" "$dt-t.jpg" "$dt-f.jpg" "$dt" "$a" "$c" "$t" "$pw" "$ph" > "$d/s$i.txt.part"
+        # Nothing to do when the slot already says this, so a run that finds the day's
+        # pictures unchanged does not set the tile reading them all over again.
         if [ ! -s "$d/s$i.txt" ] || [ "$(cat "$d/s$i.txt")" != "$(cat "$d/s$i.txt.part")" ]; then
           mv -f "$d/s$i.txt.part" "$d/s$i.txt"
         fi
-        # And a link that went missing is put back pointing at the same picture.
-        [ -s "$d/t$i-$v.jpg" ] || ln -f "$d/$dt-t.jpg" "$d/t$i-$v.jpg"
-        [ -s "$d/f$i-$v.jpg" ] || ln -f "$d/$dt-f.jpg" "$d/f$i-$v.jpg"
       fi
       i=$((i + 1))
     done
 
-    # Keep the last day or so of downloads. The slot links are the eight the slots
-    # name and nothing else: an old rule kept the newest sixteen, which quietly took
-    # links away from a slot still using them.
-    ls -t "$d"/20??-??-??-*.jpg 2>/dev/null | tail -n +25 | while read -r f; do rm -f "$f"; done
-    for l in "$d"/[tf]*-*.jpg; do
-      grep -Fxqs "${l##*/}" "$d"/s*.txt || rm -f "$l"
+    # Keep the last few weeks of downloads: the newest twenty-four, and never one a
+    # slot still names, so a picture cannot be taken away from under the tile.
+    ls -t "$d"/20??-??-??-*.jpg 2>/dev/null | tail -n +25 | while read -r f; do
+      grep -Fxqs "${f##*/}" "$d"/s*.txt || rm -f "$f"
     done
+
+    # An earlier version reached the pictures through links named after the slot and
+    # the time they were fetched. The slots above name the pictures themselves, so
+    # nothing points at those links any more and they go here: leaving them would
+    # keep a few MB behind on every install that updates.
+    rm -f "$d"/[tf][0-9]-*.jpg
     rm -f "$d"/*.part
     exit 0
   """) every 30m timeout 180s
