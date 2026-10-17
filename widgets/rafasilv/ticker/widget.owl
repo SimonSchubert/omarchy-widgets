@@ -1,0 +1,140 @@
+widget "ticker" {
+  meta {
+    description: "Live stock & crypto prices with smart search. Supports Brazilian (.SA) and international tickers including BTC-USD.";
+    version: "1.0";
+    license: "MIT";
+    category: "finance";
+    owl: 8
+  }
+  size: 6x5
+  minSize: 6x4
+
+  state symbols = [] persist
+  state query = ""
+
+  requires { pacman: ["curl", "jq"] }
+
+  // Yahoo Finance chart API. Unlike /v7/finance/quote it needs no crumb/cookie,
+  // so it works from the launcher. One request per symbol, joined into one array.
+  source q = cmd(
+    symbols.length
+      ? "printf '%s\\n' ${sh(join(symbols, ' '))} | tr ' ' '\\n' | while read -r s; do curl -sS --max-time 8 -A 'Mozilla/5.0' \"https://query2.finance.yahoo.com/v8/finance/chart/$s\" 2>/dev/null | jq -c '.chart.result[0].meta | {symbol, currency, regularMarketPrice, regularMarketChangePercent}' 2>/dev/null; done | jq -sc '.'"
+      : "echo '[]'"
+  ) every 30s status json timeout 20s
+
+  let quotes = q == null ? [] : (q.out ?? [])
+
+  source search = http(
+    query.length >= 2
+      ? "https://query1.finance.yahoo.com/v1/finance/search?q=${enc(query)}&quotesCount=8&newsCount=0"
+      : null
+  ) every 2s json
+
+  let suggestions = search == null ? [] : (search.quotes ?? [])
+
+  onTap: screen()
+
+  component Quote(sym, remove, showChange = true) {
+    let it = find(quotes, x => x.symbol == sym)
+    Row {
+      gap: 12
+      Text { text: sym; weight: 2; bold: true }
+      Text {
+        text: it == null || it.regularMarketPrice == null ? "…" : "${it.currency == 'BRL' ? 'R$' : '$'}${fixed(it.regularMarketPrice, 2)}"
+        width: 90
+        align: end
+      }
+      if showChange {
+        Text {
+          text: it != null && it.regularMarketChangePercent != null ? "${it.regularMarketChangePercent > 0 ? '+' : ''}${fixed(it.regularMarketChangePercent, 2)}%" : ""
+          width: 70
+          align: end
+          color: it != null && it.regularMarketChangePercent > 0 ? green : it != null && it.regularMarketChangePercent < 0 ? red : foreground
+        }
+      }
+      if remove {
+        Button { text: "×"; onTap: symbols = symbols.filter(x => x != sym) }
+      }
+    }
+  }
+
+  Column {
+    gap: 4
+    padding: 8
+    if !symbols.length {
+      Text { text: "no tickers"; style: muted; align: center }
+      Text { text: "tap to add"; style: small; align: center }
+    } else {
+      Column {
+        gap: 4
+        scroll: true
+        for sym in symbols key sym {
+          Quote { sym: sym; remove: false; showChange: true }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "tickers"
+    Column {
+      gap: 8
+      padding: [12, 0]
+      Input {
+        placeholder: "search ticker (PETR4, AAPL...)"
+        clear: true
+        onChange: query = value
+        onSubmit: { symbols = suggestions.length > 0 ? ([suggestions[0]] + symbols).take(30) : symbols; query = "" }
+      }
+
+      if query != "" && suggestions.length > 0 {
+        Column {
+          gap: 4
+          for item in suggestions key item.symbol {
+            Button {
+              text: item.symbol + (item.shortname ? " — ${item.shortname}" : "")
+              onTap: { symbols = ([item.symbol] + symbols).take(30); query = "" }
+            }
+          }
+        }
+      } else if query != "" {
+        Text { text: "no matches"; style: muted }
+      }
+
+      if symbols.length {
+        Column {
+          gap: 6
+          scroll: true
+          weight: 1
+          for sym, i in symbols key sym {
+            Row {
+              gap: 6
+              padding: [0, 4]
+              Text { text: sym; weight: 1; bold: true }
+              Text {
+                text: find(quotes, x => x.symbol == sym) == null ? "…" : "${find(quotes, x => x.symbol == sym).currency == 'BRL' ? 'R$' : '$'}${fixed(find(quotes, x => x.symbol == sym).regularMarketPrice, 2)}"
+                width: 85
+                align: end
+              }
+              Row {
+                gap: 2
+                Button { text: "↑"; onTap: symbols = i > 0 ? symbols.take(i-1) + [symbols[i]] + [symbols[i-1]] + symbols.drop(i+1) : symbols }
+                Button { text: "↓"; onTap: symbols = i < len(symbols)-1 ? symbols.take(i) + [symbols[i+1]] + [symbols[i]] + symbols.drop(i+2) : symbols }
+                Button { text: "×"; onTap: symbols = symbols.filter(x => x != sym) }
+              }
+            }
+          }
+        }
+      } else {
+        Text { text: "no tickers yet"; style: muted }
+      }
+
+      if q != null && !q.ok {
+        Text { text: "erro: ${q.err}"; style: small; color: red; maxLines: 2 }
+      }
+
+      Spacer { height: 8 }
+      Button { text: "close"; onTap: close() }
+    }
+  }
+}
