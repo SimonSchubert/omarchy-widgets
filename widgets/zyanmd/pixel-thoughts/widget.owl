@@ -8,7 +8,7 @@ widget "pixel thoughts" {
   meta {
     owl: 8
     description: "Catatan pikiran spontan memanjang dengan latar belakang animasi langit pixel adaptif tema."
-    version: "1.1"
+    version: "1.2"
     license: "MIT"
     category: "productivity"
     author: "zyanmd"
@@ -24,6 +24,7 @@ widget "pixel thoughts" {
     dir=~/.local/share/pixel-thoughts
     f="$dir/notes.json"
     mkdir -p "$dir"
+    chmod 700 "$dir" 2>/dev/null
     if [ ! -s "$f" ]; then
       cat > "$f" <<'EOF'
 [
@@ -32,6 +33,7 @@ widget "pixel thoughts" {
   {"id":1729164000,"text":"ide cemerlang selalu datang tiba-tiba 💡","time":1729164000}
 ]
 EOF
+      chmod 600 "$f" 2>/dev/null
     fi
     echo ok
   """) every 1h
@@ -43,7 +45,6 @@ EOF
 
   state textFont = "mono" persist
   state switchSpeed = 8 persist
-  state manualOffset = 0 persist
   state filterQuery = ""
 
   let activeTheme = lower(themeName != "" ? themeName : (sys.theme ?? ""))
@@ -57,7 +58,7 @@ EOF
   let totalNotes = len(notes)
   let currentNow = now ?? 0
   let autoStep = (totalNotes > 1 && switchSpeed > 0) ? floor(currentNow / switchSpeed) : 0
-  let validIndex = totalNotes > 0 ? ((autoStep + manualOffset) % totalNotes + totalNotes) % totalNotes : 0
+  let validIndex = totalNotes > 0 ? (autoStep % totalNotes) : 0
   let currentNote = totalNotes > 0 ? notes[validIndex] : {"text": "tulis pikiran kamu…", "time": currentNow}
 
   // --- 1. BACKGROUND SIANG: AWAN PIXEL & MATAHARI (UNTUK TEMA PUTIH/TERANG) ---
@@ -401,7 +402,7 @@ EOF
 
     Column {
       fill: true
-      padding: [18, 12]
+      padding: [22, 14]
       justify: center
       align: center
 
@@ -413,69 +414,6 @@ EOF
         align: center
         maxLines: 3
         color: foreground
-      }
-
-      if totalNotes > 1 {
-        Spacer { height: 6 }
-        Row {
-          align: center
-          justify: center
-          gap: 12
-
-          Box {
-            width: 32
-            padding: [4, 2]
-            radius: 4 * (corners ?? 1)
-            background: alpha(surface, 0.45)
-            align: center
-            onTap: {
-              manualOffset = manualOffset - 1
-              haptic()
-            }
-            Text {
-              text: "‹"
-              font: mono
-              bold: true
-              fontSize: 14
-              align: center
-              color: isLight ? "#1d4e89" : alpha(foreground, 0.8)
-            }
-          }
-
-          Text {
-            text: "${validIndex + 1} / ${totalNotes}"
-            width: 54
-            font: mono
-            fontSize: 10
-            bold: true
-            align: center
-            color: isLight ? alpha("#1d4e89", 0.8) : alpha(foreground, 0.6)
-            onTap: {
-              manualOffset = manualOffset + 1
-              haptic()
-            }
-          }
-
-          Box {
-            width: 32
-            padding: [4, 2]
-            radius: 4 * (corners ?? 1)
-            background: alpha(surface, 0.45)
-            align: center
-            onTap: {
-              manualOffset = manualOffset + 1
-              haptic()
-            }
-            Text {
-              text: "›"
-              font: mono
-              bold: true
-              fontSize: 14
-              align: center
-              color: isLight ? "#1d4e89" : alpha(foreground, 0.8)
-            }
-          }
-        }
       }
     }
   }
@@ -534,7 +472,7 @@ EOF
               weight: 1
             }
             Text {
-              text: switchSpeed == 0 ? "rotasi mati" : "ganti tiap ${switchSpeed}s"
+              text: "ganti tiap ${switchSpeed}s"
               style: small
               font: mono
               color: muted
@@ -581,12 +519,12 @@ EOF
             }
           }
 
-          // 2. Kecepatan Pergantian Teks
+          // 2. Kecepatan Pergantian Teks (Otomatis)
           Column {
             fill: width
             gap: 4
             Text {
-              text: "Kecepatan Pergantian Teks:"
+              text: "Kecepatan Pergantian Teks (Otomatis):"
               style: small
               bold: true
               color: isLight ? "#10233b" : foreground
@@ -594,7 +532,7 @@ EOF
             Row {
               fill: width
               gap: 5
-              for sp in [[5, "5s"], [8, "8s"], [12, "12s"], [20, "20s"], [0, "Mati"]] key sp[1] {
+              for sp in [[5, "5s"], [8, "8s"], [12, "12s"], [20, "20s"], [30, "30s"]] key sp[1] {
                 Box {
                   weight: 1
                   padding: [7, 5]
@@ -639,15 +577,6 @@ EOF
               weight: 1
               maxLines: 1
               color: isLight ? "#1d4e89" : accent
-            }
-            if totalNotes > 1 {
-              Button {
-                text: "ganti ↻"
-                onTap: {
-                  manualOffset = manualOffset + 1
-                  haptic()
-                }
-              }
             }
           }
         }
