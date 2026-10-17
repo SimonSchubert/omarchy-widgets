@@ -6,7 +6,7 @@ widget "vinyl-vis" {
   requires { pacman: [] }
   meta {
     owl: 7
-    description: "Trap Nation circular vinyl audio visualizer with reactive bass bounce, rotating album art, and radiating spectrum bars"
+    description: "A Trap Nation style vinyl: the album art spins on a record ringed by pulsing spectrum bars while music plays. Tap to play or pause"
     version: "1.0"
     license: "MIT"
     category: "media"
@@ -35,23 +35,26 @@ widget "vinyl-vis" {
 
     let isPlaying = m != null && m.playing == true
 
-    // Audio reactivity: Bass kick transient
-    let kick1 = pow(max(0.0, sin(time * 4.4)), 6.0)
-    let kick2 = pow(max(0.0, sin(time * 8.8 + 1.2)), 5.0) * 0.70
+    // The frame clock only while music plays: paused, the record and bars hold still and cost nothing
+    let t = isPlaying ? time : 0.0
+
+    // Bass kick on a fixed beat (the widget hears no audio)
+    let kick1 = pow(max(0.0, sin(t * 4.4)), 6.0)
+    let kick2 = pow(max(0.0, sin(t * 8.8 + 1.2)), 5.0) * 0.70
     let kick = max(kick1, kick2)
 
     // Lower limit / threshold: ONLY huge bass drops trigger tactile vibration and camera shudder
     let hugeBass = kick > 0.65 ? (kick - 0.65) / 0.35 : 0.0
 
     // Mechanical shudder and sub-bass vibration triggered strictly on huge bass
-    let subVibe = isPlaying && hugeBass > 0.0 ? sin(time * 44.0) * 0.025 * hugeBass : 0.0
-    let reverbTail = isPlaying && hugeBass > 0.0 ? sin(time * 28.0) * 0.015 * pow(hugeBass, 1.5) : 0.0
-    let bassPulse = isPlaying ? (hugeBass * 0.065 + subVibe + reverbTail) : sin(time * 2.0) * 0.010
+    let subVibe = isPlaying && hugeBass > 0.0 ? sin(t * 44.0) * 0.025 * hugeBass : 0.0
+    let reverbTail = isPlaying && hugeBass > 0.0 ? sin(t * 28.0) * 0.015 * pow(hugeBass, 1.5) : 0.0
+    let bassPulse = isPlaying ? (hugeBass * 0.065 + subVibe + reverbTail) : sin(t * 2.0) * 0.010
 
     // Tactile camera & subwoofer shake ONLY during huge bass drops
     let shakeMag = isPlaying ? pow(hugeBass, 2.0) * 2.2 : 0.0
-    let curCenterX = centerX + sin(time * 56.0) * shakeMag
-    let curCenterY = centerY + cos(time * 62.0) * shakeMag
+    let curCenterX = centerX + sin(t * 56.0) * shakeMag
+    let curCenterY = centerY + cos(t * 62.0) * shakeMag
 
     let vinylBounce = 1.0 + bassPulse
 
@@ -61,7 +64,7 @@ widget "vinyl-vis" {
 
     // Counter-clockwise rotating vinyl record with album art center sticker
     let vinylSpeed = isPlaying ? 55.0 : 18.0
-    let vinylDeg = -(time * vinylSpeed) % 360.0
+    let vinylDeg = -(t * vinylSpeed) % 360.0
 
     rotate(vinylDeg, curCenterX, curCenterY) {
       // 1. Vinyl outer dark disc body
@@ -105,16 +108,16 @@ widget "vinyl-vis" {
       let normB = b < 36 ? b / 36.0 : (72 - b) / 36.0
 
       // High-frequency reverb vibration flutter on bar tips during huge bass
-      let barVibe = sin(time * 48.0 + b * 2.5) * 0.08 * (hugeBass + 0.15)
+      let barVibe = sin(t * 48.0 + b * 2.5) * 0.08 * (hugeBass + 0.15)
 
       // Frequency bands: Bass, Mids, Highs
-      let bFreq = pow(1.0 - normB, 2.0) * (kick * 1.55 + barVibe + sin(time * 9.5 + b * 0.4) * 0.25)
-      let mFreq = sin(normB * 3.14159) * (sin(time * 15.0 + b * 0.8) * 0.35 + 0.35) * (isPlaying ? 0.75 : 0.2)
-      let tFreq = pow(normB, 1.8) * (sin(time * 26.0 + b * 1.5) * 0.25 + 0.25) * (isPlaying ? 0.65 : 0.15)
+      let bFreq = pow(1.0 - normB, 2.0) * (kick * 1.55 + barVibe + sin(t * 9.5 + b * 0.4) * 0.25)
+      let mFreq = sin(normB * 3.14159) * (sin(t * 15.0 + b * 0.8) * 0.35 + 0.35) * (isPlaying ? 0.75 : 0.2)
+      let tFreq = pow(normB, 1.8) * (sin(t * 26.0 + b * 1.5) * 0.25 + 0.25) * (isPlaying ? 0.65 : 0.15)
 
       let rawBarH = isPlaying ?
         (bFreq * 0.58 + mFreq * 0.25 + tFreq * 0.12 + 0.04) * R * 0.52 :
-        (sin(barAng * 4.0 - time * 1.8) * 0.04 + 0.06) * R * 0.32
+        (sin(barAng * 4.0 - t * 1.8) * 0.04 + 0.06) * R * 0.32
 
       let rInner = vinylR + 3.5
 
