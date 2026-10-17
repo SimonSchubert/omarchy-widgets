@@ -7,6 +7,9 @@ A responsive and dynamic home-screen photo widget for Omalauncher.
 ## Features
 
 - **Dynamic Box Layout**: Edge-to-edge photo display that fills any grid dimensions (2x2, 3x3, 4x3, 3x6, etc.) without letterbox borders. Supports both Cover and Contain fit modes.
+- **Album Slideshow with Smooth Fade**: Supports multiple photos (up to 10 photos in album) with smooth crossfade animation and configurable transition intervals (5s, 8s, 15s, 30s, 60s). Reverts to single-photo mode seamlessly.
+- **Dynamic Theme Adaptation**: Intelligently adapts text, buttons, backgrounds, and borders to any active Omarchy theme (both light and dark modes).
+- **Up to 10 Home-Screen Widgets**: Create and manage up to 10 independent photo widgets across pages with duplicate & cleanup manager.
 - **Embedded Offline Default**: Includes an embedded base64 default photo, working instantly out of the box without requiring initial setup or internet connection.
 - **Multi-Source Support**:
   - Direct web image URLs (HTTP / HTTPS).
