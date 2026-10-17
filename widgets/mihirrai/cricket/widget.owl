@@ -1,5 +1,5 @@
 widget "cricket" {
-  meta { owl: 7; description: "Live cricket scores from Cricbuzz: every match at a glance, live ones first. Tap a match for the scorecard - batsmen, bowlers, rates, recent balls - or the tile for the full board"; version: "1.4"; license: "MIT"; category: "news" }
+  meta { owl: 9; description: "Live cricket scores from Cricbuzz: every match at a glance, live ones first. Tap a match for the scorecard - batsmen, bowlers, rates, recent balls - or the tile for the full board"; version: "1.5"; license: "MIT"; category: "sport" }
 
   page: 2
   order: 2
@@ -174,10 +174,10 @@ PY
   state liveOnly = false persist
   // The last board that loaded, kept across restarts. A refresh that fails keeps the
   // previous scores on screen instead of replacing them with the error (the error still
-  // goes to .errors/ for owl-check). `when` catches the first load, `on` every one after.
+  // goes to .errors/ for owl-check). `on s first` (owl 9) runs for the first load and every
+  // refresh after it, so one trigger saves what the board fetched; a failure changes nothing.
   state last = [] persist
-  when s != null && s.ok { last = s.out.matches ?? [] }
-  on s { last = value.ok ? (value.out.matches ?? []) : last }
+  on s first { if value != null && value.ok { last = value.out.matches ?? [] } }
   // The match whose detail the screen is showing, by id; "" means the board. A match that
   // has rolled off the list (it finished and left the page) falls back to the board.
   state open = ""
@@ -337,7 +337,8 @@ except Exception as error:
   let live = matches.filter(m => m.live).sortBy(m => m.start ?? 0)
   let soon = matches.filter(m => !m.live && m.state == "Preview").sortBy(m => m.start ?? 0)
   let done = matches.filter(m => !m.live && m.state != "Preview").sortBy(m => -(m.start ?? 0))
-  let ordered = flatten([live, soon, done])
+  // flatten joins the three lists one level (owl 9's depth), not their matches.
+  let ordered = flatten([live, soon, done], 1)
   let shown = liveOnly ? live : ordered
   // The match whose detail the screen is showing, by id; "" means the board. A match that
   // has rolled off the list (it finished and left the page) falls back to the board.
@@ -614,16 +615,17 @@ except Exception as error:
   }
 
   component Match(m) {
-    // Live matches read "Trail by 27"; upcoming ones read their start time in the device's
-    // timezone (with "today"/"tomorrow" when that helps); finished ones read the result.
-    // The day is the calendar day, not "under 24 hours away": a 05:30 start seen at 22:00
-    // is tomorrow, not today.
+    // Live matches read "Trail by 27"; upcoming ones read how long until the start (owl 9's
+    // fmtAgo) and the start time in the device's timezone (with "today"/"tomorrow" when that
+    // helps); finished ones read the result. The day is the calendar day, not "under 24
+    // hours away": a 05:30 start seen at 22:00 is tomorrow, not today.
     let day = m.start == null ? "" : fmtTime(m.start, "yyyy-MM-dd")
     let when = m.start == null ? ""
       : day == fmtTime(now, "yyyy-MM-dd") ? "today " + fmtTime(m.start, "HH:mm")
       : day == fmtTime(now + 86400, "yyyy-MM-dd") ? "tomorrow " + fmtTime(m.start, "HH:mm")
       : fmtTime(m.start, "EEE HH:mm")
-    let note = m.live || m.state != "Preview" ? ((m.short ?? "") != "" ? m.short : (m.status ?? "")) : [when, m.venue].filter(x => x != "").join(" · ")
+    let away = m.state == "Preview" && m.start != null && m.start > now ? fmtAgo(m.start, now) : ""
+    let note = m.live || m.state != "Preview" ? ((m.short ?? "") != "" ? m.short : (m.status ?? "")) : [away, when, m.venue].filter(x => x != "").join(" · ")
     Column {
       gap: 2
       padding: [8, 5]
@@ -689,15 +691,14 @@ except Exception as error:
 
   screen {
     title: viewing != null ? "${viewing.t1} v ${viewing.t2}" : "cricket"
-    let gl = shown.filter(m => m.live)
-    let gu = shown.filter(m => !m.live && m.state == "Preview")
-    let gd = shown.filter(m => !m.live && m.state != "Preview")
-    // Groups run live, upcoming, results; the widget picks the order, so the board reads
+    // One pass over the board, split into the three groups (owl 9's groupBy); each keeps
+    // the order `shown` already has. Groups run live, upcoming, results, so the board reads
     // "what's happening, what's next, what happened".
+    let parts = groupBy(shown, m => m.live ? "live" : m.state == "Preview" ? "upcoming" : "results")
     let groups = [
-      { title: "live now"; tint: red; rows: gl },
-      { title: "upcoming"; tint: accent; rows: gu },
-      { title: "results"; tint: muted; rows: gd }
+      { title: "live now"; tint: red; rows: parts.live ?? [] },
+      { title: "upcoming"; tint: accent; rows: parts.upcoming ?? [] },
+      { title: "results"; tint: muted; rows: parts.results ?? [] }
     ]
 
     // A tapped match takes over the whole screen; the back button returns to the board.
