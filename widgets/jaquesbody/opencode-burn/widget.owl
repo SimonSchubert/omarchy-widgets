@@ -15,18 +15,20 @@ widget "opencode-burn" {
   meta {
     owl: 7
     description: "Paces your OpenCode free-model request quota from opencode's own session database, flags 5-hour window bursts, and says which free model to switch to."
-    version: "1.2"
+    version: "1.4"
     license: "MIT"
     category: "dev"
   }
 
+  page: 1
+  order: 3
   size: 2x2
 
   minSize: 1x1
   padding: [12, 12, 12, 2]  // little at the bottom, so the dial and its label
                             // fit inside one cell
 
-  requires { pacman: ["sqlite", "curl", "jq"] }
+  requires { pacman: ["sqlite", "curl", "jq", "openssh", "coreutils"] }
 
   // ---- the numbers you may want to change ------------------------------
   // the cap is a state, so the slider in the screen can change it and it
@@ -42,7 +44,7 @@ widget "opencode-burn" {
   // A model named in `unlimited` is never paced; the maps beat the numbers above.
   let unlimited = ["beam-free", "longcat-2.5-preview-free"]
   let capOverrides = {} // requests per day, e.g. { "kimi-k3": 110 }
-  let winOverrides = {} // requests per 5 hours, e.g. { "space-bunny-free": 3130 }
+  let winOverrides = {} // requests per 5 hours, e.g. { "some-model": 3130 }
 
   // the free tier is quoted at 200 requests/day, but the quota that actually
   // gets enforced has been known to land anywhere in this band, so the graph
@@ -62,23 +64,46 @@ widget "opencode-burn" {
   // ---- today's usage, per model, straight out of opencode's database ----
   state seenLineup = [] persist  // free model ids this widget has already met
   state showAll = false persist  // the whole catalogue, or just what is free
+  state deskSeen = 0 persist  // when the remote last answered
+  state focus = "" persist  // which model the chart is showing; "" means the one in use
+  state pane = "" persist    // "setup" is the linking view; it reopens as you left it
+  state flash = false        // a button was pressed: colour it, then put it back
+  state flashAt = 0
+  state pending = false      // asked to connect, waiting for an answer
+  state pendingAt = 0        // and gives up waiting after a while
+  state pendingAddr = ""     // the one address we asked about, so the wait is about something
+  state pasted = "" persist  // what the setup field holds, kept across visits
   state lineupBoot = false persist  // the first lineup we see is the baseline, not news
   source db = cmd("""
     db=$HOME/.local/share/opencode/opencode.db
     if [ ! -r "$db" ]; then echo '{"day":0,"end":0,"now":0,"current":null,"models":[]}'; exit 0; fi
     now=$(date +%s); day=$(date -d 'today 00:00' +%s); end=$(date -d 'tomorrow 00:00' +%s)
+    # opencode changed its schema partway through: current builds keep sessions
+    # in session_message (type / model.id / tokens.input+output+reasoning),
+    # older ones in message (role / modelID / tokens.total). Ask the file which
+    # one it fills, so this survives opencode being upgraded too.
+    filled=$(sqlite3 -readonly "$db" "SELECT count(*) FROM session_message WHERE type='assistant';" 2>/dev/null || echo 0)
+    if [ "${filled:-0}" -gt 0 ]; then
+      tbl=session_message; where="type='assistant'"
+      mid="json_extract(data,'\$.model.id')"
+      tok="coalesce(json_extract(data,'\$.tokens.input'),0)+coalesce(json_extract(data,'\$.tokens.output'),0)+coalesce(json_extract(data,'\$.tokens.reasoning'),0)"
+    else
+      tbl=message; where="json_extract(data,'\$.role')='assistant'"
+      mid="json_extract(data,'\$.modelID')"
+      tok="coalesce(json_extract(data,'\$.tokens.total'),0)"
+    fi
     sqlite3 -readonly -cmd ".param init" -cmd ".param set :day $day" -cmd ".param set :now $now" -cmd ".param set :end $end" "$db" "
     WITH RECURSIVE
       slot(s) AS (SELECT 0 UNION ALL SELECT s+1 FROM slot WHERE s < 23),
       agg AS (
-        SELECT json_extract(data,'\$.modelID') AS mid, count(*) AS n,
-               sum(coalesce(json_extract(data,'\$.tokens.total'),0)) AS t,
+        SELECT $mid AS mid, count(*) AS n,
+               sum($tok) AS t,
                sum(time_created/1000 >= :now-3600) AS r,
                sum(time_created/1000 >= :now-18000) AS w,
                min(23, CAST((time_created/1000 - :day)/3600 AS INTEGER)) AS b
-        FROM message
-        WHERE json_extract(data,'\$.role') = 'assistant'
-          AND json_extract(data,'\$.modelID') IS NOT NULL
+        FROM $tbl
+        WHERE $where
+          AND $mid IS NOT NULL
           AND time_created/1000 >= :day
         GROUP BY mid, b),
       per AS (
@@ -88,13 +113,70 @@ widget "opencode-burn" {
         FROM agg a GROUP BY a.mid)
     SELECT json_object(
       'day', :day, 'end', :end, 'now', :now,
-      'current', (SELECT json_extract(data,'\$.modelID') FROM message
-                  WHERE json_extract(data,'\$.role') = 'assistant'
-                    AND json_extract(data,'\$.modelID') IS NOT NULL
+      'current', (SELECT $mid FROM $tbl
+                  WHERE $where
+                    AND $mid IS NOT NULL
                   ORDER BY time_created DESC LIMIT 1),
+      'currentAt', (SELECT max(time_created) FROM $tbl
+                  WHERE $where
+                    AND $mid IS NOT NULL),
       'models', (SELECT json_group_array(json_object(
                    'm', mid, 'used', u, 'tok', t, 'r1h', r, 'r5h', w, 'slots', json(sl))) FROM per));"
   """) every 60s json timeout 20s
+
+  // ---- usage from other machines, if you ask for it --------------------
+  // OpenCode's free quota is per account, not per machine, so whatever
+  // another machine spends is spent out of the same allowance. List them in
+  // ~/.config/opencode-burn/remote, one per line, each an address and the
+  // command to run there:
+  //
+  //     100.64.1.7 opencode-burn-query
+  //     100.64.1.8 ~/.local/bin/opencode-burn-query
+  //
+  // That file is yours and is not part of the widget, so nothing about your
+  // network is published with it. Without it this stays off: nothing is
+  // contacted and the widget reports only what it can see locally. Every
+  // entry is asked for the same JSON this widget reads locally, each says
+  // its own name, and all of them are summed. One that is asleep is left out
+  // of the day's numbers and reported as not answering, never as zero.
+  source remote = cmd("""
+    cfg=$HOME/.config/opencode-burn/remote
+    errf=$HOME/.config/opencode-burn/.ssherr
+    mkdir -p $HOME/.config/opencode-burn
+    devs='[]'
+    auth=''
+    set -- $(sed 's/#.*//' "$cfg" 2>/dev/null)
+    while [ $# -ge 2 ]; do
+      addr=$1; cmd=$2; shift 2
+      out=$(timeout 6 ssh -o BatchMode=yes -o ConnectTimeout=4 -o LogLevel=ERROR \
+          -o StrictHostKeyChecking=accept-new -o ControlPath=none \
+          "$addr" "$cmd" 2>"$errf") || out='{"ok":0}'
+      [ -n "$auth" ] || auth=$(grep -o 'https://login.tailscale.com/a/[0-9a-z]*' "$errf" 2>/dev/null | head -1)
+      devs=$(jq -c -n --argjson p "$devs" --argjson c "$out" --arg a "$addr" \
+        '$p + [{addr:$a, ok:($c.ok==1), name:($c.name//""), models:($c.models//[])}]')
+    done
+    jq -c -n --argjson d "$devs" --arg a "$auth" '
+      [$d[].models[]] as $all
+      | {ok: ([$d[] | select(.ok)] | length) > 0,
+         auth: $a,
+         devices: $d,
+         models: ($all | group_by(.m) | map({
+                   m: .[0].m, used:(map(.used)|add), tok:(map(.tok)|add),
+                   r1h:(map(.r1h)|add), r5h:(map(.r5h)|add),
+                   slots: [range(0;24) as $i | ([.[] | .slots[$i]] | add // 0)]})),
+         current: (($d | map(select(.ok)) | sort_by(.currentAt // 0) | last) // {} | .current),
+         currentAt: ([$d[].currentAt // 0] | max)}'
+  """) every 60s json timeout 40s
+
+  // the phone's own model: the sandbox hostname is a container name, not the
+  // handset, and this is the one thing only Android can answer
+  source dev = android.device
+
+  // what this machine calls itself, so it can be named in the same list as the
+  // others rather than called "this device"
+  source host = cmd("""
+    (uname -n 2>/dev/null || cat /etc/hostname 2>/dev/null) | jq -R '{name: .}'
+  """) every 10m json
 
   // ---- the free lineup, live: it rotates, so don't hard-code it --------
 // Zen's own catalogue says which models are free; models.dev says what each one
@@ -132,8 +214,43 @@ widget "opencode-burn" {
 
   // ---- pace -----------------------------------------------------------
   let dayFrac = (now - db.day) / max(1, db.end - db.day)
-  let rows = db.models
-  // the last lineup that worked, so a failed fetch or an offline phone still
+  // what the other machine reported, if it answered
+  // the remote source is plain json, so it is already the parsed object;
+  // it reads as null until its first run, hence the empty stand-in
+  let rdb = remote == null ? {ok: false, devices: []} : remote
+  let rrows = rdb != null && rdb.ok ? rdb.models ?? [] : []
+  let rLive = rdb != null && rdb.ok
+
+  // the two sides added together per model: the quota is per account, so the
+  // day is only the day once both machines are in it. Both are assumed to share
+  // a timezone, or the midnight boundary would differ by an hour.
+  let lrows = db.models ?? []
+  let rows = unique(lrows.map(r => r.m) + rrows.map(r => r.m)).map(m => ({
+    m: m,
+    used: (lrows.find(r => r.m == m).used ?? 0) + (rrows.find(r => r.m == m).used ?? 0),
+    tok: (lrows.find(r => r.m == m).tok ?? 0) + (rrows.find(r => r.m == m).tok ?? 0),
+    r1h: (lrows.find(r => r.m == m).r1h ?? 0) + (rrows.find(r => r.m == m).r1h ?? 0),
+    r5h: (lrows.find(r => r.m == m).r5h ?? 0) + (rrows.find(r => r.m == m).r5h ?? 0),
+    slots: range(24).map(i => ((lrows.find(r => r.m == m).slots ?? [])[i] ?? 0)
+                            + ((rrows.find(r => r.m == m).slots ?? [])[i] ?? 0))
+  }))
+  let phoneUsed = sum(lrows.map(r => r.used))
+  let deskUsed = sum(rrows.map(r => r.used))
+  // "in use" means the newest request seen anywhere, so what is running here
+  // is not used on its own any more
+  // whichever asked last is the one in use, rather than simply preferring the
+  // remote, which would win all day for having done anything at all
+  let curModel = (rdb.currentAt ?? 0) > (db.currentAt ?? 0) ? rdb.current ?? db.current : db.current
+
+  // the remote's silence, aged: it is either answering, or it is not, and the
+  // tile should keep saying so rather than quietly showing half the picture
+  every 60s { deskSeen = rLive ? now : deskSeen }
+  let deskAge = deskSeen > 0 ? now - deskSeen : null
+  let deskStale = deskAge == null || deskAge > 300
+  let deskFlag = deskSeen == 0 ? "remote never seen"
+    : deskStale ? "remote ${fmtDuration(deskAge)} ago"
+    : "remote live"
+  // the last lineup that worked, so a failed fetch or an offline machine still
   // shows what is free instead of an empty list
   // the free lineup is what the pacing is measured against; the whole
   // catalogue is what you can browse
@@ -162,6 +279,9 @@ widget "opencode-burn" {
     r1h: rows.find(r => r.m == id).r1h ?? 0,
     r5h: rows.find(r => r.m == id).r5h ?? 0,
     slots: rows.find(r => r.m == id).slots ?? [],
+    // the same hours, kept apart so the chart can show where they were spent
+    pSlots: lrows.find(r => r.m == id).slots ?? [],
+    dSlots: rrows.find(r => r.m == id).slots ?? [],
     cap: get(capOverrides, id, dailyCap),
     win: get(winOverrides, id, winCap),
     isLive: live.indexOf(id) >= 0,
@@ -175,8 +295,8 @@ widget "opencode-burn" {
     feats: zen.ok ? join(zen.out.find(z => z.id == id).tags ?? [], " · ") : ""
   }))
   let scored = models.map(m => ({
-    id: m.id, name: m.name, rank: m.rank, used: m.used, tok: m.tok, r1h: m.r1h, r5h: m.r5h, slots: m.slots, cap: m.cap,
-    isLive: m.isLive, isNew: m.isNew, isCur: m.id == db.current, feats: m.feats,
+    id: m.id, name: m.name, rank: m.rank, used: m.used, tok: m.tok, r1h: m.r1h, r5h: m.r5h, slots: m.slots, pSlots: m.pSlots, dSlots: m.dSlots, cap: m.cap,
+    isLive: m.isLive, isNew: m.isNew, isCur: m.id == curModel, feats: m.feats,
     isFree: m.isFree, price: m.price, win: m.win, isUnlimited: m.isUnlimited,
     even: m.cap * dayFrac,
     left: m.cap - m.used,
@@ -185,8 +305,80 @@ widget "opencode-burn" {
     bankedPct: (m.cap * dayFrac - m.used) / max(1, m.cap) * 100
   }))
 
-  // what you're on right now, and how fast you're going
-  let cur = scored.find(m => m.id == db.current) ?? scored.find(m => m.used > 0)
+  let cur = scored.find(m => m.id == curModel) ?? scored.find(m => m.used > 0)
+  // tapping a model row aims the chart at it; by default it follows the one in use
+  let shown = focus == "" ? cur : (scored.find(m => m.id == focus) ?? cur)
+  let shownNoLimit = shown ? shown.isUnlimited : false
+  let shownRate = max(shown ? shown.r1h : 1, 1) / 3600
+  let shownTone = shownNoLimit ? cyan
+    : shown.pct >= 100 ? red
+    : shown.pct >= 75 ? orange
+    : shown.pct >= 50 ? yellow
+    : shown.pct >= 25 ? green
+    : cyan
+  // no "in use" label anywhere: the current model is simply the green one
+  let chartTitle = shown.name
+  // one entry per machine: this one, then every device that was asked, each
+  // carrying its own colour, its own hours and its own name
+  let localName = dev != null && dev.model != null && dev.model != ""
+    ? dev.model
+    : host != null && host.name != null && host.name != "" ? host.name : "this device"
+  let phoneInk = magenta
+  let inks = [blue, orange, green, yellow, red, cyan]
+  let devList = rdb.devices ?? []
+  let series = [{ name: localName, ink: phoneInk, ok: true,
+                  used: sum(shown.pSlots ?? []), slots: shown.pSlots ?? [] }]
+    + range(len(devList)).map(i => ({
+        name: (devList[i].name != "" ? devList[i].name : devList[i].addr),
+        ink: inks[i < len(inks) ? i : len(inks) - 1],
+        ok: devList[i].ok == true,
+        used: (devList[i].models.find(x => x.m == shown.id).used ?? 0),
+        slots: (devList[i].models.find(x => x.m == shown.id).slots ?? []) }))
+  // the rings only ever speak for the one in use, so the rest of today needs
+  // saying too: how many other models have spent something, and their share
+  let otherCount = len(rows.filter(r => r.used > 0 && r.m != curModel))
+  // what the little gauge is about: the model most likely to bite next, being
+  // the one that has done the most today besides the one in use. Unlimited
+  // models are skipped, having nothing to fill a gauge with
+  // the list can be empty whenever the remote stops answering, so it is
+  // indexed rather than taking the head of nothing
+  let ranked_others = scored.filter(m => m.used > 0 && m.id != curModel && !m.isUnlimited)
+                            .sortBy(m => -m.used)
+  let runnerUp = len(ranked_others) > 0 ? ranked_others[0] : null
+  let runnerPct = runnerUp ? clamp(runnerUp.pct / 100, 0, 1) : 0
+  // where things stand, said the way a person would say it
+  // a press wears off by itself; a link arriving clears the waiting
+  at flashAt { flash = false }
+  // a machine that is asleep, or an address that does not resolve, would
+  // otherwise leave the wait on screen for good
+  at pendingAt { pending = false; pendingAddr = "" }
+  // only that one address answering ends the wait. any device answering is
+  // not enough: the machines already listed keep answering while a new one
+  // is still being set up, which would cut the wait short every time
+  when len(rdb.devices.filter(d => d.ok && d.addr == pendingAddr)) > 0 {
+    pending = false
+    pendingAddr = ""
+  }
+
+  // status reads the remote's own last answer, so a connect shows up at once
+  // rather than waiting for the next tick
+  let linked = deskSeen > 0
+  let liveNow = rdb.ok == true
+  let linkLine = !linked ? "Not linked yet."
+: pending ? "connecting ${pendingAddr}..."
+    : liveNow ? "Connected"
+    : "Not answering"
+  let linkInk = !linked ? muted : liveNow ? green : yellow
+  // when Tailscale wants a human to approve this machine, it prints a link
+  // and then waits. catch it and put it where a tap can reach it, rather than
+  // leaving you to find it in a terminal
+  let authUrl = rdb.auth ?? ""
+  // every machine the widget knows about: this one first, then each on the
+  // list, with whether it answered and how to reach it
+  let machines = [{ name: localName, local: true, ok: true, addr: "" }]
+    + devList.map(d => ({ name: (d.name != "" ? d.name : d.addr),
+                          local: false, ok: d.ok == true, addr: d.addr }))
+
   let busy = cur ? cur.r1h > 0 : false
   let rate = max(cur ? cur.r1h : 1, 1) / 3600
 
@@ -233,14 +425,14 @@ widget "opencode-burn" {
   let bankText = ahead ? "${round(cur.bankedPct)}% in the bank" : null
 
   // tallest hourly bucket today, so the day-shape bars use the full height
-  let peakSlot = max(1, cur ? (cur.slots.length ? cur.slots.sortBy(v => -v).first() : 1) : 1)
+  let peakSlot = max(1, shown ? (shown.slots.length ? shown.slots.sortBy(v => -v).first() : 1) : 1)
 
   // OpenCode also enforces rolling windows, so the last five hours can run out
   // long before the day does: the count right now, and the busiest five-hour
   // stretch the day has already had, which is the one a rolling limiter trips on
   let winPeak = cur ? range(20).map(i => sum(cur.slots.take(i + 5)) - sum(cur.slots.take(i))).sort().last() ?? 0 : 0
   let overWin = cur && !noLimit ? max(cur.r5h, winPeak) >= cur.win : false
-  let peakHour = cur ? cur.slots.indexOf(peakSlot) : -1
+  let peakHour = shown ? shown.slots.indexOf(peakSlot) : -1
 
   // the window is the one that bites, so say so the moment you cross it, even
   // if the day's numbers still look fine
@@ -257,8 +449,7 @@ widget "opencode-burn" {
   let gainText = gain < 3600 ? "${max(1, floor(gain / 60))}m"
     : floor(gain % 3600 / 60) > 0 ? "${floor(gain / 3600)}h ${floor(gain % 3600 / 60)}m"
     : "${floor(gain / 3600)}h"
-  let advice = cur == null ? ""
-    : noLimit ? "no limit on ${cur.name}"
+  let advice = noLimit ? "no limit on ${cur.name}"
     : pick == null ? "no free model left today"
     : pick.id == cur.id || pick.left <= max(1, cur.left) * 1.15 ? "tip: keep ${cur.name}"
     : "tip: switch to ${pick.name}"
@@ -274,7 +465,7 @@ widget "opencode-burn" {
   // one cell: a dial with the day's spend in it, and the whole day behind a
   // tap. Sized off the tile minus its padding, with room left for the verdict
   // under it, so it fits whatever box the launcher gives it
-  let dial = clamp(min((tileWidth ?? 76) - 24, (tileHeight ?? 76) - 34) * 0.92, 26, 132)
+  let dial = clamp(min((tileWidth ?? 76) - 24, (tileHeight ?? 76) - 34) * 0.92, 26, 190)
   // "68%" fits the middle of the rings, "121%" does not, so the type gives way
   let pctText = noLimit ? "∞" : cur ? "${round(cur.pct)}%" : "…"
   let pctSize = dial * (len(pctText) >= 4 ? 0.2 : len(pctText) >= 3 ? 0.23 : 0.26)
@@ -286,6 +477,12 @@ widget "opencode-burn" {
     gap: 2
 
     Box {
+      width: dial
+      height: dial
+      align: center
+
+      // the main gauge
+      Box {
       width: dial
       height: dial
       align: center
@@ -321,6 +518,32 @@ widget "opencode-burn" {
         align: center
         width: dial
       }
+      }
+
+      // the same gauge again, in miniature, dropped into the gap where the two
+      // rings part: nothing is drawn there, so it can be as big as the wedge is
+      // wide. It circles the count of the models you are not on, and fills with
+      // how much of its own cap the biggest of them has already spent
+      Canvas {
+        width: dial
+        height: dial
+        // the wedge is 90 degrees wide, so the badge can be far bigger than
+        // the gap is thick: what limits it is only the bottom of the box
+        let mr = dial * 0.163
+        let mw = max(2, dial * 0.04)
+        let mx = width / 2
+        let my = height / 2 + dial * 0.32
+        arc(mx, my, mr, 225, 270, stroke: alpha(border, 0.5), width: mw, cap: round)
+        // with nothing else in use the gauge reads empty rather than hiding,
+        // and a remote that has stopped answering says so in yellow, so an
+        // unknown is never mistaken for a real zero
+        if (runnerPct > 0) {
+          arc(mx, my, mr, 225, max(8, 270 * runnerPct),
+              stroke: otherCount > 0 ? tone : muted, width: mw, cap: round)
+        }
+        text("+${otherCount}", mx, my, size: dial * 0.12, bold: true,
+             align: center, color: otherCount > 0 ? foreground : deskStale ? yellow : muted)
+      }
     }
     Text {
       text: cur ? verdict : "quiet"
@@ -334,6 +557,165 @@ widget "opencode-burn" {
   // ---- screen ---------------------------------------------------------
   screen {
     title: "opencode burn"
+
+    // one control, up by the close button where a thumb goes looking for it
+    Row {
+      height: 30
+      offset: [0, -41]
+      Text { text: ""; weight: 1 }
+      Box {
+        width: 34
+        Button {
+          text: pane == "setup" ? "<" : "+"
+          fill: true
+          onTap: pane = pane == "setup" ? "" : "setup"
+        }
+      }
+      Text { text: ""; width: 22 }
+    }
+
+    if (pane == "setup") {
+      Column {
+        scroll: true
+        gap: 14
+        fill: width
+
+        Text { text: "Add other devices to see what you use and where you use it"; style: body; color: muted }
+
+        for m in machines {
+          Row {
+            align: center
+            fill: width
+            // the row fills the panel and the name takes the slack, which is
+            // what pushes remove against the right edge. remove keeps its slot
+            // even on the local row (which has no text in it), otherwise that
+            // row's name would absorb 56 more and shove its status sideways
+            Text { text: m.name; style: body; color: foreground; weight: 1; maxLines: 1 }
+            Box {
+              width: 104
+              Text {
+                text: m.local ? "this device" : m.ok ? "answering" : "not answering"
+                style: body
+                color: m.local ? accent : m.ok ? green : yellow
+                maxLines: 1
+              }
+            }
+            // a live machine turns its own dots, so "answering" is something
+            // you can watch rather than take on trust. the canvas is always
+            // there and only the glyph is conditional: hiding an element
+            // collapses it and gives its width back, which would slide this
+            // row's status out of line with the silent ones
+            Canvas {
+              width: 24
+              height: 24
+              if m.ok && !m.local {
+                let glyphs = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
+                let t = time > 100000 ? time / 70 : time * 14
+                text(glyphs[round(t) % 10], width / 2, height / 2, size: 13,
+                     align: center, color: green)
+              }
+            }
+            Text {
+              text: "remove"
+              style: body
+              color: red
+              width: 56
+              align: end
+              maxLines: 1
+              // guarded, so a tap on the empty local slot cannot rewrite the file
+              onTap: run("f=$HOME/.config/opencode-burn/remote; touch $f; [ -n ${sh(m.addr)} ] && awk -v a=${sh(m.addr)} '$1 != a' $f > $f.r && mv $f.r $f; true")
+            }
+          }
+        }
+
+        // a hairline between the machines you have and the steps for adding
+        // another, so the two lists do not run together
+        Box {
+          height: 1
+          fill: width
+          background: alpha(border, 0.5)
+        }
+
+        Row {
+          align: center
+          Text { text: "step 1:"; style: body; color: muted; width: 64 }
+          Box {
+            width: 200
+          Button {
+            text: flash ? "copied" : "copy installer"
+            color: flash ? green : accent
+            animate color: tween(120ms, "out")
+            fill: true
+            onTap: { flash = true; flashAt = now + 1; copy("mkdir -p ~/.local/bin && echo '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' | base64 -d | gzip -d > ~/.local/bin/opencode-burn-query && chmod +x ~/.local/bin/opencode-burn-query && name=`uname -n 2>/dev/null || cat /etc/hostname` && addr=$name && if command -v tailscale >/dev/null 2>&1; then a=`tailscale ip -4 2>/dev/null | head -1`; [ -n $a ] && addr=$a; fi; echo $addr ~/.local/bin/opencode-burn-query") }
+            }
+          }
+        }
+
+        Text { text: "step 2: run it in a terminal on your other device"; style: body; color: muted }
+        Text { text: "step 3: paste the output below"; style: body; color: muted }
+        Box {
+          height: 34
+          Input {
+            text: pasted
+            placeholder: ""
+            color: foreground
+            fontSize: 15
+            onChange: pasted = value
+          }
+          Text {
+            text: "your device opencode-burn-query"
+            style: body
+            color: alpha(foreground, 0.3)
+            offset: [2, 11]
+            visible: pasted == ""
+          }
+        }
+
+        Row {
+          align: center
+          Text { text: "step 4:"; style: body; color: muted; width: 64 }
+          Box {
+            width: 200
+          Button {
+            text: pending ? "connecting..." : "connect"
+            color: pending ? yellow : flash ? green : accent
+            animate color: tween(120ms, "out")
+            fill: true
+            onTap: { flash = true; flashAt = now + 1; pending = true; pendingAt = now + 15
+                     pendingAddr = len(pasted.trim().split(" ")) > 0 ? pasted.trim().split(" ")[0] : ""
+                     run("mkdir -p $HOME/.config/opencode-burn; f=$HOME/.config/opencode-burn/remote; touch $f; grep -qxF ${sh(pasted)} $f || printf '%s\\n' ${sh(pasted)} >> $f") }
+            }
+          }
+        }
+        // the wait and its dots live under the button, not above the steps,
+        // so the reading belongs to the thing that was just pressed
+        Row {
+          align: center
+          visible: linked
+          Canvas {
+            width: 24
+            height: 24
+            let glyphs = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
+            let t = time > 100000 ? time / 70 : time * 14
+            text(glyphs[round(t) % 10], width / 2, height / 2, size: 15,
+                 align: center, color: linkInk)
+          }
+          Text { text: linkLine; style: body; color: linkInk; maxLines: 1 }
+        }
+
+        // Tailscale cannot be signed in from here: approving it wants a
+        // browser and a human. all the widget can do is notice, and make the
+        // link one tap away instead of something to go and dig out
+        Text {
+          text: authUrl == "" ? "" : "tap to approve this machine"
+          style: small
+          color: accent
+          maxLines: 1
+          visible: authUrl != ""
+          onTap: url(authUrl)
+        }
+      }
+    } else {
     Column {
       scroll: true
       gap: 12
@@ -413,6 +795,19 @@ widget "opencode-burn" {
         }
 
         Text { text: bankText ? "${verdict} · ${bankText}" : verdict; style: title; color: tone; maxLines: 2 }
+        // what to do about it, with its own tally right-aligned, right under
+        // the verdict so the reading and the advice arrive together
+        Row {
+          Text { text: advice; style: small; color: muted; weight: 1; maxLines: 1 }
+          Text {
+            text: pick == null ? "" : "${pick.used} / ${pick.cap}"
+            style: small
+            color: muted
+            width: 104
+            align: end
+            maxLines: 1
+          }
+        }
         // the reason, then what you are on and what switching would buy. On a
         // plain on-pace day there is nothing to say, so the line goes away
         Text {
@@ -430,77 +825,100 @@ widget "opencode-burn" {
           fill: width
           let w = width
           let ticks = 11
-          let top = 10
+          let top = 34
           let y0 = height - ticks          // the floor both are drawn on
           let gh = y0 - top
           let dayLen = max(1, db.end - db.day)
           // the scale has to hold the whole band, or the ceiling is off the top;
           // with no ceiling at all, it just has to hold what you spent
-          let peak = noLimit ? max(1, cur.used) * 1.12 : max(capHigh, cur.cap) * 1.04
+          let peak = shownNoLimit ? max(1, shown.used) * 1.12 : max(capHigh, shown.cap) * 1.04
           let yLow = top + gh * (1 - clamp(capLow / peak, 0, 1))
           let yHigh = top + gh * (1 - clamp(capHigh / peak, 0, 1))
 
           // the band the quota actually falls in
-          if (capHigh > 0 && !noLimit) {
+          if (capHigh > 0 && !shownNoLimit) {
             rect(0, yHigh, w, yLow - yHigh, fill: alpha(muted, 0.05))
           }
 
-          // when it was spent: each hour against the busiest one
+          // when it was spent, and which machine spent it: one segment per
+          // machine that spent anything, this one first, then every device on
+          // the list, each in its own colour
           let bw = w / 24
           for i in range(24) {
-            let v = cur.slots[i] ?? 0
-            let bh = max(2, gh * 0.58 * v / peakSlot)
-            // the hour that did it is drawn solid and counted above
-            rect(bw * i + 1, y0 - bh, bw - 2, bh, radius: 1.5 * corners, fill: alpha(tone, i == peakHour && v > 0 ? 0.8 : v > 0 ? 0.34 : 0.1))
+            let vis = series.filter(x => (x.slots[i] ?? 0) > 0)
+            if (len(vis) > 0) {
+              for k in range(len(vis)) {
+                let hh = max(1, gh * 0.58 * (vis[k].slots[i] ?? 0) / peakSlot)
+                let below = sum(vis.take(k).map(x => max(1, gh * 0.58 * (x.slots[i] ?? 0) / peakSlot)))
+                rect(bw * i + 1, y0 - below - hh, bw - 2, hh, radius: 1.5 * corners, fill: vis[k].ink)
+              }
+            } else {
+              rect(bw * i + 1, y0 - 2, bw - 2, 2, fill: alpha(muted, 0.18))
+            }
           }
+          // which ink is which, and what each came to on the model the chart is
+          // about. A remote that has gone quiet reads as zero, in yellow, so a
+          // silent machine is never mistaken for an idle one
+          let ly = yHigh + 2
+          let colw = w / max(1, len(series))
+          let room = max(5, 16 - len(series))
+          for k in range(len(series)) {
+            let cx = k * colw
+            rect(cx + 2, ly, 10, 10, radius: 2 * corners, fill: series[k].ink)
+            text("${sub(series[k].name, 0, room)} ${series[k].used}", cx + 16, ly + 5, size: 9,
+                 align: start, color: series[k].ok ? muted : yellow)
+          }
+          // what this chart is about, said plainly: the model in use, or
+          // whichever row was tapped to aim it
+          text(chartTitle, 0, 22, size: 12, align: start, color: shown.isCur ? green : foreground)
           if (peakHour >= 0 && peakSlot > 0) {
-            text("${peakSlot}", w * (peakHour + 0.5) / 24, y0 - gh * 0.58 - 5, size: 9, align: center, color: tone)
+            text("${peakSlot}", w * (peakHour + 0.5) / 24, y0 - gh * 0.58 - 5, size: 9, align: center, color: shownTone)
           }
 
           // an even spend of the whole day, dashed, then the cap as a flat line
-          for i in range(noLimit ? 24 : 0, 24, 2) {
-            line(w * i / 24, top + gh * (1 - clamp(cur.cap * i / 24 / peak, 0, 1)), w * (i + 1) / 24, top + gh * (1 - clamp(cur.cap * (i + 1) / 24 / peak, 0, 1)),
-                 stroke: alpha(muted, 0.8), width: 1)
+          for i in range(shownNoLimit ? 24 : 0, 24, 2) {
+            line(w * i / 24, top + gh * (1 - clamp(shown.cap * i / 24 / peak, 0, 1)), w * (i + 1) / 24, top + gh * (1 - clamp(shown.cap * (i + 1) / 24 / peak, 0, 1)),
+                 stroke: alpha(foreground, 0.42), width: 1)
           }
-          if (!noLimit) {
-            line(0, top + gh * (1 - clamp(cur.cap / peak, 0, 1)), w, top + gh * (1 - clamp(cur.cap / peak, 0, 1)), stroke: alpha(muted, 0.7), width: 1)
+          if (!shownNoLimit) {
+            line(0, top + gh * (1 - clamp(shown.cap / peak, 0, 1)), w, top + gh * (1 - clamp(shown.cap / peak, 0, 1)), stroke: alpha(foreground, 0.6), width: 1)
           }
 
           // the running total: filled down to the floor, then stroked over it
-          let nowY = top + gh * (1 - clamp(cur.used / peak, 0, 1))
-          let pts = range(25).map(i => [w * i / 24, top + gh * (1 - clamp(sum(cur.slots.take(i + 1)) / peak, 0, 1))])
+          let nowY = top + gh * (1 - clamp(shown.used / peak, 0, 1))
+          let pts = range(25).map(i => [w * i / 24, top + gh * (1 - clamp(sum(shown.slots.take(i + 1)) / peak, 0, 1))])
           let drawn = pts.filter(p => p[0] <= w * dayFrac + 1) + [[w * dayFrac, nowY]]
           if (drawn.length > 1) {
-            path(drawn + [[w * dayFrac, y0], [0, y0]], closed: true, fill: alpha(tone, 0.13))
+            path(drawn + [[w * dayFrac, y0], [0, y0]], closed: true, fill: alpha(shownTone, 0.18))
           }
           for i in range(24) {
             if (i < 24 * dayFrac) {
-              line(w * i / 24, top + gh * (1 - clamp(sum(cur.slots.take(i + 1)) / peak, 0, 1)),
-                   w * (i + 1) / 24, top + gh * (1 - clamp(sum(cur.slots.take(i + 2)) / peak, 0, 1)),
-                   stroke: tone, width: 2)
+              line(w * i / 24, top + gh * (1 - clamp(sum(shown.slots.take(i + 1)) / peak, 0, 1)),
+                   w * (i + 1) / 24, top + gh * (1 - clamp(sum(shown.slots.take(i + 2)) / peak, 0, 1)),
+                   stroke: shownTone, width: 2.5)
             }
           }
 
           // where this rate runs you out, as a fraction of the way through the day
-          let outAt = clamp(dayFrac + (cur.left / rate) / dayLen, dayFrac, 1)
+          let outAt = clamp(dayFrac + (shown.left / shownRate) / dayLen, dayFrac, 1)
           // the projection, stopping at the cap, drawn as fine dashes
-          for i in range(noLimit ? 20 : 0, 20, 2) {
-            line(w * (dayFrac + (outAt - dayFrac) * i / 20), top + gh * (1 - clamp(min(cur.cap, cur.used + (outAt - dayFrac) * dayLen * rate * i / 20) / peak, 0, 1)),
-                 w * (dayFrac + (outAt - dayFrac) * (i + 1) / 20), top + gh * (1 - clamp(min(cur.cap, cur.used + (outAt - dayFrac) * dayLen * rate * (i + 1) / 20) / peak, 0, 1)),
-                 stroke: alpha(tone, 0.6), width: 1)
+          for i in range(shownNoLimit ? 20 : 0, 20, 2) {
+            line(w * (dayFrac + (outAt - dayFrac) * i / 20), top + gh * (1 - clamp(min(shown.cap, shown.used + (outAt - dayFrac) * dayLen * shownRate * i / 20) / peak, 0, 1)),
+                 w * (dayFrac + (outAt - dayFrac) * (i + 1) / 20), top + gh * (1 - clamp(min(shown.cap, shown.used + (outAt - dayFrac) * dayLen * shownRate * (i + 1) / 20) / peak, 0, 1)),
+                 stroke: accent, width: 2.5)
           }
           // where you are now, and where the rate limit lands
-          circle(w * dayFrac, nowY, 4, fill: tone)
-          if (cur.left > 0 && !noLimit) {
-            let yOut = top + gh * (1 - clamp(cur.cap / peak, 0, 1))
+          circle(w * dayFrac, nowY, 4, fill: shownTone)
+          if (shown.left > 0 && !shownNoLimit) {
+            let yOut = top + gh * (1 - clamp(shown.cap / peak, 0, 1))
             // the drop from the limit back to now, dashed as well
             for i in range(0, 8, 2) {
               line(w * outAt, nowY + (yOut - nowY) * i / 8, w * outAt, nowY + (yOut - nowY) * (i + 1) / 8,
-                   stroke: alpha(tone, 0.5), width: 1)
+                   stroke: alpha(shownTone, 0.5), width: 1)
             }
-            circle(w * outAt, yOut, 4, fill: tone)
+            circle(w * outAt, yOut, 4, fill: shownTone)
             // named for what it is, sitting just above its own dot
-            text("rate limit", min(w * outAt, w - 42), yOut - 8, size: 9, align: center, color: tone)
+            text("rate limit", min(w * outAt, w - 42), yOut - 8, size: 9, align: center, color: shownTone)
           }
 
           // the clock under the bars
@@ -511,38 +929,29 @@ widget "opencode-burn" {
         }
       }
 
-      // what everything above is measured against, and where to change it
+      // what everything above is measured against, and where to change it, on
+      // one line: the numbers, then the pointer at the slider further down
       Text {
-        text: "based on ~${capMid} (${capLow}-${capHigh}) req/day and ${winCap} req/5hrs"
-        style: label
+        text: "based on ~${capMid} (${capLow}-${capHigh}) /day · ${winCap}/5hrs · tweak below"
+        style: small
         color: muted
+        maxLines: 1
       }
-      Text { text: "tweak the rate limit below"; style: label; color: muted }
 
-      // what to do about it, with its own tally right-aligned
-      Row {
-        Text { text: advice; style: body; color: adviceTone; weight: 1; maxLines: 1 }
-        Text {
-          text: pick == null ? "" : "${pick.used} / ${pick.cap}"
-          style: body
-          color: adviceTone
-          width: 104
-          align: end
-          maxLines: 1
-        }
-      }
+
+
 
       // free models or the whole catalogue; NEW means it was not in the free
       // lineup the last time the widget looked
       Row {
         align: center
-        Text { text: "free"; style: label; color: showAll ? muted : accent; width: 34; onTap: showAll = false }
+        Text { text: "free"; style: body; color: showAll ? muted : accent; width: 44; onTap: showAll = false }
         Text { text: "·"; style: label; color: muted; width: 9; align: center }
-        Text { text: "all"; style: label; color: showAll ? accent : muted; width: 27; onTap: showAll = true }
+        Text { text: "all"; style: body; color: showAll ? accent : muted; width: 32; onTap: showAll = true }
         Text { text: "·"; style: label; color: muted; width: 9; align: center }
         Text {
           text: "${showAll ? allIds.length : freeIds.length} models"
-          style: label
+          style: body
           color: muted
           width: 86
           maxLines: 1
@@ -550,19 +959,22 @@ widget "opencode-burn" {
       }
 
       for m in ranked {
+        // tap a row to point the chart at that model, tap it again to hand the
+        // chart back to whatever is in use
         Column {
           gap: 3
           fill: width
+          onTap: focus = focus == m.id ? "" : m.id
           Row {
-            Text { text: m.name; style: body; color: m.isFree && m.left <= 0 ? red : m.isFree ? foreground : muted; weight: 1; maxLines: 1 }
+            Text { text: m.name; style: body; color: m.isCur ? green : m.isFree && m.left <= 0 ? red : m.isFree ? foreground : muted; weight: 1; maxLines: 1 }
             Text { text: "NEW"; style: label; color: accent; width: 34; align: end; visible: m.isNew }
-            Text { text: !m.isFree ? "${m.used}" : m.isUnlimited ? "${m.used} / ∞" : "${m.used} / ${m.cap}"; style: body; width: 92; align: end; maxLines: 1 }
+            Text { text: !m.isFree ? "${m.used}" : m.isUnlimited ? "${m.used} / ∞" : "${m.used} / ${m.cap}"; style: body; color: m.isCur ? green : foreground; width: 92; align: end; maxLines: 1 }
           }
           Progress {
             value: clamp(m.pct, 0, 100)
             // the same ladder the verdict uses, so the bars rank at a glance.
             // A paid model has no daily cap to be a share of, so it gets none
-            color: m.pct >= 100 ? red : m.pct >= 75 ? orange : m.pct >= 50 ? yellow : m.pct >= 25 ? green : cyan
+            color: m.isCur ? green : m.pct >= 100 ? red : m.pct >= 75 ? orange : m.pct >= 50 ? yellow : m.pct >= 25 ? green : cyan
             track: alpha(border, 0.4)
             fill: width
             height: 5
@@ -570,7 +982,7 @@ widget "opencode-burn" {
           }
           // what it can do on the left; what is left of it, or what it costs
           Row {
-            Text { text: m.feats; style: label; color: muted; weight: 1; maxLines: 1 }
+            Text { text: m.feats; style: label; color: m.isCur ? green : muted; weight: 1; maxLines: 1 }
             Text {
               text: !m.isFree ? "\$${m.price} per 1M"
                 : m.isUnlimited ? "no limit"
@@ -578,7 +990,7 @@ widget "opencode-burn" {
                 : "spent until ${fmtTime(db.end, 'HH:mm')}"
                 : "not free any more"
               style: label
-              color: muted
+              color: m.isCur ? green : muted
               width: 132
               align: end
               maxLines: 1
@@ -587,7 +999,7 @@ widget "opencode-burn" {
         }
       }
 
-      // the rate limit, last on the page: editable on the phone, kept across
+      // the rate limit, last on the page: editable here, kept across
       // restarts, with a mark at the middle of the band to steer by
       Row {
         align: center
@@ -618,5 +1030,22 @@ widget "opencode-burn" {
         Text { text: "${dailyCap}"; style: label; color: accent; width: 36; align: end; offset: [0, 7] }
       }
     }
+    }
+
+    Box { weight: 1 }
+
+    // who made it, at the foot of the screen and out of the way
+    Text {
+      text: "built by jaquesbody"
+      style: small
+      color: muted
+      align: center
+      maxLines: 1
+      padding: [0, 0, 0, 10]
+      onTap: url("https://jaquesbody.github.io/")
+    }
   }
 }
+
+// the gauge in the dial gap counts the models you are not on
+// green says which model is in use; nothing needs to say it in words
