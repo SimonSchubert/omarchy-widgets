@@ -7,7 +7,7 @@ widget "private space" {
   meta {
     owl: 9
     description: "Control and open your Android 15+ Private Space apps via local ADB"
-    version: "2.2"
+    version: "2.3"
     license: "MIT"
     category: "system"
   }
@@ -29,7 +29,9 @@ import sys
 import time
 
 CACHE_FILE = os.path.expanduser("~/.cache/private-space.json")
+CONFIG_FILE = os.path.expanduser("~/.local/share/omalauncher/private-space/config.json")
 os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
 
 PRETTY_NAMES = {
     "com.whatsapp": "WhatsApp",
@@ -48,6 +50,24 @@ PRETTY_NAMES = {
     "com.google.android.googlequicksearchbox": "Google",
     "com.google.android.apps.adm": "Find Device",
 }
+
+
+def get_config():
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"mode": "tls"}
+
+
+def save_config(cfg):
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception:
+        pass
 
 
 def run(cmd, timeout=8):
@@ -109,6 +129,8 @@ def discover_adb_mdns(host, wait_sec=0.35):
 
 
 def ensure_adb():
+    cfg = get_config()
+    target_mode = cfg.get("mode", "tls")
     code, out, _ = run("adb devices")
     active = []
     for line in out.splitlines()[1:]:
@@ -118,34 +140,35 @@ def ensure_adb():
                 active.append(parts[0])
             elif parts[1] == "offline":
                 run(f"adb disconnect {parts[0]}", timeout=2)
-    if "127.0.0.1:5555" in active:
-        return True, "127.0.0.1:5555"
-    c, o, _ = run("adb connect 127.0.0.1:5555", timeout=2)
-    if "connected to 127.0.0.1:5555" in o:
-        c2, o2, _ = run("adb devices")
-        for line in o2.splitlines()[1:]:
-            parts = line.split()
-            if len(parts) >= 2 and parts[0] == "127.0.0.1:5555" and parts[1] == "device":
-                return True, "127.0.0.1:5555"
-    if active:
-        dev = active[0]
-        run(f"adb -s {dev} tcpip 5555", timeout=3)
-        time.sleep(0.5)
-        run("adb connect 127.0.0.1:5555", timeout=2)
-        return True, "127.0.0.1:5555"
+
+    if target_mode == "tcp5555":
+        if "127.0.0.1:5555" in active:
+            return True, "127.0.0.1:5555", "tcp5555"
+        c, o, _ = run("adb connect 127.0.0.1:5555", timeout=2)
+        if "connected to 127.0.0.1:5555" in o:
+            return True, "127.0.0.1:5555", "tcp5555"
+
     host = get_wlan_ip()
     if host != "127.0.0.1":
-        c_ports, _ = discover_adb_mdns(host)
+        for dev in active:
+            if dev.startswith(f"{host}:"):
+                c, o, _ = run(f"adb -s {dev} shell getprop ro.build.version.release", timeout=2)
+                if c == 0:
+                    return True, dev, "tls"
+
+        c_ports, _ = discover_adb_mdns(host, wait_sec=0.35)
         for p in c_ports:
             target = f"{host}:{p}"
             c, o, _ = run(f"adb connect {target}", timeout=2)
-            if "connected to" in o:
-                run(f"adb -s {target} tcpip 5555", timeout=3)
-                time.sleep(0.5)
-                run("adb connect 127.0.0.1:5555", timeout=2)
-                run(f"adb disconnect {target}", timeout=2)
-                return True, "127.0.0.1:5555"
-    return False, None
+            if "connected to" in o or f"{target}\tdevice" in run("adb devices")[1]:
+                return True, target, "tls"
+
+    for dev in active:
+        if not dev.startswith("emulator-"):
+            mode = "tcp5555" if "5555" in dev else "tls"
+            return True, dev, mode
+
+    return False, None, target_mode
 
 
 def pair_adb(arg_str):
@@ -167,7 +190,7 @@ def pair_adb(arg_str):
     return {"adb": False, "error": f"No se pudo vincular con código {code} (puertos detectados: {ports})"}
 
 
-def find_private_user(dev="127.0.0.1:5555"):
+def find_private_user(dev):
     code, out, _ = run(f"adb -s {dev} shell cmd user list -v")
     if code == 0 and out:
         for line in out.splitlines():
@@ -180,7 +203,7 @@ def find_private_user(dev="127.0.0.1:5555"):
     return None, False
 
 
-def get_private_apps(uid, dev="127.0.0.1:5555"):
+def get_private_apps(uid, dev):
     c3, out3, _ = run(f"adb -s {dev} shell pm list packages -3 --user {uid}")
     user_pkgs = set()
     if c3 == 0 and out3:
@@ -220,18 +243,28 @@ def get_private_apps(uid, dev="127.0.0.1:5555"):
 
 
 def status():
-    connected, dev = ensure_adb()
+    connected, dev, mode = ensure_adb()
     if not connected:
         host = get_wlan_ip()
         _, p_ports = discover_adb_mdns(host, wait_sec=0.3)
-        res = {"adb": False, "host": host, "ports": p_ports, "user": None, "unlocked": False, "apps": []}
+        res = {
+            "adb": False,
+            "mode": mode,
+            "host": host,
+            "ports": p_ports,
+            "user": None,
+            "unlocked": False,
+            "apps": [],
+        }
         with open(CACHE_FILE, "w") as f:
             json.dump(res, f)
         return res
+
     uid, unlocked = find_private_user(dev)
     apps = get_private_apps(uid, dev) if (uid is not None and unlocked) else []
     res = {
         "adb": True,
+        "mode": mode,
         "device": dev,
         "user": uid,
         "unlocked": unlocked,
@@ -240,6 +273,12 @@ def status():
     with open(CACHE_FILE, "w") as f:
         json.dump(res, f)
     return res
+
+
+def open_auth_screen(dev):
+    c, out, err = run(f"adb -s {dev} shell am start -n com.android.settings/.privatespace.PrivateSpaceAuthenticationActivity")
+    if c != 0 or "SecurityException" in err or "Error" in out:
+        run(f"adb -s {dev} shell am start -a android.settings.PRIVACY_SETTINGS")
 
 
 def main():
@@ -253,18 +292,17 @@ def main():
             json.dump(res, f)
         print(json.dumps(res))
     elif cmd == "unlock":
-        ok, dev = ensure_adb()
+        ok, dev, _ = ensure_adb()
         if ok:
-            uid, _ = find_private_user(dev)
-            if uid is not None:
-                c, _, _ = run(f"adb -s {dev} shell cmd user set-quiet-mode {uid} false")
-                time.sleep(0.8)
-                _, unlocked_now = find_private_user(dev)
-                if c != 0 and not unlocked_now:
-                    run(f"adb -s {dev} shell am start -n com.android.settings/.privatespace.PrivateSpaceAuthenticationActivity")
+            open_auth_screen(dev)
+            for _ in range(8):
+                time.sleep(0.6)
+                _, unlocked = find_private_user(dev)
+                if unlocked:
+                    break
         print(json.dumps(status()))
     elif cmd == "lock":
-        ok, dev = ensure_adb()
+        ok, dev, _ = ensure_adb()
         if ok:
             uid, _ = find_private_user(dev)
             if uid is not None:
@@ -273,21 +311,41 @@ def main():
         print(json.dumps(status()))
     elif cmd == "open":
         comp = sys.argv[2]
-        ok, dev = ensure_adb()
+        ok, dev, _ = ensure_adb()
         if ok:
             uid, unlocked = find_private_user(dev)
             if uid is not None:
                 if not unlocked:
-                    run(f"adb -s {dev} shell cmd user set-quiet-mode {uid} false")
-                    time.sleep(0.8)
-                run(f"adb -s {dev} shell am start --user {uid} -n {comp}")
+                    open_auth_screen(dev)
+                    for _ in range(8):
+                        time.sleep(0.6)
+                        _, unlocked = find_private_user(dev)
+                        if unlocked:
+                            break
+                if unlocked:
+                    run(f"adb -s {dev} shell am start --user {uid} -n {comp}")
+        print(json.dumps(status()))
+    elif cmd == "enable-tcp5555":
+        ok, dev, _ = ensure_adb()
+        if ok:
+            run(f"adb -s {dev} tcpip 5555", timeout=3)
+            time.sleep(0.5)
+            run("adb connect 127.0.0.1:5555", timeout=2)
+            save_config({"mode": "tcp5555"})
+        print(json.dumps(status()))
+    elif cmd == "disable-tcp5555":
+        save_config({"mode": "tls"})
+        run("adb -s 127.0.0.1:5555 usb", timeout=2)
+        run("adb disconnect 127.0.0.1:5555", timeout=2)
+        time.sleep(1.0)
+        print(json.dumps(status()))
 
 
 if __name__ == "__main__":
     main()
 PY
 python3 "$d/ctl.py" status
-""") every 15s json timeout 10s
+""") every 2m json timeout 10s
   state pairResult = ""
   state shortcuts = [] persist
 
@@ -465,6 +523,45 @@ python3 "$d/ctl.py" status
           }
         }
 
+        Column {
+          gap: 6
+          padding: 12
+          background: surface
+          border: 1
+          borderColor: border
+          Row {
+            gap: 8
+            align: center
+            Column {
+              gap: 2
+              weight: 1
+              Text {
+                text: ps.mode == "tcp5555" ? "Modo sin Wi-Fi (TCP 5555)" : "Depuración inalámbrica TLS"
+                style: body
+                bold: true
+                color: ps.mode == "tcp5555" ? yellow : green
+              }
+              Text {
+                text: ps.mode == "tcp5555" ? "Puerto 5555 activo (sin cifrado en red local)" : "Conexión cifrada TLS directa (${ps.device})"
+                style: small
+                color: muted
+              }
+            }
+            Button {
+              text: ps.mode == "tcp5555" ? "Solo TLS" : "TCP 5555"
+              color: ps.mode == "tcp5555" ? muted : accent
+              onTap: {
+                haptic()
+                if ps.mode == "tcp5555" {
+                  run("python3 ~/.local/share/omalauncher/private-space/ctl.py disable-tcp5555")
+                } else {
+                  run("python3 ~/.local/share/omalauncher/private-space/ctl.py enable-tcp5555")
+                }
+              }
+            }
+          }
+        }
+
         if unlocked && len(privApps) > 0 {
           Column {
             gap: 8
@@ -612,7 +709,7 @@ python3 "$d/ctl.py" status
             border: 1
             borderColor: border
             Text {
-              text: "Toca 'Desbloquear' arriba para encender tu Espacio privado y ver tus apps."
+              text: "Toca 'Desbloquear' arriba para abrir la pantalla de autenticación y ver tus apps."
               style: small
               color: muted
             }
