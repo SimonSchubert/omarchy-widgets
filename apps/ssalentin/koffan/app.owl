@@ -6,12 +6,8 @@ app "koffan" {
   edge: true
   icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
     <rect x="2" y="2" width="44" height="44" rx="12" fill="#F2A33C"/>
-    <path d="M15.2 18.6L12.8 8.6l7.8 4.9zM32.8 18.6l2.4-10-7.8 4.9z" fill="#FFFFFF"/>
-    <g fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M9.5 19.4h4.6l3.8 17.6h15l3.3-13.6H15"/>
-      <circle cx="20.2" cy="38" r="2.3" fill="#FFFFFF"/>
-      <circle cx="30.8" cy="38" r="2.3" fill="#FFFFFF"/>
-    </g>
+    <path d="M14.4 19.4V9.4l7.6 10zM33.6 19.4V9.4l-7.6 10z" fill="#FFFFFF"/>
+    <path d="M10.4 19.6h3.7l3.8 17.4h15l3.3-13.4H15.2" fill="none" stroke="#FFFFFF" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>"""
 
   // Where the server is, and the token from its API_TOKEN setting; kept on this phone.
