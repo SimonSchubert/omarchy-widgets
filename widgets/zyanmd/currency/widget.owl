@@ -2,7 +2,7 @@ widget "currency" {
   meta {
     owl: 8
     description: "Kurs mata uang & perbandingan forex global dengan grafik live transparan"
-    version: "4.2"
+    version: "4.3"
     license: "MIT"
     category: "finance"
   }
@@ -33,33 +33,15 @@ widget "currency" {
   state searchKeyword = ""
 
   // Data sources
-  // 1. Fetch live currency pair rate and real time-series points
+  // 1. Fetch live currency pair rate and real time-series points from Yahoo Finance / Frankfurter
   source cur = cmd("set -- ${sh(selectedSymbol != '' ? selectedSymbol : pinnedSymbol)} ${sh(timeSpan)}; " + """
-raw_sym="${1:-EURUSD}"
+raw_sym="${1:-USDIDR}"
 sp="${2:-1m}"
 sym=$(echo "$raw_sym" | tr -d '/' | tr '[:lower:]' '[:upper:]')
+b="${sym:0:3}"
+q="${sym:3:3}"
+[ -z "$q" ] && q="USD"
 
-# 1. Fetch direct currency pair
-res=$(curl -sf -H "X-API-Key: pipinipon-secret-key-2026" "http://103.119.237.37:2028/api/currency/pair/${sym}")
-pair=$(echo "$res" | jq -c '.data // empty' 2>/dev/null)
-
-if [ -z "$pair" ] || [ "$pair" = "null" ]; then
-  b="${sym:0:3}"
-  q="${sym:3:3}"
-  res=$(curl -sf -H "X-API-Key: pipinipon-secret-key-2026" "http://103.119.237.37:2028/api/currency?base=${b}&quote=${q}&limit=10")
-  pair=$(echo "$res" | jq -c '.data[0] // empty' 2>/dev/null)
-fi
-
-if [ -z "$pair" ] || [ "$pair" = "null" ]; then
-  res=$(curl -sf -H "X-API-Key: pipinipon-secret-key-2026" "http://103.119.237.37:2028/api/currency?search=${sym}&limit=10")
-  pair=$(echo "$res" | jq -c '.data[0] // empty' 2>/dev/null)
-fi
-
-if [ -z "$pair" ] || [ "$pair" = "null" ]; then
-  exit 1
-fi
-
-# 2. Map span to Yahoo Finance historical range & interval
 case "$sp" in
   "1w") y_range="7d"; y_interval="1h" ;;
   "1m") y_range="1mo"; y_interval="1d" ;;
@@ -70,36 +52,76 @@ case "$sp" in
   *) y_range="1mo"; y_interval="1d" ;;
 esac
 
-# 3. Fetch REAL historical time-series points
-pts=$(curl -sf -m 5 "https://query1.finance.yahoo.com/v8/finance/chart/${sym}=X?range=${y_range}&interval=${y_interval}" -H "User-Agent: Mozilla/5.0" 2>/dev/null | jq -c '[.chart.result[0].indicators.quote[0].close[] | select(. != null)]' 2>/dev/null)
+# 1. Fetch live rate, previous close & historical points from Yahoo Finance chart
+res=$(curl -sf -m 6 -H "User-Agent: Mozilla/5.0" "https://query1.finance.yahoo.com/v8/finance/chart/${sym}=X?range=${y_range}&interval=${y_interval}")
 
-cur_p=$(echo "$pair" | jq -r '.price // empty')
-if [ -n "$cur_p" ] && [ "$cur_p" != "null" ]; then
-  pts=$(echo "$pts" | jq -c --argjson p "$cur_p" '. + [$p]' 2>/dev/null)
+if [ -n "$res" ] && echo "$res" | jq -e '.chart.result[0].meta.regularMarketPrice' >/dev/null 2>&1; then
+  echo "$res" | jq -c --arg sym "$sym" --arg b "$b" --arg q "$q" '
+    .chart.result[0] as $r |
+    ($r.meta.regularMarketPrice) as $price |
+    ($r.meta.chartPreviousClose // $price) as $prev |
+    ($r.meta.regularMarketTime // 0) as $time |
+    ([$r.indicators.quote[0].close[]? | select(. != null and . > 0)] + [$price]) as $pts |
+    ($pts | min) as $min_p |
+    ($pts | max) as $max_p |
+    ($price - $prev) as $chg |
+    (if $prev > 0 then ($chg / $prev * 100) else 0 end) as $pct |
+    ($pts[-6] // $pts[0]) as $p_w |
+    ($pts[-22] // $pts[0]) as $p_m |
+    $pts[0] as $p_y |
+    (if $p_w > 0 then (($price - $p_w) / $p_w * 100) else 0 end) as $w |
+    (if $p_m > 0 then (($price - $p_m) / $p_m * 100) else 0 end) as $m |
+    (if $p_y > 0 then (($price - $p_y) / $p_y * 100) else 0 end) as $y |
+    {
+      symbol: $sym,
+      base_currency: $b,
+      quote_currency: $q,
+      price: $price,
+      change: $chg,
+      percent_change: $pct,
+      weekly: $w,
+      monthly: $m,
+      ytd: $y,
+      points: $pts,
+      min: $min_p,
+      max: $max_p,
+      direction: (if $chg > 0 then "positive" elif $chg < 0 then "negative" else "neutral" end),
+      date: (if $time > 0 then ($time | todateiso8601[:10]) else "Live" end)
+    }
+  '
+  exit 0
 fi
 
-# Fallback to calculated real metrics if Yahoo is temporarily unreachable
-if [ -z "$pts" ] || [ "$pts" = "null" ] || [ $(echo "$pts" | jq 'length' 2>/dev/null || echo 0) -lt 2 ]; then
-  p=${cur_p:-1.12}
-  chg=$(echo "$pair" | jq -r '.change // 0')
-  w_pct=$(echo "$pair" | jq -r '.weekly // 0')
-  m_pct=$(echo "$pair" | jq -r '.monthly // 0')
-  y_pct=$(echo "$pair" | jq -r '.ytd // 0')
-  p0=$(awk "BEGIN {printf \"%.8f\", $p / (1 + $y_pct/100)}")
-  p1=$(awk "BEGIN {printf \"%.8f\", $p / (1 + $m_pct/100)}")
-  p2=$(awk "BEGIN {printf \"%.8f\", $p / (1 + $w_pct/100)}")
-  p3=$(awk "BEGIN {printf \"%.8f\", $p - $chg}")
-  pts=$(jq -cn --argjson a "$p0" --argjson b "$p1" --argjson c "$p2" --argjson d "$p3" --argjson e "$p" '[$a, $b, $c, $d, $e]')
+# 2. Fallback to Frankfurter if Yahoo is unavailable
+fres=$(curl -sf -m 6 "https://api.frankfurter.dev/v1/latest?base=${b}&symbols=${q}")
+if [ -n "$fres" ] && echo "$fres" | jq -e '.rates' >/dev/null 2>&1; then
+  echo "$fres" | jq -c --arg sym "$sym" --arg b "$b" --arg q "$q" '
+    (.rates[$q] // 0) as $price |
+    {
+      symbol: $sym,
+      base_currency: $b,
+      quote_currency: $q,
+      price: $price,
+      change: 0,
+      percent_change: 0,
+      weekly: 0,
+      monthly: 0,
+      ytd: 0,
+      points: [$price, $price],
+      min: $price,
+      max: $price,
+      direction: "neutral",
+      date: (.date // "Live")
+    }
+  '
+  exit 0
 fi
 
-min_p=$(echo "$pts" | jq 'min // 0')
-max_p=$(echo "$pts" | jq 'max // 0')
-
-echo "$pair" | jq -c --arg sym "$sym" --argjson pts "$pts" --argjson min "$min_p" --argjson max "$max_p" '. + {symbol: (.symbol // $sym), points: $pts, min: $min, max: $max}'
+exit 1
 """) every 5m json timeout 10s status
 
-  // 2. Full Live Currency Rates with Filters, Sorting, and Pagination
-  source rates = cmd("set -- ${int(pageNumber)} ${int(pageLimit)} ${sh(sortField)} ${sh(sortDirection)} ${sh(baseFilter)} ${sh(quoteFilter)} ${sh(trendFilter)} ${sh(searchKeyword)}; " + """
+  // 2. Full Live Currency Rates with Filters, Sorting, and Pagination from Frankfurter
+  source rates = cmd("set -- ${int(pageNumber)} ${int(pageLimit)} ${sh(sortField)} ${sh(sortDirection)} ${sh(baseFilter)} ${sh(quoteFilter)} ${sh(trendFilter)} ${sh(searchKeyword)} ${sh(pinnedSymbol)}; " + """
 pg="${1:-1}"
 lim="${2:-20}"
 sb="${3:-percent_change}"
@@ -108,44 +130,113 @@ b="${5:-}"
 q="${6:-}"
 dir="${7:-all}"
 search="${8:-}"
+pin="${9:-USDIDR}"
+pin_b="${pin:0:3}"
+pin_q="${pin:3:3}"
+[ -z "$pin_q" ] && pin_q="IDR"
 
-args=(--get "http://103.119.237.37:2028/api/currency" -H "X-API-Key: pipinipon-secret-key-2026" --data-urlencode "page=${pg}" --data-urlencode "limit=${lim}" --data-urlencode "sort_by=${sb}" --data-urlencode "order=${ord}")
-[ -n "$b" ] && args+=(--data-urlencode "base=${b}")
-[ -n "$q" ] && args+=(--data-urlencode "quote=${q}")
-[ -n "$dir" ] && [ "$dir" != "all" ] && args+=(--data-urlencode "direction=${dir}")
-[ -n "$search" ] && args+=(--data-urlencode "search=${search}")
-
-res=$(curl -sf "${args[@]}")
+res=$(curl -sf -m 10 "https://api.frankfurter.dev/v1/$(date +%Y-01-01)..")
 if [ -z "$res" ]; then
   exit 1
 fi
 
-echo "$res" | jq -c '{
-  items: ([.data[]? | select(.symbol != "" and .symbol != "DXY")] | to_entries | [.[] | {
+echo "$res" | jq -c \
+  --argjson pg "$pg" \
+  --argjson lim "$lim" \
+  --arg sb "$sb" \
+  --arg ord "$ord" \
+  --arg b "$b" \
+  --arg q "$q" \
+  --arg dir "$dir" \
+  --arg search "$search" \
+  --arg pin_b "$pin_b" \
+  --arg pin_q "$pin_q" '
+  (.rates | keys) as $dates |
+  ($dates | last) as $d_today |
+  ($dates[-2] // $d_today) as $d_yest |
+  ($dates[-6] // $dates[0]) as $d_week |
+  ($dates[-22] // $dates[0]) as $d_month |
+  $dates[0] as $d_ytd |
+  (.rates[$d_today] + {"EUR": 1}) as $r_today |
+  (.rates[$d_yest] + {"EUR": 1}) as $r_yest |
+  (.rates[$d_week] + {"EUR": 1}) as $r_week |
+  (.rates[$d_month] + {"EUR": 1}) as $r_month |
+  (.rates[$d_ytd] + {"EUR": 1}) as $r_ytd |
+  ["IDR", "USD", "EUR", "GBP", "JPY", "SGD"] as $quotes |
+  ($r_today | keys) as $all_cur |
+  [
+    $quotes[] as $q_cur |
+    $all_cur[] as $b_cur |
+    select($b_cur != $q_cur) |
+    ($r_today[$q_cur] / $r_today[$b_cur]) as $p_today |
+    ($r_yest[$q_cur] / $r_yest[$b_cur]) as $p_yest |
+    ($r_week[$q_cur] / $r_week[$b_cur]) as $p_week |
+    ($r_month[$q_cur] / $r_month[$b_cur]) as $p_month |
+    ($r_ytd[$q_cur] / $r_ytd[$b_cur]) as $p_ytd |
+    ($p_today - $p_yest) as $chg |
+    (if $p_yest > 0 then ($chg / $p_yest * 100) else 0 end) as $pct |
+    (if $p_week > 0 then (($p_today - $p_week) / $p_week * 100) else 0 end) as $w |
+    (if $p_month > 0 then (($p_today - $p_month) / $p_month * 100) else 0 end) as $m |
+    (if $p_ytd > 0 then (($p_today - $p_ytd) / $p_ytd * 100) else 0 end) as $y |
+    {
+      symbol: "\($b_cur)\($q_cur)",
+      base: $b_cur,
+      quote: $q_cur,
+      group: (if ($b_cur == "USD" or $b_cur == "EUR" or $b_cur == "GBP" or $b_cur == "JPY") then "Major" elif ($b_cur == "IDR" or $b_cur == "SGD" or $b_cur == "MYR" or $b_cur == "THB" or $b_cur == "PHP") then "Asia" else "Lainnya" end),
+      price: $p_today,
+      change: $chg,
+      pct: $pct,
+      weekly: $w,
+      monthly: $m,
+      ytd: $y,
+      direction: (if $chg > 0 then "positive" elif $chg < 0 then "negative" else "neutral" end),
+      date: $d_today
+    }
+  ] as $all_pairs |
+  ($all_pairs | map(select(.base == $pin_b and .quote == $pin_q)) | first // null) as $pin_item |
+  ($all_pairs |
+    (if $search != "" then map(select((.symbol | test($search; "i")) or (.base | test($search; "i")) or (.quote | test($search; "i")))) else . end) |
+    (if $b != "" then map(select(.base == ($b | ascii_upcase))) else . end) |
+    (if $q != "" then map(select(.quote == ($q | ascii_upcase))) else . end) |
+    (if $dir != "all" then map(select(.direction == $dir)) else . end) |
+    (if $sb == "price" then (if $ord == "asc" then sort_by(.price) else (sort_by(.price) | reverse) end)
+     elif $sb == "weekly" then (if $ord == "asc" then sort_by(.weekly) else (sort_by(.weekly) | reverse) end)
+     elif $sb == "symbol" then (if $ord == "asc" then sort_by(.symbol) else (sort_by(.symbol) | reverse) end)
+     else (if $ord == "asc" then sort_by(.pct) else (sort_by(.pct) | reverse) end)
+     end)
+  ) as $filtered |
+  ($filtered | length) as $total_rates |
+  ([(($total_rates + $lim - 1) / $lim | floor), 1] | max) as $total_pages |
+  ($filtered[($pg - 1) * $lim : $pg * $lim]) |
+  to_entries | map({
     id: "\(.value.symbol)_\(.key)",
     symbol: .value.symbol,
-    base: .value.base_currency,
-    quote: .value.quote_currency,
-    group: (.value.group // "Lainnya"),
+    base: .value.base,
+    quote: .value.quote,
+    group: .value.group,
     price: .value.price,
     change: .value.change,
-    pct: .value.percent_change,
+    pct: .value.pct,
     weekly: .value.weekly,
     monthly: .value.monthly,
     ytd: .value.ytd,
-    yoy: .value.yoy,
+    yoy: 0,
     direction: .value.direction,
     date: .value.date
-  }]),
-  page: (.meta.page // 1),
-  total_pages: (.meta.total_pages // 1),
-  total_rates: (.meta.total_rates // 0)
-}'
+  }) |
+  {
+    items: .,
+    page: $pg,
+    total_pages: $total_pages,
+    total_rates: $total_rates,
+    pinned: $pin_item
+  }
+'
 """) every 10m json timeout 25s status
 
-  // 3. Official Currency Names from /api/currency/filters
+  // 3. Official Currency Names from Frankfurter API
   source filters = cmd("""
-curl -sf -H "X-API-Key: pipinipon-secret-key-2026" 'http://103.119.237.37:2028/api/currency/filters' | jq -c '[.data.base_currencies[] | {code: (.code | ascii_upcase), name}]'
+curl -sf "https://api.frankfurter.dev/v1/currencies" | jq -c 'to_entries | map({code: .key, name: .value})'
 """) every 6h json status
 
   // Derived expressions
@@ -215,13 +306,14 @@ curl -sf -H "X-API-Key: pipinipon-secret-key-2026" 'http://103.119.237.37:2028/a
   let minValStr = rawMin == null ? "…" : qCur == "IDR" ? "Rp ${round(rawMin)}" : rawMin >= 100 ? "${qSym}${fixed(rawMin, 2)}" : rawMin < 0.001 ? "${qSym}${fixed(rawMin, 6)}" : "${qSym}${fixed(rawMin, 4)}"
 
   // Data Terkunci untuk Tile Homescreen (Selalu Menampilkan Pasangan Terpasang)
-  let tilePrice = (d != null && d.symbol == pinnedSymbol) ? d.price : (pinnedItem != null ? pinnedItem.price : (d != null ? d.price : 0))
-  let tileChange = (d != null && d.symbol == pinnedSymbol) ? d.change : (pinnedItem != null ? pinnedItem.change : (d != null ? d.change : 0))
-  let tilePct = (d != null && d.symbol == pinnedSymbol) ? d.percent_change : (pinnedItem != null ? pinnedItem.pct : (d != null ? d.percent_change : 0))
-  let tileDir = (d != null && d.symbol == pinnedSymbol) ? (d.direction ?? (d.change > 0 ? "positive" : d.change < 0 ? "negative" : "neutral")) : (pinnedItem != null ? (pinnedItem.direction ?? (pinnedItem.change > 0 ? "positive" : pinnedItem.change < 0 ? "negative" : "neutral")) : "neutral")
-  let tileWeekly = (d != null && d.symbol == pinnedSymbol) ? d.weekly : (pinnedItem != null ? pinnedItem.weekly : 0)
-  let tileMonthly = (d != null && d.symbol == pinnedSymbol) ? d.monthly : (pinnedItem != null ? pinnedItem.monthly : 0)
-  let tileYtd = (d != null && d.symbol == pinnedSymbol) ? d.ytd : (pinnedItem != null ? pinnedItem.ytd : 0)
+  let pinnedRate = ratesData == null ? null : (ratesData.pinned ?? null)
+  let tilePrice = (d != null && d.symbol == pinnedSymbol) ? d.price : (pinnedRate != null ? pinnedRate.price : (pinnedItem != null ? pinnedItem.price : 0))
+  let tileChange = (d != null && d.symbol == pinnedSymbol) ? d.change : (pinnedRate != null ? pinnedRate.change : (pinnedItem != null ? pinnedItem.change : 0))
+  let tilePct = (d != null && d.symbol == pinnedSymbol) ? d.percent_change : (pinnedRate != null ? pinnedRate.pct : (pinnedItem != null ? pinnedItem.pct : 0))
+  let tileDir = (d != null && d.symbol == pinnedSymbol) ? (d.direction ?? (d.change > 0 ? "positive" : d.change < 0 ? "negative" : "neutral")) : (pinnedRate != null ? pinnedRate.direction : (pinnedItem != null ? (pinnedItem.direction ?? "neutral") : "neutral"))
+  let tileWeekly = (d != null && d.symbol == pinnedSymbol) ? d.weekly : (pinnedRate != null ? pinnedRate.weekly : (pinnedItem != null ? pinnedItem.weekly : 0))
+  let tileMonthly = (d != null && d.symbol == pinnedSymbol) ? d.monthly : (pinnedRate != null ? pinnedRate.monthly : (pinnedItem != null ? pinnedItem.monthly : 0))
+  let tileYtd = (d != null && d.symbol == pinnedSymbol) ? d.ytd : (pinnedRate != null ? pinnedRate.ytd : (pinnedItem != null ? pinnedItem.ytd : 0))
   let tilePts = (d != null && d.symbol == pinnedSymbol && d.points != null) ? d.points : []
   let tileMin = (d != null && d.symbol == pinnedSymbol) ? d.min : null
   let tileMax = (d != null && d.symbol == pinnedSymbol) ? d.max : null
@@ -273,7 +365,10 @@ curl -sf -H "X-API-Key: pipinipon-secret-key-2026" 'http://103.119.237.37:2028/a
     }
   }
 
-  onTap: screen()
+  onTap: {
+    selectedSymbol = ""
+    screen()
+  }
 
   // Main Tile Layout (Wide 6 columns)
   Column {

@@ -83,4 +83,4 @@ Didistribusikan di bawah lisensi [MIT](LICENSE).
 ## 💖 Ucapan Terima Kasih & Kredit
 
 - **[Simon Schubert](https://github.com/SimonSchubert)** atas pembuatan launcher & ekosistem [Omalauncher / Omarchy](https://github.com/SimonSchubert/omarchy-widgets).
-- Data nilai tukar pasar disediakan oleh real-time financial market feeds & Yahoo Finance.
+- Data nilai tukar pasar disediakan oleh European Central Bank via Frankfurter API & Yahoo Finance.
