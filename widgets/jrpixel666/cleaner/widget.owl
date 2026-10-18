@@ -6,7 +6,7 @@ widget "cleaner" {
 
   meta { owl: 8; description: "Finds caches, old packages and leftovers that are safe to delete, and frees the space with a tap, daily or weekly."; version: "1.0"; license: "MIT"; category: "system" }
 
-  requires { pacman: ["pacman-contrib", "findutils", "coreutils", "gawk"] }
+  requires { pacman: ["pacman-contrib", "util-linux", "findutils", "coreutils", "gawk"] }
 
   // One script, two modes: `scan` prints {disk, items: {id: bytes}, orphans}, `clean <id|safe>`
   // starts a cleaner in the background (`work`, detached with setsid so no timeout can cut it
