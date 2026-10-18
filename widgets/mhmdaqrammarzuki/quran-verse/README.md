@@ -1,4 +1,4 @@
-# quran
+# quran-verse
 
 A verse of the day from the Qur'an, in Arabic and in your language.
 
@@ -85,7 +85,7 @@ written in the file.
 
 ## Licence
 
-MIT — Copyright (c) 2026 mhmdarammarzuki
+MIT — Copyright (c) 2026 mhmdaqrammarzuki
 
 This is a derivative of **"bible-verse" by Dustin Montgomery (en3r0)** from
 [SimonSchubert/omarchy-widgets](https://github.com/SimonSchubert/omarchy-widgets),
@@ -96,7 +96,7 @@ api.alquran.cloud and adds the language picker.
 ```
 MIT License
 
-Copyright (c) 2026 mhmdarammarzuki
+Copyright (c) 2026 mhmdaqrammarzuki
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
