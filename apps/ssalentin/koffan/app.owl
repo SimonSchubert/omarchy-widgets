@@ -6,7 +6,7 @@ app "koffan" {
   edge: true
   icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
     <rect x="2" y="2" width="44" height="44" rx="12" fill="#F2A33C"/>
-    <path d="M14.4 19.4V9.4l7.6 10zM33.6 19.4V9.4l-7.6 10z" fill="#FFFFFF"/>
+    <path d="M14.6 19.4V9.8l7 10zM31 19.4V9.8l-7 10z" fill="#FFFFFF"/>
     <path d="M10.4 19.6h3.7l3.8 17.4h15l3.3-13.4H15.2" fill="none" stroke="#FFFFFF" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>"""
 
