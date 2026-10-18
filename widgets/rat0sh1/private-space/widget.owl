@@ -1,0 +1,624 @@
+widget "private space" {
+  page: 1
+  order: 3
+  size: 3x2
+  minSize: 2x2
+  requires { pacman: ["android-tools", "iproute2", "python", "coreutils"] }
+  meta {
+    owl: 9
+    description: "Control and open your Android 15+ Private Space apps via local ADB"
+    version: "2.2"
+    license: "MIT"
+    category: "system"
+  }
+
+  source psFile = file("~/.cache/private-space.json") json
+  source psPoll = cmd("""
+set -eu
+d="$HOME/.local/share/omalauncher/private-space"
+mkdir -p "$d"
+cat > "$d/ctl.py" <<'PY'
+#!/usr/bin/env python3
+import json
+import os
+import re
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+CACHE_FILE = os.path.expanduser("~/.cache/private-space.json")
+os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+
+PRETTY_NAMES = {
+    "com.whatsapp": "WhatsApp",
+    "com.instagram.android": "Instagram",
+    "com.google.android.apps.bard": "Gemini",
+    "com.android.chrome": "Chrome",
+    "com.google.android.apps.photos": "Photos",
+    "com.google.android.GoogleCamera": "Camera",
+    "com.android.vending": "Play Store",
+    "com.google.android.apps.nbu.files": "Files",
+    "com.google.android.apps.maps": "Maps",
+    "com.google.android.apps.messaging": "Messages",
+    "com.google.android.contacts": "Contacts",
+    "com.google.android.dialer": "Phone",
+    "com.android.privatespace": "Instalar apps",
+    "com.google.android.googlequicksearchbox": "Google",
+    "com.google.android.apps.adm": "Find Device",
+}
+
+
+def run(cmd, timeout=8):
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+    except Exception as e:
+        return 1, "", str(e)
+
+
+def get_wlan_ip():
+    code, out, _ = run("ip -4 -o addr show wlan0")
+    if code == 0 and out:
+        m = re.search(r"inet\s+(\d+\.\d+\.\d+\.\d+)", out)
+        if m:
+            return m.group(1)
+    return "127.0.0.1"
+
+
+def discover_adb_mdns(host, wait_sec=0.35):
+    connect_ports = []
+    pairing_ports = []
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("", 5353))
+        mreq = struct.pack("4s4s", socket.inet_aton("224.0.0.251"), socket.inet_aton(host))
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+        sock.settimeout(0.15)
+
+        def make_query(name, qtype=12):
+            q = b"\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+            for part in name.split("."):
+                if part:
+                    q += bytes([len(part)]) + part.encode()
+            return q + b"\x00" + struct.pack(">HH", qtype, 1)
+
+        for svc in ["_adb-tls-connect._tcp.local", "_adb-tls-pairing._tcp.local", "_services._dns-sd._udp.local"]:
+            sock.sendto(make_query(svc, 12), ("224.0.0.251", 5353))
+
+        t0 = time.time()
+        while time.time() - t0 < wait_sec:
+            try:
+                data, addr = sock.recvfrom(4096)
+                if addr[0] == host and (b"_adb-tls-" in data or b"adb-" in data):
+                    for m in re.finditer(b"\x00\x21[\x80\x00]\x01....\x00.\x00\x00\x00\x00(..)", data, re.DOTALL):
+                        port = struct.unpack(">H", m.group(1))[0]
+                        if 1024 < port < 65535:
+                            pairing_ports.append(port)
+                            connect_ports.append(port)
+            except socket.timeout:
+                break
+        sock.close()
+    except Exception:
+        pass
+    return sorted(set(connect_ports)), sorted(set(pairing_ports))
+
+
+def ensure_adb():
+    code, out, _ = run("adb devices")
+    active = []
+    for line in out.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 2:
+            if parts[1] == "device":
+                active.append(parts[0])
+            elif parts[1] == "offline":
+                run(f"adb disconnect {parts[0]}", timeout=2)
+    if "127.0.0.1:5555" in active:
+        return True, "127.0.0.1:5555"
+    c, o, _ = run("adb connect 127.0.0.1:5555", timeout=2)
+    if "connected to 127.0.0.1:5555" in o:
+        c2, o2, _ = run("adb devices")
+        for line in o2.splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 2 and parts[0] == "127.0.0.1:5555" and parts[1] == "device":
+                return True, "127.0.0.1:5555"
+    if active:
+        dev = active[0]
+        run(f"adb -s {dev} tcpip 5555", timeout=3)
+        time.sleep(0.5)
+        run("adb connect 127.0.0.1:5555", timeout=2)
+        return True, "127.0.0.1:5555"
+    host = get_wlan_ip()
+    if host != "127.0.0.1":
+        c_ports, _ = discover_adb_mdns(host)
+        for p in c_ports:
+            target = f"{host}:{p}"
+            c, o, _ = run(f"adb connect {target}", timeout=2)
+            if "connected to" in o:
+                run(f"adb -s {target} tcpip 5555", timeout=3)
+                time.sleep(0.5)
+                run("adb connect 127.0.0.1:5555", timeout=2)
+                run(f"adb disconnect {target}", timeout=2)
+                return True, "127.0.0.1:5555"
+    return False, None
+
+
+def pair_adb(arg_str):
+    host = get_wlan_ip()
+    nums = re.findall(r"\d+", arg_str)
+    if not nums:
+        return {"adb": False, "error": "Ingresa el código de 6 dígitos"}
+    if len(nums) >= 2:
+        ports = [int(nums[0])]
+        code = nums[1]
+    else:
+        code = nums[0]
+        _, ports = discover_adb_mdns(host, wait_sec=0.5)
+    for p in ports:
+        c, o, e = run(f"adb pair {host}:{p} {code}", timeout=4)
+        if "Successfully paired" in o:
+            ensure_adb()
+            return status()
+    return {"adb": False, "error": f"No se pudo vincular con código {code} (puertos detectados: {ports})"}
+
+
+def find_private_user(dev="127.0.0.1:5555"):
+    code, out, _ = run(f"adb -s {dev} shell cmd user list -v")
+    if code == 0 and out:
+        for line in out.splitlines():
+            if "type=profile.PRIVATE" in line or "name=Private" in line:
+                m = re.search(r"id=(\d+)", line)
+                if m:
+                    uid = int(m.group(1))
+                    unlocked = "(running)" in line and "QUIET_MODE" not in line
+                    return uid, unlocked
+    return None, False
+
+
+def get_private_apps(uid, dev="127.0.0.1:5555"):
+    c3, out3, _ = run(f"adb -s {dev} shell pm list packages -3 --user {uid}")
+    user_pkgs = set()
+    if c3 == 0 and out3:
+        for l in out3.splitlines():
+            if l.startswith("package:"):
+                user_pkgs.add(l.split(":", 1)[1].strip())
+
+    c, out, _ = run(
+        f"adb -s {dev} shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER --user {uid}"
+    )
+    if c != 0 or not out:
+        return []
+    apps = []
+    seen = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if "/" in line and not line.startswith("Activity") and not line.startswith("priority"):
+            comp = line.split()[0]
+            pkg = comp.split("/")[0]
+            if pkg in ("com.android.settings", "dev.omalauncher", "com.google.android.apps.tips") or pkg in seen:
+                continue
+            seen.add(pkg)
+            name = PRETTY_NAMES.get(pkg)
+            if not name:
+                parts = [p for p in pkg.split(".") if p not in ("com", "org", "net", "android", "app", "apps")]
+                name = (parts[-1] if parts else pkg.split(".")[-1]).capitalize()
+            prio = 50 if pkg in user_pkgs else 100
+            apps.append({
+                "package": pkg,
+                "component": comp,
+                "name": name,
+                "userApp": pkg in user_pkgs,
+                "prio": prio,
+            })
+    apps.sort(key=lambda x: (x["prio"], x["name"]))
+    return apps
+
+
+def status():
+    connected, dev = ensure_adb()
+    if not connected:
+        host = get_wlan_ip()
+        _, p_ports = discover_adb_mdns(host, wait_sec=0.3)
+        res = {"adb": False, "host": host, "ports": p_ports, "user": None, "unlocked": False, "apps": []}
+        with open(CACHE_FILE, "w") as f:
+            json.dump(res, f)
+        return res
+    uid, unlocked = find_private_user(dev)
+    apps = get_private_apps(uid, dev) if (uid is not None and unlocked) else []
+    res = {
+        "adb": True,
+        "device": dev,
+        "user": uid,
+        "unlocked": unlocked,
+        "apps": apps,
+    }
+    with open(CACHE_FILE, "w") as f:
+        json.dump(res, f)
+    return res
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
+    if cmd == "status":
+        print(json.dumps(status()))
+    elif cmd == "pair":
+        arg = " ".join(sys.argv[2:])
+        res = pair_adb(arg)
+        with open(CACHE_FILE, "w") as f:
+            json.dump(res, f)
+        print(json.dumps(res))
+    elif cmd == "unlock":
+        ok, dev = ensure_adb()
+        if ok:
+            uid, _ = find_private_user(dev)
+            if uid is not None:
+                c, _, _ = run(f"adb -s {dev} shell cmd user set-quiet-mode {uid} false")
+                time.sleep(0.8)
+                _, unlocked_now = find_private_user(dev)
+                if c != 0 and not unlocked_now:
+                    run(f"adb -s {dev} shell am start -n com.android.settings/.privatespace.PrivateSpaceAuthenticationActivity")
+        print(json.dumps(status()))
+    elif cmd == "lock":
+        ok, dev = ensure_adb()
+        if ok:
+            uid, _ = find_private_user(dev)
+            if uid is not None:
+                run(f"adb -s {dev} shell cmd user set-quiet-mode {uid} true")
+                time.sleep(0.6)
+        print(json.dumps(status()))
+    elif cmd == "open":
+        comp = sys.argv[2]
+        ok, dev = ensure_adb()
+        if ok:
+            uid, unlocked = find_private_user(dev)
+            if uid is not None:
+                if not unlocked:
+                    run(f"adb -s {dev} shell cmd user set-quiet-mode {uid} false")
+                    time.sleep(0.8)
+                run(f"adb -s {dev} shell am start --user {uid} -n {comp}")
+
+
+if __name__ == "__main__":
+    main()
+PY
+python3 "$d/ctl.py" status
+""") every 15s json timeout 10s
+  state pairResult = ""
+  state shortcuts = [] persist
+
+  let ps = psFile ?? psPoll
+  let adbOk = ps.adb ?? false
+  let hasUser = ps.user != null
+  let unlocked = ps.unlocked ?? false
+  let privApps = ps.apps ?? []
+  let shortcutApps = shortcuts.map(pkg => privApps.find(a => a.package == pkg)).filter(a => a != null)
+
+  onTap: screen()
+
+  Column {
+    gap: 4
+    fill: true
+    justify: spaceBetween
+
+    Row {
+      gap: 4
+      align: center
+      Text { text: "private space"; style: label; weight: 1; maxLines: 1 }
+      Text {
+        text: !adbOk ? "vincular" : !hasUser ? "sin perfil" : unlocked ? "${len(privApps)} apps" : "bloqueado"
+        style: small
+        color: !adbOk ? yellow : unlocked ? green : muted
+        width: 64
+        align: end
+        maxLines: 1
+      }
+    }
+
+    if !adbOk {
+      Input {
+        placeholder: "código 6 dígitos…"
+        clear: true
+        fontSize: 12
+        onSubmit: {
+          haptic()
+          pairResult = run("python3 ~/.local/share/omalauncher/private-space/ctl.py pair ${sh(value)}")
+        }
+      }
+    } else if unlocked && len(shortcutApps) > 0 {
+      Row {
+        gap: 6
+        align: center
+        for a in shortcutApps.take(2) key a.package {
+          Button {
+            text: a.name
+            color: accent
+            weight: 1
+            onTap: {
+              haptic()
+              run("python3 ~/.local/share/omalauncher/private-space/ctl.py open ${sh(a.component)}")
+            }
+          }
+        }
+      }
+    } else {
+      Text {
+        text: !unlocked ? "Espacio privado bloqueado" : "Sin accesos directos"
+        style: small
+        color: muted
+        maxLines: 1
+      }
+    }
+
+    Row {
+      gap: 6
+      if !adbOk {
+        Button {
+          text: "ajustes"
+          color: accent
+          weight: 1
+          onTap: { haptic(); androidApp("com.android.settings") }
+        }
+        Button {
+          text: "ayuda"
+          color: muted
+          onTap: { haptic(); screen() }
+        }
+      } else {
+        Button {
+          text: unlocked ? "bloquear" : "abrir"
+          color: unlocked ? yellow : green
+          weight: 1
+          onTap: {
+            haptic()
+            if unlocked {
+              run("python3 ~/.local/share/omalauncher/private-space/ctl.py lock")
+            } else {
+              run("python3 ~/.local/share/omalauncher/private-space/ctl.py unlock")
+            }
+          }
+        }
+        Button {
+          text: "ver"
+          color: accent
+          onTap: { haptic(); screen() }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "private space"
+    Column {
+      scroll: true
+      gap: 12
+
+      if !adbOk {
+        Column {
+          gap: 8
+          padding: 12
+          background: surface
+          border: 1
+          borderColor: border
+          Text { text: "Vincular Depuración inalámbrica (1 sola vez)"; style: body; bold: true; color: yellow }
+          Text {
+            text: "1. Abre Ajustes → Opciones para desarrolladores → Depuración inalámbrica.\n2. Pon Ajustes en Pantalla dividida junto con Omalauncher.\n3. Toca 'Vincular dispositivo con código de vinculación'.\n4. Escribe aquí abajo solo el código de 6 dígitos (el puerto se detecta solo):"
+            style: small
+            color: foreground
+          }
+          Input {
+            placeholder: "Escribe el código de 6 dígitos (ej. 123456)…"
+            clear: true
+            focus: true
+            onSubmit: {
+              haptic()
+              pairResult = run("python3 ~/.local/share/omalauncher/private-space/ctl.py pair ${sh(value)}")
+            }
+          }
+          if pairResult != "" {
+            Text { text: pairResult; style: small; color: muted }
+          }
+          Button {
+            text: "Abrir Ajustes de Android"
+            color: accent
+            onTap: { haptic(); androidApp("com.android.settings") }
+          }
+        }
+      } else {
+        Row {
+          gap: 8
+          align: center
+          padding: 12
+          background: surface
+          border: 1
+          borderColor: border
+          Column {
+            gap: 2
+            weight: 1
+            Text {
+              text: unlocked ? "Espacio privado desbloqueado" : "Espacio privado bloqueado"
+              style: body
+              bold: true
+              color: unlocked ? green : yellow
+            }
+            Text {
+              text: hasUser ? "Perfil privado #${ps.user} • ${len(privApps)} apps disponibles" : "No se encontró un perfil privado"
+              style: small
+              color: muted
+            }
+          }
+          Button {
+            text: unlocked ? "Bloquear" : "Desbloquear"
+            color: unlocked ? yellow : green
+            onTap: {
+              haptic()
+              if unlocked {
+                run("python3 ~/.local/share/omalauncher/private-space/ctl.py lock")
+              } else {
+                run("python3 ~/.local/share/omalauncher/private-space/ctl.py unlock")
+              }
+            }
+          }
+        }
+
+        if unlocked && len(privApps) > 0 {
+          Column {
+            gap: 8
+            padding: 12
+            background: surface
+            border: 1
+            borderColor: border
+            Row {
+              gap: 8
+              align: center
+              Column {
+                gap: 2
+                weight: 1
+                Text { text: "Accesos directos en el widget"; style: body; bold: true; color: foreground }
+                Text {
+                  text: len(shortcutApps) == 0 ? "Ninguno activo (usa '+ widget' abajo para elegir hasta 2)" : "${len(shortcutApps)} de 2 activos en el inicio"
+                  style: small
+                  color: muted
+                }
+              }
+              if len(shortcuts) > 0 {
+                Button {
+                  text: "Sin ninguno"
+                  color: muted
+                  onTap: {
+                    haptic()
+                    shortcuts = []
+                  }
+                }
+              }
+            }
+            if len(shortcutApps) > 0 {
+              Row {
+                gap: 6
+                align: center
+                for a in shortcutApps key a.package {
+                  Button {
+                    text: "✕ ${a.name}"
+                    color: accent
+                    weight: 1
+                    onTap: {
+                      haptic()
+                      shortcuts = filter(shortcuts, p => p != a.package)
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          Text { text: "Tus apps instaladas en Espacio privado"; style: label }
+          for a in privApps.filter(x => x.userApp) key a.package {
+            let isPinned = any(shortcuts, p => p == a.package)
+            Row {
+              gap: 8
+              align: center
+              padding: [12, 8]
+              background: surface
+              border: 1
+              borderColor: isPinned ? accent : border
+              Column {
+                gap: 2
+                weight: 1
+                onTap: {
+                  haptic()
+                  run("python3 ~/.local/share/omalauncher/private-space/ctl.py open ${sh(a.component)}")
+                  close()
+                }
+                Text { text: a.name; style: body; bold: true; color: foreground; maxLines: 1 }
+                Text { text: a.package; style: small; color: muted; maxLines: 1 }
+              }
+              Button {
+                text: isPinned ? "★ fijo" : "+ widget"
+                color: isPinned ? yellow : muted
+                onTap: {
+                  haptic()
+                  if isPinned {
+                    shortcuts = filter(shortcuts, p => p != a.package)
+                  } else if len(shortcuts) < 2 {
+                    shortcuts = flatten([shortcuts, [a.package]])
+                  }
+                }
+              }
+              Button {
+                text: "abrir ↗"
+                color: accent
+                onTap: {
+                  haptic()
+                  run("python3 ~/.local/share/omalauncher/private-space/ctl.py open ${sh(a.component)}")
+                  close()
+                }
+              }
+            }
+          }
+
+          Text { text: "Apps del sistema en Espacio privado"; style: label }
+          for a in privApps.filter(x => !x.userApp) key a.package {
+            let isPinned = any(shortcuts, p => p == a.package)
+            Row {
+              gap: 8
+              align: center
+              padding: [12, 8]
+              background: surface
+              border: 1
+              borderColor: isPinned ? accent : border
+              Column {
+                gap: 2
+                weight: 1
+                onTap: {
+                  haptic()
+                  run("python3 ~/.local/share/omalauncher/private-space/ctl.py open ${sh(a.component)}")
+                  close()
+                }
+                Text { text: a.name; style: body; color: foreground; maxLines: 1 }
+                Text { text: a.package; style: small; color: muted; maxLines: 1 }
+              }
+              Button {
+                text: isPinned ? "★ fijo" : "+ widget"
+                color: isPinned ? yellow : muted
+                onTap: {
+                  haptic()
+                  if isPinned {
+                    shortcuts = filter(shortcuts, p => p != a.package)
+                  } else if len(shortcuts) < 2 {
+                    shortcuts = flatten([shortcuts, [a.package]])
+                  }
+                }
+              }
+              Button {
+                text: "abrir ↗"
+                color: accent
+                onTap: {
+                  haptic()
+                  run("python3 ~/.local/share/omalauncher/private-space/ctl.py open ${sh(a.component)}")
+                  close()
+                }
+              }
+            }
+          }
+        } else if !unlocked {
+          Column {
+            gap: 6
+            padding: 12
+            background: surface
+            border: 1
+            borderColor: border
+            Text {
+              text: "Toca 'Desbloquear' arriba para encender tu Espacio privado y ver tus apps."
+              style: small
+              color: muted
+            }
+          }
+        }
+      }
+    }
+  }
+}
