@@ -9,7 +9,7 @@ widget "storage" {
   meta {
     owl: 10
     description: "A treemap of your Linux folders and what fills them, phone storage free and used, and caches that are safe to clean, per item or all at once."
-    version: "1.1"
+    version: "1.2"
     license: "MIT"
     category: "system"
   }
@@ -224,7 +224,9 @@ widget "storage" {
   state armed = 0        // until when a clean tap is armed (a second tap within 5 s cleans)
   source st = file("~/.cache/storage-widget/status.json") json
   state pending = ""     // tapped: the item to clean, "safe" for all, until the cleaner has started
-  state starting = null
+  state pendingAt = 0    // when it was tapped; a tap whose cleaner never started is dropped after 30 s
+  // run()'s output, new for every start; not null at first, since `on` ignores a change from null
+  state starting = 0
 
   let d = scan.ok ? scan.out : null
   let dirs = (d.dirs ?? []).filter(x => x.size > 0)   // empty ones (/srv, /opt) are just noise
@@ -268,10 +270,11 @@ widget "storage" {
 
   // a status still running after an hour is from a cleaner that was killed
   let live = st.running != null && st.running != "" && now != null && now - st.started < 3600
-  let cleaning = pending != "" ? pending : live ? st.target : ""   // "safe" while cleaning all
+  let waiting = pending != "" && now - pendingAt < 30
+  let cleaning = waiting ? pending : live ? st.target : ""   // "safe" while cleaning all
   on starting { pending = "" }
   // when the last clean finished; null while one runs, so it changes when one ends
-  let doneAt = live || pending != "" ? null : st.at
+  let doneAt = live || waiting ? null : st.at
   on doneAt { notify("Storage", "Freed ${st.freedH}."); refresh() }
 
   onTap: screen()
@@ -371,6 +374,7 @@ widget "storage" {
           if isArmed {
             armed = 0
             pending = "safe"
+            pendingAt = now
             starting = run("bash -c ${sh(script)} storage clean safe")
           } else {
             armed = now + 5
@@ -584,6 +588,7 @@ widget "storage" {
               onTap: {
                 if cleaning == "" {
                   pending = j.id
+                  pendingAt = now
                   starting = run("bash -c ${sh(script)} storage clean ${sh(j.id)}")
                 }
               }
@@ -600,6 +605,7 @@ widget "storage" {
                 if isArmed {
                   armed = 0
                   pending = "safe"
+                  pendingAt = now
                   starting = run("bash -c ${sh(script)} storage clean safe")
                 } else {
                   armed = now + 5
