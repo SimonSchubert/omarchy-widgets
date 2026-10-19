@@ -6,8 +6,8 @@
 // version fetches a verse and its translation from api.alquran.cloud, and adds a
 // language picker that also switches the interface language.
 //
-// Released under the MIT License. The full text is in the README next to this one,
-// and is reproduced on the widget's screen.
+// Released under the MIT License, whose full text is reproduced on the widget's
+// screen below, and in the store's README next to this file.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -15,11 +15,11 @@
 widget "quran-verse" {
   size: 6x3
   minSize: 3x2
-  requires { pacman: [] }
+  requires { pacman: ["noto-fonts", "noto-fonts-cjk", "noto-fonts-extra"] }
   meta {
-    owl: 8
+    owl: 9
     description: "A verse of the day from the Qur'an, in Arabic and in your language"
-    version: "1.1"
+    version: "1.2"
     license: "MIT"
     category: "productivity"
   }
@@ -136,18 +136,22 @@ widget "quran-verse" {
   ]
   let pick = langs.find(l => l.code == lang) ?? langs[0]
   // api.alquran.cloud has no "verse of the day" endpoint, so the day's number picks
-  // one out of the 6236: the same verse all day, a new one tomorrow.
+  // one out of the 6236. Taking it straight as `day % 6236` walks the verses in
+  // order (yesterday 6:7, today 6:8...), which reads as a chapter being read a
+  // verse at a time rather than a verse of the day; hash() scatters the days over
+  // the range instead: the same verse all day, a different — apparently random —
+  // one tomorrow, and the same verse again the day after, with no state held.
   let day = floor((now ?? 0) / 86400)
-  let n = day % 6236 + 1
+  let n = floor(hash("ayah", day) * 6236) + 1
 
   source now = clock every 1m
-  source ar = http("https://api.alquran.cloud/v1/ayah/${enc(int(n))}/ar.alquran") every 6h json timeout 10s
-  source tr = http("https://api.alquran.cloud/v1/ayah/${enc(int(n))}/${enc(pick.edition)}") every 6h json timeout 10s
+  source ar = http("https://api.alquran.cloud/v1/ayah/${enc(int(n))}/ar.alquran") json timeout 10s
+  source tr = http("https://api.alquran.cloud/v1/ayah/${enc(int(n))}/${enc(pick.edition)}") json timeout 10s
   // Korean is the only edition here that truncates: 2:286 comes back as three
   // characters. When a translation comes back far shorter than the Arabic it
   // translates, that is one of those, and an English copy stands in. A null URL
   // pauses the source, so it only ever fetches for Korean.
-  source fb = http(pick.edition == "ko.korean" ? "https://api.alquran.cloud/v1/ayah/${enc(int(n))}/en.asad" : null) every 6h json timeout 10s
+  source fb = http(pick.edition == "ko.korean" ? "https://api.alquran.cloud/v1/ayah/${enc(int(n))}/en.asad" : null) json timeout 10s
 
   state lang = "en" persist
   state arab = true persist
@@ -207,16 +211,16 @@ widget "quran-verse" {
   // English. The values describe what the widget does and what it needs, not what any
   // one machine happens to have installed, so they read the same on every device.
   let parts = [
-    [pick.t.kLevel, "8, the level it is written for"],
+    [pick.t.kLevel, "9, the level it is written for"],
     [pick.t.kNodes, "Box, Column, Row, Flow, Text, Button"],
-    [pick.t.kExpr, "clamp, round, floor, len, trim, max, int, enc, find"],
+    [pick.t.kExpr, "hash, clamp, round, floor, len, trim, max, int, enc, find"],
     [pick.t.kAct, "copy, share, haptic, screen"],
     [pick.t.kSrc, "a clock, and api.alquran.cloud for the verse and its translation"],
     [pick.t.kState, "language, whether the Arabic shows, and the last verse, so it works offline"],
-    [pick.t.kFonts, "the phone's own, which draw every script here"],
+    [pick.t.kFonts, "Noto for Arabic, Cyrillic, Devanagari, Bengali, Tamil, Thai, Urdu, CJK and Hangul; Latin needs none"],
     [pick.t.kScripts, "Arabic, Latin, Cyrillic, Devanagari, Bengali, Tamil, Thai, Urdu, CJK, Hangul"],
     [pick.t.kLangs, "23 translations, one edition each, each checked over all 6236 verses"],
-    [pick.t.kPkg, "none, and no shell commands"]
+    [pick.t.kPkg, "noto-fonts, noto-fonts-cjk and noto-fonts-extra, and no shell commands"]
   ]
 
   on ayah.text { last = ayah }

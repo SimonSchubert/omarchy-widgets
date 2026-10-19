@@ -38,9 +38,10 @@ if you can — the Tamil, Kurdish, Swahili and Urdu wording in particular.
 
 ## Requirements
 
-None. The tile is drawn with the phone's own fonts, which cover Arabic, Latin,
-Cyrillic, Devanagari, Bengali, Tamil, Thai, Urdu, CJK and Hangul, and the widget
-runs no shell commands.
+Three font packages, so the store's Linux side draws every script on its own:
+`noto-fonts`, `noto-fonts-cjk` and `noto-fonts-extra` — Noto covers Arabic,
+Latin, Cyrillic, Devanagari, Bengali, Tamil, Thai, Urdu, CJK and Hangul. The
+widget still runs no shell commands.
 
 ## Editing it
 
@@ -70,6 +71,12 @@ Three things in the file are worth knowing before you change it:
 
 Both sections start folded and share one bordered plate, so they read as parts of
 the same panel rather than two separate blocks. Each has its own open/close button.
+
+The day's verse is picked with `hash("ayah", day)` spread over the 6236 verses,
+not `day % 6236`: a modulo walk reads as a chapter being read a verse at a time
+rather than a verse of the day. The hash scatters the days across the range —
+the same verse all day, a different — apparently random — one tomorrow, and the
+same verse again the day after, with no state held.
 
 Check a change before you publish it:
 
