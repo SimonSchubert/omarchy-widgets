@@ -17,9 +17,9 @@ widget "quran-verse" {
   minSize: 3x2
   requires { pacman: [] }
   meta {
-    owl: 8
+    owl: 9
     description: "A verse of the day from the Qur'an, in Arabic and in your language"
-    version: "1.1"
+    version: "1.2"
     license: "MIT"
     category: "productivity"
   }
@@ -136,18 +136,20 @@ widget "quran-verse" {
   ]
   let pick = langs.find(l => l.code == lang) ?? langs[0]
   // api.alquran.cloud has no "verse of the day" endpoint, so the day's number picks
-  // one out of the 6236: the same verse all day, a new one tomorrow.
+  // one out of the 6236 with hash(): the days do not walk the verses in order,
+  // one surah at a time, but scatter over the range. Same verse all day, a new
+  // one tomorrow.
   let day = floor((now ?? 0) / 86400)
-  let n = day % 6236 + 1
+  let n = floor(hash("ayah", day) * 6236) + 1
 
   source now = clock every 1m
-  source ar = http("https://api.alquran.cloud/v1/ayah/${enc(int(n))}/ar.alquran") every 6h json timeout 10s
-  source tr = http("https://api.alquran.cloud/v1/ayah/${enc(int(n))}/${enc(pick.edition)}") every 6h json timeout 10s
+  source ar = http("https://api.alquran.cloud/v1/ayah/${enc(int(n))}/ar.alquran") json timeout 10s
+  source tr = http("https://api.alquran.cloud/v1/ayah/${enc(int(n))}/${enc(pick.edition)}") json timeout 10s
   // Korean is the only edition here that truncates: 2:286 comes back as three
   // characters. When a translation comes back far shorter than the Arabic it
   // translates, that is one of those, and an English copy stands in. A null URL
   // pauses the source, so it only ever fetches for Korean.
-  source fb = http(pick.edition == "ko.korean" ? "https://api.alquran.cloud/v1/ayah/${enc(int(n))}/en.asad" : null) every 6h json timeout 10s
+  source fb = http(pick.edition == "ko.korean" ? "https://api.alquran.cloud/v1/ayah/${enc(int(n))}/en.asad" : null) json timeout 10s
 
   state lang = "en" persist
   state arab = true persist
@@ -207,13 +209,13 @@ widget "quran-verse" {
   // English. The values describe what the widget does and what it needs, not what any
   // one machine happens to have installed, so they read the same on every device.
   let parts = [
-    [pick.t.kLevel, "8, the level it is written for"],
+    [pick.t.kLevel, "9, the level it is written for"],
     [pick.t.kNodes, "Box, Column, Row, Flow, Text, Button"],
-    [pick.t.kExpr, "clamp, round, floor, len, trim, max, int, enc, find"],
+    [pick.t.kExpr, "hash, clamp, round, floor, len, trim, max, int, enc, find"],
     [pick.t.kAct, "copy, share, haptic, screen"],
     [pick.t.kSrc, "a clock, and api.alquran.cloud for the verse and its translation"],
     [pick.t.kState, "language, whether the Arabic shows, and the last verse, so it works offline"],
-    [pick.t.kFonts, "the phone's own, which draw every script here"],
+    [pick.t.kFonts, "system fonts, which cover every script here"],
     [pick.t.kScripts, "Arabic, Latin, Cyrillic, Devanagari, Bengali, Tamil, Thai, Urdu, CJK, Hangul"],
     [pick.t.kLangs, "23 translations, one edition each, each checked over all 6236 verses"],
     [pick.t.kPkg, "none, and no shell commands"]

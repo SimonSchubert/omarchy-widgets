@@ -38,9 +38,8 @@ if you can — the Tamil, Kurdish, Swahili and Urdu wording in particular.
 
 ## Requirements
 
-None. The tile is drawn with the phone's own fonts, which cover Arabic, Latin,
-Cyrillic, Devanagari, Bengali, Tamil, Thai, Urdu, CJK and Hangul, and the widget
-runs no shell commands.
+None. The system's fonts cover Arabic, Latin, Cyrillic, Devanagari, Bengali,
+Tamil, Thai, Urdu, CJK and Hangul, and the widget runs no shell commands.
 
 ## Editing it
 
@@ -71,6 +70,10 @@ Three things in the file are worth knowing before you change it:
 Both sections start folded and share one bordered plate, so they read as parts of
 the same panel rather than two separate blocks. Each has its own open/close button.
 
+The day's verse is picked with `hash("ayah", day)` spread over the 6236 verses,
+not `day % 6236`, which walks the verses one surah at a time. The same verse
+shows all day, a different one the next day, and nothing is held.
+
 Check a change before you publish it:
 
 ```
@@ -79,7 +82,7 @@ owl-check widget.owl
 
 It prints any errors and writes a PNG of the tile and of the full screen. Note
 that it renders the widget as it is currently running, so the language and which
-folds are open in the preview are the ones on your phone, not the defaults
+folds are open in the preview are the ones it shows now, not the defaults
 written in the file.
 
 ## Licence
