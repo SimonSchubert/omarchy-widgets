@@ -1,5 +1,5 @@
 widget "cricket" {
-  meta { owl: 9; description: "Live cricket scores from Cricbuzz: every match at a glance, live ones first. Tap a match for the scorecard - batsmen, bowlers, rates, recent balls - or the tile for the full board"; version: "1.5"; license: "MIT"; category: "sport" }
+  meta { owl: 10; description: "Live cricket scores from Cricbuzz: every match at a glance, live ones first. Tap a match for the scorecard - batsmen, bowlers, rates, recent balls - or the tile for the full board"; version: "1.6"; license: "MIT"; category: "sport" }
 
   size: 3x4
   minSize: 3x3
@@ -81,9 +81,11 @@ def overs(value):
 
 
 def innings(scores):
-    # A team's innings as cricket writes them: "240 & 169/4d (65.6)".
+    # A team's innings as a list of parts, so the widget can draw the runs bold and the
+    # rest quiet: [{"r": 240, "w": 10, "d": False, "o": ""}, ...]. The widget joins them
+    # with " & " and adds the overs of the last one, as cricket writes them.
     if not scores:
-        return ""
+        return []
     parts = sorted(
         ((v.get("inningsId", 0), v) for k, v in scores.items() if k.startswith("inngs")),
         key=lambda pair: pair[0],
@@ -94,19 +96,14 @@ def innings(scores):
         runs = part.get("runs")
         if runs is None:
             continue
-        line = str(runs)
-        wickets = part.get("wickets")
-        # Always show how many wickets have fallen, all 10 included: a bare "223"
-        # for a side that is all out reads like it is still batting.
-        if wickets is not None:
-            line += "/%d" % wickets
-        if part.get("isDeclared"):
-            line += "d"
-        span = overs(part.get("overs"))
-        if index == last and span:
-            line += " (%s)" % span
-        out.append(line)
-    return " & ".join(out)
+        out.append({
+            "r": runs,
+            "w": part.get("wickets"),
+            "d": bool(part.get("isDeclared")),
+            # Only the innings being batted has overs worth showing.
+            "o": overs(part.get("overs")) if index == last else "",
+        })
+    return out
 
 
 def slugify(text):
@@ -141,6 +138,13 @@ def matches(page):
             "t2": (two.get("teamSName") or two.get("teamName") or "?")[:6],
             "n1": one.get("teamName") or "?",
             "n2": two.get("teamName") or "?",
+            # Cricbuzz's own badge for each side (a flag for a country, a crest for a
+            # domestic team), by its image id; the widget draws it with Image.
+            "b1": one.get("imageId"),
+            "b2": two.get("imageId"),
+            # A badge of a country is a flag and reads well small; a domestic crest is a
+            # wordmark that turns to mush, so the tile only shows the former (owl 10).
+            "flags": (info.get("matchType") or "") == "International",
             "fmt": info.get("matchFormat") or "",
             "desc": info.get("matchDesc") or "",
             "series": info.get("seriesName") or "",
@@ -174,8 +178,10 @@ PY
   // previous scores on screen instead of replacing them with the error (the error still
   // goes to .errors/ for owl-check). `on s first` (owl 9) runs for the first load and every
   // refresh after it, so one trigger saves what the board fetched; a failure changes nothing.
-  state last = [] persist
-  on s first { if value != null && value.ok { last = value.out.matches ?? [] } }
+  // `board`, not `last`: 1.6 changed an innings from text to a list, and a value kept from
+  // an older version would crash the widget's own layout until the next fetch replaced it.
+  state board = [] persist
+  on s first { if value != null && value.ok { board = value.out.matches ?? [] } }
   // The match whose detail the screen is showing, by id; "" means the board. A match that
   // has rolled off the list (it finished and left the page) falls back to the board.
   state open = ""
@@ -330,7 +336,7 @@ except Exception as error:
     sys.exit(1)
 """
   source detail = cmd("python3 -c ${sh(detailPy)} ${sh(open)}") every 30s json timeout 30s status
-  let matches = s != null && s.ok ? (s.out.matches ?? []) : last
+  let matches = s != null && s.ok ? (s.out.matches ?? []) : board
   // Live first, then the ones about to start (soonest first), then results (newest first).
   let live = matches.filter(m => m.live).sortBy(m => m.start ?? 0)
   let soon = matches.filter(m => !m.live && m.state == "Preview").sortBy(m => m.start ?? 0)
@@ -363,13 +369,46 @@ except Exception as error:
     }
   }
 
-  // A team's line, with the name in a fixed column so the runs and overs line up down the tile.
-  let teamW = 46
-  component Score(team, line) {
+  // Cricbuzz's own badge for a side, by the image id the board carries: a flag for a
+  // country, a crest for a domestic team. 80x80 is the smallest square it serves as a PNG;
+  // at 13 dp the flag is legible and costs about 4 KB, kept like any image from the web.
+  let badgeUrl = "https://static.cricbuzz.com/a/img/v1/80x80/i1/c"
+  component Badge(id, side) {
+    Image { src: "${badgeUrl}${enc(id)}/x.png"; width: side; height: side }
+  }
+
+  // A team's innings as cricket writes them, "240 & 169/4d (65.6)", with the runs bold and
+  // the wickets, the declaration and the overs quiet (owl 10's spans), so the score reads at
+  // a glance instead of arriving as one grey lump. `overs: false` leaves the overs off, for
+  // a tile too narrow to hold them.
+  component Innings(parts, size, align = "start", overs = true) {
+    Text {
+      spans: flatten(parts.map((p, i) => [
+        i == 0 ? {text: ""} : {text: " & ", color: muted, fontSize: size - 1},
+        {text: "${p.r}", fontSize: size, fontWeight: 700},
+        p.w == null ? {text: ""} : {text: "/${p.w}", color: muted, fontSize: size},
+        p.d ? {text: "d", color: muted, fontSize: size} : {text: ""},
+        !overs || (p.o ?? "") == "" ? {text: ""} : {text: " (${p.o})", color: muted, fontSize: size - 2}
+      ]))
+      font: mono
+      align: align
+      maxLines: 1
+    }
+  }
+
+  // A team's line on the tile: a flag (only on a tile with the width to spare), its short
+  // name in a fixed column so the scores line up down the tile, and the innings on the right.
+  // The flag's space stays reserved even when a side has none (a domestic crest is a wordmark
+  // that turns to mush at this size), so every card's names and scores start at the same x.
+  // On a 3-column tile there is no room for either, so the overs go too and the runs carry it.
+  let teamW = 40
+  component Score(team, parts, badge = null, narrow = false) {
     Row {
-      gap: 6
-      Text { text: team; font: mono; fontSize: 12; color: muted; width: teamW; maxLines: 1 }
-      Text { text: line; font: mono; fontSize: 12; color: foreground; weight: 1; maxLines: 1 }
+      gap: 5
+      align: center
+      if !narrow && badge != null { Badge { id: badge; side: 13 } } else if !narrow { Spacer { width: 13 } }
+      Text { text: team; font: mono; fontSize: 12; color: muted; width: narrow ? 34 : teamW; maxLines: 1 }
+      Innings { parts: parts; size: 12; align: "end"; weight: 1; overs: !narrow }
     }
   }
 
@@ -397,7 +436,9 @@ except Exception as error:
       radius: 10 * corners
       border: 1
       borderColor: m.live ? alpha(red, 0.5) : alpha(muted, 0.22)
-      background: alpha(red, m.live ? 0.12 : 0)
+      // A live card is washed in red from the corner the score sits at, so it reads as the
+      // one that's moving without the border doing all the work (owl 10's gradients).
+      background: m.live ? linear(0, 0, 1, 1, [alpha(red, 0.16), alpha(red, 0.04)]) : alpha(red, 0)
       onTap: { haptic(); open = m.id }
       Row {
         gap: 8
@@ -405,25 +446,34 @@ except Exception as error:
         Text { text: m.live ? "● LIVE" : m.state == "Preview" ? "UPCOMING" : "RESULT"; style: label; bold: m.live; color: m.live ? red : muted; width: 84; maxLines: 1 }
         Text { text: [m.fmt, m.desc].filter(x => x != "").join(" · "); style: label; color: muted; weight: 1; align: end; maxLines: 1 }
       }
-      if (m.s1 ?? "") == "" {
+      if (m.s1 ?? []).length == 0 {
         // Not a ball bowled yet: both names on one line, the way a fixture reads.
         Text { text: "${m.n1} v ${m.n2}"; style: body; maxLines: 1 }
       } else {
         Row {
           gap: 8
-          align: bottom
+          align: center
+          // The flag's space stays reserved when a side has none (a domestic crest turns to
+          // mush at this size), so every card's names line up in one column down the board.
+          if m.flags && m.b1 != null { Badge { id: m.b1; side: 16 } } else { Spacer { width: 16 } }
           Text { text: m.n1; style: body; weight: 1; maxLines: 1 }
-          Text { text: m.s1; font: mono; fontSize: 14; bold: true; width: 150; align: end; maxLines: 1 }
+          Innings { parts: m.s1; size: 15; align: "end" }
         }
-        if (m.s2 ?? "") != "" {
+        if (m.s2 ?? []).length > 0 {
           Row {
             gap: 8
-            align: bottom
+            align: center
+            if m.flags && m.b2 != null { Badge { id: m.b2; side: 16 } } else { Spacer { width: 16 } }
             Text { text: m.n2; style: body; weight: 1; maxLines: 1 }
-            Text { text: m.s2; font: mono; fontSize: 14; bold: true; width: 150; align: end; maxLines: 1 }
+            Innings { parts: m.s2; size: 15; align: "end" }
           }
         } else {
-          Text { text: "${m.n2}  yet to bat"; style: body; color: muted; maxLines: 1 }
+          Row {
+            gap: 8
+            align: center
+            if m.flags && m.b2 != null { Badge { id: m.b2; side: 16 } } else { Spacer { width: 16 } }
+            Text { text: "${m.n2}  yet to bat"; style: body; color: muted; maxLines: 1 }
+          }
         }
       }
       Text { text: note; style: small; color: m.live ? foreground : muted; maxLines: 2 }
@@ -529,23 +579,34 @@ except Exception as error:
           radius: 12 * corners
           border: 1
           borderColor: m.live ? alpha(red, 0.5) : alpha(muted, 0.22)
-          background: alpha(red, m.live ? 0.12 : 0)
+          background: m.live ? linear(0, 0, 1, 1, [alpha(red, 0.18), alpha(red, 0.03)]) : alpha(red, 0)
           Text { text: [m.fmt, m.desc].filter(x => x != "").join(" · "); style: label; color: muted; maxLines: 1 }
           Row {
             gap: 10
-            align: bottom
+            align: center
+            if m.flags && m.b1 != null { Badge { id: m.b1; side: 24 } }
             Text { text: m.n1; style: title; weight: 1; maxLines: 2 }
-            Text { text: (m.s1 ?? "") != "" ? m.s1 : "—"; font: mono; fontSize: 20; bold: true; width: 200; align: end; maxLines: 1 }
+            if (m.s1 ?? []).length > 0 {
+              Innings { parts: m.s1; size: 20; align: "end" }
+            } else {
+              Text { text: "—"; font: mono; fontSize: 20; bold: true; color: muted; maxLines: 1 }
+            }
           }
-          if (m.s2 ?? "") != "" {
+          if (m.s2 ?? []).length > 0 {
             Row {
               gap: 10
-              align: bottom
+              align: center
+              if m.flags && m.b2 != null { Badge { id: m.b2; side: 24 } }
               Text { text: m.n2; style: title; weight: 1; maxLines: 2 }
-              Text { text: m.s2; font: mono; fontSize: 20; bold: true; width: 200; align: end; maxLines: 1 }
+              Innings { parts: m.s2; size: 20; align: "end" }
             }
           } else {
-            Text { text: "${m.n2} · yet to bat"; style: title; color: muted; maxLines: 2 }
+            Row {
+              gap: 10
+              align: center
+              if m.flags && m.b2 != null { Badge { id: m.b2; side: 24 } }
+              Text { text: "${m.n2} · yet to bat"; style: title; color: muted; maxLines: 2 }
+            }
           }
           if note != "" { Text { text: note; style: body; color: m.live ? foreground : muted; maxLines: 3 } }
         }
@@ -613,6 +674,9 @@ except Exception as error:
   }
 
   component Match(m) {
+    // A 3-column tile has no room for the live dot, the flags or a wide format column; the
+    // red card alone carries "live" there and the names keep their width (owl 10's cols).
+    let narrow = cols != null && cols < 4
     // Live matches read "Trail by 27"; upcoming ones read how long until the start (owl 9's
     // fmtAgo) and the start time in the device's timezone (with "today"/"tomorrow" when that
     // helps); finished ones read the result. The day is the calendar day, not "under 24
@@ -628,19 +692,22 @@ except Exception as error:
       gap: 2
       padding: [8, 5]
       radius: 8 * corners
-      background: alpha(red, m.live ? 0.10 : 0)
+      background: m.live ? linear(0, 0, 1, 1, [alpha(red, 0.14), alpha(red, 0.03)]) : alpha(red, 0)
       onTap: { haptic(); open = m.id; screen() }
       Row {
-        gap: 6
+        gap: 5
         align: center
-        Text { text: "${m.t1} v ${m.t2}"; bold: true; weight: 1; maxLines: 1 }
-        // The dot goes before the format so the format still ends at the tile's edge; the
-        // slot is always reserved, so the format column stays lined up down the tile.
-        if m.live { Dot { } } else { Spacer { width: 12 } }
-        Text { text: m.fmt; style: label; color: muted; width: 34; align: end; maxLines: 1 }
+        // The dot goes first so a live card is spotted without reading it. A narrow tile
+        // leaves it out and lets the red card carry that, so the names keep their width.
+        if m.live && !narrow { Dot { } } else if !narrow { Spacer { width: 12 } }
+        Text { text: m.t1; bold: true; maxLines: 1 }
+        Text { text: "v"; color: muted; fontSize: 10 }
+        Text { text: m.t2; bold: true; weight: 1; maxLines: 1 }
+        // The format sits in its own column at the tile's edge, so the cards line up.
+        Text { text: m.fmt; style: label; color: muted; width: narrow ? 26 : 34; align: end; maxLines: 1 }
       }
-      if (m.s1 ?? "") != "" { Score { team: m.t1; line: m.s1 } }
-      if (m.s2 ?? "") != "" { Score { team: m.t2; line: m.s2 } }
+      if (m.s1 ?? []).length > 0 { Score { team: m.t1; parts: m.s1; badge: m.flags ? m.b1 : null; narrow: narrow } }
+      if (m.s2 ?? []).length > 0 { Score { team: m.t2; parts: m.s2; badge: m.flags ? m.b2 : null; narrow: narrow } }
       Text { text: note; style: small; color: m.live ? foreground : muted; maxLines: 1 }
     }
   }
@@ -666,13 +733,11 @@ except Exception as error:
       Row {
         gap: 6
         align: center
-        Text { text: "cricket"; style: muted; weight: 1; maxLines: 1 }
+        // The count sits next to the name as one line of text (owl 10's spans), so the
+        // tile's top reads "cricket 3 live" instead of two columns fighting for width.
         Text {
-          text: live.length > 0 ? "${live.length} live" : "${matches.length} matches"
-          style: label
-          color: live.length > 0 ? red : muted
-          width: 96
-          align: end
+          spans: [{text: "cricket", color: muted}, live.length > 0 ? {text: "  ${live.length} live", color: red, fontWeight: 700} : {text: "  ${matches.length} matches", color: muted}]
+          weight: 1
           maxLines: 1
         }
       }
