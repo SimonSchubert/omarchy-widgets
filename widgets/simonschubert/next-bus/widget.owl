@@ -155,7 +155,7 @@ widget "next bus" {
           circle(x0 + i * gapX, y, i == k ? 6 : 3.5, fill: i == k ? background : alpha(muted, 0.7))
         }
         circle(sx, y, 6, stroke: tint, width: 2.5)
-        circle(sx, y, 11 + sin(time * 180) * 2, stroke: alpha(tint, 0.35), width: 1.5)
+        circle(sx, y, 11 + (now % 2) * 2, stroke: alpha(tint, 0.35), width: 1.5)
         rect(bx - 11, y - 7, 22, 14, radius: 4 * corners, fill: next.color != "" ? "#${next.color}" : accent)
         rect(bx - 7, y - 4, 5, 4, radius: 1, fill: alpha(background, 0.7))
         rect(bx + 1, y - 4, 5, 4, radius: 1, fill: alpha(background, 0.7))
