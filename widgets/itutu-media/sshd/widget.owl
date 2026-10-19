@@ -1,0 +1,132 @@
+widget "sshd" {
+  page: 1
+  order: 9
+  size: 3x3
+  minSize: 3x3
+
+  meta {
+    owl: 7
+    description: "One tap to turn the local SSH server on or off. Log in from Termux, or add 127.0.0.1:2222 as SFTP network storage in a file manager to move files into ~/share."
+    version: "3.1"
+    license: "MIT"
+    category: "system"
+  }
+
+  requires { pacman: ["openssh", "coreutils", "grep"] }
+
+  // While a command runs, log holds "starting"/"stopping" (the value written
+  // before run() is replaced only when the command finishes), so the button can
+  // show a loading ring; afterwards it holds the command's output, if any.
+  state log = ""
+  state key = ""
+
+  // A listener has "sshd" as its comm and "-p 2222" in its cmdline; a login
+  // session is "sshd-session". /proc/net/tcp is unreadable here and ss needs
+  // netlink, which proot denies.
+  source sshd = cmd('for c in /proc/[0-9]*/comm; do [ "$(cat "$c" 2>/dev/null)" = sshd ] || continue; grep -qa -- "-p 2222" "$(dirname "$c")/cmdline" 2>/dev/null && { echo on; exit 0; }; done; echo off') every 5s
+  source sessions = cmd('n=0; for c in /proc/[0-9]*/comm; do [ "$(cat "$c" 2>/dev/null)" = sshd-session ] || continue; grep -qa -- "sshd-session: root@" "$(dirname "$c")/cmdline" 2>/dev/null && n=$((n+1)); done; echo $n') every 5s
+
+  let sshUp = sshd == "on"
+  let working = log == "starting" || log == "stopping"
+  let errText = working || log == "" ? "" : log
+  let cmdText = "ssh -p 2222 root@127.0.0.1"
+  let keyOk = startsWith(key, "ssh-") || startsWith(key, "ecdsa-") || startsWith(key, "sk-")
+
+  onTap: screen()
+
+  component Status(label, on, detail) {
+    Row {
+      gap: 7
+      align: center
+      Text { text: on ? "●" : "○"; fontSize: 18; color: on ? green : muted; width: 16; align: center }
+      Column {
+        gap: 0
+        weight: 1
+        Text { text: label; style: small; color: on ? green : muted; maxLines: 1 }
+        Text { text: detail; style: label; color: muted; maxLines: 1 }
+      }
+    }
+  }
+
+  component SshToggle(label = "start ssh") {
+    Row {
+      gap: 8
+      fill: width
+      align: center
+      Button {
+        text: working ? "${log}…" : sshUp ? "stop ssh" : label
+        color: working ? muted : sshUp ? red : accent
+        fill: width
+        weight: 1
+        onTap: {
+          log = sshUp ? "stopping" : "starting"
+          log = run("""
+on=0
+for c in /proc/[0-9]*/comm; do
+  [ "$(cat "$c" 2>/dev/null)" = sshd ] || continue
+  d=$(dirname "$c")
+  grep -qa -- "-p 2222" "$d/cmdline" 2>/dev/null && { kill "$(basename "$d")" 2>/dev/null; on=1; }
+done
+if [ "$on" = 1 ]; then sleep 0.4; exit 0; fi
+mkdir -p /run/sshd
+/usr/bin/sshd -p 2222 -o UsePAM=no -o PermitRootLogin=yes -o PasswordAuthentication=yes -o X11Forwarding=no -o ListenAddress=127.0.0.1
+sleep 0.3
+""")
+        }
+      }
+      if working {
+        Ring { value: 1; start: 0; sweep: 300; thickness: 3; color: accent; width: 20; height: 20 }
+      }
+    }
+  }
+
+  Column {
+    gap: 8
+    fill: true
+    Text { text: "sshd"; style: muted }
+    Status { label: sshUp ? "ssh is on" : "ssh is off"; on: sshUp; detail: sshUp && int(sessions ?? "0") > 0 ? "127.0.0.1:2222 · ${int(sessions)} in" : "127.0.0.1:2222" }
+    Text { text: "sftp  root@127.0.0.1:2222"; style: small; font: mono; color: muted }
+    Spacer { weight: 1 }
+    if errText != "" { Text { text: errText; style: small; color: red; maxLines: 2 } }
+    SshToggle { }
+  }
+
+  screen {
+    title: "sshd"
+    Column {
+      gap: 12
+      padding: 16
+      scroll: true
+      Status { label: sshUp ? "ssh is on" : "ssh is off"; on: sshUp; detail: "127.0.0.1:2222" }
+      if errText != "" { Text { text: errText; style: small; color: red } }
+
+      Text { text: "shell"; style: label; color: accent }
+      Text { text: "An SSH server for Termux and apps in a DeX window. Localhost only."; style: small; color: muted }
+      Text { text: cmdText; style: small; font: mono }
+      Row {
+        gap: 8
+        Button { text: "copy"; weight: 1; onTap: copy(cmdText) }
+        Button { text: "share"; weight: 1; onTap: share(cmdText) }
+      }
+      SshToggle { }
+      Text { text: "Log in with root's password, or paste a public key from Termux (ssh-keygen -t ed25519; cat ~/.ssh/id_ed25519.pub)."; style: small; color: muted }
+      Input { text: key; placeholder: "ssh-ed25519 AAAA… you@phone"; onSubmit: key = value }
+      if key != "" {
+        if keyOk {
+          Button {
+            text: "add key for root"
+            fill: width
+            onTap: {
+              log = ""
+              log = run("mkdir -p ~/.ssh && echo ${sh(key)} >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys")
+              key = ""
+            }
+          }
+        } else {
+          Text { text: "that doesn't look like a public key (ssh-, ecdsa- or sk-…)"; style: small; color: red }
+        }
+      }
+
+    }
+  }
+}
