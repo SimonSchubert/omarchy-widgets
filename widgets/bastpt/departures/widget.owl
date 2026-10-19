@@ -1,0 +1,256 @@
+widget "departures" {
+  size: 3x2
+  minSize: 2x1
+  requires { pacman: [] }
+  meta { description: "Live departures from a stop you pick, anywhere Transitous has open timetables: line, direction, platform and minutes to go, with delays. Tap the tile for the full board or to change the stop"; version: "1.1"; license: "MIT"; category: "world"; owl: 9 }
+
+  // The stop, picked in the full screen and kept across restarts. No location is hard-coded.
+  state stopId = "" persist
+  state stopName = "" persist
+  state query = ""
+  state frequent = [
+    {id: "in-Indian-Railways_STM", name: "St Thomas Mount"},
+    {id: "in-Indian-Railways_MSB", name: "Chennai Beach"},
+    {id: "in-Indian-Railways_MS", name: "Chennai Egmore"}
+  ] persist
+
+  let displayName = replace(replace(stopName, ",  -", ""), ", -", "")
+
+  source now = clock every 15s
+  // Transitous (https://transitous.org) asks clients to name themselves.
+  let ua = {"User-Agent": "omarchy-widgets/departures (+https://github.com/SimonSchubert/omarchy-widgets)"}
+
+  let q = trim(query)
+
+  // An empty URL makes no request: it just comes back not ok.
+  source found = http(len(q) < 2 ? null : "https://api.transitous.org/api/v1/geocode?type=STOP&text=${enc(q)}", ua) every 1h timeout 15s json status
+  source board = http(stopId == "" ? null : "https://api.transitous.org/api/v6/stoptimes?stopId=${enc(stopId)}&n=20", ua) every 30s timeout 15s json status
+
+  let stops = (found != null && found.ok ? found.out ?? [] : []).take(8).map(s => {
+    id: s.id,
+    name: replace(replace(s.name, ",  -", ""), ", -", ""),
+    area: (s.areas ?? []).find(a => a.default == true).name ?? s.country ?? "",
+    modes: lower(join((s.modes ?? []).take(3), ", "))
+  })
+  let rows = (board != null && board.ok ? board.out.stopTimes ?? [] : []).map(s => {
+    key: "${s.tripId}${s.place.scheduledDeparture}",
+    line: s.routeShortName != null && s.routeShortName != "?" ? s.routeShortName : s.displayName ?? s.mode ?? "",
+    color: s.routeColor ?? "",
+    text: s.routeTextColor ?? "",
+    to: s.headsign ?? s.tripTo.name ?? "",
+    at: floor(num(sub(s.place.departure ?? s.place.arrival ?? "", 11, 13))) * 60 + floor(num(sub(s.place.departure ?? s.place.arrival ?? "", 14, 16))),
+    planned: floor(num(sub(s.place.scheduledDeparture ?? s.place.scheduledArrival ?? "", 11, 13))) * 60 + floor(num(sub(s.place.scheduledDeparture ?? s.place.scheduledArrival ?? "", 14, 16))),
+    track: s.place.track ?? s.place.scheduledTrack,
+    moved: s.place.track != null && s.place.scheduledTrack != null && s.place.track != s.place.scheduledTrack,
+    live: s.realTime == true,
+    cancelled: s.cancelled == true || s.tripCancelled == true
+  })
+  let problem = stopId == "" || board == null || board.ok ? null : board.code == 429 ? "too many requests" : "transitous offline"
+  // Times are "2026-10-09T23:32:00Z" and the board only looks ahead, so minutes of the UTC day are enough:
+  // a departure is (at - nowMin) mod 1440 minutes away, and one that wraps to ~1439 has just left.
+  let nowMin = floor(now % 86400 / 60)
+  let upcoming = rows.filter(r => (r.at - nowMin + 1440) % 1440 < 1380)
+  // The next departure large (~40dp under the ~16dp stop name), then as many smaller ones (~26dp) as fit.
+  let shown = upcoming.take(tileHeight == null ? 2 : clamp(1 + floor((tileHeight - 70) / 26), 1, 15))
+  let showName = tileHeight == null || tileHeight >= 64
+  let narrow = cols != null && cols <= 2
+
+  onTap: screen()
+
+  component Badge(r, w = 44) {
+    Text {
+      text: r.line
+      style: label
+      bold: true
+      color: r.text != "" ? "#${r.text}" : foreground
+      background: r.color != "" ? "#${r.color}" : alpha(accent, 0.25)
+      padding: [4, 1]
+      radius: 4
+      width: w
+      align: center
+      maxLines: 1
+    }
+  }
+
+  // The countdown is what matters: big, and colored only by a live delay.
+  component Departure(r, now, nowMin, mode = "tile") {
+    Column {
+      gap: 0
+      let left = (r.at - nowMin + 1440) % 1440
+      let at = now - now % 60 + left * 60
+      let raw = (r.at - r.planned + 1440) % 1440
+      let delay = raw > 720 ? raw - 1440 : raw
+      let tint = r.cancelled ? red : !r.live ? foreground : delay >= 5 ? red : delay >= 2 ? yellow : foreground
+      let ampm = lower(fmtTime(at, "a"))
+      let big = r.cancelled ? "×" : left == 0 ? "now" : left < 60 ? "${left}" : fmtTime(at, "h:mm")
+      let unit = r.cancelled || left == 0 ? "" : left < 60 ? "min" : ampm
+      if mode == "list" {
+        Row {
+          align: center
+          gap: 8
+          Badge { r: r; w: 54 }
+          Text { text: r.to; style: small; color: r.cancelled ? muted : foreground; maxLines: 1; weight: 1 }
+          if r.track != null {
+            Text { text: "${r.track}"; style: label; color: r.moved ? orange : muted; maxLines: 1; width: 28; align: end }
+          }
+          Text { text: fmtTime(at, "HH:mm"); style: label; color: muted; font: mono; width: 40; align: end }
+          Text { text: big == "now" || unit == "" ? big : "${big}′"; style: body; bold: true; font: mono; color: tint; width: 52; align: end; maxLines: 1 }
+        }
+      } else {
+        // "14 min  M36  U Haselhorst": the minutes first and largest, then the line, then where it goes.
+        let lead = mode == "big"
+        // A two-column tile is ~110dp inside: everything a quarter smaller, and the line gives way last.
+        let k = narrow ? 0.75 : 1
+        let rowBg = lead ? alpha(accent, 0.2) : left < 60 ? alpha(surface, 0.65) : alpha(muted, 0.14)
+        let rowBorder = lead ? alpha(accent, 0.45) : left < 60 ? alpha(border, 0.4) : alpha(muted, 0.25)
+        Row {
+          align: center
+          fill: width
+          background: rowBg
+          border: 1
+          borderColor: rowBorder
+          radius: 6 * corners
+          padding: [narrow ? 4 : 6, (lead ? 4 : 2) * k]
+          gap: narrow ? 3 : 6
+          Text {
+            text: big
+            fontSize: (lead ? 24 : 15) * k
+            bold: true
+            font: mono
+            color: tint
+            maxLines: 1
+            width: (lead ? 68 : 46) * k
+            align: end
+          }
+          Text {
+            text: unit
+            fontSize: (lead ? 12 : 11) * k
+            color: lead ? foreground : muted
+            width: (lead ? 28 : 22) * k
+            maxLines: 1
+          }
+          Text {
+            text: r.line
+            fontSize: (lead ? 18 : 13) * k
+            bold: true
+            font: mono
+            color: lead ? foreground : muted
+            maxLines: 1
+            width: narrow ? null : max(len(r.line) * (lead ? 18 : 13) * k * 0.72 + 8, (lead ? 44 : 34) * k)
+            weight: narrow ? 1 : null
+          }
+          if !narrow {
+            Text { text: r.to; style: label; color: muted; maxLines: 1; weight: 1 }
+          }
+        }
+      }
+    }
+  }
+
+  Column {
+    gap: 2
+    justify: center
+    if showName {
+      Text { text: displayName == "" ? "departures" : displayName; style: label; color: muted; maxLines: 1 }
+    }
+    if stopId == "" {
+      Text { text: "Tap to pick a stop."; style: small; color: muted }
+    } else {
+      if board == null {
+        Text { text: "…"; fontSize: 30; bold: true; font: mono; color: muted }
+      } else {
+        if problem != null {
+          Text { text: problem; style: small; color: muted }
+        } else {
+          if len(upcoming) == 0 {
+            Text { text: "no departures soon"; style: small; color: muted }
+          }
+          for r, i in shown key r.key {
+            Departure { r: r; now: now; nowMin: nowMin; mode: i == 0 ? "big" : "small" }
+          }
+        }
+      }
+    }
+  }
+
+  component StopButton(item, selected) {
+    Box {
+      weight: 1
+      background: selected ? alpha(accent, 0.25) : alpha(muted, 0.15)
+      border: 1
+      borderColor: selected ? accent : alpha(muted, 0.3)
+      radius: 8
+      padding: [4, 6]
+      align: center
+      onTap: { stopId = item.id; stopName = item.name; refresh() }
+      Text {
+        text: item.name
+        style: small
+        bold: selected
+        color: selected ? foreground : muted
+        maxLines: 1
+        align: center
+      }
+    }
+  }
+
+  screen {
+    title: displayName == "" ? "departures" : displayName
+    Column {
+      scroll: true
+      gap: 8
+      Input { placeholder: displayName == "" ? "search for a stop" : "change stop"; clear: true; onSubmit: { query = value; refresh() } }
+      Row {
+        fill: width
+        gap: 6
+        for f in frequent key f.id {
+          StopButton {
+            item: f
+            selected: f.id == stopId
+          }
+        }
+      }
+      if len(trim(query)) >= 2 {
+        if found == null {
+          Text { text: "searching…"; style: small; color: muted }
+        } else {
+          if len(stops) == 0 {
+            Text { text: found.ok ? "no stops called “${query}”" : "transitous offline"; style: small; color: muted }
+          }
+          for s in stops key s.id {
+            Column {
+              gap: 0
+              padding: [0, 6]
+              onTap: {
+                let sClean = {id: s.id, name: s.name}
+                frequent = ([sClean] + frequent.filter(x => x.id != s.id)).take(3)
+                stopId = s.id
+                stopName = s.name
+                query = ""
+                refresh()
+              }
+              Text { text: s.name; style: body; maxLines: 1 }
+              Text { text: [s.area, s.modes].filter(x => x != "").join(" · "); style: small; color: muted; maxLines: 1 }
+            }
+          }
+          Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
+        }
+      }
+      if stopId != "" {
+        Row {
+          align: center
+          Text { text: "next departures"; style: label; color: muted; weight: 1 }
+          Button { text: "refresh"; color: muted; onTap: refresh() }
+        }
+        if problem != null {
+          Text { text: problem; style: body; color: muted }
+        }
+        for r in upcoming key r.key {
+          Departure { r: r; now: now; nowMin: nowMin; mode: "list" }
+        }
+        Text { text: "data: Transitous, from open timetables. Delays show where the operator publishes live times"; style: label; color: muted }
+      }
+      Spacer { height: 12 }
+    }
+  }
+}
