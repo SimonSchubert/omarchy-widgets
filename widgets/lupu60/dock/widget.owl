@@ -30,6 +30,14 @@ widget "dock" {
     .map(a => { label: a.name, pkg: a.key, art: null, icon: a.icon })
   let presets = flatten([builtins, installed])
 
+  // whichever of these is installed, so "browser" opens it as its own icon would
+  // (resuming where it was left), instead of a url() that always starts a fresh tab
+  let browserPkgs = ["com.android.chrome", "org.mozilla.firefox", "com.sec.android.app.sbrowser",
+    "com.microsoft.emmx", "com.brave.browser", "com.opera.browser", "com.opera.mini.native",
+    "com.duckduckgo.mobile.android", "com.kiwibrowser.browser", "com.vivaldi.browser",
+    "org.fossify.browser", "com.android.browser"]
+  let browserApp = (apps ?? []).find(a => a.profile == null && contains(browserPkgs, a.package))
+
   // Line icons on a 24-unit grid, stroked in the theme's accent colour
   let artNames = [
     "phone", "chat", "camera", "globe", "photo", "grid", "mail", "music", "pin", "gear",
@@ -298,8 +306,9 @@ widget "dock" {
       Column { align: center; onTap: launcher("drawer")
         DockFace { label: label; art: art; icon: icon; box: box; labels: labels } }
     } else if pkg == "web" {
-      // opens whichever browser is the phone's default
-      Column { align: center; onTap: url("https://www.google.com")
+      // opens the browser itself, resuming it, like tapping its own icon would;
+      // only falls back to a fresh tab when no known browser is installed
+      Column { align: center; onTap: if browserApp != null { androidApp(browserApp.key) } else { url("https://www.google.com") }
         DockFace { label: label; art: art; icon: icon; box: box; labels: labels } }
     } else if pkg == "terminal" {
       Column { align: center; onTap: terminal("bash")
