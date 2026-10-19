@@ -3,13 +3,13 @@ face "nexus" {
 
   meta {
     owl: 10
-    description: "An elegant, minimalist Arch Linux dashboard with precision typography, day progress, system vitals, fortune, and app launcher"
-    version: "1.6"
+    description: "An elegant, minimalist Arch Linux dashboard with precision typography, day progress, system vitals, online quotes, and app launcher"
+    version: "1.0"
     license: "MIT"
     category: "system"
   }
 
-  requires { pacman: ["fortune-mod"] }
+  requires { pacman: ["btop"] }
 
   source now = clock every 1s
   source dev = android.device
