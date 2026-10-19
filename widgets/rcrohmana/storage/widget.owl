@@ -9,20 +9,23 @@ widget "storage" {
   meta {
     owl: 10
     description: "A treemap of your Linux folders and what fills them, phone storage free and used, and caches that are safe to clean, per item or all at once."
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "system"
   }
   requires { pacman: ["coreutils", "findutils", "util-linux", "gawk", "sed", "jq", "pacman-contrib"] }
 
   // One script, two modes: `scan` prints the disk, the folders two levels deep and the junk items
-  // as JSON, `clean <id|safe>` deletes one junk item or all of them and prints what it freed.
+  // as JSON, `clean <id|safe>` starts a cleaner in the background (detached with setsid, so the
+  // 30 s limit on run() can't cut it off) that reports the item it's on and then what it freed
+  // in ~/.cache/storage-widget/status.json, which the widget reads with a file() source.
   // Deleting (rm -rf) only ever touches the fixed cache paths listed in paths() below, the
   // pacman package cache (through paccache) and /tmp entries unused for a week or left by
   // sessions that have ended. Results are kept in ~/.cache/storage-widget.
   let script = """
     #   scan            JSON: disk, folders (2 levels, biggest first), junk items
-    #   clean <id|safe> deletes one junk item (or all), prints {"freed": bytes}
+    #   clean <id|safe> starts deleting one junk item (or all) in the background; status.json
+    #                   says the item it's on, then {"freed": bytes, "at": seconds}
     #   clean <id> --dry  prints what would be deleted, deletes nothing
     # Only throwaway data counts as junk: download caches that tools fill again on demand,
     # the pacman package cache, the trash, and /tmp leftovers (old files, dead proot sessions).
@@ -124,7 +127,11 @@ widget "storage" {
           for (i = 1; i <= nt; i++) { p = top[i]; printf "%s{\"path\":\"%s\",\"size\":%s,\"kids\":[%s]}", (i > 1 ? "," : ""), esc(p), tsize[p], kids[p] }
           printf "]"
         }'
-      printf ',"junk":['
+      printf ',"junk":'; junk; printf '}\n'
+    }
+
+    junk() {
+      printf '['
       first=1
       for id in $IDS; do
         s=$(size "$id")
@@ -133,25 +140,47 @@ widget "storage" {
         printf '%s{"id":"%s","name":"%s","desc":"%s","size":%s}' "$([ $first = 1 ] || echo ,)" "$id" "$nm" "$(esc <<< "$desc")" "$s"
         first=0
       done
-      printf ']}\n'
+      printf ']'
     }
+
+    # After a clean, the last scan is brought up to date instead of scanning everything again
+    # (a du of the whole system, 10-20 s): the disk and the junk anew, and each folder less what
+    # was deleted in it ($D/gone: bytes and path, one per line).
+    patch() {
+      read -r total used avail < <(df -B1 --output=size,used,avail / | tail -1)
+      jq -c --rawfile g "$D/gone" --argjson junk "$(junk)" --argjson disk "{\"total\":$total,\"used\":$used,\"avail\":$avail}" '
+        [$g | split("\n")[] | select(. != "") | split("\t") | {n: (.[0] | tonumber), p: .[1]}] as $gone
+        | def less($p): [$gone[] | select(.p == $p or (.p | startswith($p + "/"))) | .n] | add // 0;
+        .ts = (now | floor) | .disk = $disk | .junk = $junk
+        | .dirs = ([.dirs[] | {path, size: ([.size - less(.path), 0] | max),
+            kids: ([.kids[] | {path, size: (.size - less(.path))} | select(.size > 0)] | sort_by(-.size))}] | sort_by(-.size))
+        | del(.map)' "$CACHE" | human
+    }
+
+    # what a clean is doing, for the widget: the item it's on, then what it freed and when
+    status() { printf '{"target":"%s","running":"%s","started":%s,"freed":%s,"at":%s}' "$1" "$2" "$3" "$4" "$5" | human > "$D/status.tmp" && mv "$D/status.tmp" "$D/status.json"; }
 
     clean() {
       case $1 in safe) ids=$IDS;; *) ids=$1;; esac
       freed=0
+      : > "$D/gone"
       for id in $ids; do
-        case " $IDS " in *" $id "*) ;; *) echo "unknown item: $id" >&2; exit 2;; esac
-        s=$(size "$id")
         if [ "$2" = --dry ]; then paths "$id" | sed "s/^/$id: /"; continue; fi
+        status "$1" "$id" "$t0" "$freed" 0
+        paths "$id" | while IFS= read -r f; do [ -e "$f" ] && du -sb -- "$f" 2>/dev/null; done > "$D/before"
         if [ "$id" = pkg ]; then
           paccache -rqk0 2>/dev/null
           rm -rf /var/cache/pacman/pkg/download-* 2>/dev/null
         else
           paths "$id" | while IFS= read -r f; do [ -n "$f" ] && [ "$f" != / ] && rm -rf -- "$f"; done
         fi
-        freed=$((freed + s - $(size "$id")))
+        # what each path lost: all of it, or less if something in it couldn't be deleted
+        while IFS=$'\t' read -r n f; do
+          left=$([ -e "$f" ] && du -sb -- "$f" 2>/dev/null | cut -f1); [ -n "$left" ] || left=0
+          printf '%s\t%s\n' "$((n - left))" "$f"
+        done < "$D/before" >> "$D/gone"
+        freed=$(awk -F'\t' '{ t += $1 } END { print t + 0 }' "$D/gone")
       done
-      [ "$2" = --dry ] || printf '{"freed":%s,"at":%s}\n' "$freed" "$(date +%s%N)"
     }
 
     # A scan is cached for 2 minutes, so several callers (the tile, owl-check) share one pass.
@@ -160,10 +189,30 @@ widget "storage" {
     case $1 in
       scan)
         fresh && exec cat "$CACHE"
-        exec 9>"$LOCK"; flock -w 110 9
+        exec 9>"$LOCK"
+        # a clean holds the lock while it runs; the last scan stands in until it's done
+        flock -n 9 || { [ -s "$CACHE" ] && exec cat "$CACHE"; flock -w 110 9; }
         fresh && exec cat "$CACHE"   # another caller finished it while we waited
         scan | human > "$CACHE.tmp" && mv "$CACHE.tmp" "$CACHE" && cat "$CACHE";;
-      clean) exec 9>"$LOCK"; flock -w 110 9; rm -f "$CACHE"; if [ "$3" = --dry ]; then clean "$2" "$3"; else clean "$2" | human; fi;;
+      clean)
+        case " $IDS safe " in *" $2 "*) ;; *) echo "unknown item: $2" >&2; exit 2;; esac
+        [ "$3" = --dry ] && { clean "$2" --dry; exit; }
+        # one clean at a time; a tap while one runs just shows it
+        if flock -n "$D/clean.lock" true; then
+          status "$2" "$2" "$(date +%s)" 0 0
+          setsid -f bash -c "$BASH_EXECUTION_STRING" storage work "$2" >/dev/null 2>&1 </dev/null
+        fi
+        date +%s%N;;
+      work)
+        exec 8>"$D/clean.lock"; flock -n 8 || exit 0
+        t0=$(date +%s)
+        exec 9>"$LOCK"; flock -w 600 9   # waits for a scan that's running
+        clean "$2" >/dev/null 2>&1
+        # update the scan before saying it's done, so the widget never shows the cleaned junk again
+        { [ -s "$CACHE" ] && patch > "$CACHE.tmp"; } || scan | human > "$CACHE.tmp"
+        mv "$CACHE.tmp" "$CACHE"
+        exec 9>&-
+        status "$2" "" "$t0" "$freed" "$(date +%s)";;
       *) echo "usage: storage scan | clean <id|safe> [--dry]" >&2; exit 2;;
     esac
   """
@@ -173,10 +222,9 @@ widget "storage" {
   source now = clock every 5s
 
   state armed = 0        // until when a clean tap is armed (a second tap within 5 s cleans)
-  state cleaning = ""    // the item being cleaned, "safe" for all
-  state result = null
-  state lastFreed = "" persist   // what the last cleanup freed ("2.9 MB"), and when
-  state lastCleanAt = 0 persist
+  source st = file("~/.cache/storage-widget/status.json") json
+  state pending = ""     // tapped: the item to clean, "safe" for all, until the cleaner has started
+  state starting = null
 
   let d = scan.ok ? scan.out : null
   let dirs = (d.dirs ?? []).filter(x => x.size > 0)   // empty ones (/srv, /opt) are just noise
@@ -215,18 +263,16 @@ widget "storage" {
   // goes next to the map's label instead of into an empty-looking box
   let mapGroups = (d.map ?? []).filter(g => g.path != "")
   let otherH = find(d.map ?? [], g => g.path == "").h
+  let lastCleanAt = num(st.at, 0)
   let ago = lastCleanAt > 0 ? (fmtAgo(lastCleanAt, now) == "now" ? "just now" : "${fmtAgo(lastCleanAt, now)} ago") : ""
 
-  // the clean's output, {"freed": bytes, "at": ...}; the rescan after it ends "cleaning…"
-  on result {
-    let r = parseJson(value)
-    notify("Storage", r ? "Freed ${r.freedH}." : "Couldn't clean up. Open the widget to see why.")
-    if r {
-      lastFreed = r.freedH
-      lastCleanAt = now
-    }
-  }
-  on scan { cleaning = "" }
+  // a status still running after an hour is from a cleaner that was killed
+  let live = st.running != null && st.running != "" && now != null && now - st.started < 3600
+  let cleaning = pending != "" ? pending : live ? st.target : ""   // "safe" while cleaning all
+  on starting { pending = "" }
+  // when the last clean finished; null while one runs, so it changes when one ends
+  let doneAt = live || pending != "" ? null : st.at
+  on doneAt { notify("Storage", "Freed ${st.freedH}."); refresh() }
 
   onTap: screen()
 
@@ -324,8 +370,8 @@ widget "storage" {
         if cleaning == "" {
           if isArmed {
             armed = 0
-            cleaning = "safe"
-            result = run("bash -c ${sh(script)} storage clean safe")
+            pending = "safe"
+            starting = run("bash -c ${sh(script)} storage clean safe")
           } else {
             armed = now + 5
           }
@@ -518,7 +564,7 @@ widget "storage" {
               gap: 2
               weight: 1
               Text { text: "All clean"; color: green }
-              Text { text: lastCleanAt > 0 ? "The last cleanup freed ${lastFreed}, ${ago}. Checked again every hour." : "No caches or old temporary files worth removing. Checked again every hour."; style: small; color: muted }
+              Text { text: lastCleanAt > 0 ? "The last cleanup freed ${st.freedH}, ${ago}. Checked again every hour." : "No caches or old temporary files worth removing. Checked again every hour."; style: small; color: muted }
             }
           }
         }
@@ -537,8 +583,8 @@ widget "storage" {
               text: cleaning == j.id || cleaning == "safe" ? "…" : "Clean"
               onTap: {
                 if cleaning == "" {
-                  cleaning = j.id
-                  result = run("bash -c ${sh(script)} storage clean ${sh(j.id)}")
+                  pending = j.id
+                  starting = run("bash -c ${sh(script)} storage clean ${sh(j.id)}")
                 }
               }
             }
@@ -553,8 +599,8 @@ widget "storage" {
               if cleaning == "" {
                 if isArmed {
                   armed = 0
-                  cleaning = "safe"
-                  result = run("bash -c ${sh(script)} storage clean safe")
+                  pending = "safe"
+                  starting = run("bash -c ${sh(script)} storage clean safe")
                 } else {
                   armed = now + 5
                 }
