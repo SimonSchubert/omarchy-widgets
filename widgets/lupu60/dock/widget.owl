@@ -40,6 +40,10 @@ widget "dock" {
   let meridian = range(37).map(i => [12 + 4 * sin(rad(i * 10)), 12 - 9.5 * cos(rad(i * 10))])
   let snooHead = range(37).map(i => [12 + 8.5 * sin(rad(i * 10)), 15 - 6 * cos(rad(i * 10))])
   let starPts = range(10).map(i => [12 + (i % 2 == 0 ? 9.5 : 4) * sin(rad(i * 36)), 13 - (i % 2 == 0 ? 9.5 : 4) * cos(rad(i * 36))])
+  // dot/square grids for grid, calendar and calc, as point lists rather than nested loops
+  let gridPts = flatten(range(3).map(i => range(3).map(j => [3.5 + i * 6.5, 3.5 + j * 6.5])))
+  let calendarDots = flatten([range(3).map(i => [7.5 + i * 4.5, 14.5]), range(2).map(i => [7.5 + i * 4.5, 18])])
+  let calcDots = flatten(range(2).map(r => range(3).map(c => [8.3 + c * 3.7, 13.5 + r * 4])))
 
   let pencil = [
     ".......xx", "......x.x", ".....x.x.", "....x.x..",
@@ -55,159 +59,216 @@ widget "dock" {
   let showLabels = rowH >= 72
   let iconSize = floor(clamp(min(cellW - 8, rowH - (showLabels ? 24 : 6)), 24, 56))
 
+  // Icon artwork as data: one entry per name, each a list of shape ops for the
+  // generic drawer in Icon below. k picks the shape; c is a round cap, f fills
+  // instead of stroking, wd overrides the default stroke width.
+  let iconDefault = { name: "_default", ops: [{ k: "circle", x: 12, y: 12, r: 3, f: true }] }
+  let iconDefs = [
+    { name: "phone", ops: [
+      { k: "path", p: [[5, 3], [9, 3], [11, 8], [8.5, 9.8], [14.2, 15.5], [16, 13], [21, 15], [21, 19], [19, 21], [13, 19.3], [7.5, 15], [4.2, 10], [3, 5.5]], closed: true, c: true }
+    ] },
+    { name: "chat", ops: [
+      { k: "rect", x: 3, y: 4, w: 18, h: 13, r: 3.5 },
+      { k: "path", p: [[7, 17], [6.5, 21], [11.5, 17]], c: true },
+      { k: "line", x1: 7.5, y1: 9, x2: 16.5, y2: 9, c: true },
+      { k: "line", x1: 7.5, y1: 12.5, x2: 13, y2: 12.5, c: true }
+    ] },
+    { name: "camera", ops: [
+      { k: "rect", x: 2, y: 7, w: 20, h: 14, r: 3 },
+      { k: "path", p: [[7.5, 7], [9.3, 4], [14.7, 4], [16.5, 7]], c: true },
+      { k: "circle", x: 12, y: 14, r: 4 }
+    ] },
+    { name: "globe", ops: [
+      { k: "circle", x: 12, y: 12, r: 9.5 },
+      { k: "path", p: meridian },
+      { k: "line", x1: 2.5, y1: 12, x2: 21.5, y2: 12 }
+    ] },
+    { name: "photo", ops: [
+      { k: "rect", x: 3, y: 4, w: 18, h: 16, r: 2.5 },
+      { k: "circle", x: 15.5, y: 9, r: 1.8, f: true },
+      { k: "path", p: [[3.5, 17.5], [9, 12], [14, 17], [16.5, 14.5], [20.5, 18.5]], c: true }
+    ] },
+    { name: "grid", ops: [{ k: "squares", pts: gridPts, s: 4, r: 1.2 }] },
+    { name: "mail", ops: [
+      { k: "rect", x: 2.5, y: 5, w: 19, h: 14, r: 2.5 },
+      { k: "path", p: [[3.5, 6.5], [12, 13], [20.5, 6.5]], c: true }
+    ] },
+    { name: "music", ops: [
+      { k: "path", p: [[9, 18], [9, 5], [20, 3], [20, 16]], c: true },
+      { k: "circle", x: 6.5, y: 18, r: 2.6 },
+      { k: "circle", x: 17.5, y: 16, r: 2.6 }
+    ] },
+    { name: "pin", ops: [
+      { k: "arc", x: 12, y: 10, r: 7, start: 225, sweep: 270 },
+      { k: "path", p: [[7.05, 14.95], [12, 21.5], [16.95, 14.95]], c: true },
+      { k: "circle", x: 12, y: 10, r: 2.5 }
+    ] },
+    { name: "gear", ops: [
+      { k: "rotrep", n: 8, step: 45, cx: 12, cy: 12, ops: [{ k: "line", x1: 12, y1: 2.8, x2: 12, y2: 5, wd: 3.4 }] },
+      { k: "circle", x: 12, y: 12, r: 7 },
+      { k: "circle", x: 12, y: 12, r: 2.8 }
+    ] },
+    { name: "clock", ops: [
+      { k: "circle", x: 12, y: 12, r: 9.5 },
+      { k: "path", p: [[12, 6.5], [12, 12], [15.5, 14.5]], c: true }
+    ] },
+    { name: "calendar", ops: [
+      { k: "rect", x: 3, y: 5, w: 18, h: 16, r: 2.5 },
+      { k: "line", x1: 3, y1: 10, x2: 21, y2: 10 },
+      { k: "line", x1: 8, y1: 3, x2: 8, y2: 7, c: true },
+      { k: "line", x1: 16, y1: 3, x2: 16, y2: 7, c: true },
+      { k: "dots", pts: calendarDots, r: 1.1 }
+    ] },
+    { name: "video", ops: [
+      { k: "rect", x: 2, y: 5, w: 20, h: 14, r: 4 },
+      { k: "path", p: [[10, 9], [15.5, 12], [10, 15]], closed: true, f: true }
+    ] },
+    { name: "term", ops: [
+      { k: "rect", x: 2, y: 4, w: 20, h: 16, r: 2.5 },
+      { k: "path", p: [[6.5, 9], [9.5, 12], [6.5, 15]], c: true },
+      { k: "line", x1: 12, y1: 15, x2: 17, y2: 15, c: true }
+    ] },
+    { name: "folder", ops: [
+      { k: "path", p: [[3, 5], [9, 5], [11, 7.5], [21, 7.5], [21, 19], [3, 19]], closed: true },
+      { k: "line", x1: 3, y1: 10.5, x2: 21, y2: 10.5 }
+    ] },
+    { name: "note", ops: [
+      { k: "path", p: [[5, 3], [14, 3], [19, 8], [19, 21], [5, 21]], closed: true },
+      { k: "path", p: [[14, 3], [14, 8], [19, 8]] },
+      { k: "line", x1: 8.5, y1: 13, x2: 15.5, y2: 13, c: true },
+      { k: "line", x1: 8.5, y1: 17, x2: 12.5, y2: 17, c: true }
+    ] },
+    { name: "user", ops: [
+      { k: "circle", x: 12, y: 8, r: 4 },
+      { k: "arc", x: 12, y: 21, r: 7.5, start: 270, sweep: 180, c: true }
+    ] },
+    { name: "calc", ops: [
+      { k: "rect", x: 4, y: 2, w: 16, h: 20, r: 2.5 },
+      { k: "rect", x: 7.5, y: 5.5, w: 9, h: 3.5, r: 1, f: true },
+      { k: "dots", pts: calcDots, r: 1.1 }
+    ] },
+    { name: "bag", ops: [
+      { k: "path", p: [[4, 8], [20, 8], [19, 21], [5, 21]], closed: true },
+      { k: "arc", x: 12, y: 8, r: 4, start: 270, sweep: 180 }
+    ] },
+    { name: "card", ops: [
+      { k: "rect", x: 2, y: 5, w: 20, h: 14, r: 2.5 },
+      { k: "line", x1: 2, y1: 9.5, x2: 22, y2: 9.5 },
+      { k: "line", x1: 6, y1: 15, x2: 10, y2: 15, c: true }
+    ] },
+    { name: "cloud", ops: [
+      { k: "arc", x: 7, y: 14.5, r: 4, start: 180, sweep: 180 },
+      { k: "arc", x: 12.5, y: 11, r: 5.5, start: 300, sweep: 130 },
+      { k: "arc", x: 17.5, y: 14.5, r: 4, start: 0, sweep: 180 },
+      { k: "line", x1: 7, y1: 18.5, x2: 17.5, y2: 18.5, c: true }
+    ] },
+    { name: "bell", ops: [
+      { k: "arc", x: 12, y: 10, r: 6, start: 270, sweep: 180 },
+      { k: "path", p: [[6, 10], [6, 15], [4, 17.5], [20, 17.5], [18, 15], [18, 10]], c: true },
+      { k: "line", x1: 12, y1: 2.5, x2: 12, y2: 4, c: true },
+      { k: "arc", x: 12, y: 19.5, r: 2.2, start: 90, sweep: 180 }
+    ] },
+    { name: "search", ops: [
+      { k: "circle", x: 10.5, y: 10.5, r: 6.5 },
+      { k: "line", x1: 15.5, y1: 15.5, x2: 21, y2: 21, wd: 2.5, c: true }
+    ] },
+    { name: "game", ops: [
+      { k: "rect", x: 2, y: 7, w: 20, h: 11, r: 5.5 },
+      { k: "line", x1: 7.5, y1: 10.5, x2: 7.5, y2: 14.5, c: true },
+      { k: "line", x1: 5.5, y1: 12.5, x2: 9.5, y2: 12.5, c: true },
+      { k: "circle", x: 15, y: 11.5, r: 1.2, f: true },
+      { k: "circle", x: 17.5, y: 14, r: 1.2, f: true }
+    ] },
+    { name: "heart", ops: [
+      { k: "arc", x: 7.5, y: 9.5, r: 4.5, start: 225, sweep: 225 },
+      { k: "arc", x: 16.5, y: 9.5, r: 4.5, start: 270, sweep: 225 },
+      { k: "path", p: [[4.32, 12.68], [12, 20.5], [19.68, 12.68]], c: true }
+    ] },
+    { name: "star", ops: [{ k: "path", p: starPts, closed: true }] },
+    { name: "whatsapp", ops: [
+      { k: "arc", x: 12, y: 12, r: 9.5, start: 235, sweep: 325 },
+      { k: "path", p: [[4.22, 17.45], [3, 21], [8.75, 20.93]], c: true },
+      { k: "path", p: [[9.06, 7.82], [10.74, 7.82], [11.58, 9.92], [10.53, 10.68], [12.92, 13.07], [13.68, 12.02], [15.78, 12.86], [15.78, 14.54], [14.94, 15.38], [12.42, 14.67], [10.11, 12.86], [8.72, 10.76], [8.22, 8.87]], closed: true, f: true }
+    ] },
+    { name: "signal", ops: [
+      { k: "arcring", x: 12, y: 12, r: 9.5, n: 10, start0: 240, step: 31, sweep: 19 },
+      { k: "circle", x: 12, y: 12, r: 6, f: true },
+      { k: "path", p: [[7.2, 14.2], [6, 18.5], [10.3, 17.3]], closed: true, f: true }
+    ] },
+    { name: "telegram", ops: [
+      { k: "path", p: [[2.5, 11.2], [21.5, 3.5], [17.8, 20.5]], closed: true },
+      { k: "path", p: [[21.5, 3.5], [9.5, 14], [10, 19.5], [13, 16.5]], c: true }
+    ] },
+    { name: "slack", ops: [{ k: "rotrep", n: 4, step: 90, cx: 12, cy: 12, ops: [
+      { k: "line", x1: 9.6, y1: 4, x2: 9.6, y2: 9.6, wd: 3.4 },
+      { k: "circle", x: 4.6, y: 9.6, r: 1.7, f: true }
+    ] }] },
+    { name: "gphotos", ops: [{ k: "rotrep", n: 4, step: 90, cx: 12, cy: 12, ops: [
+      { k: "arc", x: 12, y: 7.25, r: 4.75, start: 180, sweep: 180 },
+      { k: "line", x1: 12, y1: 2.5, x2: 12, y2: 12 }
+    ] }] },
+    { name: "reddit", ops: [
+      { k: "path", p: snooHead },
+      { k: "circle", x: 4.5, y: 10, r: 1.8 },
+      { k: "circle", x: 19.5, y: 10, r: 1.8 },
+      { k: "circle", x: 9, y: 14.5, r: 1.3, f: true },
+      { k: "circle", x: 15, y: 14.5, r: 1.3, f: true },
+      { k: "arc", x: 12, y: 15.5, r: 3.2, start: 125, sweep: 110, wd: 1.6, c: true },
+      { k: "path", p: [[12, 9], [13.5, 3.5], [17.5, 4.5]], wd: 1.6, c: true },
+      { k: "circle", x: 19, y: 4.8, r: 1.5, f: true }
+    ] },
+    { name: "x", ops: [
+      { k: "path", p: [[3.5, 3], [8.5, 3], [20.5, 21], [15.5, 21]], closed: true, wd: 1.7 },
+      { k: "line", x1: 19.5, y1: 3, x2: 13.6, y2: 9.6, c: true },
+      { k: "line", x1: 10.4, y1: 14.4, x2: 4.5, y2: 21, c: true }
+    ] }
+  ]
+
+  // A generic drawer for the ops above, instead of one branch per icon name.
   component Icon(art, px, tint = accent) {
     Canvas {
       size: px * 16
       let g = px * 16 * 0.6
       let w = 1.9
+      let ops = (find(iconDefs, d => d.name == art) ?? iconDefault).ops
       translate((px * 16 - g) / 2, (px * 16 - g) / 2) {
         scale(g / 24, g / 24, 0, 0) {
-          if art == "phone" {
-            path([[5, 3], [9, 3], [11, 8], [8.5, 9.8], [14.2, 15.5], [16, 13], [21, 15], [21, 19], [19, 21], [13, 19.3], [7.5, 15], [4.2, 10], [3, 5.5]], closed: true, stroke: tint, width: w, cap: round)
-          } else if art == "chat" {
-            rect(3, 4, 18, 13, radius: 3.5, stroke: tint, width: w)
-            path([[7, 17], [6.5, 21], [11.5, 17]], stroke: tint, width: w, cap: round)
-            line(7.5, 9, 16.5, 9, stroke: tint, width: w, cap: round)
-            line(7.5, 12.5, 13, 12.5, stroke: tint, width: w, cap: round)
-          } else if art == "camera" {
-            rect(2, 7, 20, 14, radius: 3, stroke: tint, width: w)
-            path([[7.5, 7], [9.3, 4], [14.7, 4], [16.5, 7]], stroke: tint, width: w, cap: round)
-            circle(12, 14, 4, stroke: tint, width: w)
-          } else if art == "globe" {
-            circle(12, 12, 9.5, stroke: tint, width: w)
-            path(meridian, stroke: tint, width: w)
-            line(2.5, 12, 21.5, 12, stroke: tint, width: w)
-          } else if art == "photo" {
-            rect(3, 4, 18, 16, radius: 2.5, stroke: tint, width: w)
-            circle(15.5, 9, 1.8, fill: tint)
-            path([[3.5, 17.5], [9, 12], [14, 17], [16.5, 14.5], [20.5, 18.5]], stroke: tint, width: w, cap: round)
-          } else if art == "grid" {
-            for i in range(3) {
-              for j in range(3) { rect(3.5 + i * 6.5, 3.5 + j * 6.5, 4, 4, radius: 1.2, fill: tint) }
-            }
-          } else if art == "mail" {
-            rect(2.5, 5, 19, 14, radius: 2.5, stroke: tint, width: w)
-            path([[3.5, 6.5], [12, 13], [20.5, 6.5]], stroke: tint, width: w, cap: round)
-          } else if art == "music" {
-            path([[9, 18], [9, 5], [20, 3], [20, 16]], stroke: tint, width: w, cap: round)
-            circle(6.5, 18, 2.6, stroke: tint, width: w)
-            circle(17.5, 16, 2.6, stroke: tint, width: w)
-          } else if art == "pin" {
-            arc(12, 10, 7, 225, 270, stroke: tint, width: w)
-            path([[7.05, 14.95], [12, 21.5], [16.95, 14.95]], stroke: tint, width: w, cap: round)
-            circle(12, 10, 2.5, stroke: tint, width: w)
-          } else if art == "gear" {
-            for i in range(8) {
-              rotate(i * 45, 12, 12) { line(12, 2.8, 12, 5, stroke: tint, width: 3.4, cap: round) }
-            }
-            circle(12, 12, 7, stroke: tint, width: w)
-            circle(12, 12, 2.8, stroke: tint, width: w)
-          } else if art == "clock" {
-            circle(12, 12, 9.5, stroke: tint, width: w)
-            path([[12, 6.5], [12, 12], [15.5, 14.5]], stroke: tint, width: w, cap: round)
-          } else if art == "calendar" {
-            rect(3, 5, 18, 16, radius: 2.5, stroke: tint, width: w)
-            line(3, 10, 21, 10, stroke: tint, width: w)
-            line(8, 3, 8, 7, stroke: tint, width: w, cap: round)
-            line(16, 3, 16, 7, stroke: tint, width: w, cap: round)
-            for i in range(3) { circle(7.5 + i * 4.5, 14.5, 1.1, fill: tint) }
-            for i in range(2) { circle(7.5 + i * 4.5, 18, 1.1, fill: tint) }
-          } else if art == "video" {
-            rect(2, 5, 20, 14, radius: 4, stroke: tint, width: w)
-            path([[10, 9], [15.5, 12], [10, 15]], closed: true, fill: tint)
-          } else if art == "term" {
-            rect(2, 4, 20, 16, radius: 2.5, stroke: tint, width: w)
-            path([[6.5, 9], [9.5, 12], [6.5, 15]], stroke: tint, width: w, cap: round)
-            line(12, 15, 17, 15, stroke: tint, width: w, cap: round)
-          } else if art == "folder" {
-            path([[3, 5], [9, 5], [11, 7.5], [21, 7.5], [21, 19], [3, 19]], closed: true, stroke: tint, width: w)
-            line(3, 10.5, 21, 10.5, stroke: tint, width: w)
-          } else if art == "note" {
-            path([[5, 3], [14, 3], [19, 8], [19, 21], [5, 21]], closed: true, stroke: tint, width: w)
-            path([[14, 3], [14, 8], [19, 8]], stroke: tint, width: w)
-            line(8.5, 13, 15.5, 13, stroke: tint, width: w, cap: round)
-            line(8.5, 17, 12.5, 17, stroke: tint, width: w, cap: round)
-          } else if art == "user" {
-            circle(12, 8, 4, stroke: tint, width: w)
-            arc(12, 21, 7.5, 270, 180, stroke: tint, width: w, cap: round)
-          } else if art == "calc" {
-            rect(4, 2, 16, 20, radius: 2.5, stroke: tint, width: w)
-            rect(7.5, 5.5, 9, 3.5, radius: 1, fill: tint)
-            for r in range(2) {
-              for c in range(3) { circle(8.3 + c * 3.7, 13.5 + r * 4, 1.1, fill: tint) }
-            }
-          } else if art == "bag" {
-            path([[4, 8], [20, 8], [19, 21], [5, 21]], closed: true, stroke: tint, width: w)
-            arc(12, 8, 4, 270, 180, stroke: tint, width: w)
-          } else if art == "card" {
-            rect(2, 5, 20, 14, radius: 2.5, stroke: tint, width: w)
-            line(2, 9.5, 22, 9.5, stroke: tint, width: w)
-            line(6, 15, 10, 15, stroke: tint, width: w, cap: round)
-          } else if art == "cloud" {
-            arc(7, 14.5, 4, 180, 180, stroke: tint, width: w)
-            arc(12.5, 11, 5.5, 300, 130, stroke: tint, width: w)
-            arc(17.5, 14.5, 4, 0, 180, stroke: tint, width: w)
-            line(7, 18.5, 17.5, 18.5, stroke: tint, width: w, cap: round)
-          } else if art == "bell" {
-            arc(12, 10, 6, 270, 180, stroke: tint, width: w)
-            path([[6, 10], [6, 15], [4, 17.5], [20, 17.5], [18, 15], [18, 10]], stroke: tint, width: w, cap: round)
-            line(12, 2.5, 12, 4, stroke: tint, width: w, cap: round)
-            arc(12, 19.5, 2.2, 90, 180, stroke: tint, width: w)
-          } else if art == "search" {
-            circle(10.5, 10.5, 6.5, stroke: tint, width: w)
-            line(15.5, 15.5, 21, 21, stroke: tint, width: w + 0.6, cap: round)
-          } else if art == "game" {
-            rect(2, 7, 20, 11, radius: 5.5, stroke: tint, width: w)
-            line(7.5, 10.5, 7.5, 14.5, stroke: tint, width: w, cap: round)
-            line(5.5, 12.5, 9.5, 12.5, stroke: tint, width: w, cap: round)
-            circle(15, 11.5, 1.2, fill: tint)
-            circle(17.5, 14, 1.2, fill: tint)
-          } else if art == "heart" {
-            arc(7.5, 9.5, 4.5, 225, 225, stroke: tint, width: w)
-            arc(16.5, 9.5, 4.5, 270, 225, stroke: tint, width: w)
-            path([[4.32, 12.68], [12, 20.5], [19.68, 12.68]], stroke: tint, width: w, cap: round)
-          } else if art == "star" {
-            path(starPts, closed: true, stroke: tint, width: w)
-          } else if art == "whatsapp" {
-            arc(12, 12, 9.5, 235, 325, stroke: tint, width: w)
-            path([[4.22, 17.45], [3, 21], [8.75, 20.93]], stroke: tint, width: w, cap: round)
-            path([[9.06, 7.82], [10.74, 7.82], [11.58, 9.92], [10.53, 10.68], [12.92, 13.07], [13.68, 12.02], [15.78, 12.86], [15.78, 14.54], [14.94, 15.38], [12.42, 14.67], [10.11, 12.86], [8.72, 10.76], [8.22, 8.87]], closed: true, fill: tint)
-          } else if art == "signal" {
-            for i in range(10) { arc(12, 12, 9.5, 240 + i * 31, 19, stroke: tint, width: w, cap: round) }
-            circle(12, 12, 6, fill: tint)
-            path([[7.2, 14.2], [6, 18.5], [10.3, 17.3]], closed: true, fill: tint)
-          } else if art == "telegram" {
-            path([[2.5, 11.2], [21.5, 3.5], [17.8, 20.5]], closed: true, stroke: tint, width: w)
-            path([[21.5, 3.5], [9.5, 14], [10, 19.5], [13, 16.5]], stroke: tint, width: w, cap: round)
-          } else if art == "slack" {
-            for i in range(4) {
-              rotate(i * 90, 12, 12) {
-                line(9.6, 4, 9.6, 9.6, stroke: tint, width: 3.4, cap: round)
-                circle(4.6, 9.6, 1.7, fill: tint)
+          for o in ops {
+            if o.k == "path" {
+              if o.f { path(o.p, closed: o.closed ?? false, fill: tint) }
+              else if o.c { path(o.p, closed: o.closed ?? false, stroke: tint, width: o.wd ?? w, cap: round) }
+              else { path(o.p, closed: o.closed ?? false, stroke: tint, width: o.wd ?? w) }
+            } else if o.k == "line" {
+              if o.c { line(o.x1, o.y1, o.x2, o.y2, stroke: tint, width: o.wd ?? w, cap: round) }
+              else { line(o.x1, o.y1, o.x2, o.y2, stroke: tint, width: o.wd ?? w) }
+            } else if o.k == "rect" {
+              if o.f { rect(o.x, o.y, o.w, o.h, radius: o.r ?? 0, fill: tint) }
+              else { rect(o.x, o.y, o.w, o.h, radius: o.r ?? 0, stroke: tint, width: o.wd ?? w) }
+            } else if o.k == "circle" {
+              if o.f { circle(o.x, o.y, o.r, fill: tint) }
+              else { circle(o.x, o.y, o.r, stroke: tint, width: o.wd ?? w) }
+            } else if o.k == "arc" {
+              if o.c { arc(o.x, o.y, o.r, o.start, o.sweep, stroke: tint, width: o.wd ?? w, cap: round) }
+              else { arc(o.x, o.y, o.r, o.start, o.sweep, stroke: tint, width: o.wd ?? w) }
+            } else if o.k == "dots" {
+              for p in o.pts { circle(p[0], p[1], o.r, fill: tint) }
+            } else if o.k == "squares" {
+              for p in o.pts { rect(p[0], p[1], o.s, o.s, radius: o.r, fill: tint) }
+            } else if o.k == "rotrep" {
+              for i in range(o.n) {
+                rotate(o.step * i, o.cx, o.cy) {
+                  for o2 in o.ops {
+                    if o2.k == "line" { line(o2.x1, o2.y1, o2.x2, o2.y2, stroke: tint, width: o2.wd ?? w, cap: round) }
+                    else if o2.k == "circle" { circle(o2.x, o2.y, o2.r, fill: tint) }
+                    else { arc(o2.x, o2.y, o2.r, o2.start, o2.sweep, stroke: tint, width: o2.wd ?? w) }
+                  }
+                }
+              }
+            } else if o.k == "arcring" {
+              for i in range(o.n) {
+                arc(o.x, o.y, o.r, o.start0 + i * o.step, o.sweep, stroke: tint, width: w, cap: round)
               }
             }
-          } else if art == "gphotos" {
-            for i in range(4) {
-              rotate(i * 90, 12, 12) {
-                arc(12, 7.25, 4.75, 180, 180, stroke: tint, width: w)
-                line(12, 2.5, 12, 12, stroke: tint, width: w, cap: round)
-              }
-            }
-          } else if art == "reddit" {
-            path(snooHead, stroke: tint, width: w)
-            circle(4.5, 10, 1.8, stroke: tint, width: w)
-            circle(19.5, 10, 1.8, stroke: tint, width: w)
-            circle(9, 14.5, 1.3, fill: tint)
-            circle(15, 14.5, 1.3, fill: tint)
-            arc(12, 15.5, 3.2, 125, 110, stroke: tint, width: w - 0.3, cap: round)
-            path([[12, 9], [13.5, 3.5], [17.5, 4.5]], stroke: tint, width: w - 0.3, cap: round)
-            circle(19, 4.8, 1.5, fill: tint)
-          } else if art == "x" {
-            path([[3.5, 3], [8.5, 3], [20.5, 21], [15.5, 21]], closed: true, stroke: tint, width: w - 0.2)
-            line(19.5, 3, 13.6, 9.6, stroke: tint, width: w, cap: round)
-            line(10.4, 14.4, 4.5, 21, stroke: tint, width: w, cap: round)
-          } else {
-            circle(12, 12, 3, fill: tint)
           }
         }
       }
