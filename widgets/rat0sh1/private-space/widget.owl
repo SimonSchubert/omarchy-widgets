@@ -1,13 +1,11 @@
 widget "private space" {
-  page: 1
-  order: 3
   size: 3x2
   minSize: 2x2
   requires { pacman: ["android-tools", "iproute2", "python", "coreutils"] }
   meta {
     owl: 9
     description: "Control and open your Android 15+ Private Space apps via local ADB"
-    version: "2.3"
+    version: "2.4"
     license: "MIT"
     category: "system"
   }
@@ -141,32 +139,57 @@ def ensure_adb():
             elif parts[1] == "offline":
                 run(f"adb disconnect {parts[0]}", timeout=2)
 
-    if target_mode == "tcp5555":
+    # 1. Check if 127.0.0.1:5555 is already active and responsive
+    if "127.0.0.1:5555" in active:
+        c, _, _ = run("adb -s 127.0.0.1:5555 shell getprop ro.build.version.release", timeout=2)
+        if c == 0:
+            return True, "127.0.0.1:5555", "tcp5555"
+        run("adb disconnect 127.0.0.1:5555", timeout=2)
         if "127.0.0.1:5555" in active:
-            return True, "127.0.0.1:5555", "tcp5555"
-        c, o, _ = run("adb connect 127.0.0.1:5555", timeout=2)
-        if "connected to 127.0.0.1:5555" in o:
-            return True, "127.0.0.1:5555", "tcp5555"
+            active.remove("127.0.0.1:5555")
 
+    # 2. Check if any other active device is responsive
+    for dev in list(active):
+        if not dev.startswith("emulator-"):
+            c, _, _ = run(f"adb -s {dev} shell getprop ro.build.version.release", timeout=2)
+            if c == 0:
+                if target_mode == "tcp5555" and not dev.startswith("127.0.0.1:5555"):
+                    run(f"adb -s {dev} tcpip 5555", timeout=3)
+                    time.sleep(0.5)
+                    run("adb connect 127.0.0.1:5555", timeout=2)
+                    c5, _, _ = run("adb -s 127.0.0.1:5555 shell getprop ro.build.version.release", timeout=2)
+                    if c5 == 0:
+                        return True, "127.0.0.1:5555", "tcp5555"
+                mode = "tcp5555" if "5555" in dev else "tls"
+                return True, dev, mode
+            else:
+                run(f"adb disconnect {dev}", timeout=2)
+                if dev in active:
+                    active.remove(dev)
+
+    # 3. Always attempt local loopback connection (offline mode)
+    c, o, _ = run("adb connect 127.0.0.1:5555", timeout=2)
+    c_probe, _, _ = run("adb -s 127.0.0.1:5555 shell getprop ro.build.version.release", timeout=2)
+    if c_probe == 0:
+        return True, "127.0.0.1:5555", "tcp5555"
+
+    # 4. If Wi-Fi is available, discover and connect via wireless debugging TLS
     host = get_wlan_ip()
     if host != "127.0.0.1":
-        for dev in active:
-            if dev.startswith(f"{host}:"):
-                c, o, _ = run(f"adb -s {dev} shell getprop ro.build.version.release", timeout=2)
-                if c == 0:
-                    return True, dev, "tls"
-
         c_ports, _ = discover_adb_mdns(host, wait_sec=0.35)
         for p in c_ports:
             target = f"{host}:{p}"
             c, o, _ = run(f"adb connect {target}", timeout=2)
-            if "connected to" in o or f"{target}\tdevice" in run("adb devices")[1]:
+            c_test, _, _ = run(f"adb -s {target} shell getprop ro.build.version.release", timeout=2)
+            if c_test == 0:
+                if target_mode == "tcp5555":
+                    run(f"adb -s {target} tcpip 5555", timeout=3)
+                    time.sleep(0.5)
+                    run("adb connect 127.0.0.1:5555", timeout=2)
+                    c5, _, _ = run("adb -s 127.0.0.1:5555 shell getprop ro.build.version.release", timeout=2)
+                    if c5 == 0:
+                        return True, "127.0.0.1:5555", "tcp5555"
                 return True, target, "tls"
-
-    for dev in active:
-        if not dev.startswith("emulator-"):
-            mode = "tcp5555" if "5555" in dev else "tls"
-            return True, dev, mode
 
     return False, None, target_mode
 
@@ -325,13 +348,13 @@ def main():
                 if unlocked:
                     run(f"adb -s {dev} shell am start --user {uid} -n {comp}")
         print(json.dumps(status()))
-    elif cmd == "enable-tcp5555":
+    elif cmd in ("enable-tcp5555", "connect-tcp5555"):
+        save_config({"mode": "tcp5555"})
         ok, dev, _ = ensure_adb()
-        if ok:
+        if ok and not dev.startswith("127.0.0.1:5555"):
             run(f"adb -s {dev} tcpip 5555", timeout=3)
             time.sleep(0.5)
-            run("adb connect 127.0.0.1:5555", timeout=2)
-            save_config({"mode": "tcp5555"})
+        run("adb connect 127.0.0.1:5555", timeout=2)
         print(json.dumps(status()))
     elif cmd == "disable-tcp5555":
         save_config({"mode": "tls"})
@@ -368,7 +391,7 @@ python3 "$d/ctl.py" status
       align: center
       Text { text: "private space"; style: label; weight: 1; maxLines: 1 }
       Text {
-        text: !adbOk ? "vincular" : !hasUser ? "sin perfil" : unlocked ? "${len(privApps)} apps" : "bloqueado"
+        text: !adbOk ? (ps.mode == "tcp5555" ? "offline" : "pair") : !hasUser ? "no profile" : unlocked ? "${len(privApps)} apps" : "locked"
         style: small
         color: !adbOk ? yellow : unlocked ? green : muted
         width: 64
@@ -379,7 +402,7 @@ python3 "$d/ctl.py" status
 
     if !adbOk {
       Input {
-        placeholder: "código 6 dígitos…"
+        placeholder: "6-digit code…"
         clear: true
         fontSize: 12
         onSubmit: {
@@ -415,20 +438,32 @@ python3 "$d/ctl.py" status
     Row {
       gap: 6
       if !adbOk {
-        Button {
-          text: "ajustes"
-          color: accent
-          weight: 1
-          onTap: { haptic(); androidApp("com.android.settings") }
+        if ps.mode == "tcp5555" {
+          Button {
+            text: "Connect"
+            color: accent
+            weight: 1
+            onTap: {
+              haptic()
+              run("python3 ~/.local/share/omalauncher/private-space/ctl.py enable-tcp5555")
+            }
+          }
+        } else {
+          Button {
+            text: "Settings"
+            color: accent
+            weight: 1
+            onTap: { haptic(); androidApp("com.android.settings") }
+          }
         }
         Button {
-          text: "ayuda"
+          text: "Help"
           color: muted
           onTap: { haptic(); screen() }
         }
       } else {
         Button {
-          text: unlocked ? "bloquear" : "abrir"
+          text: unlocked ? "Lock" : "Unlock"
           color: unlocked ? yellow : green
           weight: 1
           onTap: {
@@ -441,7 +476,7 @@ python3 "$d/ctl.py" status
           }
         }
         Button {
-          text: "ver"
+          text: "View"
           color: accent
           onTap: { haptic(); screen() }
         }
@@ -481,7 +516,7 @@ python3 "$d/ctl.py" status
             Text { text: pairResult; style: small; color: muted }
           }
           Button {
-            text: "Abrir Ajustes de Android"
+            text: "Open Android Settings"
             color: accent
             onTap: { haptic(); androidApp("com.android.settings") }
           }
@@ -510,7 +545,7 @@ python3 "$d/ctl.py" status
             }
           }
           Button {
-            text: unlocked ? "Bloquear" : "Desbloquear"
+            text: unlocked ? "Lock" : "Unlock"
             color: unlocked ? yellow : green
             onTap: {
               haptic()
@@ -522,33 +557,44 @@ python3 "$d/ctl.py" status
             }
           }
         }
+      }
 
-        Column {
-          gap: 6
-          padding: 12
-          background: surface
-          border: 1
-          borderColor: border
-          Row {
-            gap: 8
-            align: center
-            Column {
-              gap: 2
-              weight: 1
-              Text {
-                text: ps.mode == "tcp5555" ? "Modo sin Wi-Fi (TCP 5555)" : "Depuración inalámbrica TLS"
-                style: body
-                bold: true
-                color: ps.mode == "tcp5555" ? yellow : green
-              }
-              Text {
-                text: ps.mode == "tcp5555" ? "Puerto 5555 activo (sin cifrado en red local)" : "Conexión cifrada TLS directa (${ps.device})"
-                style: small
-                color: muted
+      Column {
+        gap: 6
+        padding: 12
+        background: surface
+        border: 1
+        borderColor: border
+        Row {
+          gap: 8
+          align: center
+          Column {
+            gap: 2
+            weight: 1
+            Text {
+              text: ps.mode == "tcp5555" ? "Modo sin Wi-Fi (TCP 5555)" : "Depuración inalámbrica TLS"
+              style: body
+              bold: true
+              color: ps.mode == "tcp5555" ? yellow : green
+            }
+            Text {
+              text: !adbOk ? (ps.mode == "tcp5555" ? "Modo offline guardado • Toca para conectar localmente" : "Permite usar Espacio privado fuera de Wi-Fi con puerto 5555") : (ps.mode == "tcp5555" ? "Puerto 5555 activo en 127.0.0.1 • Funciona sin Wi-Fi" : "Conexión cifrada TLS directa (${ps.device})")
+              style: small
+              color: muted
+            }
+          }
+          if !adbOk {
+            Button {
+              text: "Connect Offline (TCP 5555)"
+              color: accent
+              onTap: {
+                haptic()
+                run("python3 ~/.local/share/omalauncher/private-space/ctl.py enable-tcp5555")
               }
             }
+          } else {
             Button {
-              text: ps.mode == "tcp5555" ? "Solo TLS" : "TCP 5555"
+              text: ps.mode == "tcp5555" ? "Switch to TLS" : "Enable Offline (TCP 5555)"
               color: ps.mode == "tcp5555" ? muted : accent
               onTap: {
                 haptic()
@@ -561,7 +607,9 @@ python3 "$d/ctl.py" status
             }
           }
         }
+      }
 
+      if adbOk {
         if unlocked && len(privApps) > 0 {
           Column {
             gap: 8
@@ -584,7 +632,7 @@ python3 "$d/ctl.py" status
               }
               if len(shortcuts) > 0 {
                 Button {
-                  text: "Sin ninguno"
+                  text: "Clear All"
                   color: muted
                   onTap: {
                     haptic()
@@ -634,7 +682,7 @@ python3 "$d/ctl.py" status
                 Text { text: a.package; style: small; color: muted; maxLines: 1 }
               }
               Button {
-                text: isPinned ? "★ fijo" : "+ widget"
+                text: isPinned ? "★ Pinned" : "+ Widget"
                 color: isPinned ? yellow : muted
                 onTap: {
                   haptic()
@@ -646,7 +694,7 @@ python3 "$d/ctl.py" status
                 }
               }
               Button {
-                text: "abrir ↗"
+                text: "Open ↗"
                 color: accent
                 onTap: {
                   haptic()
@@ -679,7 +727,7 @@ python3 "$d/ctl.py" status
                 Text { text: a.package; style: small; color: muted; maxLines: 1 }
               }
               Button {
-                text: isPinned ? "★ fijo" : "+ widget"
+                text: isPinned ? "★ Pinned" : "+ Widget"
                 color: isPinned ? yellow : muted
                 onTap: {
                   haptic()
@@ -691,7 +739,7 @@ python3 "$d/ctl.py" status
                 }
               }
               Button {
-                text: "abrir ↗"
+                text: "Open ↗"
                 color: accent
                 onTap: {
                   haptic()
@@ -709,7 +757,7 @@ python3 "$d/ctl.py" status
             border: 1
             borderColor: border
             Text {
-              text: "Toca 'Desbloquear' arriba para abrir la pantalla de autenticación y ver tus apps."
+              text: "Toca 'Unlock' arriba para abrir la pantalla de autenticación y ver tus apps."
               style: small
               color: muted
             }
