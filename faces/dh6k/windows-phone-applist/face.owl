@@ -2,14 +2,14 @@ face "Windows phone applist" {
   meta {
     owl: 10
     description: "A Windows Phone inspired, searchable and alphabetized list of every installed app"
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "productivity"
   }
 
   requires { pacman: [] }
   statusBar: true
-  background: linear(0, 0, 0, 1, [alpha(background, 0.72), alpha(surface, 0.72)])
+  background: alpha(background, 0.72)
   padding: 0
 
   state query = ""
@@ -21,22 +21,32 @@ face "Windows phone applist" {
   // android.recent is the launcher's cross-platform app registry: Linux entries
   // are included there with their icon and launch key.
   let linuxApps = (recent ?? []).filter(a => a.kind == "linux")
-  let allApps = (apps ?? []) + linuxApps
-  let showMostUsed = trim(query) == "" && letter == ""
+  let rawApps = (apps ?? []) + linuxApps
+  let allApps = rawApps.map(a => {
+    key: a.key,
+    name: a.name,
+    kind: a.kind,
+    icon: a.icon,
+    score: a.score,
+    normalizedName: lower(a.name),
+    initial: upper(sub(a.name, 0, 1))
+  })
+  let normalizedQuery = lower(trim(query))
+  let showMostUsed = normalizedQuery == "" && letter == ""
   let mostUsed = allApps
     .filter(a => num(a.score, 0) > 0)
     .sortBy(a => -num(a.score, 0))
     .take(6)
   let mostUsedKeys = mostUsed.map(a => a.key)
   let matches = allApps
-    .filter(a => (trim(query) == "" || contains(lower(a.name), lower(trim(query)))) && (letter == "" || startsWith(upper(a.name), letter)))
+    .filter(a => (normalizedQuery == "" || contains(a.normalizedName, normalizedQuery)) && (letter == "" || a.initial == letter))
     .filter(a => !showMostUsed || !contains(mostUsedKeys, a.key))
-    .sortBy(a => lower(a.name))
-  let sections = values(groupBy(matches, a => upper(sub(a.name, 0, 1))))
-    .sortBy(g => upper(sub(g[0].name, 0, 1)))
+    .sortBy(a => a.normalizedName)
+  let sections = values(groupBy(matches, a => a.initial))
+    .sortBy(g => g[0].initial)
   let latinLetters = split("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "")
   let extraLetters = allApps
-    .map(a => upper(sub(a.name, 0, 1)))
+    .map(a => a.initial)
     .filter(l => l != null && !contains(latinLetters, l))
     .unique()
     .sort()
