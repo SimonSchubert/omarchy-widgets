@@ -2,7 +2,7 @@ widget "departures" {
   size: 3x2
   minSize: 2x1
   requires { pacman: [] }
-  meta { description: "Live departures from a stop you pick, anywhere Transitous has open timetables: line, direction, platform and minutes to go, with delays. Tap the tile for the full board or to change the stop"; version: "1.1"; license: "MIT"; category: "world"; owl: 8 }
+  meta { description: "Live departures from a stop you pick, anywhere Transitous has open timetables: line, direction, platform and minutes to go, with delays. Tap the tile for the full board or to change the stop"; version: "1.2"; license: "MIT"; category: "world"; owl: 8 }
 
   // The stop, picked in the full screen and kept across restarts. No location is hard-coded.
   state stopId = "" persist
@@ -10,6 +10,8 @@ widget "departures" {
   // The last three stops picked, as buttons under the search.
   state recent = [] persist
   state query = ""
+
+  let displayName = replace(replace(stopName, ",  -", ""), ", -", "")
 
   source now = clock every 15s
   // Transitous (https://transitous.org) asks clients to name themselves.
@@ -21,7 +23,7 @@ widget "departures" {
 
   let stops = (found != null && found.ok ? found.out ?? [] : []).take(8).map(s => {
     id: s.id,
-    name: s.name,
+    name: replace(replace(s.name, ",  -", ""), ", -", ""),
     area: (s.areas ?? []).find(a => a.default == true).name ?? s.country ?? "",
     modes: lower(join((s.modes ?? []).take(3), ", "))
   })
@@ -74,8 +76,9 @@ widget "departures" {
       let raw = (r.at - r.planned + 1440) % 1440
       let delay = raw > 720 ? raw - 1440 : raw
       let tint = r.cancelled ? red : !r.live ? foreground : delay >= 5 ? red : delay >= 2 ? yellow : foreground
-      let big = r.cancelled ? "×" : left == 0 ? "now" : left < 60 ? "${left}" : fmtTime(at, "HH:mm")
-      let unit = r.cancelled || left == 0 || left >= 60 ? "" : "min"
+      let ampm = lower(fmtTime(at, "a"))
+      let big = r.cancelled ? "×" : left == 0 ? "now" : left < 60 ? "${left}" : fmtTime(at, "h:mm")
+      let unit = r.cancelled || left == 0 ? "" : left < 60 ? "min" : ampm
       if mode == "list" {
         Row {
           align: center
@@ -86,33 +89,40 @@ widget "departures" {
             Text { text: "${r.track}"; style: label; color: r.moved ? orange : muted; maxLines: 1; width: 28; align: end }
           }
           Text { text: fmtTime(at, "HH:mm"); style: label; color: muted; font: mono; width: 40; align: end }
-          Text { text: big == "now" || unit == "" ? big : "${big}′"; style: body; bold: true; font: mono; color: tint; width: 52; align: end; maxLines: 1 }
+          // The clock column already says when, so this one only adds the countdown.
+          Text { text: r.cancelled ? "×" : left == 0 ? "now" : left < 60 ? "${left}′" : ""; style: body; bold: true; font: mono; color: tint; width: 52; align: end; maxLines: 1 }
         }
       } else {
         // "14 min  M36  U Haselhorst": the minutes first and largest, then the line, then where it goes.
         let lead = mode == "big"
         // A two-column tile is ~110dp inside: everything a quarter smaller, and the line gives way last.
         let k = narrow ? 0.75 : 1
+        let rowBg = lead ? alpha(accent, 0.2) : left < 60 ? alpha(surface, 0.65) : alpha(muted, 0.14)
+        let rowBorder = lead ? alpha(accent, 0.45) : left < 60 ? alpha(border, 0.4) : alpha(muted, 0.25)
         Row {
-          align: bottom
+          align: center
+          fill: width
+          background: rowBg
+          border: 1
+          borderColor: rowBorder
+          radius: 6 * corners
+          padding: [narrow ? 4 : 6, (lead ? 4 : 2) * k]
           gap: narrow ? 3 : 6
           // A Text without a width fills the row, so each gets its own: monospace is ~0.6em a character.
-          Text { text: big; fontSize: (lead ? 30 : 18) * k; bold: true; font: mono; color: tint; maxLines: 1; width: len(big) * (lead ? 30 : 18) * k * 0.62 + 2 }
-          if unit != "" {
-            Text { text: unit; fontSize: (lead ? 14 : 12) * k; color: lead ? foreground : muted; padding: [0, 0, 0, (lead ? 5 : 2) * k]; width: 3 * (lead ? 14 : 12) * k * 0.62 + 2 }
-          }
+          Text { text: big; fontSize: (lead ? 24 : 15) * k; bold: true; font: mono; color: tint; maxLines: 1; width: len(big) * (lead ? 24 : 15) * k * 0.7 + 4; align: end }
+          Text { text: unit; fontSize: (lead ? 12 : 11) * k; color: lead ? foreground : muted; maxLines: 1; width: len(unit) * (lead ? 12 : 11) * k * 0.7 + 2 }
           Text {
             text: r.line
-            fontSize: (lead ? 20 : 14) * k
+            fontSize: (lead ? 18 : 13) * k
             bold: true
+            font: mono
             color: lead ? foreground : muted
-            padding: [narrow ? 2 : 4, 0, 0, (lead ? 3 : 1) * k]
             maxLines: 1
-            width: narrow ? null : len(r.line) * (lead ? 20 : 14) * 0.62 + 6
+            width: narrow ? null : len(r.line) * (lead ? 18 : 13) * k * 0.62 + 6
             weight: narrow ? 1 : null
           }
           if !narrow {
-            Text { text: r.to; style: label; color: muted; maxLines: 1; weight: 1; padding: [0, 0, 0, lead ? 6 : 3] }
+            Text { text: r.to; style: label; color: muted; maxLines: 1; weight: 1 }
           }
         }
       }
@@ -123,7 +133,7 @@ widget "departures" {
     gap: 2
     justify: center
     if showName {
-      Text { text: stopName == "" ? "departures" : stopName; style: label; color: muted; maxLines: 1 }
+      Text { text: displayName == "" ? "departures" : displayName; style: label; color: muted; maxLines: 1 }
     }
     if stopId == "" {
       Text { text: "Tap to pick a stop."; style: small; color: muted }
@@ -145,26 +155,39 @@ widget "departures" {
     }
   }
 
+  component StopButton(item, selected) {
+    Box {
+      weight: 1
+      background: selected ? alpha(accent, 0.25) : alpha(muted, 0.15)
+      border: 1
+      borderColor: selected ? accent : alpha(muted, 0.3)
+      radius: 8
+      padding: [4, 6]
+      align: center
+      onTap: { stopId = item.id; stopName = item.name; refresh() }
+      Text {
+        text: item.name
+        style: small
+        bold: selected
+        color: selected ? foreground : muted
+        maxLines: 1
+        align: center
+      }
+    }
+  }
+
   screen {
-    title: stopName == "" ? "departures" : stopName
+    title: displayName == "" ? "departures" : displayName
     Column {
       scroll: true
       gap: 8
-      Input { placeholder: stopName == "" ? "search for a stop" : "change stop"; clear: true; onSubmit: { query = value; refresh() } }
+      Input { placeholder: displayName == "" ? "search for a stop" : "change stop"; clear: true; onSubmit: { query = value; refresh() } }
       if len(recent) > 0 {
         Row {
           fill: width
           gap: 6
           for r in recent key r.id {
-            Box {
-              weight: 1
-              background: r.id == stopId ? alpha(accent, 0.25) : alpha(muted, 0.15)
-              radius: 8
-              padding: [4, 6]
-              align: center
-              onTap: { stopId = r.id; stopName = r.name; refresh() }
-              Text { text: r.name; style: small; color: r.id == stopId ? foreground : muted; maxLines: 1 }
-            }
+            StopButton { item: r; selected: r.id == stopId }
           }
         }
       }
