@@ -3,6 +3,8 @@
 A quiet EPUB, MOBI and TXT reader with a local library, saved reading progress,
 adjustable typography, paper/sepia/night themes and public OPDS 1/2 catalogs.
 
+Version 1.9 replaces the settings symbol with an outlined eight-tooth gear.
+
 Tap the page's right half to advance, its left half to go back. The gear opens
 Settings; the book button opens Library. The library scans files directly in
 `~/Books` by default; choose a different folder in Settings. Book titles and

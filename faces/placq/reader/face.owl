@@ -1,5 +1,5 @@
 face "Reader" {
-  meta { owl: 11; description: "A quiet EPUB, MOBI and TXT reader with a local library and OPDS catalogs"; version: "1.8"; license: "MIT AND GPL-3.0-only"; category: "productivity" }
+  meta { owl: 11; description: "A quiet EPUB, MOBI and TXT reader with a local library and OPDS catalogs"; version: "1.9"; license: "MIT AND GPL-3.0-only"; category: "productivity" }
   page: 0
   padding: 0
   requires { pacman: ["bash", "python", "python-beautifulsoup4", "python-requests", "python-pillow", "ttf-dejavu"] }
@@ -100,11 +100,9 @@ face "Reader" {
       Canvas {
         let cx = width / 2
         let cy = height / 2
-        for i in range(8) {
-          rotate(i * 45, cx, cy) { line(cx, cy - 12, cx, cy - 9, stroke: pane == "settings" ? tint : soft, width: 2.5, cap: round) }
-        }
-        circle(cx, cy, 8.5, stroke: pane == "settings" ? tint : soft, width: 1.8)
-        circle(cx, cy, 3, stroke: pane == "settings" ? tint : soft, width: 1.8)
+        let teeth = range(48).map(i => [cx + sin(rad(i * 7.5)) * (i % 6 == 0 || i % 6 == 5 ? 9 : 12), cy - cos(rad(i * 7.5)) * (i % 6 == 0 || i % 6 == 5 ? 9 : 12)])
+        path(teeth, closed: true, stroke: pane == "settings" ? tint : soft, width: 1.8)
+        circle(cx, cy, 3.5, stroke: pane == "settings" ? tint : soft, width: 1.8)
       }
     }
   }
