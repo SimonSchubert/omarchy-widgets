@@ -1,5 +1,5 @@
 widget "radar wallpaper" {
-  meta { description: "Live National Weather Service radar on a night map, centered on this phone."; version: "1.6"; license: "MIT"; category: "world"; owl: 6 }
+  meta { description: "Live National Weather Service radar on a night map, centered on this phone."; version: "1.7"; license: "MIT"; category: "world"; owl: 6 }
   page: 1
   order: 30
   size: 3x2
@@ -38,7 +38,6 @@ d=$HOME/.local/share/omalauncher/nws-wallpaper
 mkdir -p "$d"
 tmp=$(mktemp)
 cat > "$tmp" << 'NWS_WP_SCRIPT_END'
-#!/bin/bash
 # Plays an NWS radar loop as the omalauncher wallpaper.
 #
 # The launcher redraws the wallpaper only when the background name in
@@ -292,21 +291,21 @@ style_is_ours() {
 
 screen_size() {
   sw=1080
-  sh=2388
+  scrh=2388
   local a b
   if read -r a b <"$cache/screen" 2>/dev/null; then
     case $a in
       ''|*[!0-9]*) ;;
       *) case $b in
            ''|*[!0-9]*) ;;
-           *) sw=$a; sh=$b ;;
+           *) sw=$a; scrh=$b ;;
          esac ;;
     esac
   fi
   if [ "$sw" -lt 200 ] || [ "$sw" -gt 2000 ]; then sw=1080; fi
-  if [ "$sh" -lt 200 ] || [ "$sh" -gt 4000 ]; then sh=2388; fi
+  if [ "$scrh" -lt 200 ] || [ "$scrh" -gt 4000 ]; then scrh=2388; fi
   if [ $((sw % 2)) -eq 1 ]; then sw=$((sw - 1)); fi
-  if [ $((sh % 2)) -eq 1 ]; then sh=$((sh - 1)); fi
+  if [ $((scrh % 2)) -eq 1 ]; then scrh=$((scrh - 1)); fi
 }
 
 theme_color() {
@@ -533,23 +532,23 @@ build_vf() {
       esac
       ;;
   esac
-  geom=$(awk -v iw="$iw" -v ih="$ih" -v sw="$sw" -v sh="$sh" -v fx="$fx" -v fy="$fy" -v reach="$reach" 'BEGIN {
-    mw = int(ih * sw / sh); if (mw > iw) mw = iw; if (mw < 2) mw = 2;
+  geom=$(awk -v iw="$iw" -v ih="$ih" -v sw="$sw" -v scrh="$scrh" -v fx="$fx" -v fy="$fy" -v reach="$reach" 'BEGIN {
+    mw = int(ih * sw / scrh); if (mw > iw) mw = iw; if (mw < 2) mw = 2;
     f = 0.72; if (reach == "close") f = 0.48; else if (reach == "wide") f = 1;
     cw = int(mw * f); if (cw < 2) cw = 2; if (cw > iw) cw = iw; if (cw % 2) cw--;
-    ch = int(cw * sh / sw); if (ch % 2) ch--;
-    if (ch > ih || ch < 2) { ch = ih; if (ch % 2) ch--; cw = int(ch * sw / sh); if (cw % 2) cw--; }
+    ch = int(cw * scrh / sw); if (ch % 2) ch--;
+    if (ch > ih || ch < 2) { ch = ih; if (ch % 2) ch--; cw = int(ch * sw / scrh); if (cw % 2) cw--; }
     if (cw < 2) cw = 2; if (ch < 2) ch = 2;
     cx = int(fx * iw - cw / 2); if (cx < 0) cx = 0; if (cx > iw - cw) cx = iw - cw; if (cx % 2) cx--;
     if (cx < 0) cx = 0;
     cy = int(fy * ih - ch / 2); if (cy < 0) cy = 0; if (cy > ih - ch) cy = ih - ch; if (cy % 2) cy--;
     if (cy < 0) cy = 0;
-    printf "%d %d %d %d %d %d", cw, ch, cx, cy, sw, sh
+    printf "%d %d %d %d %d %d", cw, ch, cx, cy, sw, scrh
   }')
   read -r cw ch cx cy ow oh <<<"$geom"
   log "draw sector=$sector view=$view reach=$reach pan=$pan vpan=$vpan dim=$dim crop=${cw}x${ch}+${cx}+${cy} out=${ow}x${oh}"
   ensure_night_cube || return 1
-  vf="crop=${cw}:${ch}:${cx}:${cy},scale=${ow}:${oh}:flags=lanczos,pad=${sw}:${sh}:(ow-iw)/2:(oh-ih)/2:color=0x${color},format=rgb24,lut3d=file=${cache}/night.cube:interp=nearest"
+  vf="crop=${cw}:${ch}:${cx}:${cy},scale=${ow}:${oh}:flags=lanczos,pad=${sw}:${scrh}:(ow-iw)/2:(oh-ih)/2:color=0x${color},format=rgb24,lut3d=file=${cache}/night.cube:interp=nearest"
   if [ "$dim" -gt 0 ]; then
     dim_r=$((16#${color:0:2}))
     dim_g=$((16#${color:2:2}))
@@ -640,7 +639,7 @@ current_mark() {
     mlat=$lat
     mlon=$lon
   fi
-  printf '%s\n' "$theme $sw $sh $color $mt $sector $view $reach $pan $vpan $dim $mlat $mlon night1"
+  printf '%s\n' "$theme $sw $scrh $color $mt $sector $view $reach $pan $vpan $dim $mlat $mlon night1"
 }
 
 write_status() {
@@ -960,13 +959,12 @@ case ${1:-ensure} in
 esac
 NWS_WP_SCRIPT_END
 if ! cmp -s "$tmp" "$d/nws-wallpaper"; then
-  chmod 755 "$tmp"
   mv -f "$tmp" "$d/nws-wallpaper"
 else
   rm -f "$tmp"
 fi
-"$d/nws-wallpaper" ensure
 """)
+    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper ensure || true")
   }
   every 60s {
     run("""
@@ -974,7 +972,6 @@ d=$HOME/.local/share/omalauncher/nws-wallpaper
 mkdir -p "$d"
 tmp=$(mktemp)
 cat > "$tmp" << 'NWS_WP_SCRIPT_END'
-#!/bin/bash
 # Plays an NWS radar loop as the omalauncher wallpaper.
 #
 # The launcher redraws the wallpaper only when the background name in
@@ -1228,21 +1225,21 @@ style_is_ours() {
 
 screen_size() {
   sw=1080
-  sh=2388
+  scrh=2388
   local a b
   if read -r a b <"$cache/screen" 2>/dev/null; then
     case $a in
       ''|*[!0-9]*) ;;
       *) case $b in
            ''|*[!0-9]*) ;;
-           *) sw=$a; sh=$b ;;
+           *) sw=$a; scrh=$b ;;
          esac ;;
     esac
   fi
   if [ "$sw" -lt 200 ] || [ "$sw" -gt 2000 ]; then sw=1080; fi
-  if [ "$sh" -lt 200 ] || [ "$sh" -gt 4000 ]; then sh=2388; fi
+  if [ "$scrh" -lt 200 ] || [ "$scrh" -gt 4000 ]; then scrh=2388; fi
   if [ $((sw % 2)) -eq 1 ]; then sw=$((sw - 1)); fi
-  if [ $((sh % 2)) -eq 1 ]; then sh=$((sh - 1)); fi
+  if [ $((scrh % 2)) -eq 1 ]; then scrh=$((scrh - 1)); fi
 }
 
 theme_color() {
@@ -1469,23 +1466,23 @@ build_vf() {
       esac
       ;;
   esac
-  geom=$(awk -v iw="$iw" -v ih="$ih" -v sw="$sw" -v sh="$sh" -v fx="$fx" -v fy="$fy" -v reach="$reach" 'BEGIN {
-    mw = int(ih * sw / sh); if (mw > iw) mw = iw; if (mw < 2) mw = 2;
+  geom=$(awk -v iw="$iw" -v ih="$ih" -v sw="$sw" -v scrh="$scrh" -v fx="$fx" -v fy="$fy" -v reach="$reach" 'BEGIN {
+    mw = int(ih * sw / scrh); if (mw > iw) mw = iw; if (mw < 2) mw = 2;
     f = 0.72; if (reach == "close") f = 0.48; else if (reach == "wide") f = 1;
     cw = int(mw * f); if (cw < 2) cw = 2; if (cw > iw) cw = iw; if (cw % 2) cw--;
-    ch = int(cw * sh / sw); if (ch % 2) ch--;
-    if (ch > ih || ch < 2) { ch = ih; if (ch % 2) ch--; cw = int(ch * sw / sh); if (cw % 2) cw--; }
+    ch = int(cw * scrh / sw); if (ch % 2) ch--;
+    if (ch > ih || ch < 2) { ch = ih; if (ch % 2) ch--; cw = int(ch * sw / scrh); if (cw % 2) cw--; }
     if (cw < 2) cw = 2; if (ch < 2) ch = 2;
     cx = int(fx * iw - cw / 2); if (cx < 0) cx = 0; if (cx > iw - cw) cx = iw - cw; if (cx % 2) cx--;
     if (cx < 0) cx = 0;
     cy = int(fy * ih - ch / 2); if (cy < 0) cy = 0; if (cy > ih - ch) cy = ih - ch; if (cy % 2) cy--;
     if (cy < 0) cy = 0;
-    printf "%d %d %d %d %d %d", cw, ch, cx, cy, sw, sh
+    printf "%d %d %d %d %d %d", cw, ch, cx, cy, sw, scrh
   }')
   read -r cw ch cx cy ow oh <<<"$geom"
   log "draw sector=$sector view=$view reach=$reach pan=$pan vpan=$vpan dim=$dim crop=${cw}x${ch}+${cx}+${cy} out=${ow}x${oh}"
   ensure_night_cube || return 1
-  vf="crop=${cw}:${ch}:${cx}:${cy},scale=${ow}:${oh}:flags=lanczos,pad=${sw}:${sh}:(ow-iw)/2:(oh-ih)/2:color=0x${color},format=rgb24,lut3d=file=${cache}/night.cube:interp=nearest"
+  vf="crop=${cw}:${ch}:${cx}:${cy},scale=${ow}:${oh}:flags=lanczos,pad=${sw}:${scrh}:(ow-iw)/2:(oh-ih)/2:color=0x${color},format=rgb24,lut3d=file=${cache}/night.cube:interp=nearest"
   if [ "$dim" -gt 0 ]; then
     dim_r=$((16#${color:0:2}))
     dim_g=$((16#${color:2:2}))
@@ -1576,7 +1573,7 @@ current_mark() {
     mlat=$lat
     mlon=$lon
   fi
-  printf '%s\n' "$theme $sw $sh $color $mt $sector $view $reach $pan $vpan $dim $mlat $mlon night1"
+  printf '%s\n' "$theme $sw $scrh $color $mt $sector $view $reach $pan $vpan $dim $mlat $mlon night1"
 }
 
 write_status() {
@@ -1896,38 +1893,37 @@ case ${1:-ensure} in
 esac
 NWS_WP_SCRIPT_END
 if ! cmp -s "$tmp" "$d/nws-wallpaper"; then
-  chmod 755 "$tmp"
   mv -f "$tmp" "$d/nws-wallpaper"
 else
   rm -f "$tmp"
 fi
-"$d/nws-wallpaper" ensure
 """)
+    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper ensure || true")
   }
   when dw != null && dh != null {
-    run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper screen ${int(dw)} ${int(dh)} || true")
+    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper screen ${int(dw)} ${int(dh)} || true")
   }
   on dw {
-    run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper screen ${int(dw)} ${int(dh)} || true")
+    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper screen ${int(dw)} ${int(dh)} || true")
   }
   every 60s {
-    run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper screen ${int(dw)} ${int(dh)} || true")
+    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper screen ${int(dw)} ${int(dh)} || true")
   }
   when lat != null && lon != null {
-    run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper locate ${sh(fixed(lat, 2))} ${sh(fixed(lon, 2))} || true")
+    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper locate ${sh(fixed(lat, 2))} ${sh(fixed(lon, 2))} || true")
   }
   on lat {
-    run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper locate ${sh(fixed(lat, 2))} ${sh(fixed(lon, 2))} || true")
+    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper locate ${sh(fixed(lat, 2))} ${sh(fixed(lon, 2))} || true")
   }
   every 60s {
-    run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper locate ${sh(fixed(lat, 2))} ${sh(fixed(lon, 2))} || true")
+    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper locate ${sh(fixed(lat, 2))} ${sh(fixed(lon, 2))} || true")
   }
 
   component Pick(label, lit, field, choice) {
     Button {
       text: label
       color: lit ? accent : muted
-      onTap: run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set ${sh(field)} ${sh(choice)} || true")
+      onTap: run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set ${sh(field)} ${sh(choice)} || true")
     }
   }
 
@@ -1941,12 +1937,12 @@ fi
     Row {
       gap: 8
       if enabled != "1" || play == "still" {
-        Button { text: enabled != "1" ? "on" : "play"; onTap: run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set play loop || true") }
+        Button { text: enabled != "1" ? "on" : "play"; onTap: run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set play loop || true") }
       } else {
-        Button { text: "pause"; onTap: run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set play still || true") }
+        Button { text: "pause"; onTap: run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set play still || true") }
       }
       if enabled == "1" {
-        Button { text: "off"; color: muted; onTap: run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set enabled 0 || true") }
+        Button { text: "off"; color: muted; onTap: run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set enabled 0 || true") }
       }
     }
   }
@@ -1962,12 +1958,12 @@ fi
       Row {
         gap: 8
         if enabled != "1" || play == "still" {
-          Button { text: enabled != "1" ? "on" : "play"; onTap: run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set play loop || true") }
+          Button { text: enabled != "1" ? "on" : "play"; onTap: run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set play loop || true") }
         } else {
-          Button { text: "pause"; onTap: run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set play still || true") }
+          Button { text: "pause"; onTap: run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set play still || true") }
         }
         if enabled == "1" {
-          Button { text: "off"; color: muted; onTap: run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set enabled 0 || true") }
+          Button { text: "off"; color: muted; onTap: run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set enabled 0 || true") }
         }
       }
 
@@ -1989,7 +1985,7 @@ fi
 
       Text { text: "dim ${dim}%"; style: label; color: muted }
       Text { text: "Blends the map toward the theme color so the tiles stay readable."; style: small; color: muted }
-      Slider { value: num(dim); min: 0; max: 40; step: 5; onChange: run("test -x $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper && $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set dim ${int(value)} || true") }
+      Slider { value: num(dim); min: 0; max: 40; step: 5; onChange: run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set dim ${int(value)} || true") }
 
       Text { text: "refresh"; style: label; color: muted }
       Flow {
