@@ -1,0 +1,142 @@
+widget "unicorn" {
+  // A pixel unicorn that bobs on your home screen, cracks jokes when booped, and throws a rainbow
+  // party when an email arrives. Tap it during the party to open the newest mail.
+  page: 2
+  order: 1
+  size: 3x3
+  minSize: 2x2
+
+  meta { owl: 10; description: "A silly pixel unicorn that tells jokes when booped and throws a rainbow party when you get an email."; version: "1.0"; license: "MIT"; category: "fun" }
+
+  // No shell involved: notifications come from Android, so this works without Linux too.
+  source n = android.notifications
+  source now = clock every 1s
+
+  // Mail apps by package, plus anything whose app name or package says "mail".
+  let mailApps = ["com.google.android.gm", "com.microsoft.office.outlook", "ch.protonmail.android", "com.fsck.k9", "net.thunderbird.android", "eu.faircode.email", "com.readdle.spark", "com.samsung.android.email.provider", "com.yahoo.mobile.client.android.mail", "me.bluemail.mail", "com.fastmail.app", "de.tutao.tutanota"]
+  let mails = n.available ? n.items.filter(i => contains(mailApps, i.package) || contains(lower(i.app ?? ""), "mail") || contains(lower(i.package ?? ""), "mail")) : []
+  state seen = [] persist
+  let fresh = mails.filter(m => !contains(seen, m.key))
+  let party = len(fresh) > 0
+
+  let quips = [
+    "I run on rainbows and root access.",
+    "No new mail. Suspiciously peaceful.",
+    "pacman -S glitter",
+    "Inbox zero? I'm so proud of you 🥲",
+    "I'm not a horse. I'm pointier.",
+    "Neigh-ver gonna give you up.",
+    "Have you tried turning my horn off and on?",
+    "I poop rainbows. Don't ask.",
+    "Boop me again. I dare you.",
+    "sudo make me a sandwich 🥪",
+    "Mail check: 0 dragons, 0 emails.",
+    "Powered by sparkles and Arch, btw."
+  ]
+  state quip = 0
+  state boopAt = 0
+  let booped = now - boopAt < 2
+  every 30s { quip = random(len(quips)) }
+
+  onTap: {
+    if !n.available {
+      notification("open", "")
+    } else if party {
+      notification("open", fresh[0].key)
+      seen = mails.map(m => m.key)
+    } else {
+      quip = (quip + 1 + random(len(quips) - 1)) % len(quips)
+      boopAt = now
+      haptic()
+    }
+  }
+
+  // Seen keys of mails that are gone from the shade don't need remembering.
+  on mails { seen = seen.filter(k => any(mails, m => m.key == k)) }
+
+  let unicorn = [
+    "...............Y........",
+    "..............YY........",
+    ".............YY.........",
+    "...........rWWW.........",
+    "..........roWWWWW.......",
+    ".........royWWeWWWW.....",
+    ".........oygWWWWWWWWW...",
+    "........oygbWWWWWWWWnW..",
+    "........ygbpWWWkWWWWWW..",
+    "........gbp.WWWW..WWW...",
+    ".......bp..WWWWW........",
+    "..rr.....WWWWWWW........",
+    ".rooWWWWWWWWWWWW........",
+    "royyWWWWWWWWWWWWW.......",
+    "oyg.WWWWWWWWWWWWW.......",
+    "ygb.SSWWWWWWWWWSS.......",
+    "gbp..SSSSSSSSSSS........",
+    ".p...WW.WW...WW.WW......"
+  ]
+  let legsA = [".....WW.WW...WW.WW......", ".....nn.nn...nn.nn......"]
+  let legsB = ["....WW...WW.WW...WW.....", "....nn...nn.nn...nn....."]
+  let envelope = ["mmmmmmmmm", "mwm...mwm", "m.wm.mw.m", "m..mwm..m", "m.......m", "mmmmmmmmm"]
+
+  let body = mix(magenta, "#ffffff", 0.84)
+  let shade = mix(magenta, "#ffffff", 0.6)
+  let rainbow = [red, orange, yellow, green, blue, magenta]
+
+  Column {
+    gap: 4
+    fill: true
+
+    Text {
+      text: !n.available ? "Let me sniff your mail? Tap me 🦄" : party ? "📬 ${len(fresh)} new mail${len(fresh) > 1 ? "s" : ""}!! ${fresh[0].title}" : booped ? "Hehe, boop!" : quips[quip]
+      style: small
+      color: party ? background : foreground
+      bold: party
+      maxLines: 2
+      padding: [8, 4]
+      background: party ? accent : surface
+      radius: 8 * corners
+    }
+
+    Canvas {
+      weight: 1
+      fill: width
+      let px = max(1, floor(min(width / 30, height / 24)))
+      let ox = floor((width - 24 * px) / 2)
+      let ground = height - 2 * px
+      let hop = party ? -abs(sin(time * 7)) * px * 4 : booped ? -abs(sin(time * 10)) * px * 2 : sin(time * 2) * px * 0.6
+      let oy = floor(ground - 20 * px + hop)
+      let shift = party ? floor(time * 8) : 0
+      let blink = !party && time % 4 < 0.15
+      let prance = (party || booped) && floor(time * 8) % 2 == 1
+
+      // The party: a rainbow behind, sparkles all around.
+      if party {
+        for c, i in rainbow {
+          arc(width / 2, ground, width * 0.46 - i * px * 1.6, 270, 180, stroke: alpha(c, 0.55), width: px * 1.6)
+        }
+      }
+      for i in range(party ? 12 : 4) {
+        let tw = sin(time * (2 + hash(i, 3) * 3) + i) * 0.5 + 0.5
+        text("✦", hash(i, 1) * width, hash(i, 2) * height * 0.8 + 6, size: 6 + tw * 8, align: center, color: alpha(rainbow[(i + shift) % 6], party ? tw : tw * 0.4))
+      }
+
+      // Shadow on the ground, smaller as it jumps.
+      rect(ox + 5 * px - hop * 0.3, ground - px * 0.5, 13 * px + hop * 0.6, px * 1.4, radius: px, color: alpha(foreground, 0.12))
+
+      // The unicorn, with its mane cycling colors at the party.
+      sprite(unicorn, ox, oy, px, palette: {
+        W: body, S: shade, Y: yellow, n: mix(magenta, "#000000", 0.3), k: alpha(red, 0.55),
+        e: blink ? body : "#1a1b26",
+        r: rainbow[shift % 6], o: rainbow[(shift + 1) % 6], y: rainbow[(shift + 2) % 6],
+        g: rainbow[(shift + 3) % 6], b: rainbow[(shift + 4) % 6], p: rainbow[(shift + 5) % 6]
+      })
+      sprite(prance ? legsB : legsA, ox, oy + 18 * px, px, palette: {W: body, n: mix(magenta, "#000000", 0.3)})
+
+      // A letter flutters in front of its nose.
+      if party {
+        let ey = oy + 3 * px + sin(time * 5) * px * 2
+        sprite(envelope, ox + 23 * px, ey, max(1, floor(px * 0.8)), palette: {m: accent, w: accent})
+      }
+    }
+  }
+}
