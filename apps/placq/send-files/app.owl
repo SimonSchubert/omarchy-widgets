@@ -1,10 +1,11 @@
 app "Send Files to Linux" {
-  meta { owl: 9; description: "Local file transfers from Android to Linux on this phone"; version: "1.2"; license: "MIT"; category: "productivity" }
+  meta { owl: 9; description: "Local file transfers from Android to Linux on this phone"; version: "1.3"; license: "MIT"; category: "productivity" }
   requires { pacman: ["python", "bash"] }
   icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18v23h38V18H29l-5-6H5v6"/><path d="M24 3v26m-8-8 8 8 8-8"/></svg>"""
   title: "Send Files to Linux"
   // Install the embedded, reviewed helper in the app cache; no downloads.
-  let runner = "import pathlib,runpy,sys; p=pathlib.Path.home()/'.cache/owl-send-files/server.py'; p.parent.mkdir(parents=True,exist_ok=True,mode=0o700); p.write_text(sys.argv.pop(1)); sys.argv[0]=str(p); runpy.run_path(str(p),run_name='__main__')"
+  // Owl's multiline strings keep backslashes; decode the embedded helper's escaping before writing Python.
+  let runner = "import pathlib,runpy,sys; p=pathlib.Path.home()/'.cache/owl-send-files/server.py'; p.parent.mkdir(parents=True,exist_ok=True,mode=0o700); s=sys.argv.pop(1); p.write_text(s.replace(chr(92)*2,chr(92)).replace(chr(92)+chr(34),chr(34)).replace(chr(92)+'$','$')); sys.argv[0]=str(p); runpy.run_path(str(p),run_name='__main__')"
   let helper = """#!/usr/bin/env python3
 \"\"\"Loopback-only, temporary Android → local Linux file receiver.\"\"\"
 import argparse
@@ -223,7 +224,7 @@ def serve(destination):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=['start', 'serve', 'stop'])
-    parser.add_argument('--dest', default='~/Downloads')
+    parser.add_argument('--dest', default='~/')
     args = parser.parse_args()
     if args.action == 'serve':
         serve(args.dest)
@@ -264,7 +265,7 @@ def main():
 if __name__ == '__main__':
     main()
 """
-  state destination = "~/Downloads" persist
+  state destinationFolder = "~/" persist
   state response = ""
   source transfer = file("~/.cache/owl-send-files/status.json") json
   let running = transfer.phase == "ready" || transfer.phase == "uploading" || transfer.phase == "error"
@@ -279,11 +280,11 @@ if __name__ == '__main__':
     Text { text: "Files stay on this phone. No cloud or Wi-Fi needed."; style: small }
     Spacer { height: 8 }
     Text { text: "DESTINATION FOLDER"; style: label }
-    Input { text: destination; placeholder: "~/Downloads"; onChange: destination = value }
+    Input { text: destinationFolder; placeholder: "~/"; onChange: destinationFolder = value }
     Text { text: "The folder will be created if needed. You can also browse folders on the upload page."; style: small }
     Button {
       text: running ? "Open upload page" : "Choose files and send"
-      onTap: { response = ""; response = run("python -c ${sh(runner)} ${sh(helper)} start --dest ${sh(destination)}") }
+      onTap: { response = ""; response = run("python -c ${sh(runner)} ${sh(helper)} start --dest ${sh(destinationFolder)}") }
     }
     Text { text: "Choose Android files in your browser, then tap Send. Upload progress appears on the page."; style: small }
     Column {
