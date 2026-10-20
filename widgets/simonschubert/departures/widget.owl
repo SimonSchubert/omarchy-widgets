@@ -50,6 +50,28 @@ widget "departures" {
   let showName = tileHeight == null || tileHeight >= 64
   let narrow = cols != null && cols <= 2
 
+  // The face has three columns: the time, the line and the station it goes to. The time column holds
+  // one of three shapes, "now", a countdown with its unit or a clock time, and is wide enough for the
+  // widest of them; the line column is as wide as the longest line on the board, up to ten
+  // characters, because a clipped train number is worse than a clipped station; and the station takes
+  // everything the two leave. A cell is what one monospace character takes at that column's size,
+  // ~0.72em, and s shrinks the block into the tile. Every row uses the same widths, so the columns
+  // line down the face.
+  let inner = tileWidth == null ? 150 : tileWidth
+  let far = len(shown.filter(r => (r.at - nowMin + 1440) % 1440 >= 60)) > 0
+  // A clock time renders at 0.8 of the countdown size, so five of its characters take four cells.
+  let timeCells = far ? 4 : 3
+  let unitCells = 3
+  let lineCells = len(shown) == 0 ? 3 : clamp(first(shown.map(r => len(r.line)).sortBy(x => -x)), 2, 10)
+  let rawW = timeCells * 24 * 0.72 + unitCells * 12 * 0.72 + lineCells * 18 * 0.72
+  let s = clamp((inner - 42) / (rawW + 120), 0.62, 1)
+  let timeW = timeCells * 24 * s * 0.72 + 4
+  let unitW = unitCells * 12 * s * 0.72 + 2
+  let lineW = lineCells * 18 * s * 0.72 + 6
+  // Below ~40dp the station would be a bare ellipsis, so on a small face the line takes the row.
+  let showTo = !narrow && inner - timeW - unitW - lineW >= 40
+  let lineGrow = narrow || !showTo
+
   onTap: screen()
 
   component Badge(r, w = 44) {
@@ -99,6 +121,7 @@ widget "departures" {
         let k = narrow ? 0.75 : 1
         let rowBg = lead ? alpha(accent, 0.2) : left < 60 ? alpha(surface, 0.65) : alpha(muted, 0.14)
         let rowBorder = lead ? alpha(accent, 0.45) : left < 60 ? alpha(border, 0.4) : alpha(muted, 0.25)
+        let bigFs = (left >= 60 ? 0.8 : 1) * (lead ? 24 : 15) * s * k
         Row {
           align: center
           fill: width
@@ -108,21 +131,21 @@ widget "departures" {
           radius: 6 * corners
           padding: [narrow ? 4 : 6, (lead ? 4 : 2) * k]
           gap: narrow ? 3 : 6
-          // A Text without a width fills the row, so each gets its own: monospace is ~0.6em a character.
-          Text { text: big; fontSize: (lead ? 24 : 15) * k; bold: true; font: mono; color: tint; maxLines: 1; width: len(big) * (lead ? 24 : 15) * k * 0.7 + 4; align: end }
-          Text { text: unit; fontSize: (lead ? 12 : 11) * k; color: lead ? foreground : muted; maxLines: 1; width: len(unit) * (lead ? 12 : 11) * k * 0.7 + 2 }
+          // A Text without a width fills the row, so each takes its reserved column.
+          Text { text: big; fontSize: bigFs; bold: true; font: mono; color: tint; maxLines: 1; width: timeW * k; align: end }
+          Text { text: unit; fontSize: (lead ? 12 : 11) * s * k; color: lead ? foreground : muted; maxLines: 1; width: unitW * k }
           Text {
             text: r.line
-            fontSize: (lead ? 18 : 13) * k
+            fontSize: (lead ? 18 : 13) * s * k
             bold: true
             font: mono
             color: lead ? foreground : muted
             maxLines: 1
-            width: narrow ? null : len(r.line) * (lead ? 18 : 13) * k * 0.62 + 6
-            weight: narrow ? 1 : null
+            width: lineGrow ? null : lineW * k
+            weight: lineGrow ? 1 : null
           }
-          if !narrow {
-            Text { text: r.to; style: label; color: muted; maxLines: 1; weight: 1 }
+          if showTo {
+            Text { text: r.to; style: label; bold: lead; color: muted; maxLines: 1; weight: 1 }
           }
         }
       }
