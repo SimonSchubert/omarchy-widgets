@@ -6,4 +6,4 @@ Radar imagery is produced by NOAA's National Weather Service and is in the publi
 
 Needs `curl` and `ffmpeg`.
 
-The loop runs only while this tile's page is on screen. It fetches a new image every 15 minutes, steps no faster than every 2 seconds, and puts the previous wallpaper back when it is switched off or the home screen is gone.
+The loop runs only while this tile's page is on screen. It fetches a new image every 15 minutes, which is how often the Weather Service publishes one, or not at all when updates are off. Frames step no faster than every 2 seconds, and the previous wallpaper comes back when it is switched off or the home screen is gone.

@@ -1,5 +1,5 @@
 widget "radar wallpaper" {
-  meta { description: "Live National Weather Service radar on a night map, centered on this phone."; version: "1.9"; license: "MIT"; category: "world"; owl: 6 }
+  meta { description: "Live National Weather Service radar on a night map, centered on this phone."; version: "1.10"; license: "MIT"; category: "world"; owl: 6 }
   page: 1
   order: 30
   size: 3x2
@@ -64,8 +64,9 @@ cat > "$tmp" << 'NWS_WP_SCRIPT_END'
 # off, this process puts the previous background back and exits. It does
 # not keep polling, and it does not download, once the home screen is gone.
 #
-# A new radar image is fetched every 15 minutes unless the tile asks for
-# a different interval. A frame step is never faster than 2 seconds,
+# The Weather Service publishes a new loop about every 15 minutes, so that
+# is the only fetch interval. refresh 0 keeps the pictures already saved
+# and does not download another. A frame step is never faster than 2 seconds,
 # because each step makes the launcher decode a full-screen wallpaper.
 #
 # Optional environment overrides exist so a check can run against a copy
@@ -167,9 +168,11 @@ load_conf() {
   case $vpan in north|center|south|here) ;; *) vpan=here ;; esac
   case $dim in ''|*[!0-9]*) dim=0 ;; esac
   [ "$dim" -gt 40 ] && dim=40
-  case $refresh in ''|*[!0-9]*) refresh=15 ;; esac
-  [ "$refresh" -lt 5 ] && refresh=5
-  [ "$refresh" -gt 30 ] && refresh=30
+  # 0 means do not download. Anything else follows the source, every 15 minutes.
+  case $refresh in
+    0) ;;
+    *) refresh=15 ;;
+  esac
   case $sector in
     conus-large|conus|pacnorthwest|pacsouthwest|northrockies|southrockies|uppermissvly|centgrtlakes|northeast|midatlantic|southeast|southplains|southmissvly|alaska|hawaii|carib|guam) ;;
     *) sector=conus-large ;;
@@ -974,7 +977,7 @@ cmd_set() {
       set_key dim "$v"
       ;;
     refresh)
-      case $v in 5|10|15) ;; *) return 1 ;; esac
+      case $v in 0|15) ;; *) return 1 ;; esac
       set_key refresh "$v"
       ;;
     *)
@@ -1089,26 +1092,29 @@ daemon_main() {
       local_sector=CONUS-LARGE
     fi
     now=$(date +%s)
-    if [ $((next_fetch - now)) -gt $((refresh * 60)) ]; then
-      next_fetch=$now
-    fi
-    if [ "$local_sector" != "$(sector_name)" ] || [ "$now" -ge "$next_fetch" ]; then
-      if ! tile_here; then
-        leave quiet
+    # Updates off: keep playing the frames already saved.
+    if [ "$refresh" != "0" ]; then
+      if [ $((next_fetch - now)) -gt $((refresh * 60)) ]; then
+        next_fetch=$now
       fi
-      if [ "$local_sector" != "$(sector_name)" ]; then
-        rm -f "$gif"
-      fi
-      if download; then
-        printf '%s\n' "$(sector_name)" >"$cache/sector"
-        next_fetch=$((now + refresh * 60))
-      else
-        next_fetch=$((now + 45))
-        list_frames
-        if [ "$count" -lt 1 ]; then
-          write_status error download
-          nap 5
-          continue
+      if [ "$local_sector" != "$(sector_name)" ] || [ "$now" -ge "$next_fetch" ]; then
+        if ! tile_here; then
+          leave quiet
+        fi
+        if [ "$local_sector" != "$(sector_name)" ]; then
+          rm -f "$gif"
+        fi
+        if download; then
+          printf '%s\n' "$(sector_name)" >"$cache/sector"
+          next_fetch=$((now + refresh * 60))
+        else
+          next_fetch=$((now + 45))
+          list_frames
+          if [ "$count" -lt 1 ]; then
+            write_status error download
+            nap 5
+            continue
+          fi
         fi
       fi
     fi
@@ -1292,13 +1298,12 @@ fi
       Text { text: "Blends the map toward the theme color so the tiles stay readable."; style: small; color: muted }
       Slider { value: num(dim); min: 0; max: 40; step: 5; onChange: run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set dim ${int(value)} || true") }
 
-      Text { text: "refresh"; style: label; color: muted }
-      Text { text: "A new image every 15 minutes. Faster uses more mobile data."; style: small; color: muted }
+      Text { text: "update"; style: label; color: muted }
+      Text { text: "A new loop about every 15 minutes. Off keeps the pictures already saved."; style: small; color: muted }
       Flow {
         gap: 8
-        Pick { label: "5 min"; lit: refresh == "5"; field: "refresh"; choice: "5" }
-        Pick { label: "10 min"; lit: refresh == "10"; field: "refresh"; choice: "10" }
-        Pick { label: "15 min"; lit: refresh == "15"; field: "refresh"; choice: "15" }
+        Pick { label: "every 15 min"; lit: refresh != "0"; field: "refresh"; choice: "15" }
+        Pick { label: "off"; lit: refresh == "0"; field: "refresh"; choice: "0" }
       }
     }
   }
