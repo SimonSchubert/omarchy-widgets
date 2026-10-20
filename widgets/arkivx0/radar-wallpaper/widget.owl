@@ -1,5 +1,5 @@
 widget "radar wallpaper" {
-  meta { description: "Live National Weather Service radar on a night map, centered on this phone."; version: "1.7"; license: "MIT"; category: "world"; owl: 6 }
+  meta { description: "Live National Weather Service radar on a night map, centered on this phone."; version: "1.8"; license: "MIT"; category: "world"; owl: 6 }
   page: 1
   order: 30
   size: 3x2
@@ -23,9 +23,7 @@ widget "radar wallpaper" {
   let dim = match(cfg ?? "", "dim=([0-9]+)")[0] ?? "0"
   let refresh = match(cfg ?? "", "refresh=([0-9]+)")[0] ?? "5"
   let phase = st.phase ?? "starting"
-  let frame = st.frame ?? 0
-  let count = st.count ?? 0
-  let label = phase == "playing" ? "live ${frame + 1}/${count}" : phase == "paused" ? "paused" : phase == "off" ? "off" : phase == "error" ? "offline" : phase == "fetching" ? "fetching…" : "starting…"
+  let label = phase == "playing" ? "live" : phase == "paused" ? "paused" : phase == "off" ? "off" : phase == "error" ? "offline" : phase == "fetching" ? "fetching…" : "starting…"
   let reachLabel = reach == "close" ? "closer" : reach == "wide" ? "wider" : "around me"
   let dw = int(sys.display.width)
   let dh = int(sys.display.height)
@@ -55,6 +53,10 @@ cat > "$tmp" << 'NWS_WP_SCRIPT_END'
 #
 # The mosaic is a light map. A night lookup repaints land, water, borders,
 # and highways, and leaves the radar colors as NWS drew them.
+#
+# The phone crop hides the time NWS prints in the corner. Each frame gets
+# that time back, and a dot for its place in the loop, so a quiet stretch
+# of radar still shows that the loop is moving.
 #
 # Optional environment overrides exist so a check can run against a copy
 # of the files and leave the live wallpaper alone. Unset, the defaults are
@@ -548,13 +550,89 @@ build_vf() {
   read -r cw ch cx cy ow oh <<<"$geom"
   log "draw sector=$sector view=$view reach=$reach pan=$pan vpan=$vpan dim=$dim crop=${cw}x${ch}+${cx}+${cy} out=${ow}x${oh}"
   ensure_night_cube || return 1
-  vf="crop=${cw}:${ch}:${cx}:${cy},scale=${ow}:${oh}:flags=lanczos,pad=${sw}:${scrh}:(ow-iw)/2:(oh-ih)/2:color=0x${color},format=rgb24,lut3d=file=${cache}/night.cube:interp=nearest"
+  local base stamp pip step i prev room doty dotx0 plate_w
+  base="crop=${cw}:${ch}:${cx}:${cy},scale=${ow}:${oh}:flags=lanczos,pad=${sw}:${scrh}:(ow-iw)/2:(oh-ih)/2:color=0x${color},format=rgb24,lut3d=file=${cache}/night.cube:interp=nearest"
   if [ "$dim" -gt 0 ]; then
     dim_r=$((16#${color:0:2}))
     dim_g=$((16#${color:2:2}))
     dim_b=$((16#${color:4:2}))
     # A 256-entry table. This ffmpeg rejects bare r, g, and b in geq.
-    vf="${vf},lutrgb=r='val*(100-${dim})/100+${dim_r}*${dim}/100':g='val*(100-${dim})/100+${dim_g}*${dim}/100':b='val*(100-${dim})/100+${dim_b}*${dim}/100'"
+    base="${base},lutrgb=r='val*(100-${dim})/100+${dim_r}*${dim}/100':g='val*(100-${dim})/100+${dim_g}*${dim}/100':b='val*(100-${dim})/100+${dim_b}*${dim}/100'"
+  fi
+  case ${frames_n:-} in ''|*[!0-9]*) frames_n=10 ;; esac
+  [ "$frames_n" -lt 1 ] && frames_n=1
+  [ "$frames_n" -gt 18 ] && frames_n=18
+  # CONUS-LARGE prints the time at this corner. A smaller product has no
+  # matching label, so it only gets the dots.
+  stamp=0
+  if [ "$iw" -ge 3000 ] && [ "$ih" -ge 1538 ]; then
+    stamp=1
+  fi
+  pip=14
+  step=26
+  dotx0=52
+  if [ "$stamp" -eq 1 ]; then
+    room=600
+    doty="main_h-118"
+  else
+    room=420
+    doty="main_h-128"
+  fi
+  if [ "$frames_n" -gt 1 ] && [ $(( (frames_n - 1) * step + pip )) -gt "$room" ]; then
+    step=$(( (room - pip) / (frames_n - 1) ))
+    [ "$step" -lt 8 ] && step=8
+  fi
+  if [ "$stamp" -eq 1 ]; then
+    vf="[0:v]split[geo][raw];[geo]${base},format=rgba,drawbox=x=32:y=ih-250:w=680:h=160:color=0x07110e@0.75:t=fill[map];"
+  else
+    plate_w=$((dotx0 - 32 + (frames_n - 1) * step + pip + 24))
+    vf="[0:v]${base},format=rgba,drawbox=x=32:y=ih-150:w=${plate_w}:h=52:color=0x07110e@0.75:t=fill[map];"
+  fi
+  # overlay's n starts at 1 here, so the lit dot uses n-1.
+  # Input 1 is the dim pip, input 2 is the lit pip.
+  vf="${vf}[2:v]format=rgba[pip];"
+  vf="${vf}[1:v]format=rgba,split=${frames_n}"
+  i=0
+  while [ "$i" -lt "$frames_n" ]; do
+    vf="${vf}[d${i}]"
+    i=$((i + 1))
+  done
+  vf="${vf};"
+  prev=map
+  i=0
+  while [ "$i" -lt "$frames_n" ]; do
+    vf="${vf}[${prev}][d${i}]overlay=x=$((dotx0 + i * step)):y=${doty}:eof_action=repeat:format=auto[m${i}];"
+    prev="m${i}"
+    i=$((i + 1))
+  done
+  if [ "$stamp" -eq 1 ]; then
+    vf="${vf}[${prev}][pip]overlay=x=${dotx0}+(n-1)*${step}:y=${doty}:eof_action=repeat:format=auto[dotted];"
+    vf="${vf}[raw]crop=700:90:30:1448,format=rgba,geq=r=236:g=244:b=238:a='if(lt(r(X\,Y)+g(X\,Y)+b(X\,Y)\,400)\,255\,0)',scale=620:80:flags=lanczos[stamp];"
+    vf="${vf}[dotted][stamp]overlay=48:H-236:format=auto[out]"
+  else
+    vf="${vf}[${prev}][pip]overlay=x=${dotx0}+(n-1)*${step}:y=${doty}:eof_action=repeat:format=auto[out]"
+  fi
+}
+
+# A generated color inside the filter adds frames, and the image muxer then
+# rejects the timestamps. These are still pictures, overlaid once per frame.
+ensure_pips() {
+  local on="$cache/pip-on.png" off="$cache/pip-off.png"
+  if [ -f "$on" ] && [ -f "$off" ]; then
+    return 0
+  fi
+  mkdir -p "$cache"
+  if ! ffmpeg -y -v error -f lavfi -i "color=c=white:s=14x14:d=1" \
+      -vf "format=rgba,geq=r=236:g=244:b=238:a='if(lt(hypot(X-6.5\,Y-6.5)\,6)\,255\,0)'" \
+      -frames:v 1 "$on"; then
+    rm -f "$on"
+    return 1
+  fi
+  if ! ffmpeg -y -v error -f lavfi -i "color=c=white:s=14x14:d=1" \
+      -vf "format=rgba,geq=r=236:g=244:b=238:a='if(lt(hypot(X-6.5\,Y-6.5)\,6)\,80\,0)'" \
+      -frames:v 1 "$off"; then
+    rm -f "$off"
+    return 1
   fi
 }
 
@@ -569,6 +647,8 @@ publish() {
   ih=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$gif" | tr -d ',\r' | head -1)
   case $iw in ''|*[!0-9]*) return 1 ;; esac
   case $ih in ''|*[!0-9]*) return 1 ;; esac
+  frames_n=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames -of csv=p=0 "$gif" | tr -d ',\r' | head -1)
+  case $frames_n in ''|*[!0-9]*) frames_n=10 ;; esac
   build_vf || return 1
   built="$dir/.nws-build"
   mkdir -p "$built"
@@ -577,7 +657,8 @@ publish() {
     rm -f "$f"
   done
   # ffmpeg must be given a real .jpg path. A .tmp name is left undecoded.
-  if ! timeout 180 nice -n 10 ffmpeg -y -v error -i "$gif" -fps_mode passthrough -vf "$vf" -q:v 3 "$built/f-%02d.jpg"; then
+  ensure_pips || return 1
+  if ! timeout 180 nice -n 10 ffmpeg -y -v error -i "$gif" -i "$cache/pip-off.png" -i "$cache/pip-on.png" -fps_mode passthrough -filter_complex "$vf" -map "[out]" -q:v 3 "$built/f-%02d.jpg"; then
     for f in "$built"/f-*.jpg; do
       [ -e "$f" ] || continue
       rm -f "$f"
@@ -639,7 +720,7 @@ current_mark() {
     mlat=$lat
     mlon=$lon
   fi
-  printf '%s\n' "$theme $sw $scrh $color $mt $sector $view $reach $pan $vpan $dim $mlat $mlon night1"
+  printf '%s\n' "$theme $sw $scrh $color $mt $sector $view $reach $pan $vpan $dim $mlat $mlon cue1"
 }
 
 write_status() {
@@ -712,7 +793,8 @@ start_daemon() {
   if [ -f "$cache/log" ] && [ "$(stat -c%s "$cache/log" 2>/dev/null || echo 0)" -gt 200000 ]; then
     tail -c 40000 "$cache/log" >"$cache/log.trim" && mv "$cache/log.trim" "$cache/log"
   fi
-  setsid "$0" daemon >>"$cache/log" 2>&1 </dev/null &
+  # The script is not marked executable, so name the interpreter and start it.
+  interp=bash; setsid "$interp" "$0" daemon >>"$cache/log" 2>&1 </dev/null &
   disown 2>/dev/null || true
 }
 
@@ -990,6 +1072,10 @@ cat > "$tmp" << 'NWS_WP_SCRIPT_END'
 # The mosaic is a light map. A night lookup repaints land, water, borders,
 # and highways, and leaves the radar colors as NWS drew them.
 #
+# The phone crop hides the time NWS prints in the corner. Each frame gets
+# that time back, and a dot for its place in the loop, so a quiet stretch
+# of radar still shows that the loop is moving.
+#
 # Optional environment overrides exist so a check can run against a copy
 # of the files and leave the live wallpaper alone. Unset, the defaults are
 # the per-user omalauncher paths.
@@ -1482,13 +1568,89 @@ build_vf() {
   read -r cw ch cx cy ow oh <<<"$geom"
   log "draw sector=$sector view=$view reach=$reach pan=$pan vpan=$vpan dim=$dim crop=${cw}x${ch}+${cx}+${cy} out=${ow}x${oh}"
   ensure_night_cube || return 1
-  vf="crop=${cw}:${ch}:${cx}:${cy},scale=${ow}:${oh}:flags=lanczos,pad=${sw}:${scrh}:(ow-iw)/2:(oh-ih)/2:color=0x${color},format=rgb24,lut3d=file=${cache}/night.cube:interp=nearest"
+  local base stamp pip step i prev room doty dotx0 plate_w
+  base="crop=${cw}:${ch}:${cx}:${cy},scale=${ow}:${oh}:flags=lanczos,pad=${sw}:${scrh}:(ow-iw)/2:(oh-ih)/2:color=0x${color},format=rgb24,lut3d=file=${cache}/night.cube:interp=nearest"
   if [ "$dim" -gt 0 ]; then
     dim_r=$((16#${color:0:2}))
     dim_g=$((16#${color:2:2}))
     dim_b=$((16#${color:4:2}))
     # A 256-entry table. This ffmpeg rejects bare r, g, and b in geq.
-    vf="${vf},lutrgb=r='val*(100-${dim})/100+${dim_r}*${dim}/100':g='val*(100-${dim})/100+${dim_g}*${dim}/100':b='val*(100-${dim})/100+${dim_b}*${dim}/100'"
+    base="${base},lutrgb=r='val*(100-${dim})/100+${dim_r}*${dim}/100':g='val*(100-${dim})/100+${dim_g}*${dim}/100':b='val*(100-${dim})/100+${dim_b}*${dim}/100'"
+  fi
+  case ${frames_n:-} in ''|*[!0-9]*) frames_n=10 ;; esac
+  [ "$frames_n" -lt 1 ] && frames_n=1
+  [ "$frames_n" -gt 18 ] && frames_n=18
+  # CONUS-LARGE prints the time at this corner. A smaller product has no
+  # matching label, so it only gets the dots.
+  stamp=0
+  if [ "$iw" -ge 3000 ] && [ "$ih" -ge 1538 ]; then
+    stamp=1
+  fi
+  pip=14
+  step=26
+  dotx0=52
+  if [ "$stamp" -eq 1 ]; then
+    room=600
+    doty="main_h-118"
+  else
+    room=420
+    doty="main_h-128"
+  fi
+  if [ "$frames_n" -gt 1 ] && [ $(( (frames_n - 1) * step + pip )) -gt "$room" ]; then
+    step=$(( (room - pip) / (frames_n - 1) ))
+    [ "$step" -lt 8 ] && step=8
+  fi
+  if [ "$stamp" -eq 1 ]; then
+    vf="[0:v]split[geo][raw];[geo]${base},format=rgba,drawbox=x=32:y=ih-250:w=680:h=160:color=0x07110e@0.75:t=fill[map];"
+  else
+    plate_w=$((dotx0 - 32 + (frames_n - 1) * step + pip + 24))
+    vf="[0:v]${base},format=rgba,drawbox=x=32:y=ih-150:w=${plate_w}:h=52:color=0x07110e@0.75:t=fill[map];"
+  fi
+  # overlay's n starts at 1 here, so the lit dot uses n-1.
+  # Input 1 is the dim pip, input 2 is the lit pip.
+  vf="${vf}[2:v]format=rgba[pip];"
+  vf="${vf}[1:v]format=rgba,split=${frames_n}"
+  i=0
+  while [ "$i" -lt "$frames_n" ]; do
+    vf="${vf}[d${i}]"
+    i=$((i + 1))
+  done
+  vf="${vf};"
+  prev=map
+  i=0
+  while [ "$i" -lt "$frames_n" ]; do
+    vf="${vf}[${prev}][d${i}]overlay=x=$((dotx0 + i * step)):y=${doty}:eof_action=repeat:format=auto[m${i}];"
+    prev="m${i}"
+    i=$((i + 1))
+  done
+  if [ "$stamp" -eq 1 ]; then
+    vf="${vf}[${prev}][pip]overlay=x=${dotx0}+(n-1)*${step}:y=${doty}:eof_action=repeat:format=auto[dotted];"
+    vf="${vf}[raw]crop=700:90:30:1448,format=rgba,geq=r=236:g=244:b=238:a='if(lt(r(X\,Y)+g(X\,Y)+b(X\,Y)\,400)\,255\,0)',scale=620:80:flags=lanczos[stamp];"
+    vf="${vf}[dotted][stamp]overlay=48:H-236:format=auto[out]"
+  else
+    vf="${vf}[${prev}][pip]overlay=x=${dotx0}+(n-1)*${step}:y=${doty}:eof_action=repeat:format=auto[out]"
+  fi
+}
+
+# A generated color inside the filter adds frames, and the image muxer then
+# rejects the timestamps. These are still pictures, overlaid once per frame.
+ensure_pips() {
+  local on="$cache/pip-on.png" off="$cache/pip-off.png"
+  if [ -f "$on" ] && [ -f "$off" ]; then
+    return 0
+  fi
+  mkdir -p "$cache"
+  if ! ffmpeg -y -v error -f lavfi -i "color=c=white:s=14x14:d=1" \
+      -vf "format=rgba,geq=r=236:g=244:b=238:a='if(lt(hypot(X-6.5\,Y-6.5)\,6)\,255\,0)'" \
+      -frames:v 1 "$on"; then
+    rm -f "$on"
+    return 1
+  fi
+  if ! ffmpeg -y -v error -f lavfi -i "color=c=white:s=14x14:d=1" \
+      -vf "format=rgba,geq=r=236:g=244:b=238:a='if(lt(hypot(X-6.5\,Y-6.5)\,6)\,80\,0)'" \
+      -frames:v 1 "$off"; then
+    rm -f "$off"
+    return 1
   fi
 }
 
@@ -1503,6 +1665,8 @@ publish() {
   ih=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$gif" | tr -d ',\r' | head -1)
   case $iw in ''|*[!0-9]*) return 1 ;; esac
   case $ih in ''|*[!0-9]*) return 1 ;; esac
+  frames_n=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames -of csv=p=0 "$gif" | tr -d ',\r' | head -1)
+  case $frames_n in ''|*[!0-9]*) frames_n=10 ;; esac
   build_vf || return 1
   built="$dir/.nws-build"
   mkdir -p "$built"
@@ -1511,7 +1675,8 @@ publish() {
     rm -f "$f"
   done
   # ffmpeg must be given a real .jpg path. A .tmp name is left undecoded.
-  if ! timeout 180 nice -n 10 ffmpeg -y -v error -i "$gif" -fps_mode passthrough -vf "$vf" -q:v 3 "$built/f-%02d.jpg"; then
+  ensure_pips || return 1
+  if ! timeout 180 nice -n 10 ffmpeg -y -v error -i "$gif" -i "$cache/pip-off.png" -i "$cache/pip-on.png" -fps_mode passthrough -filter_complex "$vf" -map "[out]" -q:v 3 "$built/f-%02d.jpg"; then
     for f in "$built"/f-*.jpg; do
       [ -e "$f" ] || continue
       rm -f "$f"
@@ -1573,7 +1738,7 @@ current_mark() {
     mlat=$lat
     mlon=$lon
   fi
-  printf '%s\n' "$theme $sw $scrh $color $mt $sector $view $reach $pan $vpan $dim $mlat $mlon night1"
+  printf '%s\n' "$theme $sw $scrh $color $mt $sector $view $reach $pan $vpan $dim $mlat $mlon cue1"
 }
 
 write_status() {
@@ -1646,7 +1811,8 @@ start_daemon() {
   if [ -f "$cache/log" ] && [ "$(stat -c%s "$cache/log" 2>/dev/null || echo 0)" -gt 200000 ]; then
     tail -c 40000 "$cache/log" >"$cache/log.trim" && mv "$cache/log.trim" "$cache/log"
   fi
-  setsid "$0" daemon >>"$cache/log" 2>&1 </dev/null &
+  # The script is not marked executable, so name the interpreter and start it.
+  interp=bash; setsid "$interp" "$0" daemon >>"$cache/log" 2>&1 </dev/null &
   disown 2>/dev/null || true
 }
 
