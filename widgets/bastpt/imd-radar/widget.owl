@@ -335,13 +335,12 @@ widget "IMD radar" {
   let markLonN = num(spotLon, 999)
   let markOn = lock != "" && geo != null && site != null && abs(markLatN) <= 90 && abs(markLonN) <= 180
 
-  // Wind comes from Open-Meteo's blended model (DWD ICON and NOAA GFS) rather
-  // than IMD's Doppler plot: nothing is read off an image, so it works for every
-  // station and for a locked spot. One request answers both points — the station
-  // pair is repeated when nothing is locked, so the reply is always a list — and
-  // a changed URL is fetched at once instead of waiting out the interval. Its
-  // CC-BY-4.0 licence asks for attribution, so the source is named wherever the
-  // numbers appear.
+  // Wind comes from Open-Meteo's blended model (DWD ICON and NOAA GFS): nothing
+  // is read off an image, so it works for every station and for a locked spot.
+  // One request answers both points — the station pair is repeated when nothing
+  // is locked, so the reply is always a list — and a changed URL is fetched at
+  // once instead of waiting out the interval. Its CC-BY-4.0 licence asks for
+  // attribution, so the source is named wherever the numbers appear.
   let siteLat = fixed(site.lat ?? 13.0827, 4)
   let siteLon = fixed(site.lon ?? 80.2707, 4)
   let windLat = "${siteLat},${markOn ? fixed(markLatN, 4) : siteLat}"
@@ -376,8 +375,9 @@ widget "IMD radar" {
   let lockNote = lock == "" ? null : markOn
     ? "${spotLabel} · ${round(abs(markLatN), 4)}°${markLatN < 0 ? "S" : "N"} ${round(abs(markLonN), 4)}°${markLonN < 0 ? "W" : "E"} · ${round(markKm)} km from ${pickedName}${markKm > (geo.range ?? 150) ? " · beyond this radar's range" : ""}${site.range == null ? " · assumes this radar plots 150 km" : ""}"
     : "${spotLabel}: type a latitude and a longitude in degrees"
-  // the switch itself lives on the live picture only
-  let lockUi = view == "current"
+  // the switch shows where a spot has a place: on the live picture it marks the
+  // frame, on the wind page it gets its own reading
+  let lockUi = view == "current" || view == "wind"
 
   // one place where a pick lands: a tap, the field's submit or an owl-send set
   on station {
@@ -411,22 +411,22 @@ widget "IMD radar" {
   // a Row takes all the width left to it, so the row holds one Text only.
   component WindBlock(who, at, cur, deg, dir, tint = cyan) {
     Column {
-      gap: 4
+      gap: 6
       Row {
-        gap: 6
+        gap: 8
         align: center
-        WindArrow { bearing: deg; sz: 22; tint: tint }
-        Text { text: "${who} · ${dir} ${round(deg)}°"; color: tint; maxLines: 1 }
+        WindArrow { bearing: deg; sz: 28; tint: tint }
+        Text { text: "${who} · ${dir} ${round(deg)}°"; color: tint; fontSize: 20; maxLines: 1 }
       }
       Text {
-        text: "${at} · 10 m ${round(num(cur.wind_speed_10m, 0))} km/h · gusts ${round(num(cur.wind_gusts_10m, 0))} km/h"
-        style: small
-        color: muted
+        text: "${at} · 10 m ${round(num(cur.wind_speed_10m, 0))} km/h · gusts ${round(num(cur.wind_gusts_10m, 0))}"
+        fontSize: 16
+        color: foreground
       }
       Text {
         text: "80 m  ${round(num(cur.wind_speed_80m, 0))} km/h ${round(num(cur.wind_direction_80m, 0))}° · 120 m  ${round(num(cur.wind_speed_120m, 0))} km/h ${round(num(cur.wind_direction_120m, 0))}°"
-        style: small
-        color: muted
+        fontSize: 16
+        color: foreground
       }
     }
   }
@@ -579,9 +579,9 @@ widget "IMD radar" {
             WindBlock { who: spotLabel; at: "${fixed(markLatN, 4)}° ${fixed(markLonN, 4)}°"; cur: spotWind; deg: spotDeg; dir: spotDir; tint: bright_red }
           }
           if siteWind == null {
-            Text { text: windMissing; color: muted }
+            Text { text: windMissing; fontSize: 18; color: foreground }
           }
-          Text { text: windFrom; style: small; color: muted }
+          Text { text: windFrom; fontSize: 14; color: muted }
         }
       } else {
         Box {
@@ -642,7 +642,7 @@ widget "IMD radar" {
           gap: 6
           align: center
           WindArrow { bearing: siteDeg; sz: 20 }
-          Text { text: windText; style: small; color: cyan; maxLines: 1 }
+          Text { text: windText; fontSize: 16; color: cyan; maxLines: 1 }
         }
       }
 
