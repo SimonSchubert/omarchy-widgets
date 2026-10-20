@@ -2,7 +2,7 @@ widget "IMD radar" {
   meta {
     owl: 6
     description: "IMD live PPI radar for all 47 stations with Doppler wind; lock two named spots as a beating mark on every view, prev/live compare, pan/zoom and refresh interval"
-    version: "2.0"
+    version: "2.1"
     license: "MIT"
     category: "world"
   }
@@ -264,23 +264,69 @@ widget "IMD radar" {
     [ -f "$C/station" ] && STATION=$(tr -d '[:space:]' < "$C/station")
     # a cached profile from another station is not this station's wind
     if [ -f "$C/vp2.station" ] && [ "$(tr -d '[:space:]' < "$C/vp2.station")" != "$STATION" ]; then
-      rm -f "$C/vp2.gif" "$C/vp2.json"
+      rm -f "$C/vp2.gif" "$C/vp2.json" "$C/vp2.fetched_at"
     fi
     printf '%s' "$STATION" > "$C/vp2.station.tmp" && mv -f "$C/vp2.station.tmp" "$C/vp2.station"
+    # Wind is read off the plot box and height axis of Chennai's 744x964 Rainbow
+    # frame. IMD's other profiles come in 22 different sizes with their own
+    # boxes, and measuring them with this template would invent a direction and
+    # an altitude, so nothing is fetched for them at all.
+    if [ "$STATION" != "cni" ]; then
+      printf '%s' '{"ok":false,"err":"unsupported","path":null}' > "$C/vp2.json.tmp"
+      mv -f "$C/vp2.json.tmp" "$C/vp2.json"
+      cat "$C/vp2.json"
+      exit 0
+    fi
     URL="https://mausam.imd.gov.in/Radar/vp2_$STATION.gif"
     PAGE="https://mausam.imd.gov.in/responsive/radar.php"
+
+    # Same interval the PPI source keeps in $C/interval.min, and the same
+    # $C/force marker behind "refresh now": a marker newer than the last
+    # profile goes online immediately instead of waiting out the interval.
+    INTERVAL=20
+    if [ -f "$C/interval.min" ]; then
+      INTERVAL=$(tr -dc '0-9' < "$C/interval.min")
+    fi
+    case "$INTERVAL" in 10|20|30) ;; *) INTERVAL=20 ;; esac
+    now=$(date +%s)
+    force=""
+    [ -f "$C/force" ] && force=$(tr -dc '0-9' < "$C/force")
+    if [ -f "$C/vp2.fetched_at" ] && [ -s "$C/vp2.json" ]; then
+      last=$(tr -dc '0-9' < "$C/vp2.fetched_at")
+      if [ -n "$last" ]; then
+        age=$(( now - last ))
+        if [ "$age" -lt $(( INTERVAL * 60 )) ] && { [ -z "$force" ] || [ "$force" -le "$last" ]; }; then
+          cat "$C/vp2.json"
+          exit 0
+        fi
+      fi
+    fi
+
     tmp="$C/vp2.gif.$$"
     rm -f "$C"/vp2.gif.new "$C"/vp2.gif.*
     code=0
-    # unconditional fetch: -z against vp2.gif's mtime (our download time) would
-    # suppress every later update the same way it suppressed the PPI ones
+    # no `curl -z`: it compares the server's Last-Modified against vp2.gif's
+    # mtime, which is our own download time and always newer than the frame's
+    # stamp, so every fetch after the first would report "not modified"
     curl -fsm 30 -A "omalauncher-imd-radar/2.0" -e "$PAGE" -o "$tmp" "$URL" || code=$?
     if [ "$code" -ne 0 ] && [ ! -s "$tmp" ]; then
       rm -f "$tmp"
       [ -s "$C/vp2.gif" ] || exit "$code"
     fi
-    if [ -s "$tmp" ]; then mv -f "$tmp" "$C/vp2.gif"; fi
+    # only a profile that arrived counts as fresh: a failed fetch must retry
+    # with the next tick rather than sit out the whole interval on the old one
+    if [ -s "$tmp" ]; then mv -f "$tmp" "$C/vp2.gif"; date +%s > "$C/vp2.fetched_at"; fi
     [ -s "$C/vp2.gif" ] || { [ -s "$C/vp2.json" ] && cat "$C/vp2.json" && exit 0; exit 4; }
+
+    # Refuse any frame that is not the 744x964 template the crop below is cut
+    # for, so a changed IMD layout shows the plot with no reading instead of a
+    # wind from the wrong box.
+    size=$(magick identify -format "%wx%h" "$C/vp2.gif[0]" 2>/dev/null || true)
+    if [ "$size" != "744x964" ]; then
+      printf '{"ok":false,"err":"template","size":"%s","path":"%s"}' "$size" "$C/vp2.gif" \
+        | tee "$C/vp2.json"
+      exit 0
+    fi
 
     # Plot window inside the 744x964 frame (Rainbow template): abs x 95..475,
     # abs y 15..905; height axis 0.00 km at y=891, 9.00 km at y=49.
@@ -375,6 +421,9 @@ widget "IMD radar" {
   // (its radar index page; the few it omits fall back to the map marker). The
   // scope of every frame is centred on that point, so a locked lat/long is
   // measured from here to land on the picture.
+  // `range` is the plot radius in km, read off that station's own frame header.
+  // It is recorded only where it was verified; an entry without it is drawn as
+  // the 150 km IMD's PPI products plot at, and the caption says so.
   let stations = [
     {code: "agt", name: "Agartala", lat: 23.8315, lon: 91.2868},
     {code: "aya", name: "Ayanagar", lat: 28.4833, lon: 77.125},
@@ -382,7 +431,7 @@ widget "IMD radar" {
     {code: "bln", name: "Belonia", lat: 23.2489, lon: 91.463},
     {code: "bhp", name: "Bhopal", lat: 23.2599, lon: 77.4126},
     {code: "bhj", name: "Bhuj", lat: 23.242, lon: 69.6669},
-    {code: "cni", name: "Chennai", lat: 13.0827, lon: 80.2707},
+    {code: "cni", name: "Chennai", lat: 13.0827, lon: 80.2707, range: 150},
     {code: "delhi", name: "Delhi", lat: 28.5632, lon: 77.1912},
     {code: "dmu", name: "Dimapur", lat: 25.9028, lon: 93.7031},
     {code: "goa", name: "Goa", lat: 15.4909, lon: 73.8278},
@@ -392,7 +441,7 @@ widget "IMD radar" {
     {code: "jmu", name: "Jammu", lat: 32.9266, lon: 74.857},
     {code: "jrh", name: "Jorhat", lat: 26.7169, lon: 94.194},
     {code: "jot", name: "Jot", lat: 32.4868, lon: 76.0593},
-    {code: "kkl", name: "Karaikal", lat: 10.9254, lon: 79.838},
+    {code: "kkl", name: "Karaikal", lat: 10.9254, lon: 79.838, range: 150},
     {code: "koc", name: "Kochi", lat: 9.9312, lon: 76.2673},
     {code: "kol", name: "Kolkata", lat: 22.5726, lon: 88.3639},
     {code: "kuf", name: "Kufri", lat: 31.0978, lon: 77.2678},
@@ -403,12 +452,13 @@ widget "IMD radar" {
     {code: "mlr", name: "Mangaluru", lat: 12.95, lon: 74.84},
     {code: "mbr", name: "Mohanbari", lat: 27.4728, lon: 94.912},
     {code: "mks", name: "Mukteshwar", lat: 29.4604, lon: 79.6558},
-    {code: "mum", name: "Mumbai-Colaba", lat: 19.076, lon: 72.8777},
+    {code: "mum", name: "Mumbai-Colaba", lat: 19.076, lon: 72.8777, range: 150},
     {code: "vrv", name: "Mumbai-Veravali", lat: 19.7343, lon: 72.8763},
     {code: "mur", name: "Murari", lat: 30.7898, lon: 78.9179},
     {code: "ngp", name: "Nagpur", lat: 21.1458, lon: 79.0882},
     {code: "dlh", name: "Palam", lat: 28.5901, lon: 77.0888},
-    {code: "plk", name: "Pallikaranai", lat: 12.9451, lon: 80.2115},
+    // the one station found plotting closer: its header prints Range:85.0km
+    {code: "plk", name: "Pallikaranai", lat: 12.9451, lon: 80.2115, range: 85},
     {code: "pdp", name: "Paradip", lat: 20.3166, lon: 86.6114},
     {code: "ptl", name: "Patiala", lat: 30.3398, lon: 76.3869},
     {code: "ptn", name: "Patna", lat: 25.5941, lon: 85.1376},
@@ -422,7 +472,7 @@ widget "IMD radar" {
     {code: "sur", name: "Surkandaji", lat: 30.4114, lon: 78.2885},
     {code: "tez", name: "Tezpur", lat: 26.6385, lon: 92.8146},
     {code: "tvm", name: "Thiruvananthapuram", lat: 8.5241, lon: 76.9366},
-    {code: "vsk", name: "Visakhapatnam", lat: 17.6868, lon: 83.2185}
+    {code: "vsk", name: "Visakhapatnam", lat: 17.6868, lon: 83.2185, range: 150}
   ]
   let q = lower(trim(query))
   let matches = q == "" ? [] : take(filter(stations, s => contains(lower(s.name), q) || contains(s.code, q)), 6)
@@ -444,6 +494,7 @@ widget "IMD radar" {
   let vvpOk = vvp != null && vvp.ok && vvp.out.ok
   // the profile plot itself is worth showing even when no barb was read off it
   let vvpImg = vvp != null && vvp.out != null ? vvp.out.path : null
+  let vvpErr = vvp != null && vvp.out != null ? vvp.out.err : null
   let windText = vvpOk ? "wind ${vvp.out.dir} ${vvp.out.deg}° at ${vvp.out.heightKm} km" : null
   let maxPanX = (screenWidth ?? 0) / 2 * (zoom - 1)
   let maxPanY = (screenHeight ?? 0) * 0.45 * (zoom - 1)
@@ -467,7 +518,7 @@ widget "IMD radar" {
   let markY = (geo.cy ?? 0) - northKm * (geo.k ?? 0)
   let diffGap = (geo.dw ?? 0) - 2 * (geo.dh ?? 0)
   let lockNote = lock == "" ? null : markOn
-    ? "${spotLabel} · ${round(abs(markLatN), 4)}°${markLatN < 0 ? "S" : "N"} ${round(abs(markLonN), 4)}°${markLonN < 0 ? "W" : "E"} · ${round(markKm)} km from ${pickedName}${markKm > (geo.range ?? 150) ? " · beyond this radar's range" : ""}"
+    ? "${spotLabel} · ${round(abs(markLatN), 4)}°${markLatN < 0 ? "S" : "N"} ${round(abs(markLonN), 4)}°${markLonN < 0 ? "W" : "E"} · ${round(markKm)} km from ${pickedName}${markKm > (geo.range ?? 150) ? " · beyond this radar's range" : ""}${site.range == null ? " · assumes this radar plots 150 km" : ""}"
     : "${spotLabel}: type a latitude and a longitude in degrees"
   // the switch itself lives on the live picture only
   let lockUi = view == "current"
@@ -480,7 +531,7 @@ widget "IMD radar" {
     // a spot is measured from the station it was locked against, so a new
     // station drops it; the two saved spots keep their names and coordinates
     lock = ""
-    run("mkdir -p ~/.cache/omalauncher-imd-radar && printf '%s' ${sh(station)} > ~/.cache/omalauncher-imd-radar/station && printf '%s' ${sh(pickedName)} > ~/.cache/omalauncher-imd-radar/station.name && date +%s > ~/.cache/omalauncher-imd-radar/force")
+    run("mkdir -p ~/.cache/omalauncher-imd-radar && printf '%s' ${sh(station)} > ~/.cache/omalauncher-imd-radar/station && printf '%s' ${sh(pickedName)} > ~/.cache/omalauncher-imd-radar/station.name && printf '%s' ${sh(site.range ?? 150)} > ~/.cache/omalauncher-imd-radar/range.km && date +%s > ~/.cache/omalauncher-imd-radar/force")
     refresh()
   }
 
@@ -668,11 +719,18 @@ widget "IMD radar" {
               text: view == "diff"
                 ? "Need two frames for the site comparison"
                 : view == "previous" ? "No previous frame yet"
+                : view == "vvp" && vvpErr == "unsupported" ? "Doppler wind is read off Chennai's profile only"
                 : view == "vvp" ? "No VVP profile yet"
                 : "No radar image yet"
               color: muted
             }
-            Text { text: view == "vvp" ? "Pulls Doppler wind profile from IMD" : "Pulls PPI reflectivity from IMD"; style: small; color: muted }
+            Text {
+              text: view != "vvp" ? "Pulls PPI reflectivity from IMD"
+                : vvpErr == "unsupported" ? "Other stations plot their profile differently — pick Chennai for the wind"
+                : "Pulls Doppler wind profile from IMD"
+              style: small
+              color: muted
+            }
           }
         }
       }
@@ -684,7 +742,13 @@ widget "IMD radar" {
       }
 
       if view == "vvp" && vvpImg != null && !vvpOk {
-        Text { text: "No near-surface barb read off this profile — wind hidden"; style: small; color: muted }
+        Text {
+          text: vvpErr == "template"
+            ? "IMD redrew this profile outside the plot box the reader knows — wind hidden"
+            : "No near-surface barb read off this profile — wind hidden"
+          style: small
+          color: muted
+        }
       }
 
       if vvpOk {
