@@ -1,0 +1,801 @@
+widget "IMD radar" {
+  meta {
+    owl: 6
+    description: "IMD live PPI radar for all 47 stations with Doppler wind; lock two named spots as a beating mark on every view, prev/live compare, pan/zoom and refresh interval"
+    version: "2.0"
+    license: "MIT"
+    category: "world"
+  }
+  size: 6x4
+  minSize: 3x3
+  padding: 0
+
+  requires { pacman: ["curl", "jq", "gawk", "imagemagick"] }
+
+  // Persisted UI interval (10 / 20 / 30). Script also reads ~/.cache/omalauncher-imd-radar/interval.min.
+  state intervalMin = 20 persist
+  // IMD radar station code; the screen view's search writes it
+  state station = "cni" persist
+  // the three most recent picks, shown as buttons under the search field
+  state recent1 = "" persist
+  state recent2 = "" persist
+  state recent3 = "" persist
+  state query = ""
+  // Two spots the user can lock by lat/long and name; lock picks which one,
+  // if any, is drawn on the map — "" leaves the picture unmarked
+  state lock = "" persist
+  state name1 = "" persist
+  state lat1 = "" persist
+  state lon1 = "" persist
+  state name2 = "" persist
+  state lat2 = "" persist
+  state lon2 = "" persist
+  state view = "current"
+  state zoom = 1
+  state panX = 0
+  state panY = 0
+
+  // Poll every 1m; the script enforces interval.min (10/20/30 buttons) and
+  // consumes the force marker, so a "refresh now" that loses the run()/
+  // refresh() race still fetches within a minute. Skip path is ~0.5s.
+  source radar = cmd("""
+    set -euo pipefail
+    export LC_ALL=C
+    # CONFIG — extend later without changing the tile contract
+    # Products on IMD: caz (MAX Z), ppi, sri, ppz, pac, ppv, vp2
+    # The picker's $C/station file decides what is fetched; cni here is only the
+    # fallback before the first tap, and matches the default of state station
+    PRODUCT=ppi
+    STATION=cni
+    C=~/.cache/omalauncher-imd-radar
+    mkdir -p "$C"
+    # one run at a time: concurrent fetches race on the cache files
+    exec 9>"$C/lock"
+    if ! flock -n 9; then
+      [ -s "$C/meta.json" ] && cat "$C/meta.json" && exit 0
+      exit 0
+    fi
+    [ -f "$C/product" ] && PRODUCT=$(tr -d '[:space:]' < "$C/product")
+    [ -f "$C/station" ] && STATION=$(tr -d '[:space:]' < "$C/station")
+    # the display name comes from the search pick, so the station list lives in
+    # one place; an unknown code falls back to its capitalised form
+    NAME=""
+    [ -f "$C/station.name" ] && NAME=$(tr -d '[:space:]' < "$C/station.name")
+    [ -n "$NAME" ] || NAME=$(printf '%s' "$STATION" | tr '[:lower:]' '[:upper:]')
+    URL="https://mausam.imd.gov.in/Radar/"$PRODUCT"_"$STATION".gif"
+    PAGE="https://mausam.imd.gov.in/responsive/radar.php?id=$NAME"
+
+    # Frames cached for another station or product are a different image: drop
+    # them so the -z conditional fetch below compares same-source timestamps
+    if [ -f "$C/product.used" ] && [ "$(tr -d '[:space:]' < "$C/product.used")" != "$STATION.$PRODUCT" ]; then
+      rm -f "$C/current.gif" "$C/previous.gif" "$C/diff.png" "$C/diff.geo" "$C/vp2.gif" "$C/vp2.json" "$C/last_modified" "$C/fetched_at"
+    fi
+    printf '%s' "$STATION.$PRODUCT" > "$C/product.used.tmp" && mv -f "$C/product.used.tmp" "$C/product.used"
+
+    INTERVAL=20
+    if [ -f "$C/interval.min" ]; then
+      INTERVAL=$(tr -d '[:space:]' < "$C/interval.min")
+    fi
+    case "$INTERVAL" in 10|20|30) ;; *) INTERVAL=20 ;; esac
+    printf '%s' "$INTERVAL" > "$C/interval.min"
+
+    emit() {
+      local changed="${1:-false}"
+      local updated=0 lm=""
+      [ -f "$C/fetched_at" ] && updated=$(tr -d '[:space:]' < "$C/fetched_at")
+      [ -f "$C/last_modified" ] && lm=$(tr -d '\r' < "$C/last_modified" | head -n1)
+      [ -z "$updated" ] && updated=0
+      # The frame's geometry, so a lat/long pair lands on the right pixel: the
+      # scope is the left-aligned square of side h with the site at its centre
+      # and that half-side covering the product's range. $C/range.km overrides
+      # the 150 km every PPI product on IMD plots today.
+      local gw=0 gh=0 gcx=0 gcy=0 gk=0 range=150
+      [ -f "$C/range.km" ] && range=$(tr -dc '0-9' < "$C/range.km")
+      [ -z "$range" ] && range=150
+      if [ -s "$C/current.gif" ]; then
+        geom=$(magick identify -format "%w %h" "$C/current.gif[0]")
+        gw=${geom% *}; gh=${geom#* }
+        gcx=$(( gh / 2 )); gcy=$gcx
+        gk=$(awk -v h="$gh" -v r="$range" 'BEGIN { printf "%.5f", h / 2 / r }')
+      fi
+      # the diff is that square cropped around the site and scaled up: report
+      # the crop and the scale so the mark lands in both panels
+      local dw=0 dh=0 dx=0 dy=0 ds=1 cs=360
+      if [ -s "$C/diff.png" ]; then
+        dgeom=$(magick identify -format "%w %h" "$C/diff.png")
+        dw=${dgeom% *}; dh=${dgeom#* }
+        cs=$(( dh / 2 ))
+        # the crop that built it, so the mark lines up with a stale diff too
+        if [ -s "$C/diff.geo" ]; then
+          set -- $(tr -c '0-9' ' ' < "$C/diff.geo")
+          [ $# -ge 2 ] && { dx=$1; dy=$2; }
+        else
+          dx=$(( gcx - cs / 2 )); [ "$dx" -gt $(( gw - cs )) ] && dx=$(( gw - cs )); [ "$dx" -lt 0 ] && dx=0
+          dy=$(( gcy - cs / 2 )); [ "$dy" -gt $(( gh - cs )) ] && dy=$(( gh - cs )); [ "$dy" -lt 0 ] && dy=0
+        fi
+        ds=$(( dh / cs ))
+      fi
+      jq -nc \
+        --arg path "$([ -s "$C/current.gif" ] && echo "$C/current.gif" || true)" \
+        --arg prev "$([ -s "$C/previous.gif" ] && echo "$C/previous.gif" || true)" \
+        --arg diff "$([ -s "$C/diff.png" ] && echo "$C/diff.png" || true)" \
+        --arg product "$PRODUCT" \
+        --arg station "$STATION" \
+        --arg stationName "$NAME" \
+        --arg url "$PAGE" \
+        --arg lm "$lm" \
+        --argjson updated "$updated" \
+        --argjson intervalMin "$INTERVAL" \
+        --argjson changed "$changed" \
+        --argjson gw "$gw" \
+        --argjson gh "$gh" \
+        --argjson gcx "$gcx" \
+        --argjson gcy "$gcy" \
+        --argjson gk "$gk" \
+        --argjson range "$range" \
+        --argjson dw "$dw" \
+        --argjson dh "$dh" \
+        --argjson dx "$dx" \
+        --argjson dy "$dy" \
+        --argjson ds "$ds" \
+        '{
+          path: (if $path == "" then null else $path end),
+          prev: (if $prev == "" then null else $prev end),
+          diff: (if $diff == "" then null else $diff end),
+          product: $product,
+          station: $station,
+          stationName: $stationName,
+          url: $url,
+          updated: (if $updated == 0 then null else $updated end),
+          lastModified: (if $lm == "" then null else $lm end),
+          intervalMin: $intervalMin,
+          changed: $changed,
+          geo: {
+            w: $gw, h: $gh, cx: $gcx, cy: $gcy, k: $gk, range: $range,
+            dw: $dw, dh: $dh, dx: $dx, dy: $dy, ds: $ds
+          }
+        }'
+    }
+
+    # "refresh now" writes epoch seconds into $C/force from its own shell.
+    # run() and refresh() race, so the marker outlives the tap: whenever it
+    # is newer than the last fetch we go online; the fetch rewrites
+    # fetched_at past it, which consumes the marker.
+    now=$(date +%s)
+    force=""
+    [ -f "$C/force" ] && force=$(tr -dc '0-9' < "$C/force")
+    if [ -f "$C/fetched_at" ] && [ -s "$C/current.gif" ]; then
+      last=$(tr -d '[:space:]' < "$C/fetched_at")
+      age=$(( now - last ))
+      if [ "$age" -lt $(( INTERVAL * 60 )) ] && { [ -z "$force" ] || [ "$force" -le "$last" ]; }; then
+        emit false | tee "$C/meta.json"
+        exit 0
+      fi
+    fi
+
+    tmp="$C/current.gif.$$"
+    # stale tmp files from crashed runs — before ours exists
+    rm -f "$C"/current.gif.new "$C"/current.gif.*
+    code=0
+    # No `curl -z`: it compares the server's Last-Modified against this file's
+    # mtime, which is our download time and therefore always newer than the
+    # frame's own stamp — the fetch then reports "not modified" for cycle after
+    # cycle and prev/diff never rotate. Dedupe by bytes instead.
+    curl -fsm 30 -A "omalauncher-imd-radar/2.0" -e "$PAGE" -o "$tmp" -D "$C/headers.txt" "$URL" || code=$?
+
+    # Network / HTTP failure: keep showing the last good frame
+    if [ "$code" -ne 0 ] && [ ! -s "$tmp" ]; then
+      rm -f "$tmp"
+      if [ -s "$C/current.gif" ]; then
+        emit false
+        exit 0
+      fi
+      exit "$code"
+    fi
+
+    # Empty body with a clean exit means the server sent nothing usable
+    if [ ! -s "$tmp" ]; then
+      rm -f "$tmp"
+      if [ -s "$C/current.gif" ]; then
+        emit false > "$C/meta.json"
+        cat "$C/meta.json"
+        exit 0
+      fi
+      exit 4
+    fi
+
+    # Keep the last genuinely different frame as "previous": IMD re-serves the
+    # same scan between volume updates, so bytes — not Last-Modified — decide
+    changed=false
+    if [ -s "$C/current.gif" ]; then
+      if cmp -s "$C/current.gif" "$tmp"; then
+        changed=false
+      else
+        cp -f "$C/current.gif" "$C/previous.gif"
+        changed=true
+      fi
+    else
+      changed=true
+    fi
+    mv -f "$tmp" "$C/current.gif"
+
+    # diff = site-area compare, previous and live side by side: a 360x360 box
+    # centred on the site — the middle of the square plot — whatever station
+    # and frame size it last served, then doubled so the detail reads
+    geom=$(magick identify -format "%w %h" "$C/current.gif[0]")
+    W=${geom% *}; H=${geom#* }
+    X=$(( H / 2 - 180 )); [ "$X" -gt $(( W - 360 )) ] && X=$(( W - 360 )); [ "$X" -lt 0 ] && X=0
+    Y=$(( H / 2 - 180 )); [ "$Y" -gt $(( H - 360 )) ] && Y=$(( H - 360 )); [ "$Y" -lt 0 ] && Y=0
+    CROP=360x360+$X+$Y
+    if [ -s "$C/previous.gif" ] && [ -s "$C/current.gif" ] && ! cmp -s "$C/previous.gif" "$C/current.gif"; then
+      magick \
+        \( "$C/previous.gif[0]" -crop "$CROP" +repage -scale 200% \
+           -fill '#FFFFFF' -gravity northwest -pointsize 28 -annotate +12+12 'prev' \) \
+        \( -size 6x720 xc:white \) \
+        \( "$C/current.gif[0]" -crop "$CROP" +repage -scale 200% \
+           -fill '#FFFFFF' -gravity northwest -pointsize 28 -annotate +12+12 'live' \) \
+        +append "$C/diff.png" || true
+      printf '%s %s\n' "$X" "$Y" > "$C/diff.geo"
+    fi
+
+    lm=$(awk 'BEGIN{IGNORECASE=1} /^Last-Modified:/ {sub(/\r$/,""); sub(/^Last-Modified:[[:space:]]*/,""); print; exit}' "$C/headers.txt" 2>/dev/null || true)
+    printf '%s' "$lm" > "$C/last_modified"
+    printf '%s' "$(date +%s)" > "$C/fetched_at"
+    emit "$changed" > "$C/meta.json"
+    cat "$C/meta.json"
+  """) every 1m json timeout 60s status
+
+  // Wind from IMD's own Doppler VVP product (vp2_<station>.gif): the plot's
+  // latest time column holds wind barbs per height; the lowest solid barb's
+  // feather end points where the wind blows from.
+  source vvp = cmd("""
+    set -euo pipefail
+    export LC_ALL=C
+    C=~/.cache/omalauncher-imd-radar
+    mkdir -p "$C"
+    exec 9>"$C/vp2.lock"
+    if ! flock -n 9; then
+      [ -s "$C/vp2.json" ] && cat "$C/vp2.json" && exit 0
+      exit 0
+    fi
+    # the same $C/station the PPI source fetches, so the wind is for the
+    # selected site; cni is only the fallback before the first tap
+    STATION=cni
+    [ -f "$C/station" ] && STATION=$(tr -d '[:space:]' < "$C/station")
+    # a cached profile from another station is not this station's wind
+    if [ -f "$C/vp2.station" ] && [ "$(tr -d '[:space:]' < "$C/vp2.station")" != "$STATION" ]; then
+      rm -f "$C/vp2.gif" "$C/vp2.json"
+    fi
+    printf '%s' "$STATION" > "$C/vp2.station.tmp" && mv -f "$C/vp2.station.tmp" "$C/vp2.station"
+    URL="https://mausam.imd.gov.in/Radar/vp2_$STATION.gif"
+    PAGE="https://mausam.imd.gov.in/responsive/radar.php"
+    tmp="$C/vp2.gif.$$"
+    rm -f "$C"/vp2.gif.new "$C"/vp2.gif.*
+    code=0
+    # unconditional fetch: -z against vp2.gif's mtime (our download time) would
+    # suppress every later update the same way it suppressed the PPI ones
+    curl -fsm 30 -A "omalauncher-imd-radar/2.0" -e "$PAGE" -o "$tmp" "$URL" || code=$?
+    if [ "$code" -ne 0 ] && [ ! -s "$tmp" ]; then
+      rm -f "$tmp"
+      [ -s "$C/vp2.gif" ] || exit "$code"
+    fi
+    if [ -s "$tmp" ]; then mv -f "$tmp" "$C/vp2.gif"; fi
+    [ -s "$C/vp2.gif" ] || { [ -s "$C/vp2.json" ] && cat "$C/vp2.json" && exit 0; exit 4; }
+
+    # Plot window inside the 744x964 frame (Rainbow template): abs x 95..475,
+    # abs y 15..905; height axis 0.00 km at y=891, 9.00 km at y=49.
+    out=$(magick "$C/vp2.gif[0]" -crop 380x890+95+15 +repage -colorspace Gray \
+      -threshold 72% -compress none pbm:- | awk -v VP2="$C/vp2.gif" '
+      BEGIN { Y0=891; Y9=49; W=380; H=890 }
+      /^P1/ { next }
+      !dims && /^#/ { next }
+      !dims && NF==2 { w=$1+0; h=$2+0; dims=1; next }
+      dims {
+        line=$0
+        gsub(/[^01]/, "", line)          # P1 raster is chunked ~35 px/line; count globally
+        for(p=1; p<=length(line); p++){
+          if(rixx>=12 && rix<=872 && substr(line,p,1)=="0") { px[n]=rixx; py[n]=rix; n++ }
+          rixx++; if(rixx==w){ rixx=0; rix++ }
+        }
+      }
+      END {
+        if (n < 30) { print "{\"ok\":false,\"err\":\"few white pixels\"}"; exit 0 }
+        for(i=0;i<n;i++) cnt[px[i]]++
+        # time columns: x-profile peaks (cnt>=4), clusters split by gaps >= 8
+        prevx=-100; start=-1; ncol=0
+        for(x=12;x<W;x++){
+          if(cnt[x]>=4){ if(start<0) start=x; prevx=x }
+          else if(start>=0 && x-prevx>=8){ cxl[ncol]=start; cxr[ncol]=prevx; ncol++; start=-1 }
+        }
+        if(start>=0){ cxl[ncol]=start; cxr[ncol]=prevx; ncol++ }
+        if(ncol==0){ print "{\"ok\":false,\"err\":\"no columns\"}"; exit 0 }
+        # right to left: latest column with a solid near-surface barb wins
+        chosen=-1
+        for(c=ncol-1;c>=0;c--){
+          m=0
+          for(i=0;i<n;i++) if(px[i]>=cxl[c] && px[i]<=cxr[c]){ qx[m]=px[i]; qy[m]=py[i]; m++ }
+          if(m<12) continue
+          delete rcnt
+          for(i=0;i<m;i++) rcnt[qy[i]]++
+          delete bl; delete br; nb=0
+          prevy=-100; s=-1
+          for(y=0;y<H;y++){
+            if(rcnt[y]>0){ if(s<0) s=y; prevy=y }
+            else if(s>=0 && y-prevy>=4){ bl[nb]=s; br[nb]=prevy; nb++; s=-1 }
+          }
+          if(s>=0){ bl[nb]=s; br[nb]=prevy; nb++ }
+          best=-1
+          for(b=nb-1;b>=0;b--){               # largest y first = lowest altitude
+            cntb=0; for(i=0;i<m;i++) if(qy[i]>=bl[b] && qy[i]<=br[b]) cntb++
+            if(cntb>=8){ best=b; break }
+          }
+          if(best>=0){ chosen=c; break }
+        }
+        if(chosen<0){ print "{\"ok\":false,\"err\":\"no solid barb\"}"; exit 0 }
+        k=0; mx=0; my=0
+        for(i=0;i<n;i++)
+          if(px[i]>=cxl[chosen] && px[i]<=cxr[chosen] && py[i]>=bl[best] && py[i]<=br[best]){
+            bx[k]=px[i]; by[k]=py[i]; mx+=px[i]; my+=py[i]; k++
+          }
+        mx/=k; my/=k
+        sxx=0; syy=0; sxy=0
+        for(i=0;i<k;i++){ dx=bx[i]-mx; dy=by[i]-my; sxx+=dx*dx; syy+=dy*dy; sxy+=dx*dy }
+        th=0.5*atan2(2*sxy, sxx-syy)          # screen coords, y down; axis is mod 180
+        ux=cos(th); uy=sin(th)
+        # calm-circle end is light, feather end is heavy; wind blows FROM the feathers
+        tmin=1e9; tmax=-1e9
+        for(i=0;i<k;i++){ t=(bx[i]-mx)*ux+(by[i]-my)*uy; if(t<tmin)tmin=t; if(t>tmax)tmax=t }
+        rng=tmax-tmin
+        # a barb is a short stroke inside one time column, which is ~56 px wide:
+        # anything spanning the window is a text block or panel, not wind
+        if(k > 2000 || rng > 150){ printf "{\"ok\":false,\"err\":\"not a barb\",\"path\":\"%s\"}\n", VP2; exit 0 }
+        lo=0; hi=0
+        for(i=0;i<k;i++){
+          t=(bx[i]-mx)*ux+(by[i]-my)*uy
+          if(t<tmin+0.3*rng) lo++
+          if(t>tmax-0.3*rng) hi++
+        }
+        fromx=ux; fromy=uy
+        if(lo>hi){ fromx=-ux; fromy=-uy }
+        # screen vector (x right, y down) -> compass bearing, 0 = N, 90 = E
+        deg=atan2(fromx, -fromy)*57.29577951308232
+        if(deg<0) deg+=360
+        split("N NNE NE ENE E ESE SE SSE S SSW SW WSW W WNW NW NNW", D, " ")
+        # split arrays begin at 1, so the sector index needs +1
+        d16=D[int(deg/22.5+0.5)%16 + 1]
+        hkm=(Y0-(my+15))*9.0/(Y0-Y9)
+        conf = (lo>hi*1.5 || hi>lo*1.5) ? "high" : "low"
+        printf "{\"ok\":true,\"deg\":%.0f,\"dir\":\"%s\",\"heightKm\":%.1f,\"col\":%d,\"npix\":%d,\"conf\":\"%s\",\"path\":\"%s\"}\n", deg, d16, hkm, chosen, k, conf, VP2
+      }') || { [ -s "$C/vp2.json" ] && cat "$C/vp2.json" && exit 0; exit 1; }
+    printf '%s' "$out" > "$C/vp2.json"
+    printf '%s' "$out"
+  """) every 10m json timeout 60s status
+
+  // IMD's radar network, each entry at the position IMD gives its antenna
+  // (its radar index page; the few it omits fall back to the map marker). The
+  // scope of every frame is centred on that point, so a locked lat/long is
+  // measured from here to land on the picture.
+  let stations = [
+    {code: "agt", name: "Agartala", lat: 23.8315, lon: 91.2868},
+    {code: "aya", name: "Ayanagar", lat: 28.4833, lon: 77.125},
+    {code: "bnh", name: "Banihal", lat: 33.51, lon: 75.205},
+    {code: "bln", name: "Belonia", lat: 23.2489, lon: 91.463},
+    {code: "bhp", name: "Bhopal", lat: 23.2599, lon: 77.4126},
+    {code: "bhj", name: "Bhuj", lat: 23.242, lon: 69.6669},
+    {code: "cni", name: "Chennai", lat: 13.0827, lon: 80.2707},
+    {code: "delhi", name: "Delhi", lat: 28.5632, lon: 77.1912},
+    {code: "dmu", name: "Dimapur", lat: 25.9028, lon: 93.7031},
+    {code: "goa", name: "Goa", lat: 15.4909, lon: 73.8278},
+    {code: "gop", name: "Gopalpur", lat: 19.2647, lon: 84.862},
+    {code: "hyd", name: "Hyderabad", lat: 17.385, lon: 78.4867},
+    {code: "jpr", name: "Jaipur", lat: 26.9124, lon: 75.7873},
+    {code: "jmu", name: "Jammu", lat: 32.9266, lon: 74.857},
+    {code: "jrh", name: "Jorhat", lat: 26.7169, lon: 94.194},
+    {code: "jot", name: "Jot", lat: 32.4868, lon: 76.0593},
+    {code: "kkl", name: "Karaikal", lat: 10.9254, lon: 79.838},
+    {code: "koc", name: "Kochi", lat: 9.9312, lon: 76.2673},
+    {code: "kol", name: "Kolkata", lat: 22.5726, lon: 88.3639},
+    {code: "kuf", name: "Kufri", lat: 31.0978, lon: 77.2678},
+    {code: "ldn", name: "Lansdowne", lat: 29.85, lon: 78.6767},
+    {code: "leh", name: "Leh", lat: 34.2833, lon: 77.2833},
+    {code: "lkn", name: "Lucknow", lat: 26.8467, lon: 80.9462},
+    {code: "mpt", name: "Machilipatnam", lat: 16.1905, lon: 81.1362},
+    {code: "mlr", name: "Mangaluru", lat: 12.95, lon: 74.84},
+    {code: "mbr", name: "Mohanbari", lat: 27.4728, lon: 94.912},
+    {code: "mks", name: "Mukteshwar", lat: 29.4604, lon: 79.6558},
+    {code: "mum", name: "Mumbai-Colaba", lat: 19.076, lon: 72.8777},
+    {code: "vrv", name: "Mumbai-Veravali", lat: 19.7343, lon: 72.8763},
+    {code: "mur", name: "Murari", lat: 30.7898, lon: 78.9179},
+    {code: "ngp", name: "Nagpur", lat: 21.1458, lon: 79.0882},
+    {code: "dlh", name: "Palam", lat: 28.5901, lon: 77.0888},
+    {code: "plk", name: "Pallikaranai", lat: 12.9451, lon: 80.2115},
+    {code: "pdp", name: "Paradip", lat: 20.3166, lon: 86.6114},
+    {code: "ptl", name: "Patiala", lat: 30.3398, lon: 76.3869},
+    {code: "ptn", name: "Patna", lat: 25.5941, lon: 85.1376},
+    {code: "rpr", name: "Raipur", lat: 21.25, lon: 81.63},
+    {code: "sbp", name: "Sambalpur", lat: 21.5374, lon: 83.9809},
+    {code: "sil", name: "Silkheda", lat: 23.5716, lon: 77.2461},
+    {code: "cpj", name: "Sohra", lat: 25.2702, lon: 91.7323},
+    {code: "slp", name: "Solapur", lat: 17.6599, lon: 75.9064},
+    {code: "shr", name: "Sriharikota", lat: 13.7259, lon: 80.2266},
+    {code: "srn", name: "Srinagar", lat: 34.0837, lon: 74.7974},
+    {code: "sur", name: "Surkandaji", lat: 30.4114, lon: 78.2885},
+    {code: "tez", name: "Tezpur", lat: 26.6385, lon: 92.8146},
+    {code: "tvm", name: "Thiruvananthapuram", lat: 8.5241, lon: 76.9366},
+    {code: "vsk", name: "Visakhapatnam", lat: 17.6868, lon: 83.2185}
+  ]
+  let q = lower(trim(query))
+  let matches = q == "" ? [] : take(filter(stations, s => contains(lower(s.name), q) || contains(s.code, q)), 6)
+  let recentCodes = take(unique(filter([station, recent1, recent2, recent3], c => c != "")), 3)
+  let recentStations = filter(map(recentCodes, c => find(stations, s => s.code == c)), x => x != null)
+  // what the row under the field offers: the typed matches, or the last picks
+  let picks = q == "" ? recentStations : matches
+  let site = find(stations, s => s.code == station)
+  let pickedName = site.name ?? upper(station)
+
+  let out = radar != null && radar.ok ? radar.out : null
+  let path = out.path
+  let updated = out.updated
+  let title = "${pickedName} radar"
+  let img = view == "diff" ? out.diff : view == "previous" ? out.prev : view == "vvp" ? null : out.path
+  let caption = out == null
+    ? (radar == null ? "loading…" : radar.ok ? "no image" : "offline")
+    : (updated != null ? "updated ${fmtTime(updated, "HH:mm")}" : title)
+  let vvpOk = vvp != null && vvp.ok && vvp.out.ok
+  // the profile plot itself is worth showing even when no barb was read off it
+  let vvpImg = vvp != null && vvp.out != null ? vvp.out.path : null
+  let windText = vvpOk ? "wind ${vvp.out.dir} ${vvp.out.deg}° at ${vvp.out.heightKm} km" : null
+  let maxPanX = (screenWidth ?? 0) / 2 * (zoom - 1)
+  let maxPanY = (screenHeight ?? 0) * 0.45 * (zoom - 1)
+
+  // The locked spot, typed as degrees. The frame's own geometry places it: the
+  // scope is a square of side h centred on the site, its half-side being the
+  // plotted range, so degrees to the north/east scale linearly from there.
+  let geo = out.geo
+  let spot = lock == "2" ? 2 : 1
+  let spotName = lock == "2" ? name2 : name1
+  let spotLat = lock == "2" ? lat2 : lat1
+  let spotLon = lock == "2" ? lon2 : lon1
+  let spotLabel = spotName == "" ? "L${spot}" : spotName
+  let markLatN = num(spotLat, 999)
+  let markLonN = num(spotLon, 999)
+  let markOn = lock != "" && geo != null && site != null && abs(markLatN) <= 90 && abs(markLonN) <= 180
+  let northKm = (markLatN - (site.lat ?? 0)) * 110.574
+  let eastKm = (markLonN - (site.lon ?? 0)) * 111.32 * cos(rad(site.lat ?? 0))
+  let markKm = sqrt(northKm * northKm + eastKm * eastKm)
+  let markX = (geo.cx ?? 0) + eastKm * (geo.k ?? 0)
+  let markY = (geo.cy ?? 0) - northKm * (geo.k ?? 0)
+  let diffGap = (geo.dw ?? 0) - 2 * (geo.dh ?? 0)
+  let lockNote = lock == "" ? null : markOn
+    ? "${spotLabel} · ${round(abs(markLatN), 4)}°${markLatN < 0 ? "S" : "N"} ${round(abs(markLonN), 4)}°${markLonN < 0 ? "W" : "E"} · ${round(markKm)} km from ${pickedName}${markKm > (geo.range ?? 150) ? " · beyond this radar's range" : ""}"
+    : "${spotLabel}: type a latitude and a longitude in degrees"
+  // the switch itself lives on the live picture only
+  let lockUi = view == "current"
+
+  // one place where a pick lands: a tap, the field's submit or an owl-send set
+  on station {
+    recent3 = recent2
+    recent2 = recent1
+    recent1 = old
+    // a spot is measured from the station it was locked against, so a new
+    // station drops it; the two saved spots keep their names and coordinates
+    lock = ""
+    run("mkdir -p ~/.cache/omalauncher-imd-radar && printf '%s' ${sh(station)} > ~/.cache/omalauncher-imd-radar/station && printf '%s' ${sh(pickedName)} > ~/.cache/omalauncher-imd-radar/station.name && date +%s > ~/.cache/omalauncher-imd-radar/force")
+    refresh()
+  }
+
+  // Arrow points where the wind blows FROM (weather-vane style), matching the text
+  component WindArrow(bearing, sz = 14, tint = cyan) {
+    Canvas {
+      width: sz
+      height: sz
+      let cx = width / 2
+      let cy = height / 2
+      let r = min(width, height) / 2 - 1
+      circle(cx, cy, r, stroke: border, width: 1)
+      rotate(bearing, cx, cy) {
+        path([{x: cx, y: cy - r * 0.55}, {x: cx + r * 0.5, y: cy + r * 0.45}, {x: cx, y: cy + r * 0.18}, {x: cx - r * 0.5, y: cy + r * 0.45}], closed: true, fill: tint)
+      }
+    }
+  }
+
+  // The locked point on the picture: a core that throbs under a ring beating
+  // outward. x, y are pixels of the image being shown and w, h its size, so the
+  // mark rides the same contain/cover fit — and the same zoom and pan.
+  component Mark(x, y, w, h, cover = false, sz = 1) {
+    Canvas {
+      fill: true
+      let s = cover ? max(width / w, height / h) : min(width / w, height / h)
+      let px = (width - w * s) / 2 + x * s
+      let py = (height - h * s) / 2 + y * s
+      let ax = cover ? px : width / 2 + (px - width / 2) * zoom + panX
+      let ay = cover ? py : height / 2 + (py - height / 2) * zoom + panY
+      let ph = (time % 1.5) / 1.5
+      layer(1 - ph) {
+        circle(ax, ay, sz * (6 + ph * 20), stroke: bright_red, width: 2.5)
+      }
+      circle(ax, ay, sz * (3 + abs(sin(time * 3.2)) * 1.4), fill: bright_red, stroke: foreground, width: 1.5)
+    }
+  }
+
+  // Picks set the station; the on station trigger writes the cache files the
+  // scripts read and wipes the frame cache when it changes
+  component StationBtn(code, label) {
+    Button {
+      text: label
+      color: station == code ? accent : muted
+      onTap: {
+        station = code
+        query = ""
+      }
+    }
+  }
+
+  onTap: screen()
+
+  Box {
+    fill: true
+    align: bottom
+    if path != null {
+      Image { src: path; fit: cover; fill: true }
+      if markOn {
+        Mark { x: markX; y: markY; w: geo.w; h: geo.h; cover: true; sz: 0.7 }
+      }
+    } else {
+      Column {
+        fill: true
+        align: center
+        gap: 4
+        Text { text: title; style: muted }
+        Text { text: caption; style: small; color: muted }
+      }
+    }
+    Column {
+      fill: width
+      gap: 0
+      padding: [10, 6]
+      background: alpha(background, 0.75)
+      Text { text: title; fontSize: 12; maxLines: 1 }
+      Text { text: caption; fontSize: 10; color: muted; maxLines: 1 }
+      if windText != null {
+        Row {
+          gap: 4
+          align: center
+          WindArrow { bearing: vvp.out.deg }
+          Text { text: windText; fontSize: 10; color: cyan; maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: title
+    Column {
+      fill: true
+      gap: 8
+      padding: 12
+
+      Row {
+        gap: 6
+        Button {
+          text: "live"
+          color: view == "current" ? accent : muted
+          onTap: view = "current"
+        }
+        Button {
+          text: "diff"
+          color: view == "diff" ? accent : muted
+          onTap: view = "diff"
+        }
+        Button {
+          text: "prev"
+          color: view == "previous" ? accent : muted
+          onTap: view = "previous"
+        }
+        Button {
+          text: "vvp"
+          color: view == "vvp" ? accent : muted
+          onTap: view = "vvp"
+        }
+        Spacer { weight: 1 }
+        Button {
+          text: "reset"
+          color: zoom == 1 && panX == 0 && panY == 0 ? muted : accent
+          onTap: {
+            zoom = 1
+            panX = 0
+            panY = 0
+          }
+        }
+      }
+
+      Input {
+        placeholder: "search an IMD radar station…"
+        text: query
+        clear: true
+        onChange: query = value
+        // the pick comes before the field empties: picks is derived from the
+        // query, so clearing it first would offer the recent three instead
+        onSubmit: {
+          station = first(picks).code ?? station
+          query = ""
+        }
+      }
+      Row {
+        gap: 6
+        for s in picks {
+          StationBtn { code: s.code; label: s.name }
+        }
+      }
+      if q != "" && len(picks) == 0 {
+        Text { text: "no IMD radar by that name"; style: small; color: muted }
+      }
+
+      Box {
+        weight: 1
+        fill: width
+        clip: true
+        onDrag: {
+          panX = clamp(panX + dx, -maxPanX, maxPanX)
+          panY = clamp(panY + dy, -maxPanY, maxPanY)
+        }
+        onTap: {
+          zoom = zoom < 5 ? zoom + 1 : 1
+          panX = zoom == 1 ? 0 : panX
+          panY = zoom == 1 ? 0 : panY
+        }
+        let shown = view == "vvp" ? vvpImg : img
+        // the diff's two panels hold the same area, so the point lands twice
+        let diffX = (markX - (geo.dx ?? 0)) * (geo.ds ?? 1)
+        let diffY = (markY - (geo.dy ?? 0)) * (geo.ds ?? 1)
+        if shown != null {
+          Image { src: shown; fit: contain; fill: true; scale: zoom; offset: [panX, panY]; animate scale: spring() }
+          if markOn && view != "vvp" {
+            if view == "diff" && (geo.dw ?? 0) > 0 {
+              for off in [0, (geo.dh ?? 0) + diffGap] {
+                Mark { x: diffX + off; y: diffY; w: geo.dw; h: geo.dh }
+              }
+            } else {
+              Mark { x: markX; y: markY; w: geo.w; h: geo.h }
+            }
+          }
+        } else {
+          Column {
+            fill: true
+            align: center
+            gap: 6
+            Text {
+              text: view == "diff"
+                ? "Need two frames for the site comparison"
+                : view == "previous" ? "No previous frame yet"
+                : view == "vvp" ? "No VVP profile yet"
+                : "No radar image yet"
+              color: muted
+            }
+            Text { text: view == "vvp" ? "Pulls Doppler wind profile from IMD" : "Pulls PPI reflectivity from IMD"; style: small; color: muted }
+          }
+        }
+      }
+
+      Text { text: "drag to pan · tap map to zoom · tap at 5x to reset"; style: small; color: muted }
+
+      if view == "diff" && out.diff == null {
+        Text { text: "Need two frames for the site comparison — wait for the next IMD update"; style: small; color: muted }
+      }
+
+      if view == "vvp" && vvpImg != null && !vvpOk {
+        Text { text: "No near-surface barb read off this profile — wind hidden"; style: small; color: muted }
+      }
+
+      if vvpOk {
+        Row {
+          gap: 6
+          align: center
+          WindArrow { bearing: vvp.out.deg; sz: 20 }
+          Text {
+            text: "VVP wind FROM ${vvp.out.dir} (${vvp.out.deg}°) at ${vvp.out.heightKm} km · Doppler-derived, confidence ${vvp.out.conf}"
+            style: small
+            color: cyan
+          }
+        }
+      }
+
+      Text { text: "refresh every"; style: small; color: muted }
+      Row {
+        gap: 6
+        Button {
+          text: "10m"
+          color: intervalMin == 10 ? accent : muted
+          onTap: {
+            intervalMin = 10
+            run("mkdir -p ~/.cache/omalauncher-imd-radar && printf '%s' 10 > ~/.cache/omalauncher-imd-radar/interval.min")
+            refresh()
+          }
+        }
+        Button {
+          text: "20m"
+          color: intervalMin == 20 ? accent : muted
+          onTap: {
+            intervalMin = 20
+            run("mkdir -p ~/.cache/omalauncher-imd-radar && printf '%s' 20 > ~/.cache/omalauncher-imd-radar/interval.min")
+            refresh()
+          }
+        }
+        Button {
+          text: "30m"
+          color: intervalMin == 30 ? accent : muted
+          onTap: {
+            intervalMin = 30
+            run("mkdir -p ~/.cache/omalauncher-imd-radar && printf '%s' 30 > ~/.cache/omalauncher-imd-radar/interval.min")
+            refresh()
+          }
+        }
+      }
+
+      Row {
+        gap: 8
+        Button {
+          text: "open IMD"
+          onTap: url(out.url ?? "https://mausam.imd.gov.in/responsive/radar.php")
+        }
+        Button {
+          text: "refresh now"
+          onTap: {
+            run("mkdir -p ~/.cache/omalauncher-imd-radar && date +%s > ~/.cache/omalauncher-imd-radar/force.tmp && mv -f ~/.cache/omalauncher-imd-radar/force.tmp ~/.cache/omalauncher-imd-radar/force")
+            refresh()
+          }
+        }
+        Spacer { weight: 1 }
+        // the two spots share this line with the links: the named one is drawn
+        // on the map, off takes the mark away. Only the live picture offers the
+        // switch — the other views just show wherever it was left.
+        if lockUi {
+          Row {
+            gap: 8
+            Button {
+              text: "off"
+              color: lock == "" ? accent : muted
+              onTap: lock = ""
+            }
+            Button {
+              text: name1 == "" ? "L1" : name1
+              color: lock == "1" ? accent : muted
+              onTap: lock = "1"
+            }
+            Button {
+              text: name2 == "" ? "L2" : name2
+              color: lock == "2" ? accent : muted
+              onTap: lock = "2"
+            }
+          }
+        }
+      }
+
+      if lock == "1" && lockUi {
+        Row {
+          gap: 6
+          Input { placeholder: "name"; text: name1; onChange: name1 = value; weight: 1 }
+          Input { placeholder: "lat"; text: lat1; onChange: lat1 = value; weight: 1 }
+          Input { placeholder: "lon"; text: lon1; onChange: lon1 = value; weight: 1 }
+        }
+      }
+      if lock == "2" && lockUi {
+        Row {
+          gap: 6
+          Input { placeholder: "name"; text: name2; onChange: name2 = value; weight: 1 }
+          Input { placeholder: "lat"; text: lat2; onChange: lat2 = value; weight: 1 }
+          Input { placeholder: "lon"; text: lon2; onChange: lon2 = value; weight: 1 }
+        }
+      }
+      if lockNote != null && lockUi {
+        Text { text: lockNote; style: small; color: muted }
+      }
+
+      Text {
+        text: (out != null ? "${out.product}_${out.station} · " : "") + "every ${intervalMin}m · zoom ${zoom}x" + (windText == null ? "" : " · ${windText}")
+        style: small
+        color: muted
+      }
+    }
+  }
+}
