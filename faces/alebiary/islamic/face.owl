@@ -985,7 +985,13 @@ face "islamic" {
               maxLines: 1
             }
             Text {
-              text: "${placeName} · ↑${dayWx.maxtempC}° ↓${dayWx.mintempC}°"
+              text: placeName
+              fontSize: 10
+              color: muted
+              maxLines: 1
+            }
+            Text {
+              text: "↑${dayWx.maxtempC}° ↓${dayWx.mintempC}°"
               fontSize: 10
               color: muted
               maxLines: 1
