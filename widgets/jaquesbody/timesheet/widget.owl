@@ -142,6 +142,19 @@ widget "timesheet" {
     "**Worked** " + exportWorkedTexts[wi] + " · **Target** " + exportTargetTexts[wi] + " · **Week** " + exportWeekTexts[wi] + " · **Running** " + exportRunTexts[wi] + " · **Holidays** " + fixed(holidayBalance, 2) + " d",
     "<!-- /owl-week:" + w.id + " -->"
   ], "\n"))
+  let exportCsvRows = flatten(weeks.map((w, wi) => range(exportDayCounts[wi]).map(di => join([
+    "${w.week}",
+    w.date,
+    dayNames[di],
+    w.days[di].amInM == null ? "" : fmtTime(w.days[di].amInM * 60, "HH:mm", "UTC"),
+    w.days[di].amOutM == null ? "" : fmtTime(w.days[di].amOutM * 60, "HH:mm", "UTC"),
+    w.days[di].pmInM == null ? "" : fmtTime(w.days[di].pmInM * 60, "HH:mm", "UTC"),
+    w.days[di].pmOutM == null ? "" : fmtTime(w.days[di].pmOutM * 60, "HH:mm", "UTC"),
+    (w.days[di].done ?? false) ? "yes" : "no",
+    dayMins[wi][di] == null ? "" : floor(round(dayMins[wi][di]) / 60) + ":" + pad(round(dayMins[wi][di]) % 60, 2, "0"),
+    dayDiffs[wi][di] == null ? "" : (dayDiffs[wi][di] < -0.5 ? "-" : "") + floor(abs(round(dayDiffs[wi][di])) / 60) + ":" + pad(abs(round(dayDiffs[wi][di])) % 60, 2, "0")
+  ], ","))))
+  let fullTimesheetCsv = join(["week,date,day,am_in,am_out,pm_in,pm_out,done,worked,vs_avg"] + exportCsvRows, "\n") + "\n"
   let fullTimesheetText = "# Timesheet\n\n" + settingsSectionText + "\n" + join(exportSections, "\n\n") + "\n"
   let orderedWeeks = reverse(weeks)
   let labelStep = max(1, floor((len(weeks) + 7) / 8))
@@ -158,7 +171,7 @@ widget "timesheet" {
   let chartTone = cumDiff < -0.5 ? negTone : accent
 
   when len(weeks) == 0 && now != null {
-    let dow = int(fmtTime(now, "e") ?? 1)
+    let dow = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(fmtTime(now, "EEE", null, "en")) + 1
     let sod = int(fmtTime(now, "H") ?? 0) * 3600 + int(fmtTime(now, "m") ?? 0) * 60 + int(fmtTime(now, "s") ?? 0)
     let mon = now - sod - (dow - 1) * 86400 + 43200
     let wid = "${fmtTime(mon, 'ww')}-${mon}"
@@ -945,7 +958,7 @@ widget "timesheet" {
                           run("tmp=$(mktemp); printf %s ${sh(fullTimesheetText)} > \"$tmp\"; mkdir -p \"$HOME/Downloads\"; cp \"$tmp\" \"$HOME/Downloads/timesheet.txt\"; rm -f \"$tmp\"")
                         }
                         if (saveCsv) {
-                          run("tmp=$(mktemp); printf %s ${sh(fullTimesheetText)} > \"$tmp\"; mkdir -p \"$HOME/Downloads\"; cp \"$tmp\" \"$HOME/Downloads/timesheet.csv\"; rm -f \"$tmp\"")
+                          run("tmp=$(mktemp); printf %s ${sh(fullTimesheetCsv)} > \"$tmp\"; mkdir -p \"$HOME/Downloads\"; cp \"$tmp\" \"$HOME/Downloads/timesheet.csv\"; rm -f \"$tmp\"")
                         }
                         settingsSavedAt = now
                       }
