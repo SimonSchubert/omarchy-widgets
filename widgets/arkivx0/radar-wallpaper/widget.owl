@@ -1,7 +1,5 @@
 widget "radar wallpaper" {
-  meta { description: "Live National Weather Service radar on a night map, centered on this phone."; version: "1.11"; license: "MIT"; category: "world"; owl: 6 }
-  page: 1
-  order: 30
+  meta { description: "Live NWS national radar on a night map as your wallpaper, centered on you. Runs a background loop; about 4 MB every 15 min."; version: "1.12"; license: "MIT"; category: "world"; owl: 6 }
   size: 3x2
   minSize: 2x2
   requires { pacman: ["curl", "ffmpeg"] }
@@ -10,12 +8,10 @@ widget "radar wallpaper" {
   // installed under the home directory. It is not downloaded. Once a minute
   // the tile touches a heartbeat. If that goes quiet, or the wallpaper is
   // switched off, the program puts the previous background back and exits.
-  // page and order apply when this file is added by hand; a store install
-  // uses the page you are on.
   source cfg = file("~/.config/omalauncher/nws-wallpaper.conf")
   source st = file("~/.cache/omalauncher/nws-wallpaper/status.json") json
   source sys = android.system every 1m
-  source wx = http("https://wttr.in/?format=j1") every 30m timeout 10s json
+  source wx = http("https://wttr.in/?format=j1") every 30m timeout 10s json status
 
   let enabled = match(cfg ?? "", "enabled=(0|1)")[0] ?? "1"
   let play = match(cfg ?? "", "play=(loop|still)")[0] ?? "loop"
@@ -28,8 +24,12 @@ widget "radar wallpaper" {
   let reachLabel = reach == "close" ? "closer" : reach == "wide" ? "wider" : "around me"
   let dw = int(sys.display.width)
   let dh = int(sys.display.height)
-  let lat = wx.nearest_area[0].latitude
-  let lon = wx.nearest_area[0].longitude
+  // wttr.in answers Partridge, Kansas when it cannot place the IP. That is not a location.
+  let area = wx != null && wx.ok ? wx.out.nearest_area[0] : null
+  let fallback = area != null && area.areaName[0].value == "Partridge"
+  let lat = area == null || fallback ? null : area.latitude
+  let lon = area == null || fallback ? null : area.longitude
+  let where = wx == null ? "locating…" : !wx.ok ? "location failed" : fallback ? "location unknown" : null
 
   when sys != null {
     run("""
@@ -78,7 +78,7 @@ cache="${NWS_WP_CACHE:-$HOME/.cache/omalauncher/nws-wallpaper}"
 conf="${NWS_WP_CONF:-$HOME/.config/omalauncher/nws-wallpaper.conf}"
 style="${NWS_WP_STYLE:-$HOME/.config/omalauncher/style/style.toml}"
 bg_root="${NWS_WP_BG:-$HOME/.config/omarchy/backgrounds}"
-ua="omalauncher-nws-wallpaper/1.0 (live wallpaper; radar.weather.gov)"
+ua="omalauncher-nws-wallpaper/1.12 (+https://github.com/SimonSchubert/omarchy-widgets)"
 gif="$cache/loop.gif"
 lockdir="$cache/worker.d"
 previous="$cache/previous"
@@ -924,6 +924,15 @@ start_daemon() {
     case $old in
       ''|*[!0-9]*) ;;
       *)
+        # Only a daemon of this program: a pid can be reused by anything.
+        if ! tr '\0' ' ' <"/proc/$old/cmdline" 2>/dev/null | grep -q 'nws-wallpaper daemon'; then
+          old=
+        fi
+        ;;
+    esac
+    case $old in
+      ''|*[!0-9]*) ;;
+      *)
         kill "$old" 2>/dev/null || true
         sleep 0.4
         if kill -0 "$old" 2>/dev/null; then
@@ -1019,16 +1028,7 @@ cmd_locate() {
   case $lo in
     ''|*[!0-9.-]*) return 1 ;;
   esac
-  # wttr.in answers Partridge, Kansas (about 37.97, -98.09) when it cannot
-  # see the phone. That is not a location. Keep whatever we already have,
-  # and do not store Kansas when we have nothing yet either.
-  case $la in
-    37.9[0-9]|38.0[0-9])
-      case $lo in
-        -98.[01]*) return 0 ;;
-      esac
-      ;;
-  esac
+  # The tile leaves out wttr.in's Partridge, Kansas fallback, so this is a real place.
   load_conf
   set_key lat "$la"
   set_key lon "$lo"
@@ -1135,7 +1135,12 @@ daemon_main() {
     list_frames
     mark=$(current_mark)
     if [ "$(cat "$cache/stamp" 2>/dev/null || true)" != "$mark" ]; then
-      if [ "$(cat "$cache/fail" 2>/dev/null || true)" = "$mark" ] && [ "$now" -lt "$fail_until" ]; then
+      # Settings still moving (a slider drag sends a value per step): wait until
+      # they have been still for 3 seconds, so one change makes one encode.
+      quiet=$(( $(date +%s) - $(stat -c%Y "$conf" 2>/dev/null || echo 0) ))
+      if [ "$count" -gt 0 ] && [ "$quiet" -lt 3 ]; then
+        :
+      elif [ "$(cat "$cache/fail" 2>/dev/null || true)" = "$mark" ] && [ "$now" -lt "$fail_until" ]; then
         :
       elif publish; then
         rm -f "$cache/fail"
@@ -1223,22 +1228,20 @@ fi
   every 60s {
     run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper beat || true")
   }
+  // Screen size and place are sent once when first known (when) and again only when they change (on);
+  // the heartbeat above is the one minute timer. on alone would miss a value already there at start.
   when dw != null && dh != null {
-    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper screen ${int(dw)} ${int(dh)} || true")
-  }
-  on dw {
-    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper screen ${int(dw)} ${int(dh)} || true")
-  }
-  every 60s {
     run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper screen ${int(dw)} ${int(dh)} || true")
   }
   when lat != null && lon != null {
     run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper locate ${sh(fixed(lat, 2))} ${sh(fixed(lon, 2))} || true")
   }
-  on lat {
-    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper locate ${sh(fixed(lat, 2))} ${sh(fixed(lon, 2))} || true")
+  on dw {
+    // A null value reaches the program as a blank word, which it turns down.
+    run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper screen ${int(dw)} ${int(dh)} || true")
   }
-  every 60s {
+  on lat {
+    // A null value reaches the program as a blank word, which it turns down.
     run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper locate ${sh(fixed(lat, 2))} ${sh(fixed(lon, 2))} || true")
   }
 
@@ -1256,7 +1259,7 @@ fi
     gap: 2
     Text { text: "radar wall"; style: muted; maxLines: 1 }
     Text { text: label; style: title; maxLines: 1 }
-    Text { text: phase == "off" ? "tap for options" : reachLabel; style: small; color: muted; maxLines: 1 }
+    Text { text: where ?? (phase == "off" ? "tap for options" : reachLabel); style: small; color: where == "location failed" ? red : muted; maxLines: 1 }
     Row {
       gap: 8
       if enabled != "1" || play == "still" {
@@ -1278,6 +1281,9 @@ fi
       Text { text: "national weather service"; style: label; color: muted }
       Text { text: label; style: title }
       Text { text: "Live radar centered on you, playing behind the home screen."; style: small; color: muted }
+      if where != null {
+        Text { text: where == "locating…" ? "Finding where you are through wttr.in…" : "wttr.in could not place this phone, so the map stays on the last place it had, or the middle of the country."; style: small; color: where == "location failed" ? red : muted }
+      }
       Row {
         gap: 8
         if enabled != "1" || play == "still" {
@@ -1309,7 +1315,7 @@ fi
 
       Text { text: "dim ${dim}%"; style: label; color: muted }
       Text { text: "Blends the map toward the theme color so the tiles stay readable."; style: small; color: muted }
-      Slider { value: num(dim); min: 0; max: 40; step: 5; onChange: run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set dim ${int(value)} || true") }
+      Slider { value: num(dim); min: 0; max: 40; step: 5; live: false; onChange: run("bash $HOME/.local/share/omalauncher/nws-wallpaper/nws-wallpaper set dim ${int(value)} || true") }
 
       Text { text: "update"; style: label; color: muted }
       Text { text: "A new loop about every 15 minutes. Off keeps the pictures already saved."; style: small; color: muted }
