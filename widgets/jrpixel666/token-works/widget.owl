@@ -1,0 +1,207 @@
+widget "token works" {
+  // A bubble floating on home with your coding agents at work inside it. Tap it for the works: each agent's
+  // machine sends carts of today's tokens down the tracks to the projects they went to.
+
+  meta { owl: 11; description: "A floating bubble of your coding agents at work; it opens into pixel-art machines carting today's tokens to your projects"; version: "1.0"; license: "MIT"; category: "dev" }
+  requires { pacman: ["jq", "sqlite", "procps-ng", "findutils"] }
+
+  page: 1
+  order: 3
+  size: 2x2
+  minSize: 2x2
+  padding: 0
+  background: alpha(background, 0)
+
+  // Today's tokens (since local midnight) from the agents' own logs, per working folder: input + output +
+  // cache writes, as the agents bill them (cache reads left out). Claude Code's messages are counted once each.
+  source w = cmd("""
+    m=$(date -d 00:00 +%s)
+    claude=$(find ~/.claude/projects -name '*.jsonl' -newermt @$m 2>/dev/null | xargs -r cat 2>/dev/null | jq -c --argjson m $m 'select(.type == "assistant" and .message.usage != null and .cwd != null) | (.timestamp[0:19] + "Z" | fromdateiso8601) as $t | select($t >= $m) | {id: ((.message.id // "") + (.requestId // "")), agent: "claude", dir: .cwd, t: $t, n: (.message.usage | (.input_tokens // 0) + (.output_tokens // 0) + (.cache_creation_input_tokens // 0))}' 2>/dev/null | jq -sc 'unique_by(.id)')
+    oc=$(sqlite3 -json ~/.local/share/opencode/opencode.db "select s.directory as dir, m.time_created / 1000 as t, m.data as data from session_message m join session_v2 s on s.id = m.session_id where m.type = 'assistant' and m.time_created >= $m * 1000" 2>/dev/null | jq -c '[.[] | {agent: "opencode", dir, t, n: (.data | fromjson | .tokens // {} | (.input // 0) + (.output // 0) + (.reasoning // 0) + (.cache.write // 0))}]' 2>/dev/null)
+    [ -n "$claude" ] || claude='[]'
+    [ -n "$oc" ] || oc='[]'
+    jq -nc --argjson c "$claude" --argjson o "$oc" --arg home "$HOME" --argjson rc "$(pgrep -x claude | wc -l)" --argjson ro "$(pgrep -x opencode | wc -l)" '
+      ($c + $o | map(select(.n > 0))) as $all | {claude: $rc, opencode: $ro} as $run |
+      {total: ($all | map(.n) | add // 0),
+       agents: [["claude", "opencode"][] as $a | {name: $a, running: $run[$a], tokens: ($all | map(select(.agent == $a) | .n) | add // 0), last: ($all | map(select(.agent == $a) | .t) | max)}],
+       projects: ($all | group_by(.dir) | map({name: (.[0].dir | if . == $home then "~" else split("/") | last end), dir: (.[0].dir | if startswith($home) then "~" + .[($home | length):] else . end), tokens: (map(.n) | add), last: (map(.t) | max), by: (group_by(.agent) | map({key: .[0].agent, value: (map(.n) | add)}) | from_entries)}) | sort_by(-.tokens))}'
+  """) every 1m json timeout 30s
+  source now = clock every 10s
+
+  let press = "https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/PressStart2P-Regular.ttf"
+  let agents = w.agents ?? []
+  let projects = w.projects ?? []
+  // An agent is at work when it wrote in the last three minutes.
+  let busy = agents.map(a => a.last != null && now - a.last < 180)
+  let anyBusy = any(busy, b => b)
+  let tint = {claude: orange, opencode: cyan}
+
+  onTap: screen()
+
+  // The tile: a soap bubble bobbing on the wallpaper, a little bot per agent inside, typing while it works.
+  Canvas {
+    fill: true
+    let r = min(width, height) / 2 - 10
+    let cx = width / 2 + sin(time * 0.7) * 3
+    let cy = height / 2 + sin(time * 1.3) * 5
+    let px = max(2, floor(r / 14))
+    circle(cx, cy, r, fill: radial(0.5, 0.5, 1, [alpha(accent, 0.05), alpha(accent, 0.22)]))
+    circle(cx, cy, r, stroke: alpha(mix(accent, foreground, 0.4), 0.7), width: 2)
+    arc(cx, cy, r - 6, 300, 50, stroke: alpha(foreground, 0.55), width: 3, cap: round)
+    circle(cx - r * 0.45, cy - r * 0.5, 3, fill: alpha(foreground, 0.7))
+    // Small bubbles rising beside it.
+    for i in range(4) {
+      let p = (time * (0.15 + hash(i, 2) * 0.1) + hash(i, 1)) % 1
+      circle(cx + (hash(i, 3) - 0.5) * r * 2.2 + sin(time * 2 + i) * 3, height - p * height, 2 + hash(i, 4) * 3, stroke: alpha(accent, (1 - p) * 0.6), width: 1)
+    }
+    for a, i in agents {
+      let n = max(len(agents), 1)
+      let bx = floor((cx - r * 0.55 + (i + 0.5) * r * 1.1 / n - 4 * px) / px) * px
+      let on = busy[i]
+      let hop = on ? floor(abs(sin(time * 9 + i * 1.7)) * 2) * px : 0
+      let by = floor((cy - r * 0.32) / px) * px - hop
+      let c = tint[a.name] ?? magenta
+      sprite(on ? [".aaaaaa.", "aAAAAAAa", "aAeAAeAa", "aAAAAAAa", ".aaaaaa.", ".a.aa.a."] : [".aaaaaa.", "aAAAAAAa", "aAddddAa", "aAAAAAAa", ".aaaaaa.", "..a..a.."], bx, by, px, palette: {a: mix(c, color0, 0.35), A: c, e: color0, d: mix(c, color0, 0.6)})
+      // A desk, and tokens flying off it while the bot works; asleep it dreams in z's.
+      rect(bx - px, by + 6 * px + hop, 10 * px, px, fill: alpha(foreground, 0.5))
+      if on {
+        for k in range(3) {
+          let p = (time * 1.2 + k / 3 + i * 0.37) % 1
+          rect(floor((bx + 4 * px + sin(p * 7 + k) * 3 * px) / px) * px, floor((by - p * r * 0.5) / px) * px, px, px, fill: alpha(yellow, 1 - p))
+        }
+      } else {
+        text("z", bx + 9 * px, by - px - (time * 4 % 6), size: 7, font: press, color: alpha(muted, 0.8))
+      }
+    }
+    text(fmtNum(w.total, {compact: true}), cx, cy + r * 0.3, size: max(8, floor(r / 4.5)), font: press, align: center, color: foreground)
+    text(anyBusy ? "AT WORK" : "RESTING", cx, cy + r * 0.58, size: 6, font: press, align: center, color: anyBusy ? green : muted)
+  }
+
+  screen {
+    title: "token works"
+
+    // The works, in dp: machines on the left, one depot per project on the right, a lane of track between
+    // each machine and each project it sent tokens to today.
+    let shown = projects.take(7)
+    let na = max(len(agents), 1)
+    let lane = 48
+    let W = (screenWidth ?? 360) - 24
+    let H = max(len(shown), na * 2, 3) * lane + 16
+    let xA = 64
+    let xD = W - 118
+    let routes = flatten(shown.map((p, j) => agents.map((a, i) => {p: p, j: j, a: a, i: i, n: p.by[a.name] ?? 0}).filter(r => r.n > 0)))
+    let step = (xD - xA - 24) / max(len(routes), 1)
+    let biggest = max(projects.map(p => p.tokens)) ?? 1
+
+    Column {
+      scroll: true
+      gap: 12
+      padding: [12, 8]
+
+      Column {
+        gap: 6
+        Text { text: "TODAY"; font: press; fontSize: 9; color: muted }
+        Text { spans: [fmtNum(w.total, {compact: true}), {text: " TOKENS", fontSize: 10, color: muted}]; font: press; fontSize: 22; color: yellow }
+        Row {
+          gap: 14
+          for a, i in agents {
+            Text { spans: [{text: "■ ", color: tint[a.name] ?? magenta}, "${upper(a.name)} ${fmtNum(a.tokens, {compact: true})}", {text: busy[i] ? "  WORKING" : a.running > 0 ? "  IDLE" : "  OFF", color: busy[i] ? green : muted}]; font: press; fontSize: 7 }
+          }
+        }
+      }
+
+      Canvas {
+        width: W
+        height: H
+        rect(0, 0, W, H, fill: alpha(color0, 0.5), radius: 6 * corners)
+        // Rails: two dotted lines per route, and its carts.
+        for r, k in routes {
+          let yA = floor(H * (r.i + 0.5) / na / 2) * 2
+          let yP = 8 + r.j * lane + lane / 2 + 6
+          let xm = floor((xA + 16 + k * step) / 2) * 2
+          let c = tint[r.a.name] ?? magenta
+          let rail = alpha(mix(c, muted, 0.5), 0.55)
+          line(xA, yA, xm, yA, stroke: rail, width: 2)
+          line(xm, yA, xm, yP, stroke: rail, width: 2)
+          line(xm, yP, xD, yP, stroke: rail, width: 2)
+          let l1 = xm - xA
+          let l2 = abs(yP - yA)
+          let L = l1 + l2 + xD - xm
+          let carts = clamp(round(sqrt(r.n / biggest) * 5), 1, 5)
+          let speed = busy[r.i] ? 36 : 10
+          for c2 in range(carts) {
+            let s = (time * speed + c2 * L / carts + k * 17) % L
+            let x = s < l1 ? xA + s : s < l1 + l2 ? xm : xm + s - l1 - l2
+            let y = s < l1 ? yA : s < l1 + l2 ? yA + sign(yP - yA) * (s - l1) : yP
+            sprite(["..yy..", ".yYYy.", "kkkkkk", "kAAAAk", ".kkkk.", ".o..o."], floor(x / 2) * 2 - 6, floor(y / 2) * 2 - 11, 2, palette: {y: yellow, Y: mix(yellow, foreground, 0.5), k: mix(c, color0, 0.4), A: c, o: muted})
+          }
+        }
+        // The machines: a screen face, eyes blinking, chimney puffing while it works.
+        for a, i in agents {
+          let c = tint[a.name] ?? magenta
+          let on = busy[i]
+          let my = floor(H * (i + 0.5) / na / 2) * 2 - 18
+          let blink = on && floor(time * 2 + i) % 7 == 0
+          sprite([
+            "........dd..",
+            "..aaaaaadda.",
+            ".aAAAAAAAAa.",
+            ".aAssssssAa.",
+            blink ? ".aAssssssAa." : ".aAsEssEsAa.",
+            ".aAssssssAa.",
+            on && floor(time * 6) % 2 == 0 ? ".aAsMMMMsAa." : ".aAssMMssAa.",
+            ".aAAAAAAAAa.",
+            "..aaaaaaaa..",
+            "...aa..aa...",
+            "..gggggggg.."
+          ], 6, my - 6, 4, palette: {a: mix(c, color0, 0.4), A: c, s: color0, E: on ? mix(c, foreground, 0.6) : mix(c, color0, 0.3), M: on ? green : muted, d: mix(muted, color0, 0.3), g: mix(muted, color0, 0.5)})
+          if on {
+            for q in range(3) {
+              let p = (time * 0.6 + q / 3 + i * 0.3) % 1
+              rect(floor((40 + p * 6 + sin(p * 6 + q) * 3) / 2) * 2, floor((my - 8 - p * 18) / 2) * 2, 3, 3, fill: alpha(mix(muted, foreground, 0.4), 1 - p))
+            }
+          }
+          text(upper(a.name), 30, my + 44, size: 6, font: press, align: center, color: c)
+        }
+        // The depots: a shed with today's pile of tokens, the project's name and its count.
+        for p, j in shown {
+          let y = 8 + j * lane + lane / 2 + 6
+          let pile = clamp(ceil(p.tokens / biggest * 4), 1, 4)
+          sprite(["...rrrr...", "..rrrrrr..", ".rrrrrrrr.", "rrrrrrrrrr", ".wwwwwwww.", ".wkkwwddw.", ".wkkwwddw.", ".wwwwwddw."], xD, y - 20, 3, palette: {r: mix(red, color0, 0.3), w: mix(foreground, orange, 0.25), k: mix(blue, color0, 0.3), d: mix(orange, color0, 0.5)})
+          for q in range(pile) {
+            rect(xD + 32 - floor(q / 2) * 3, y - 3 - (q % 2) * 3 - floor(q / 2) * 3, 3, 3, fill: q % 2 == 0 ? yellow : mix(yellow, orange, 0.4))
+          }
+          text(sub(p.name, 0, 8), xD + 42, y - 9, size: 7, font: press, color: foreground)
+          text(fmtNum(p.tokens, {compact: true}), xD + 42, y + 3, size: 7, font: press, color: yellow)
+        }
+        if len(projects) == 0 {
+          text(w == null ? "LOADING…" : "NO TOKENS YET TODAY", W / 2, H / 2, size: 8, font: press, align: center, color: muted)
+        }
+      }
+
+      // Every project of the day, with each agent's share.
+      Text { text: "PROJECTS"; font: press; fontSize: 9; color: muted }
+      for p in projects key p.dir {
+        Column {
+          gap: 3
+          Row {
+            align: center
+            Text { text: p.name; bold: true; maxLines: 1 }
+            Text { text: p.dir == p.name ? "" : p.dir; style: small; color: muted; maxLines: 1; weight: 1 }
+            Text { text: fmtNum(p.tokens, {compact: true}); font: press; fontSize: 8; color: yellow }
+          }
+          Row {
+            gap: 2
+            height: 6
+            for a in agents {
+              if (p.by[a.name] ?? 0) > 0 {
+                Box { fill: height; weight: p.by[a.name] / biggest; background: tint[a.name] ?? magenta; radius: 2 * corners }
+              }
+            }
+            if p.tokens < biggest { Box { fill: height; weight: (biggest - p.tokens) / biggest; background: alpha(muted, 0.15); radius: 2 * corners } }
+          }
+        }
+      }
+    }
+  }
+}
