@@ -1,7 +1,7 @@
 widget "what's new" {
   size: 3x2
   minSize: 2x2
-  meta { description: "What's new in the launcher, from its changelog on GitHub. Tap it for every release"; version: "1.1"; license: "MIT"; category: "news"; owl: 5 }
+  meta { description: "What's new in the launcher, from its changelog on GitHub. Tap it for every release"; version: "1.2"; license: "MIT"; category: "news"; owl: 5 }
 
   source log = http("https://raw.githubusercontent.com/SimonSchubert/omalauncher/main/CHANGELOG.md") every 6h timeout 10s status
   source sys = android.system every 1h
@@ -16,6 +16,7 @@ widget "what's new" {
   // "Unreleased" is what's coming; the tile shows the newest release.
   let latest = releases.find(r => r.date != null)
   let behind = latest != null && sys.launcher != null && latest.version != sys.launcher
+  let store = "https://play.google.com/store/apps/details?id=dev.omalauncher"
 
   onTap: screen()
 
@@ -43,33 +44,38 @@ widget "what's new" {
       Text { text: log == null ? "loading…" : "couldn't reach github"; style: body; color: muted }
     } else {
       Column {
-        scroll: true
-        gap: 18
-        for r in releases key r.version {
-          let installed = r.version == sys.launcher
-          Column {
-            gap: 6
-            Row {
-              gap: 8
-              align: bottom
-              Text { text: r.date == null ? "coming next" : r.version; style: title; color: r.date == null ? muted : accent; weight: 1; maxLines: 1 }
-              if installed {
-                Text { text: "installed"; style: label; color: green; width: 72; align: end }
-              }
-              Text { text: r.date ?? ""; style: small; color: muted; width: 88; align: end }
-            }
-            for item in r.items {
+        Column {
+          scroll: true
+          gap: 18
+          weight: 1
+          for r in releases key r.version {
+            let installed = r.version == sys.launcher
+            Column {
+              gap: 6
               Row {
                 gap: 8
-                align: top
-                Text { text: "•"; style: body; color: r.date == null ? muted : accent; width: 10 }
-                Text { text: item; style: body; color: r.date == null ? muted : foreground; weight: 1 }
+                align: bottom
+                Text { text: r.date == null ? "coming next" : r.version; style: title; color: r.date == null ? muted : accent; weight: 1; maxLines: 1 }
+                if installed {
+                  Text { text: "installed"; style: label; color: green; width: 72; align: end }
+                }
+                Text { text: r.date ?? ""; style: small; color: muted; width: 88; align: end }
+              }
+              for item in r.items {
+                Row {
+                  gap: 8
+                  align: top
+                  Text { text: "•"; style: body; color: r.date == null ? muted : accent; width: 10 }
+                  Text { text: item; style: body; color: r.date == null ? muted : foreground; weight: 1 }
+                }
               }
             }
           }
         }
         Row {
           justify: end
+          gap: 8
+          Button { text: "play store ↗"; color: accent; onTap: url(store) }
           Button { text: "open on github ↗"; color: muted; onTap: url("https://github.com/SimonSchubert/omalauncher/blob/main/CHANGELOG.md") }
         }
       }
