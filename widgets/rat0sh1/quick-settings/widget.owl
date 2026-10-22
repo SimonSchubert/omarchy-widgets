@@ -2,7 +2,7 @@ widget "quick settings" {
   // Quick settings in Omarchy's style: Wi-Fi, mobile data, flashlight, media, Do Not Disturb and btop in one row
   // on square tiles, set in JetBrains Mono. Wi-Fi, data and Do Not Disturb go over adb to the phone itself.
 
-  meta { owl: 12; description: "Compact Omarchy-style quick settings in one row: Wi-Fi, mobile data, flashlight, media, Do Not Disturb and btop. Wi-Fi, data and DND use wireless adb"; version: "1.1"; license: "MIT"; category: "system" }
+  meta { owl: 11; description: "Compact Omarchy-style quick settings in one row: Wi-Fi, mobile data, flashlight, media, Do Not Disturb and btop. Wi-Fi, data and DND use wireless adb"; version: "1.1"; license: "MIT"; category: "system" }
   requires { pacman: ["btop", "android-tools"] }
 
   size: 8x2
