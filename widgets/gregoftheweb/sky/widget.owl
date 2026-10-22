@@ -2,8 +2,13 @@ widget "sky" {
   size: 6x1
   minSize: 4x1
   padding: 0
-  meta { description: "The day and night sky across the past six hours and the next six, now in the middle"; version: "1.2"; license: "MIT"; category: "time"; owl: 6 }
+  meta { description: "The day and night sky across the past six hours and the next six, now in the middle"; version: "1.3"; license: "MIT"; category: "time"; owl: 6 }
   source now = clock every 1m
+  // tapping the tile steps through these ways of showing the time in the middle
+  state fmt = 0 persist
+  let fmts = ["HH:mm", "h:mm a", "EEE HH:mm", "EEE h:mm a", "EEE d MMM · HH:mm", "EEE d MMM · h:mm a", "EEEE d MMMM", "yyyy-MM-dd HH:mm", "MMM d, yyyy · h:mm a"]
+  let label = fmtTime(now, fmts[fmt % len(fmts)])
+  onTap: fmt = (fmt + 1) % len(fmts)
   source wx = http("https://wttr.in/?format=j1") every 30m timeout 10s json
   let astro = wx.weather[0].astronomy[0]
   let sunHrs = [astro.sunrise, astro.sunset]
@@ -31,6 +36,11 @@ widget "sky" {
   let eNow = elev[int(steps / 2)]
   // dark text in daylight, light text from dusk to dawn (sun below the horizon)
   let ink = eNow > 0 ? #10203a : #e8ecf8
+  // the label sits on a pill of the sky's color at now, so a long one stays readable across dusk and dawn
+  let skyNow = sky[int(steps / 2)]
+  // and an outline of the other ink, so it also reads where the see-through pill crosses light into dark
+  let halo = eNow > 0 ? #e8ecf8 : #10203a
+  let haloAt = [[-1, 0], [1, 0], [0, -1], [0, 1], [-0.7, -0.7], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7]]
   let inkStart = elev[0] > 0 ? #10203a : #e8ecf8
   let inkEnd = elev[steps] > 0 ? #10203a : #e8ecf8
   let offRise = (rise - hNow + 36) % 24 - 12
@@ -64,18 +74,25 @@ widget "sky" {
       circle(width / 2, (-lo * py + offMidnight * py), width * 0.14, fill: #e9ecf5)
       circle(width / 2 - width * 0.06, (-lo * py + offMidnight * py) - width * 0.04, width * 0.12, fill: mix(#03050e, #0a1030, 0.3))
     }
+    let tSize = clamp((width - 10) / (len(label) * 0.62 + 0.8), 8, 40)
+    let half = min(width / 2 - 2, (len(label) * 0.62 + 0.8) * tSize / 2)
     for p in [[offRise, rise, "↑"], [offSet, set, "↓"]] {
+      // a sunrise or sunset label that would fall under the pill moves just above or below it
+      let y = -lo * py + p[0] * py
+      let ly = abs(y + lo * py) < tSize * 0.75 + 8 ? (p[0] < 0 ? -lo * py - tSize * 0.75 - 8 : -lo * py + tSize * 0.75 + 8) : y
       if p[0] > lo + 0.6 && p[0] < hi - 0.6 {
         line(0, (-lo * py + p[0] * py), 8, (-lo * py + p[0] * py), stroke: alpha(#ffe2a8, 0.8), width: 1)
         line(width - 8, (-lo * py + p[0] * py), width, (-lo * py + p[0] * py), stroke: alpha(#ffe2a8, 0.8), width: 1)
-        text("${p[2]}${pad(int(floor(p[1])), 2, "0")}:${pad(int(round((p[1] - floor(p[1])) * 60) % 60), 2, "0")}", width / 2, (-lo * py + p[0] * py), size: 10, align: center, color: alpha(#ffe2a8, 0.9))
+        text("${p[2]}${pad(int(floor(p[1])), 2, "0")}:${pad(int(round((p[1] - floor(p[1])) * 60) % 60), 2, "0")}", width / 2, ly, size: 10, align: center, color: alpha(#ffe2a8, 0.9))
       }
     }
-    let tSize = clamp((width - 10) / 3, 12, 40)
-    let half = tSize * 1.5 + 3
+    rect(width / 2 - half, -lo * py - tSize * 0.75, half * 2, tSize * 1.5, fill: alpha(skyNow, 0.45), radius: tSize * 0.75)
     line(0, -lo * py, max(0, width / 2 - half), -lo * py, stroke: alpha(ink, 0.55), width: 1.5)
     line(min(width, width / 2 + half), -lo * py, width, -lo * py, stroke: alpha(ink, 0.55), width: 1.5)
-    text(fmtTime(now, "HH:mm"), width / 2, -lo * py, size: tSize, bold: true, align: center, color: ink)
+    for o in haloAt {
+      text(label, width / 2 + o[0] * max(1, tSize * 0.06), -lo * py + o[1] * max(1, tSize * 0.06), size: tSize, bold: true, align: center, color: alpha(halo, 0.55))
+    }
+    text(label, width / 2, -lo * py, size: tSize, bold: true, align: center, color: ink)
     text("-6h", width / 2, 10, size: 9, align: center, color: alpha(inkStart, 0.6))
     text("+6h", width / 2, height - 10, size: 9, align: center, color: alpha(inkEnd, 0.6))
     } else {
@@ -102,16 +119,24 @@ widget "sky" {
       circle((-lo * px + (offMidnight) * px), height / 2, height * 0.14, fill: #e9ecf5)
       circle((-lo * px + (offMidnight) * px) + -height * 0.06, height / 2 - height * 0.04, height * 0.12, fill: mix(#03050e, #0a1030, 0.3))
     }
+    let tSize = min(clamp(height * 0.32, 16, 40), width * 0.7 / (len(label) * 0.62 + 0.8))
+    let half = (len(label) * 0.62 + 0.8) * tSize / 2
     for p in [[offRise, rise, "↑"], [offSet, set, "↓"]] {
+      // a sunrise or sunset label that would fall under the pill moves just beside it
+      let x = -lo * px + p[0] * px
+      let lx = abs(x + lo * px) < half + 30 ? (p[0] < 0 ? -lo * px - half - 30 : -lo * px + half + 30) : x
       if p[0] > lo + 0.4 && p[0] < hi - 0.4 {
         line((-lo * px + (p[0]) * px), height - 10, (-lo * px + (p[0]) * px), height, stroke: alpha(#ffe2a8, 0.8), width: 1)
-        text("${p[2]}${pad(int(floor(p[1])), 2, "0")}:${pad(int(round((p[1] - floor(p[1])) * 60) % 60), 2, "0")}", (-lo * px + (p[0]) * px), height - 17, size: 10, align: center, color: alpha(#ffe2a8, 0.9))
+        text("${p[2]}${pad(int(floor(p[1])), 2, "0")}:${pad(int(round((p[1] - floor(p[1])) * 60) % 60), 2, "0")}", lx, height - 17, size: 10, align: center, color: alpha(#ffe2a8, 0.9))
       }
     }
-    let tSize = clamp(height * 0.32, 16, 40)
+    rect(-lo * px - half, height / 2 - tSize * 0.75, half * 2, tSize * 1.5, fill: alpha(skyNow, 0.45), radius: tSize * 0.75)
     line(-lo * px, 0, -lo * px, height / 2 - tSize * 0.75, stroke: alpha(ink, 0.55), width: 1.5)
     line(-lo * px, height / 2 + tSize * 0.75, -lo * px, height, stroke: alpha(ink, 0.55), width: 1.5)
-    text(fmtTime(now, "HH:mm"), -lo * px, height / 2, size: tSize, bold: true, align: center, color: ink)
+    for o in haloAt {
+      text(label, -lo * px + o[0] * max(1, tSize * 0.06), height / 2 + o[1] * max(1, tSize * 0.06), size: tSize, bold: true, align: center, color: alpha(halo, 0.55))
+    }
+    text(label, -lo * px, height / 2, size: tSize, bold: true, align: center, color: ink)
     text("-6h", 16, 12, size: 9, align: center, color: alpha(inkStart, 0.6))
     text("+6h", width - 16, 12, size: 9, align: center, color: alpha(inkEnd, 0.6))
     }
