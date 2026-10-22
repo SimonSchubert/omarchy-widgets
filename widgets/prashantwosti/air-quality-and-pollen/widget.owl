@@ -1,0 +1,382 @@
+widget "air quality and pollen" {
+  meta { description: "Air quality and pollen where you are: the AQI, the next 24 hours and pollutants from Open-Meteo, and pollen from Open-Meteo in Europe or from IQAir worldwide. Located by IP or a city you set"; version: "1.3"; license: "MIT"; category: "world"; owl: 8 }
+  size: 3x2
+  minSize: 3x2
+
+  source now = clock every 1m
+  state city = "" persist
+  // IQAir's pollen page path, set once on the screen, as its URL spells it: country/state/city.
+  state iqCountry = "" persist
+  state iqRegion = "" persist
+  state iqCity = "" persist
+  // Where you are. The same request as the today widget, so the two share it. Empty means located by IP.
+  source wx = http("https://wttr.in/${enc(city)}?format=j1") every 30m timeout 10s json
+  let area = wx.nearest_area[0]
+  let lat = num(area.latitude)
+  let lon = num(area.longitude)
+  // The US index there, Europe's everywhere else.
+  let us = contains(["united states", "united states of america"], lower(trim(area.country[0].value)))
+  source air = http("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${enc(lat)}&longitude=${enc(lon)}&current=european_aqi,us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide,uv_index&hourly=european_aqi,us_aqi,alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,olive_pollen,ragweed_pollen&forecast_days=2&timezone=auto&timeformat=unixtime") every 30m timeout 15s json status
+  // The first request goes out before the location is known; ask again once it is.
+  when lat != null { refresh() }
+  // And again when a new city moves it.
+  on lat { refresh() }
+  // IQAir's pollen page has pollen outside Europe too, where Open-Meteo has none. It's a web page,
+  // not an API, so it needs a browser's headers and the exact country/state/city path set above.
+  source iq = http(iqCity == "" ? null : "https://www.iqair.com/pollen/${enc(iqCountry)}/${enc(iqRegion)}/${enc(iqCity)}", {"User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36", "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8", "Accept-Language": "en-US,en;q=0.9"}) every 30m timeout 30s status
+
+  let cur = air.ok ? air.out.current : null
+  let hourly = air.ok ? air.out.hourly : null
+  let index = us ? "us_aqi" : "european_aqi"
+  let aqi = get(cur, index)
+  let steps = us ? [50, 100, 150, 200, 300] : [20, 40, 60, 80, 100]
+  let names = us ? ["good", "moderate", "unhealthy for some", "unhealthy", "very unhealthy", "hazardous"] : ["good", "fair", "moderate", "poor", "very poor", "extremely poor"]
+  let tints = us ? [green, yellow, orange, red, magenta, magenta] : [green, cyan, yellow, orange, red, magenta]
+  let advice = ["ideal for being outside", "fine for your usual outdoor plans", "sensitive people may want to take it easy outside", "consider less intense activity outside", "cut down on activity outside", "avoid activity outside"]
+  let level = aqi == null ? null : count(steps, s => aqi > s)
+  let tint = level == null ? muted : tints[level]
+  // The next 24 hours, from the current one on.
+  let start = max(count(hourly.time ?? [], t => t <= now) - 1, 0)
+  let hours = take(drop(hourly.time ?? [], start), 24)
+  let aqis = take(drop(get(hourly, index) ?? [], start), 24)
+  // Open-Meteo's pollen in grains/m³, rated none, low, moderate or high. Europe only: elsewhere it's null.
+  let kinds = [
+    {key: "birch", t: [1, 15, 90]}, {key: "alder", t: [1, 15, 90]}, {key: "olive", t: [1, 15, 90]},
+    {key: "grass", t: [1, 20, 50]}, {key: "mugwort", t: [1, 10, 50]}, {key: "ragweed", t: [1, 5, 20]}
+  ]
+  let omPollen = kinds.map(k => {
+    name: k.key,
+    values: take(drop(get(hourly, k.key + "_pollen") ?? [], start), 24),
+    peak: max(take(drop(get(hourly, k.key + "_pollen") ?? [], start), 24).filter(v => v != null)),
+    t: k.t
+  }).map(p => {name: p.name, values: p.values, peak: p.peak, level: p.peak == null ? 0 : count(p.t, x => p.peak >= x)})
+  let pollenWords = ["none", "low", "moderate", "high"]
+  // IQAir names its pollen types and prints a level word for today, with no numbers or hours.
+  let iqHtml = iq.ok ? lower(iq.out) : ""
+  let iqRows = ["tree", "grass", "weed", "ragweed"].map(k => {
+    name: k,
+    word: lower(trim((match(iqHtml, 'mb-0">' + k + '</p>.{0,120}?>([a-z ]+)<') ?? [])[0] ?? ""))
+  }).filter(p => p.word != "").map(p => {name: p.name, word: p.word, level: clamp(indexOf(["none", "low", "moderate", "high", "very high"], p.word), 0, 3), values: null, peak: null})
+  // IQAir where it answers (and outside Europe), Open-Meteo's forecast where it doesn't.
+  let iqUsed = len(iqRows) > 0
+  let pollen = iqUsed ? iqRows : omPollen.filter(p => p.peak != null)
+  let hasPollen = len(pollen) > 0
+  let flying = pollen.filter(p => p.level > 0).sortBy(p => -(p.level * 1000 + (p.peak ?? 0)))
+  let pollenTints = [muted, green, yellow, red]
+  // Precautions, switched on by the worst pollen level and by the air quality.
+  let pmax = len(pollen) == 0 ? 0 : max(pollen.map(p => p.level))
+  let bad = (level ?? 0) >= 2
+  let tips = [
+    {icon: "🕶", title: "wear sunglasses", detail: "wrap around glasses keep pollen out of your eyes", on: pmax >= 2},
+    {icon: "🪟", title: "keep windows closed", detail: "especially in the morning and evening, when pollen peaks. Use recirculated air in the car", on: pmax >= 2},
+    {icon: "🚿", title: "shower and change", detail: "wash hair and clothes after being outside so pollen stays off your pillow", on: pmax >= 1},
+    {icon: "🧺", title: "dry laundry indoors", detail: "sheets and clothes on a line collect pollen", on: pmax >= 2},
+    {icon: "💊", title: "take your medication early", detail: "antihistamines or nasal spray work best before symptoms start. Ask a doctor if they're strong", on: pmax >= 3},
+    {icon: "🏠", title: "cut outdoor activity", detail: "air quality is poor: keep exercise indoors", on: bad}
+  ]
+  let active = tips.filter(t => t.on)
+  // A narrow tile (the landscape home screen turns 3x2 into 2x3) stacks the gauge above the words.
+  let narrow = tileWidth != null && tileWidth < 170
+  let problem = wx == null || (lat != null && air == null) ? "…" : lat == null ? "location unknown" : !air.ok ? "open-meteo offline" : null
+
+  onTap: screen()
+
+  // When the reading was taken, for the tile's footer and the screen's subtitle.
+  let updated = cur == null ? null : fmtTime(cur.time, "HH:mm")
+
+  // A section title with a rule running to the right edge, so the eye can find each block.
+  component Section(t) {
+    Row {
+      gap: 8
+      align: center
+      Text { text: t; style: label; color: accent }
+      Spacer { height: 1; weight: 1; background: alpha(muted, 0.4) }
+    }
+  }
+
+  component Dots(n, c) {
+    Row {
+      gap: 2
+      for i in range(3) { Box { width: 9; height: 4; radius: 2; background: i < n ? c : alpha(muted, 0.22) } }
+    }
+  }
+
+  // A 270° gauge drawn by hand: the track, then the reading, with round ends.
+  component Gauge(big = false) {
+    Box {
+      width: big ? 128 : 66
+      height: big ? 128 : 66
+      align: center
+      Canvas {
+        width: big ? 128 : 66
+        height: big ? 128 : 66
+        let cx = width / 2
+        let cy = height / 2
+        let rr = min(width, height) / 2 - (big ? 10 : 6)
+        let thick = big ? 9 : 5
+        let frac = aqi == null ? 0 : clamp(aqi / steps[4], 0, 1)
+        arc(cx, cy, rr, 225, 270, stroke: alpha(muted, 0.15), width: thick, cap: round)
+        if frac > 0 {
+          arc(cx, cy, rr, 225, 270 * frac, stroke: tint, width: thick, cap: round)
+        }
+      }
+      Column {
+        gap: 0
+        align: center
+        Text { text: aqi == null ? "…" : round(aqi); fontSize: big ? 40 : 21; bold: true; color: tint; align: center }
+      }
+    }
+  }
+
+  component PollenRow(p, size = 11) {
+    Row {
+      gap: 8
+      align: center
+      Text { text: p.name; fontSize: size; weight: 1; maxLines: 1 }
+      Dots { n: p.level; c: pollenTints[p.level] }
+      Box {
+        width: size * 6
+        height: size + 9
+        align: center
+        background: alpha(pollenTints[p.level], 0.14)
+        radius: 6 * corners
+        Text { text: pollenWords[p.level]; fontSize: size; color: pollenTints[p.level]; align: center; maxLines: 1 }
+      }
+    }
+  }
+
+  Column {
+    gap: 5
+    Row {
+      gap: 6
+      align: center
+      // The colour of the air, at a glance, before the words.
+      Box { width: 6; height: 6; radius: 3; background: tint }
+      Text { text: "air"; style: muted; weight: 1 }
+      Text { text: lower(area.areaName[0].value ?? ""); fontSize: 10; color: muted; maxLines: 1; width: 96; align: end }
+    }
+    if problem != null {
+      Text { text: problem; style: small; color: muted }
+      // The air quality is down, but the pollen may not be: the list below needs 3 rows.
+      if rows < 3 && hasPollen {
+        Text { text: len(flying) == 0 ? "no pollen in the air" : "${flying[0].name} pollen ${pollenWords[flying[0].level]}"; style: small; color: len(flying) == 0 ? green : pollenTints[flying[0].level]; maxLines: 1 }
+      }
+    } else if narrow {
+      Column {
+        gap: 2
+        align: center
+        weight: 1
+        Gauge {}
+        Text { text: names[level]; style: body; bold: true; color: tint; maxLines: 1; align: center }
+        Text { text: "pm2.5 ${round(cur.pm2_5)} · uv ${round(cur.uv_index)}"; style: small; color: muted; maxLines: 1; align: center }
+      }
+    } else {
+      Row {
+        gap: 12
+        align: center
+        weight: rows >= 3 ? 0 : 1
+        Gauge {}
+        Column {
+          gap: 3
+          weight: 1
+          Text { text: names[level]; style: body; bold: true; color: tint; maxLines: 1 }
+          Text { text: "pm2.5 ${round(cur.pm2_5)} · uv ${round(cur.uv_index)}"; style: small; color: muted; maxLines: 1 }
+          if rows < 3 {
+            // Safety tips as icons; the full list is on the screen.
+            if len(active) > 0 {
+              Row {
+                gap: 4
+                for t in take(active, 4) key t.title { Text { text: t.icon; fontSize: 16; width: 22 } }
+              }
+            } else {
+              Text { text: "all clear"; style: small; color: green; maxLines: 1 }
+            }
+          }
+        }
+      }
+    }
+    // With two rows the hero leaves the rest empty: the coming day, as a shape.
+    if rows < 3 && !narrow && problem == null && len(aqis) > 0 {
+      Canvas {
+        height: 36
+        fill: width
+        let n = max(len(aqis), 1)
+        let w = width / n
+        let top = max(max(aqis.filter(v => v != null)) ?? 0, steps[1])
+        for v, i in aqis {
+          if v != null {
+            rect(i * w, height - 3 - max(v / top * (height - 6), 2), max(w - 1.5, 1), max(v / top * (height - 6), 2), radius: 1.5, fill: tints[count(steps, s => v > s)])
+          }
+        }
+        line(0, height - 2, width, height - 2, stroke: alpha(muted, 0.3), width: 1)
+      }
+    }
+    // Pollen stands on its own: IQAir can answer while Open-Meteo is down.
+    if rows >= 3 && !narrow {
+      if len(active) > 0 {
+        Row {
+          gap: 4
+          for t in take(active, 7) key t.title { Text { text: t.icon; fontSize: 18; width: 26 } }
+        }
+      }
+      Section { t: iqUsed ? "pollen · today" : "pollen · next 24 h" }
+      Column {
+        gap: 3
+        weight: 1
+        if !hasPollen {
+          Text { text: iqCity == "" ? "no pollen forecast here; set an iqair city" : "no pollen reported"; style: small; color: muted }
+        } else if len(flying) == 0 {
+          Text { text: "none in the air"; style: small; color: green }
+        } else {
+          for p in take(flying, rows >= 4 ? 5 : 3) key p.name { PollenRow { p: p } }
+        }
+      }
+    }
+    if updated != null {
+      Text { text: "updated ${updated}"; style: label; color: muted; align: end; maxLines: 1 }
+    }
+  }
+
+  screen {
+    title: "air quality and pollen"
+    Column {
+      scroll: true
+      gap: 14
+      if problem != null {
+        Text { text: problem; style: body; color: muted }
+      } else {
+        Row {
+          gap: 16
+          align: center
+          padding: [18, 16]
+          background: alpha(surface, 0.45)
+          border: 1
+          borderColor: alpha(muted, 0.2)
+          radius: 16 * corners
+          Gauge { big: true }
+          Column {
+            gap: 3
+            weight: 1
+            Text { text: us ? "us aqi" : "european aqi"; style: label; color: muted }
+            Text { text: names[level]; style: title; color: tint }
+            Text { text: advice[level]; style: small }
+            Text { text: "${lower(area.areaName[0].value)}, ${lower(area.country[0].value)} · updated ${updated ?? "…"}"; style: label; color: muted; maxLines: 1 }
+          }
+        }
+
+        Section { t: "stay safe today" }
+        if len(active) == 0 {
+          Text { text: "no precautions needed right now"; style: small; color: green }
+        } else {
+          for t in active key t.title {
+            Row {
+              gap: 10
+              align: center
+              Text { text: t.icon; fontSize: 24; width: 34 }
+              Column {
+                gap: 0
+                weight: 1
+                Text { text: t.title; style: body; bold: true }
+                Text { text: t.detail; style: small; color: muted }
+              }
+            }
+          }
+        }
+
+        Section { t: "next 24 hours" }
+        Canvas {
+          height: 128
+          fill: width
+          let n = max(len(aqis), 1)
+          let top = max(max(aqis.filter(v => v != null)) ?? 0, steps[1])
+          let w = width / n
+          let base = 98
+          let tall = 86
+          // The category lines, so a bar's height reads as good, fair, ...
+          for s, i in take(steps, 4) {
+            if s < top {
+              line(0, base - s / top * tall, width, base - s / top * tall, stroke: alpha(tints[i + 1], 0.28), width: 1)
+            }
+          }
+          line(0, base, width, base, stroke: alpha(muted, 0.35), width: 1)
+          for v, i in aqis {
+            if v != null {
+              rect(i * w + 1, base - v / top * tall, max(w - 2, 1), max(v / top * tall, 2), radius: 2, fill: tints[count(steps, s => v > s)])
+            }
+            if i % 6 == 0 {
+              text(i == 0 ? "now" : fmtTime(hours[i], "HH:mm"), i * w + w / 2, base + 16, size: 10, align: center, color: muted)
+            }
+          }
+        }
+
+        Section { t: "pollutants now · µg/m³" }
+        Grid {
+          columns: 3
+          gap: 8
+          for p in [["pm2.5", cur.pm2_5, 25], ["pm10", cur.pm10, 50], ["ozone", cur.ozone, 120], ["no₂", cur.nitrogen_dioxide, 40], ["uv index", cur.uv_index, 6]] {
+            Column {
+              gap: 4
+              padding: [12, 10]
+              background: alpha(surface, 0.35)
+              border: 1
+              borderColor: alpha(muted, 0.2)
+              radius: 10 * corners
+              Text { text: p[0]; style: label; color: muted }
+              Text { text: p[1] == null ? "…" : round(p[1], 1); style: title; color: p[1] > p[2] ? orange : foreground }
+              Canvas {
+                height: 3
+                fill: width
+                rect(0, 0, width, 3, radius: 1.5, fill: alpha(muted, 0.15))
+                rect(0, 0, max(width * clamp((p[1] ?? 0) / p[2], 0, 1), 2), 3, radius: 1.5, fill: p[1] > p[2] ? orange : tint)
+              }
+            }
+          }
+        }
+      }
+
+      Section { t: iqUsed ? "pollen · today, from iqair" : "pollen · next 24 hours" }
+      if !hasPollen {
+        Text { text: iqCity == "" ? "open-meteo only forecasts pollen in europe; set an iqair city below for the rest of the world" : "iqair has no pollen for that city"; style: small; color: muted }
+      } else {
+        for p in pollen.sortBy(p => -(p.level * 1000 + (p.peak ?? 0))) key p.name {
+          Column {
+            gap: 2
+            PollenRow { p: p; size: 14 }
+            if p.values != null && p.level > 0 {
+              Row {
+                gap: 6
+                align: center
+                Sparkline { values: p.values.map(v => v ?? 0); min: 0; max: max(p.peak ?? 0, 1); color: pollenTints[p.level]; area: true; height: 24; weight: 1 }
+                Text { text: p.peak == null ? "" : "peak ${round(p.peak)}"; style: label; color: muted; width: 72; align: end }
+              }
+            }
+          }
+        }
+      }
+      Text { text: iqUsed ? "pollen: iqair · air quality: copernicus via open-meteo" : "data: copernicus atmosphere monitoring service via open-meteo"; style: label; color: muted }
+
+      Section { t: "settings" }
+      Input {
+        text: city
+        placeholder: "city · empty = auto"
+        onSubmit: { city = trim(value); refresh() }
+      }
+      // IQAir's pollen page needs its exact path, since it's a web page rather than an API.
+      Input {
+        text: iqCity == "" ? "" : "${iqCountry}/${iqRegion}/${iqCity}"
+        placeholder: "iqair pollen · country/state/city"
+        onSubmit: {
+          iqCountry = lower(trim(split(value, "/")[0] ?? ""))
+          iqRegion = lower(trim(split(value, "/")[1] ?? ""))
+          iqCity = lower(trim(split(value, "/")[2] ?? ""))
+          refresh()
+        }
+      }
+      if iqCity != "" && iq.code != null && !iq.ok {
+        Text { text: iq.code == 404 ? "no iqair pollen page at that country/state/city path" : iq.code == 429 ? "iqair is rate limiting; it will try again" : "iqair: error ${iq.code}"; style: small; color: orange }
+      } else if iqCity == "" {
+        Text { text: "no iqair city set: pollen comes from open-meteo, which is europe only"; style: small; color: muted }
+      }
+    }
+  }
+}
