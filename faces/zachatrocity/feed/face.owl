@@ -1,0 +1,264 @@
+face "Feed" {
+  page: 0
+  meta { owl: 11; description: "A tailored news and developer feed with live NFL and NCAA football scores, Google News, Hacker News and rising GitHub repositories"; version: "1.0"; license: "MIT"; category: "news" }
+  requires { pacman: ["python"] }
+
+  statusBar: true
+  background: linear(0, 0, 0, 1, [alpha(background, 0.92), alpha(background, 0.62), alpha(background, 0.88)])
+  padding: 0
+
+  source now = clock every 1m
+  source feeds = cmd("""
+    python - <<'PY'
+    import json
+    import re
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    from concurrent.futures import ThreadPoolExecutor
+
+    def preview_image(url):
+        if not url or not url.startswith("https://"):
+            return None
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "omalauncher-feed/1.0"})
+            with urllib.request.urlopen(request, timeout=4) as response:
+                html = response.read(200000).decode("utf-8", "ignore")
+            patterns = [
+                r"<meta[^>]+(?:property|name)=[\"'](?:og:image|twitter:image)[\"'][^>]+content=[\"'](https://[^\"']+)",
+                r"<meta[^>]+content=[\"'](https://[^\"']+)[\"'][^>]+(?:property|name)=[\"'](?:og:image|twitter:image)[\"']",
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, html, re.IGNORECASE)
+                if match:
+                    return match.group(1).replace("&amp;", "&")
+        except Exception:
+            pass
+        return None
+
+    def enrich(items):
+        pending = [
+            (item, item.get("url"))
+            for item in items
+            if not item.get("image") and (item.get("url") or "").startswith("https://")
+        ]
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            images = pool.map(preview_image, [url for _, url in pending])
+            for (item, _), image in zip(pending, images):
+                if image:
+                    item["image"] = image
+
+    news = []
+    try:
+        request = urllib.request.Request(
+            "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+            headers={"User-Agent": "omalauncher-feed/1.0"},
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            root = ET.fromstring(response.read())
+        for index, item in enumerate(root.findall("./channel/item")):
+            title = (item.findtext("title") or "").strip()
+            url = (item.findtext("link") or "").strip()
+            image = None
+            for child in item:
+                tag = child.tag.rsplit("}", 1)[-1]
+                candidate = child.attrib.get("url") if tag in ("content", "thumbnail", "enclosure") else None
+                if candidate and candidate.startswith("https://"):
+                    image = candidate
+                    break
+            if image is None:
+                description = item.findtext("description") or ""
+                match = re.search(r"<img[^>]+src=[\"'](https://[^\"']+)", description)
+                image = match.group(1) if match else None
+            if title and url:
+                news.append({
+                    "id": (item.findtext("guid") or str(index)).strip(),
+                    "title": title,
+                    "url": url,
+                    "image": image,
+                    "source": (item.findtext("source") or "Google News").strip(),
+                    "published": (item.findtext("pubDate") or "").strip(),
+                })
+    except Exception:
+        pass
+
+    hn = []
+    try:
+        with urllib.request.urlopen("https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=12", timeout=15) as response:
+            hn = json.loads(response.read()).get("hits", [])
+    except Exception:
+        pass
+
+    enrich(news[:12])
+    enrich(hn[:12])
+    print(json.dumps({"news": news[:12], "hn": hn[:12]}, separators=(",", ":")))
+    PY
+  """) every 15m json timeout 25s
+  let since = fmtTime(now - 7 * 86400, "yyyy-MM-dd")
+  source gh = http("https://api.github.com/search/repositories?q=created%3A%3E${enc(since)}%20stars%3A%3E25&sort=stars&order=desc&per_page=12", {Accept: "application/vnd.github+json"}) every 1h timeout 15s json
+  source nfl = http("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard") every 5m timeout 15s json
+  source ncaa = http("https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard") every 5m timeout 15s json
+
+  state scoreOffset = 0
+  let events = flatten([
+    (nfl.events ?? []).map(e => {league: "NFL", event: e}),
+    (ncaa.events ?? []).map(e => {league: "NCAA", event: e})
+  ]).sortBy(g => parseTime(g.event.date) ?? 9999999999)
+  let newsItems = (feeds.news ?? []).take(8)
+  let hnItems = (feeds.hn ?? []).take(8)
+  let repoItems = (gh.items ?? []).take(8)
+  let glass = alpha(surface, 0.68)
+
+  component Section(label, note = "", tint = accent) {
+    Row {
+      align: center
+      Text { text: upper(label); style: label; color: tint; letterSpacing: 1.5; weight: 1; maxLines: 1 }
+      Text { text: note; style: label; color: muted; maxLines: 1; align: end }
+    }
+  }
+
+  component Story(title, source, meta, link, image = null, tint = accent) {
+    Column {
+      gap: 5
+      padding: [13, 14]
+      frost: 18
+      background: glass
+      radius: 15 * corners
+      onTap: url(link)
+      Row {
+        gap: 12
+        if image != null {
+          Image { src: image; width: 92; height: 62; fit: cover; clip: true; radius: 10 * corners; label: title }
+        }
+        Column {
+          gap: 5
+          weight: 1
+          Row {
+            gap: 8
+            Text { text: source; style: label; color: tint; weight: 1; maxLines: 1 }
+            Text { text: meta; style: label; color: muted; maxLines: 1; align: end }
+          }
+          Text { text: title; style: body; maxLines: 2 }
+        }
+      }
+    }
+  }
+
+  component Football() {
+    Column {
+      gap: 8
+      Section { label: "football"; note: len(events) == 0 ? "no games" : "${len(events)} · kickoff order · drag"; tint: orange }
+      Box {
+        height: 132
+        clip: true
+        onDrag: scoreOffset = max(0, scoreOffset - dx)
+        Canvas {
+          fill: true
+          let cardW = 172
+          let cardGap = 10
+          let maxOffset = max(0, len(events) * (cardW + cardGap) - cardGap - width + 8)
+          let offset = clamp(scoreOffset, 0, maxOffset)
+          if len(events) == 0 {
+            rect(0, 0, width, height, radius: 15 * corners, fill: glass)
+            text("no live or upcoming games", width / 2, 68, size: 13, align: center, color: muted)
+          }
+          for g, i in events key g.event.id {
+            let competition = g.event.competitions[0]
+            let home = competition == null ? null : competition.competitors.find(t => t.homeAway == "home")
+            let away = competition == null ? null : competition.competitors.find(t => t.homeAway == "away")
+            let x = 4 + i * (cardW + cardGap) - offset
+            let detail = competition == null ? "scheduled" : (competition.status.type.shortDetail ?? competition.status.type.detail ?? "scheduled")
+            let homeName = home == null ? "HOME" : upper(home.team.abbreviation ?? home.team.shortDisplayName ?? "HOME")
+            let awayName = away == null ? "AWAY" : upper(away.team.abbreviation ?? away.team.shortDisplayName ?? "AWAY")
+            let homeLogo = home == null ? null : (home.team.logo ?? home.team.logos[0].href)
+            let awayLogo = away == null ? null : (away.team.logo ?? away.team.logos[0].href)
+            if x + cardW > 0 && x < width {
+              rect(x, 0, cardW, height, radius: 15 * corners, fill: glass)
+              text(g.league, x + 14, 20, size: 10, font: mono, bold: true, color: orange)
+              text(sub(g.event.shortName ?? g.event.name ?? "", 0, 12), x + cardW - 12, 20, size: 8, align: end, color: muted)
+              text(awayName, x + 14, 54, size: 14, font: mono, color: foreground)
+              if awayLogo != null { image(awayLogo, x + 106, 42, 20, 20) }
+              text(away == null ? "-" : (away.score ?? "-"), x + cardW - 14, 54, size: 18, font: mono, bold: true, align: end, color: away != null && away.winner ? accent : foreground)
+              text(homeName, x + 14, 84, size: 14, font: mono, color: foreground)
+              if homeLogo != null { image(homeLogo, x + 106, 72, 20, 20) }
+              text(home == null ? "-" : (home.score ?? "-"), x + cardW - 14, 84, size: 18, font: mono, bold: true, align: end, color: home != null && home.winner ? accent : foreground)
+              text(sub(detail, 0, 25), x + 14, 112, size: 10, color: muted)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  Column {
+    fill: true
+    gap: 12
+    padding: [14, 12]
+    Row {
+      align: center
+      Text { text: "FEED"; style: huge; fontWeight: 250; letterSpacing: -1; weight: 1; maxLines: 1 }
+      Column {
+        gap: 0
+        align: end
+        Text { text: fmtTime(now, "HH:mm"); style: title; color: accent; align: end; maxLines: 1 }
+        Text { text: lower(fmtTime(now, "EEE d MMM")); style: label; color: muted; align: end; maxLines: 1 }
+      }
+      Text { text: "↻"; style: title; color: accent; padding: [8, 10]; onTap: refresh() }
+    }
+
+    Column {
+      scroll: true
+      lazy: true
+      weight: 1
+      gap: 12
+      Football { }
+
+      Section { label: "google news"; note: "live"; tint: cyan }
+      if len(newsItems) == 0 {
+        Text { text: "Google News is loading or unavailable"; style: small; color: muted }
+      } else {
+        for item in newsItems key item.id {
+          Story {
+            title: item.title
+            source: item.source ?? "Google News"
+            meta: fmtAgo(parseTime(item.published), now)
+            link: item.url
+            image: item.image
+            tint: cyan
+          }
+        }
+      }
+
+      Section { label: "hacker news"; note: "front page"; tint: orange }
+      if len(hnItems) == 0 {
+        Text { text: "Hacker News is loading or unavailable"; style: small; color: muted }
+      } else {
+        for item in hnItems key item.objectID {
+          Story {
+            title: item.title
+            source: "HN · ${item.points ?? 0} pts"
+            meta: "${item.num_comments ?? 0} comments"
+            link: item.url ?? "https://news.ycombinator.com/item?id=${item.objectID}"
+            tint: orange
+          }
+        }
+      }
+
+      Section { label: "github rising"; note: "last 7 days"; tint: magenta }
+      if len(repoItems) == 0 {
+        Text { text: "GitHub repositories are loading or unavailable"; style: small; color: muted }
+      } else {
+        for repo in repoItems key repo.id {
+          Story {
+            title: repo.full_name
+            source: "★ ${fmtNum(repo.stargazers_count ?? 0)} · ${repo.language ?? "code"}"
+            meta: "${repo.forks_count ?? 0} forks"
+            link: repo.html_url
+            image: repo.owner.avatar_url
+            tint: magenta
+          }
+        }
+      }
+      Spacer { height: screenInset }
+    }
+  }
+}
