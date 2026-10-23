@@ -1,0 +1,225 @@
+face "mes" {
+  // The whole month with the bands of the events and, when you tap a day, its
+  // agenda. month.py (embedded below) turns the secret iCal addresses of your
+  // calendars into the data drawn here.
+  meta {
+    owl: 10
+    description: "The whole month with colored event bands, and the agenda of the day you tap, from your calendars' secret iCal addresses"
+    version: "1.0"
+    license: "MIT"
+    category: "productivity"
+  }
+
+  requires { pacman: ["python", "python-icalendar", "python-recurring-ical-events"] }
+  padding: 0
+  background: background
+
+  state ym = "" persist          // month shown "2026-10"; empty = the current one
+  state sel = "" persist         // day tapped "2026-10-23"; empty = today
+  state cals = [] persist  // [{n, u, c, on}]
+  state setup = false
+  state nn = ""                  // new calendar: name
+  state nu = ""                  // new calendar: iCal address
+
+  let calsJson = "[" + cals.map(c => "{\"n\":\"${c.n}\",\"u\":\"${c.u}\",\"c\":\"${c.c}\",\"on\":${c.on ? 'true' : 'false'}}").join(",") + "]"
+
+  source now = clock every 1m
+  source data = cmd("test -s ~/.local/share/owlcal/month.py || { mkdir -p ~/.local/share/owlcal; echo 'IyEvdXNyL2Jpbi9lbnYgcHl0aG9uMwoiIiJEYXRvcyBwYXJhIGxhIGZhY2UgJ21lcycgZGUgT21hTGF1bmNoZXIuCgogICAgbW9udGgucHkgWVlZWS1NTSAnPGpzb24gZGUgY2FsZW5kYXJpb3M+JwoKQ2FsZW5kYXJpb3M6IFt7Im4iOiAibm9tYnJlIiwgInUiOiAiaHR0cHM6Ly/igKYvYmFzaWMuaWNzIiwgImMiOiAiIzdhYTJmNyIsICJvbiI6IHRydWV9XQoKU2FsaWRhICh1bmEgc29sYSBsw61uZWEgSlNPTik6CnsKICAieW0iOiAiMjAyNi0xMCIsICJ0aXRsZSI6ICJvY3R1YnJlIDIwMjYiLCAidG9kYXkiOiAiMjAyNi0xMC0yMyIsCiAgIndlZWtzIjogWyB7ICJoZHIiOiBbIkwiLCJNIiwiWCIsIkoiLCJWIiwiUyIsIkQiXSwKICAgICAgICAgICAgICAgImNlbGxzIjogW3siZCI6IDI4LCAiaW4iOiBmYWxzZSwgInRvZGF5IjogZmFsc2V9LCDigKYgN10sCiAgICAgICAgICAgICAgICJiYW5kcyI6IFt7ImMiOiAwLCAicyI6IDIsICJsIjogMCwgInQiOiAiVmlhamUiLCAiaCI6ICIiLCAiY29sIjogIiNmNzc2OGUifSwg4oCmXSwKICAgICAgICAgICAgICAgImhpZGRlbiI6IHsiMyI6IDJ9IH0g4oCmIDYgXSwKICAiZGF5cyI6IHsiMjAyNi0xMC0yMyI6IFt7InQiOiAiQ2VuYSIsICJoIjogIjIxOjAwIiwgImNvbCI6ICIjN2FhMmY3In0sIOKApl19LAogICJlcnJvcnMiOiB7IlRyYWJham8iOiAidGltZW91dCJ9Cn0KCkNhY2hlYSBjYWRhIGZlZWQgZW4gfi8uY2FjaGUvb3dsY2FsLzxzaGExPi5pY3MgcGFyYSBwb2RlciBwaW50YXIgc2luIHJlZC4KIiIiCmltcG9ydCBoYXNobGliCmltcG9ydCBqc29uCmltcG9ydCBvcwppbXBvcnQgc3lzCmltcG9ydCB0aW1lCmltcG9ydCB1cmxsaWIucmVxdWVzdAppbXBvcnQgemxpYgpmcm9tIGRhdGV0aW1lIGltcG9ydCBkYXRlLCBkYXRldGltZSwgdGltZWRlbHRhLCB0aW1lem9uZQoKaW1wb3J0IGljYWxlbmRhcgppbXBvcnQgcmVjdXJyaW5nX2ljYWxfZXZlbnRzCgpNT05USFMgPSBbImphbnVhcnkiLCAiZmVicnVhcnkiLCAibWFyY2giLCAiYXByaWwiLCAibWF5IiwgImp1bmUiLCAianVseSIsCiAgICAgICAgICAiYXVndXN0IiwgInNlcHRlbWJlciIsICJvY3RvYmVyIiwgIm5vdmVtYmVyIiwgImRlY2VtYmVyIl0KSERSID0gWyJNIiwgIlQiLCAiVyIsICJUIiwgIkYiLCAiUyIsICJTIl0KVFRMID0gMjQwICAgICAgICAgICAgICAjIHNlZ3VuZG9zOiBkZW50cm8gZGUgZXN0byBzZSB1c2EgbGEgY2FjaMOpIHNpbiBzYWxpciBhIGxhIHJlZApNQVhfTEFORVMgPSA0ICAgICAgICAgICMgYmFuZGFzIHBvciBzZW1hbmEgYW50ZXMgZGUgY29sYXBzYXIgZW4gIitOIgpNQVhfREFZID0gMTQgICAgICAgICAgICMgZXZlbnRvcyBwb3IgZMOtYSBlbiBsYSBhZ2VuZGEKQ0FDSEUgPSBvcy5wYXRoLmV4cGFuZHVzZXIoIn4vLmNhY2hlL293bGNhbCIpCgoKZGVmIGZldGNoKHVybCwgY2FwPTMyICogMTAyNCAqIDEwMjQsIHRpbWVvdXQ9MjApOgogICAgIiIiRGVzY2FyZ2EgZWwgZmVlZDsgc2kgZmFsbGEsIHVzYSBsYSDDumx0aW1hIGNvcGlhIGJ1ZW5hLiIiIgogICAgb3MubWFrZWRpcnMoQ0FDSEUsIGV4aXN0X29rPVRydWUpCiAgICBwYXRoID0gb3MucGF0aC5qb2luKENBQ0hFLCBoYXNobGliLnNoYTEodXJsLmVuY29kZSgpKS5oZXhkaWdlc3QoKSArICIuaWNzIikKICAgIGlmIHVybC5zdGFydHN3aXRoKCJ3ZWJjYWw6Ly8iKToKICAgICAgICB1cmwgPSAiaHR0cHM6Ly8iICsgdXJsW2xlbigid2ViY2FsOi8vIik6XQogICAgaWYgIjovLyIgbm90IGluIHVybDogICAgICAgICAgICAgICAgICAgICAgIyBydXRhIGxvY2FsLCBwYXJhIHBydWViYXMKICAgICAgICB3aXRoIG9wZW4ob3MucGF0aC5leHBhbmR1c2VyKHVybCksICJyYiIpIGFzIGZoOgogICAgICAgICAgICByZXR1cm4gZmgucmVhZCgpCiAgICAjIGNhY2jDqSByZWNpZW50ZTogY2FtYmlhciBkZSBtZXMgbm8gZXNwZXJhIGEgR29vZ2xlCiAgICB0cnk6CiAgICAgICAgaWYgdGltZS50aW1lKCkgLSBvcy5wYXRoLmdldG10aW1lKHBhdGgpIDwgVFRMOgogICAgICAgICAgICB3aXRoIG9wZW4ocGF0aCwgInJiIikgYXMgZmg6CiAgICAgICAgICAgICAgICByZXR1cm4gZmgucmVhZCgpCiAgICBleGNlcHQgT1NFcnJvcjoKICAgICAgICBwYXNzCiAgICB0cnk6CiAgICAgICAgcmVxID0gdXJsbGliLnJlcXVlc3QuUmVxdWVzdCh1cmwsIGhlYWRlcnM9eyJVc2VyLUFnZW50IjogIm9tYWxhdW5jaGVyLW1vbnRoIiwKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIkFjY2VwdC1FbmNvZGluZyI6ICJnemlwIn0pCiAgICAgICAgd2l0aCB1cmxsaWIucmVxdWVzdC51cmxvcGVuKHJlcSwgdGltZW91dD10aW1lb3V0KSBhcyByOgogICAgICAgICAgICBkYXRhID0gci5yZWFkKGNhcCArIDEpCiAgICAgICAgICAgIGlmIChyLmhlYWRlcnMuZ2V0KCJDb250ZW50LUVuY29kaW5nIikgb3IgIiIpLmxvd2VyKCkgPT0gImd6aXAiOgogICAgICAgICAgICAgICAgZGF0YSA9IHpsaWIuZGVjb21wcmVzc29iaigzMSkuZGVjb21wcmVzcyhkYXRhLCBjYXAgKyAxKQogICAgICAgIGlmIGxlbihkYXRhKSA+IGNhcDoKICAgICAgICAgICAgcmFpc2UgVmFsdWVFcnJvcigiZmVlZCBkZW1hc2lhZG8gZ3JhbmRlIikKICAgICAgICB3aXRoIG9wZW4ocGF0aCwgIndiIikgYXMgZmg6CiAgICAgICAgICAgIGZoLndyaXRlKGRhdGEpCiAgICAgICAgcmV0dXJuIGRhdGEKICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgaWYgb3MucGF0aC5leGlzdHMocGF0aCk6CiAgICAgICAgICAgIHdpdGggb3BlbihwYXRoLCAicmIiKSBhcyBmaDoKICAgICAgICAgICAgICAgIHJldHVybiBmaC5yZWFkKCkKICAgICAgICByYWlzZQoKCmRlZiBhc19kYXRlcyhjb21wKToKICAgICIiIihpbmljaW8sIGZpbl9leGNsdXNpdm8sIHRvZG9fZWxfZGlhKSBkZSB1biBjb21wb25lbnRlIFZFVkVOVC4iIiIKICAgIGRlZiBvbmUocHJvcCk6CiAgICAgICAgdiA9IGNvbXAuZ2V0KHByb3ApCiAgICAgICAgaWYgdiBpcyBOb25lOgogICAgICAgICAgICByZXR1cm4gTm9uZQogICAgICAgIHYgPSB2LmR0CiAgICAgICAgaWYgaXNpbnN0YW5jZSh2LCBkYXRldGltZSk6CiAgICAgICAgICAgIGlmIHYudHppbmZvIGlzIE5vbmU6CiAgICAgICAgICAgICAgICB2ID0gdi5yZXBsYWNlKHR6aW5mbz10aW1lem9uZS51dGMpCiAgICAgICAgICAgIHJldHVybiB2LmFzdGltZXpvbmUoKQogICAgICAgIHJldHVybiB2CgogICAgc3RhcnQsIGVuZCA9IG9uZSgiRFRTVEFSVCIpLCBvbmUoIkRURU5EIikKICAgIGlmIHN0YXJ0IGlzIE5vbmU6CiAgICAgICAgcmV0dXJuIE5vbmUKICAgIGFsbF9kYXkgPSBub3QgaXNpbnN0YW5jZShzdGFydCwgZGF0ZXRpbWUpCiAgICBpZiBhbGxfZGF5OgogICAgICAgIGlmIGVuZCBpcyBOb25lIG9yIG5vdCBpc2luc3RhbmNlKGVuZCwgZGF0ZSkgb3IgaXNpbnN0YW5jZShlbmQsIGRhdGV0aW1lKToKICAgICAgICAgICAgZW5kID0gc3RhcnQgKyB0aW1lZGVsdGEoZGF5cz0xKQogICAgICAgIHJldHVybiBzdGFydCwgZW5kLCBUcnVlCiAgICBpZiBlbmQgaXMgTm9uZToKICAgICAgICBlbmQgPSBzdGFydCArIHRpbWVkZWx0YShob3Vycz0xKQogICAgcmV0dXJuIHN0YXJ0LmRhdGUoKSwgZW5kLmRhdGUoKSArIHRpbWVkZWx0YShkYXlzPTEgaWYgZW5kLnRpbWUoKSAhPSBkYXRldGltZS5taW4udGltZSgpIGVsc2UgMCksIEZhbHNlCgoKZGVmIGNsZWFuKHRleHQsIGxpbWl0PTQyKToKICAgIHMgPSAiICIuam9pbihzdHIodGV4dCBvciAiIikuc3BsaXQoKSkKICAgIHJldHVybiBzIGlmIGxlbihzKSA8PSBsaW1pdCBlbHNlIHNbOiBsaW1pdCAtIDFdICsgIuKApiIKCgpkZWYgbWFpbigpOgogICAgeW0gPSBzeXMuYXJndlsxXSBpZiBsZW4oc3lzLmFyZ3YpID4gMSBlbHNlICIiCiAgICBpZiBub3QgeW06ICAgICAgICAgICAgICAgICAgICAgICAjIHZhY8OtbyA9IGVsIG1lcyBhY3R1YWwgKGxvIHVzYSBsYSBmYWNlKQogICAgICAgIHltID0gZGF0ZXRpbWUubm93KCkuc3RyZnRpbWUoIiVZLSVtIikKICAgIHRyeToKICAgICAgICBjYWxzID0ganNvbi5sb2FkcyhzeXMuYXJndlsyXSkgaWYgbGVuKHN5cy5hcmd2KSA+IDIgYW5kIHN5cy5hcmd2WzJdIGVsc2UgW10KICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgY2FscyA9IFtdCgogICAgeWVhciwgbW9udGggPSBpbnQoeW1bOjRdKSwgaW50KHltWzU6N10pCiAgICB0b2RheSA9IGRhdGUudG9kYXkoKQogICAgZmlyc3QgPSBkYXRlKHllYXIsIG1vbnRoLCAxKQogICAgbGFzdCA9IGRhdGUoeWVhciArIChtb250aCA9PSAxMiksIG1vbnRoICUgMTIgKyAxLCAxKSAtIHRpbWVkZWx0YShkYXlzPTEpCiAgICBncmlkX3N0YXJ0ID0gZmlyc3QgLSB0aW1lZGVsdGEoZGF5cz1maXJzdC53ZWVrZGF5KCkpICAgICAgICAgICMgbHVuZXMKICAgIGdyaWRfZW5kID0gbGFzdCArIHRpbWVkZWx0YShkYXlzPTYgLSBsYXN0LndlZWtkYXkoKSkKICAgIG53ZWVrcyA9ICgoZ3JpZF9lbmQgLSBncmlkX3N0YXJ0KS5kYXlzICsgMSkgLy8gNwoKICAgIGVycm9ycywgZXZlbnRzID0ge30sIFtdCiAgICBmb3IgY2FsIGluIGNhbHM6CiAgICAgICAgaWYgbm90IGNhbC5nZXQoIm9uIiwgVHJ1ZSkgb3Igbm90IGNhbC5nZXQoInUiKToKICAgICAgICAgICAgY29udGludWUKICAgICAgICBuYW1lID0gY2FsLmdldCgibiIpIG9yICJjYWxlbmRhcmlvIgogICAgICAgIGNvbG9yID0gY2FsLmdldCgiYyIpIG9yICIjN2FhMmY3IgogICAgICAgIHRyeToKICAgICAgICAgICAgcmF3ID0gZmV0Y2goY2FsWyJ1Il0pCiAgICAgICAgICAgIGljcyA9IGljYWxlbmRhci5DYWxlbmRhci5mcm9tX2ljYWwocmF3KQogICAgICAgICAgICBoaXRzID0gcmVjdXJyaW5nX2ljYWxfZXZlbnRzLm9mKGljcykuYmV0d2VlbihncmlkX3N0YXJ0LCBncmlkX2VuZCArIHRpbWVkZWx0YShkYXlzPTEpKQogICAgICAgIGV4Y2VwdCBFeGNlcHRpb24gYXMgZXhjOiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIyBub3FhOiBCTEUwMDEKICAgICAgICAgICAgZXJyb3JzW25hbWVdID0gc3RyKGV4YylbOjgwXQogICAgICAgICAgICBjb250aW51ZQogICAgICAgIGZvciBjb21wIGluIGhpdHM6CiAgICAgICAgICAgIHNwYW4gPSBhc19kYXRlcyhjb21wKQogICAgICAgICAgICBpZiBub3Qgc3BhbjoKICAgICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgIHN0YXJ0LCBlbmQsIGFsbF9kYXkgPSBzcGFuCiAgICAgICAgICAgIGlmIGVuZCA8PSBncmlkX3N0YXJ0IG9yIHN0YXJ0ID4gZ3JpZF9lbmQ6CiAgICAgICAgICAgICAgICBjb250aW51ZQogICAgICAgICAgICBzdW1tYXJ5ID0gY29tcC5nZXQoIlNVTU1BUlkiKQogICAgICAgICAgICBzdW1tYXJ5ID0gc3VtbWFyeS50b19pY2FsKCkuZGVjb2RlKCJ1dGYtOCIsICJyZXBsYWNlIikgaWYgc3VtbWFyeSBlbHNlIG5hbWUKICAgICAgICAgICAgdCA9IGNvbXAuZ2V0KCJEVFNUQVJUIikKICAgICAgICAgICAgaG91ciA9ICIiCiAgICAgICAgICAgIGlmIG5vdCBhbGxfZGF5IGFuZCBpc2luc3RhbmNlKHQuZHQsIGRhdGV0aW1lKToKICAgICAgICAgICAgICAgIGhvdXIgPSB0LmR0LmFzdGltZXpvbmUoKS5zdHJmdGltZSgiJUg6JU0iKQogICAgICAgICAgICBldmVudHMuYXBwZW5kKHsKICAgICAgICAgICAgICAgICJzdGFydCI6IHN0YXJ0LCAiZW5kIjogbWluKGVuZCwgZ3JpZF9lbmQgKyB0aW1lZGVsdGEoZGF5cz0xKSksCiAgICAgICAgICAgICAgICAidGl0bGUiOiBjbGVhbihzdW1tYXJ5KSwgImhvdXIiOiBob3VyLCAiY29sb3IiOiBjb2xvciwKICAgICAgICAgICAgICAgICJhbGxfZGF5IjogYWxsX2RheSwgImNhbCI6IG5hbWUsCiAgICAgICAgICAgIH0pCgogICAgIyAtLS0gYWdlbmRhIHBvciBkw61hIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KICAgIGRheXMgPSB7fQogICAgZm9yIGV2IGluIGV2ZW50czoKICAgICAgICBkID0gZXZbInN0YXJ0Il0KICAgICAgICB3aGlsZSBkIDwgZXZbImVuZCJdOgogICAgICAgICAgICBkYXlzLnNldGRlZmF1bHQoZC5pc29mb3JtYXQoKSwgW10pLmFwcGVuZCh7CiAgICAgICAgICAgICAgICAidCI6IGV2WyJ0aXRsZSJdLCAiaCI6ICIiIGlmIGV2WyJhbGxfZGF5Il0gZWxzZSBldlsiaG91ciJdLAogICAgICAgICAgICAgICAgImNvbCI6IGV2WyJjb2xvciJdLCAiYyI6IGV2WyJjYWwiXSwKICAgICAgICAgICAgfSkKICAgICAgICAgICAgZCArPSB0aW1lZGVsdGEoZGF5cz0xKQogICAgZm9yIGssIGxzdCBpbiBkYXlzLml0ZW1zKCk6CiAgICAgICAgbHN0LnNvcnQoa2V5PWxhbWJkYSBlOiAoZVsiaCJdID09ICIiLCBlWyJoIl0sIGVbInQiXSkpCiAgICAgICAgZGF5c1trXSA9IGxzdFs6TUFYX0RBWV0KCiAgICAjIC0tLSByZWppbGxhIGNvbiBiYW5kYXMgLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgICB3ZWVrcyA9IFtdCiAgICBmb3IgdyBpbiByYW5nZShud2Vla3MpOgogICAgICAgIHdzdGFydCA9IGdyaWRfc3RhcnQgKyB0aW1lZGVsdGEoZGF5cz03ICogdykKICAgICAgICB3ZW5kID0gd3N0YXJ0ICsgdGltZWRlbHRhKGRheXM9NykKICAgICAgICBjZWxscyA9IFtdCiAgICAgICAgZm9yIGkgaW4gcmFuZ2UoNyk6CiAgICAgICAgICAgIGQgPSB3c3RhcnQgKyB0aW1lZGVsdGEoZGF5cz1pKQogICAgICAgICAgICBjZWxscy5hcHBlbmQoewogICAgICAgICAgICAgICAgImQiOiBkLmRheSwgImluIjogZCA+PSBmaXJzdCBhbmQgZCA8PSBsYXN0LAogICAgICAgICAgICAgICAgInRvZGF5IjogZCA9PSB0b2RheSwgIndlIjogaSA+PSA1LCAieW1kIjogZC5pc29mb3JtYXQoKSwKICAgICAgICAgICAgfSkKCiAgICAgICAgbGFuZXMgPSBbRmFsc2VdICogTUFYX0xBTkVTICAgICAgICAgICMgb2N1cGFjacOzbiBwb3IgY2FycmlsIHkgY29sdW1uYQogICAgICAgIGJhbmRzLCBoaWRkZW4gPSBbXSwge30KICAgICAgICBtaW5lID0gW2UgZm9yIGUgaW4gZXZlbnRzIGlmIGVbInN0YXJ0Il0gPCB3ZW5kIGFuZCBlWyJlbmQiXSA+IHdzdGFydF0KICAgICAgICBtaW5lLnNvcnQoa2V5PWxhbWJkYSBlOiAobm90IGVbImFsbF9kYXkiXSwgZVsic3RhcnQiXSwgLShlWyJlbmQiXSAtIGVbInN0YXJ0Il0pLmRheXMpKQogICAgICAgICMgb2N1cGFjacOzbiByZWFsIHBvciBjYXJyaWw6IGxpc3RhIGRlIDcgYm9vbHMKICAgICAgICBvY2MgPSBbW0ZhbHNlXSAqIDcgZm9yIF8gaW4gcmFuZ2UoTUFYX0xBTkVTKV0KICAgICAgICBmb3IgZXYgaW4gbWluZToKICAgICAgICAgICAgYzAgPSBtYXgoMCwgKGV2WyJzdGFydCJdIC0gd3N0YXJ0KS5kYXlzKQogICAgICAgICAgICBjMSA9IG1pbig3LCAoZXZbImVuZCJdIC0gd3N0YXJ0KS5kYXlzKQogICAgICAgICAgICBzcGFuID0gbWF4KDEsIGMxIC0gYzApCiAgICAgICAgICAgIGxhbmUgPSBuZXh0KChsIGZvciBsIGluIHJhbmdlKE1BWF9MQU5FUykKICAgICAgICAgICAgICAgICAgICAgICAgIGlmIG5vdCBhbnkob2NjW2xdW2MwOmMwICsgc3Bhbl0pKSwgTm9uZSkKICAgICAgICAgICAgaWYgbGFuZSBpcyBOb25lOgogICAgICAgICAgICAgICAgZm9yIGMgaW4gcmFuZ2UoYzAsIGMxKToKICAgICAgICAgICAgICAgICAgICBoaWRkZW5bY2VsbHNbY11bInltZCJdXSA9IGhpZGRlbi5nZXQoY2VsbHNbY11bInltZCJdLCAwKSArIDEKICAgICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgIGZvciBjIGluIHJhbmdlKGMwLCBjMCArIHNwYW4pOgogICAgICAgICAgICAgICAgb2NjW2xhbmVdW2NdID0gVHJ1ZQogICAgICAgICAgICBiYW5kcy5hcHBlbmQoewogICAgICAgICAgICAgICAgImMiOiBjMCwgInMiOiBzcGFuLCAibCI6IGxhbmUsICJ0IjogZXZbInRpdGxlIl0sCiAgICAgICAgICAgICAgICAiaCI6IGV2WyJob3VyIl0sICJjb2wiOiBldlsiY29sb3IiXSwKICAgICAgICAgICAgICAgICJmaXJzdCI6IGV2WyJzdGFydCJdID49IHdzdGFydCwgImxhc3QiOiBldlsiZW5kIl0gPD0gd2VuZCwKICAgICAgICAgICAgfSkKICAgICAgICBkZWwgbGFuZXMKICAgICAgICB3ZWVrcy5hcHBlbmQoeyJjZWxscyI6IGNlbGxzLCAiYmFuZHMiOiBiYW5kcywKICAgICAgICAgICAgICAgICAgICAgICJsYW5lcyI6IG1heChbYlsibCJdIGZvciBiIGluIGJhbmRzXSwgZGVmYXVsdD0tMSkgKyAxLAogICAgICAgICAgICAgICAgICAgICAgImhpZGRlbiI6IGhpZGRlbn0pCgogICAgb3V0ID0gewogICAgICAgICJ5bSI6IHltLCAidGl0bGUiOiAiJXMgJWQiICUgKE1PTlRIU1ttb250aCAtIDFdLCB5ZWFyKSwKICAgICAgICAidG9kYXkiOiB0b2RheS5pc29mb3JtYXQoKSwgImhkciI6IEhEUiwKICAgICAgICAid2Vla3MiOiB3ZWVrcywgImRheXMiOiBkYXlzLCAiZXJyb3JzIjogZXJyb3JzLCAiY291bnQiOiBsZW4oZXZlbnRzKSwKICAgIH0KICAgIHN5cy5zdGRvdXQud3JpdGUoanNvbi5kdW1wcyhvdXQsIGVuc3VyZV9hc2NpaT1GYWxzZSwgc2VwYXJhdG9ycz0oIiwiLCAiOiIpKSkKCgppZiBfX25hbWVfXyA9PSAiX19tYWluX18iOgogICAgbWFpbigpCg==' | base64 -d > ~/.local/share/owlcal/month.py; }; python3 ~/.local/share/owlcal/month.py ${sh(ym)} ${sh(calsJson)}") every 5m json timeout 120s
+  let palette = ["#f7768e", "#7aa2f7", "#9ece6a", "#e0af68", "#bb9af7", "#7dcfff", "#ff9e64", "#c0caf5"]
+  let cur = data.ym ?? ""
+  let weeks = data.weeks ?? []
+  let cy = num(sub(cur, 0, 4))
+  let cm = num(sub(cur, 5, 7))
+  let prevYm = cur == "" ? "" : (cm == 1 ? "${cy - 1}-12" : "${cy}-${pad(cm - 1, 2, '0')}")
+  let nextYm = cur == "" ? "" : (cm == 12 ? "${cy + 1}-01" : "${cy}-${pad(cm + 1, 2, '0')}")
+  let errs = entries(data.errors ?? {})
+  let hoy = data.today ?? ""
+  let day = sel == "" ? hoy : sel
+  let evs = get(data.days, day, [])
+  let agH = clamp(48 + len(evs) * 22, 62, 210)
+
+  if setup {
+    Column {
+      fill: true
+      background: background
+      padding: [16, 16, 16, 12]
+      gap: 8
+      Text { text: "calendars"; style: title }
+      Text {
+        text: "Paste the secret iCal address of each calendar: Google Calendar → Settings → pick a calendar → “Secret address in iCal format”. The links stay on this phone."
+        style: label
+        color: muted
+      }
+      Column {
+        gap: 6
+        for c in cals {
+          Row {
+            gap: 8
+            Text { text: "●"; fontSize: 13; color: c.c }
+            Text { text: c.n; style: small; color: foreground; weight: 1; maxLines: 1 }
+            Text {
+              text: c.on ? "visible" : "hidden"
+              style: label
+              color: c.on ? accent : muted
+              onTap: cals = cals.map(x => x.u == c.u ? {n: x.n, u: x.u, c: x.c, on: !x.on} : x)
+            }
+            Text {
+              text: "✕"
+              style: label
+              color: red
+              onTap: cals = cals.filter(x => x.u != c.u)
+            }
+          }
+        }
+        if len(cals) == 0 {
+          Text { text: "no calendars yet"; style: label; color: muted }
+        }
+      }
+      Spacer { size: 4 }
+      Input { placeholder: "name (optional)"; onSubmit: nn = value; clear: true }
+      Input { placeholder: "https://calendar.google.com/calendar/ical/…/basic.ics"; onSubmit: nu = value }
+      Row {
+        gap: 8
+        Button {
+          text: "add"
+          onTap: {
+            cals = trim(nu) == "" ? cals : cals + [{n: nn == "" ? "calendar ${len(cals) + 1}" : nn, u: trim(nu), c: palette[len(cals) % 8], on: true}]
+            nn = ""
+            nu = ""
+          }
+        }
+        Button { text: "refresh"; onTap: { refresh(); setup = false } }
+        Button { text: "back"; onTap: setup = false }
+      }
+      if len(errs) > 0 {
+        Text { text: "no data: ${errs.map(e => e[0]).join(', ')}"; style: label; color: red }
+      }
+      Spacer { weight: 1 }
+    }
+  } else if len(cals) == 0 {
+    Column {
+      fill: true
+      background: background
+      padding: 24
+      gap: 10
+      align: center
+      justify: center
+      Text { text: "no calendars yet"; style: title; align: center }
+      Text {
+        text: "Add the secret iCal address of your Google calendars to see the month here."
+        style: small
+        color: muted
+        align: center
+      }
+      Button { text: "add calendars"; onTap: setup = true }
+    }
+  } else {
+    Column {
+      fill: true
+      background: background
+      // ---- header: month, arrows and settings
+      Row {
+        gap: 2
+        height: 38
+        padding: [14, 6, 14, 4]
+        Text { text: "‹"; fontSize: 20; color: muted; width: 26; onTap: { ym = prevYm; sel = "" } }
+        Text { text: data.title ?? "…"; style: title; weight: 1 }
+        Text { text: "›"; fontSize: 20; color: muted; width: 26; align: end; onTap: { ym = nextYm; sel = "" } }
+        Text { text: "⚙"; fontSize: 15; color: muted; width: 26; align: end; onTap: setup = true }
+      }
+
+      // ---- weekday initials (same 7 columns as the grid)
+      Row {
+        height: 18
+        for d in data.hdr ?? ["M", "T", "W", "T", "F", "S", "S"] {
+          Text { text: d; style: label; color: muted; align: center; weight: 1 }
+        }
+      }
+
+      // ---- one row per week: the drawing below, seven tap areas on top
+      for w in weeks {
+        Box {
+          weight: 1
+          Canvas {
+            let cw = width / 7
+            let laneH = 17
+            line(0, 0, width, 0, stroke: alpha(border, 0.45), width: 1)
+            for c, ci in w.cells {
+              let cx = ci * cw
+              if c.today {
+                rect(cx + 1, 1, cw - 2, 17, radius: 8 * corners, color: accent)
+              }
+              text(str(c.d), cx + cw / 2, 10, size: 12, align: center,
+                   color: c.today ? background : (c.in ? (c.we ? muted : foreground) : alpha(foreground, 0.35)),
+                   bold: c.today)
+            }
+            for b in w.bands {
+              let bx = b.c * cw + 1
+              let bw = b.s * cw - 2
+              let by = 22 + b.l * laneH
+              rect(bx, by, bw, laneH - 4, radius: 3 * corners, color: b.col)
+              clip(bx, by, bw, laneH - 4) {
+                text(b.s == 1 && b.h != "" ? "${b.h} ${b.t}" : b.t,
+                     bx + 3, by + (laneH - 4) / 2, size: 9, align: start, color: background)
+              }
+            }
+            for c, ci in w.cells {
+              let hid = get(w.hidden, c.ymd, 0)
+              if hid > 0 {
+                text("+${hid}", ci * cw + cw - 5, 22 + w.lanes * laneH + 6, size: 9, align: end, color: muted)
+              }
+            }
+          }
+          Row {
+            fill: true
+            for c in w.cells {
+              Box {
+                weight: 1
+                fill: true
+                onTap: sel = sel == c.ymd ? "" : c.ymd
+              }
+            }
+          }
+        }
+      }
+
+      // ---- agenda of the day (today by default)
+      if day != "" {
+        Column {
+          height: agH
+          gap: 3
+          padding: [14, 8, 14, 8]
+          background: alpha(surface, 0.6)
+          Text {
+            text: "${day}${day == hoy ? ' · today' : ''} · ${len(evs)} ${len(evs) == 1 ? 'event' : 'events'}"
+            style: label
+            color: muted
+          }
+          if len(evs) == 0 {
+            Text { text: "nothing scheduled"; style: small; color: muted }
+          }
+          Column {
+            scroll: true
+            gap: 2
+            for e in evs {
+              Row {
+                gap: 8
+                Text { text: e.h; style: label; width: 76; color: e.col }
+                Text { text: e.t; style: small; color: foreground; maxLines: 1; weight: 1 }
+              }
+            }
+          }
+        }
+      }
+
+      if len(errs) > 0 {
+        Text {
+          text: "warning: no data from ${errs.map(e => e[0]).join(', ')}"
+          style: label
+          color: red
+          padding: [14, 2, 14, 6]
+        }
+      }
+    }
+  }
+}
