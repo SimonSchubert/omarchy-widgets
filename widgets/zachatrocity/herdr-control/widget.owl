@@ -62,7 +62,7 @@ widget "herdr control" {
               border: 1
               borderColor: border
               radius: 4 * corners
-              onTap: terminal("ssh ${sh(remoteTarget)} -tt ~/.local/bin/herdr --session ${sh(s.name)}", "herdr · ${s.name}")
+              onTap: terminal("ssh ${sh(remoteTarget)} -tt '~/.local/bin/herdr' --session ${sh(s.name)}", "herdr · ${s.name}")
               Text {
                 text: "●"
                 color: s.status == "blocked" ? red : s.status == "done" ? yellow : s.status == "working" ? accent : s.status == "idle" ? green : muted
@@ -88,7 +88,7 @@ widget "herdr control" {
                 border: 1
                 borderColor: alpha(border, 0.8)
                 radius: 4 * corners
-                onTap: terminal("ssh ${sh(remoteTarget)} -tt ~/.local/bin/herdr --session ${sh(s.name)} terminal attach ${sh(w.active_terminal)}", "herdr · ${s.name} · ${w.name}")
+                onTap: terminal("ssh ${sh(remoteTarget)} -tt '~/.local/bin/herdr' --session ${sh(s.name)} terminal attach ${sh(w.active_terminal)}", "herdr · ${s.name} · ${w.name}")
                 Text { text: "↳"; color: accent; width: 12 }
                 Text { text: w.name; style: small; maxLines: 1; weight: 1 }
                 Text { text: "space"; style: label; color: muted; align: end }
@@ -103,7 +103,7 @@ widget "herdr control" {
                   border: 1
                   borderColor: alpha(border, 0.7)
                   radius: 4 * corners
-                  onTap: terminal("ssh ${sh(remoteTarget)} -tt ~/.local/bin/herdr --session ${sh(s.name)} terminal attach ${sh(p.terminal)}", "herdr · ${s.name} · ${p.name}")
+                  onTap: terminal("ssh ${sh(remoteTarget)} -tt '~/.local/bin/herdr' --session ${sh(s.name)} terminal attach ${sh(p.terminal)}", "herdr · ${s.name} · ${p.name}")
                   Text { text: "•"; color: muted; width: 12 }
                   Column {
                     gap: 0
@@ -181,7 +181,7 @@ widget "herdr control" {
               border: showSessions ? 1 : 0
               borderColor: s.attention ? red : border
               radius: showSessions ? 8 * corners : 0
-              onTap: { if showSessions { terminal("ssh ${sh(remoteTarget)} -tt ~/.local/bin/herdr --session ${sh(s.name)}", "herdr · ${s.name}") } }
+              onTap: { if showSessions { terminal("ssh ${sh(remoteTarget)} -tt '~/.local/bin/herdr' --session ${sh(s.name)}", "herdr · ${s.name}") } }
               if showSessions {
               Row {
                 gap: 10
@@ -215,7 +215,7 @@ widget "herdr control" {
                     border: 1
                     borderColor: border
                     radius: 4 * corners
-                    onTap: terminal("ssh ${sh(remoteTarget)} -tt ~/.local/bin/herdr --session ${sh(s.name)} terminal attach ${sh(w.active_terminal)}", "herdr · ${s.name} · ${w.name}")
+                    onTap: terminal("ssh ${sh(remoteTarget)} -tt '~/.local/bin/herdr' --session ${sh(s.name)} terminal attach ${sh(w.active_terminal)}", "herdr · ${s.name} · ${w.name}")
                     Text { text: "↳"; color: accent; width: 18 }
                     Text { text: w.name; style: body; maxLines: 1; weight: 1 }
                     Text { text: "space"; style: label; color: muted; align: end }
@@ -230,7 +230,7 @@ widget "herdr control" {
                       border: 1
                       borderColor: alpha(border, 0.8)
                       radius: 4 * corners
-                      onTap: terminal("ssh ${sh(remoteTarget)} -tt ~/.local/bin/herdr --session ${sh(s.name)} terminal attach ${sh(p.terminal)}", "herdr · ${s.name} · ${p.name}")
+                      onTap: terminal("ssh ${sh(remoteTarget)} -tt '~/.local/bin/herdr' --session ${sh(s.name)} terminal attach ${sh(p.terminal)}", "herdr · ${s.name} · ${p.name}")
                       Text { text: "•"; color: muted; width: 18 }
                       Column {
                         gap: 0
