@@ -1,14 +1,12 @@
 widget "theme colors" {
   // By Svffer (https://github.com/Svffer), written together with Claude Opus 5.5, Anthropic's AI model. MIT license.
-  page: 3
-  order: 1
   size: 6x4
   minSize: 4x3
-  meta { description: "Sets the active Omarchy theme's colors from its palette or a color picker; English, Russian, Ukrainian and Belarusian (AI-translated)"; version: "1.3"; license: "MIT"; category: "system"; owl: 12 }
+  meta { description: "Sets the active Omarchy theme's colors from its palette or a color picker; English, Russian, Ukrainian and Belarusian (AI-translated)"; version: "1.4"; license: "MIT"; category: "system"; owl: 12 }
   requires { pacman: ["bash", "coreutils", "grep", "sed", "util-linux"] }
 
   // The active theme: `theme` in style.toml, else the one omarchy has applied.
-  // A user theme (~/.config/omarchy/themes) is edited in place; a stock one is copied there first, since user themes win.
+  // A user theme (~/.config/omarchy/themes) is edited in place; a stock one gets a copy there first, since user themes win.
   // Before the first edit the colors are saved to colors.orig.toml next to it: that is the palette to pick from, and what reset restores.
   // Output lines: "theme <name>", "orig 1", "c <key> <hex>" (in the theme now), "p <key> <hex>" (the palette).
   source theme = cmd("""
@@ -22,9 +20,9 @@ p=$d/colors.toml
 [ -f "$d/colors.orig.toml" ] && echo "orig 1" && p=$d/colors.orig.toml
 grep -E '^[a-z0-9_]+ *= *"#[0-9a-fA-F]{6}' "$d/colors.toml" | sed -E 's/^([a-z0-9_]+) *= *"(#[0-9a-fA-F]{6}).*/c \1 \2/'
 grep -E '^[a-z0-9_]+ *= *"#[0-9a-fA-F]{6}' "$p" | sed -E 's/^([a-z0-9_]+) *= *"(#[0-9a-fA-F]{6}).*/p \1 \2/'
-""") every 30s
+""") every 5m
   // Re-read the theme as soon as the launcher applies one (a theme switch on the phone, or a rebuild after an edit),
-  // instead of waiting for the next 30 s poll.
+  // instead of waiting for the next poll.
   source appliedName = file("~/.local/state/omarchy/current/theme.name")
   source appliedColors = file("~/.local/state/omarchy/current/theme/colors.toml")
   on appliedName { refresh() }
@@ -44,8 +42,9 @@ grep -E '^[a-z0-9_]+ *= *"#[0-9a-fA-F]{6}' "$p" | sed -E 's/^([a-z0-9_]+) *= *"(
   state cb = 214 persist
   // Applying a color, for reviewers:
   // 1. Writes color value.v to key value.k in the theme's colors.toml, one `key = "#rrggbb"` line, after checking both
-  //    against ^[a-z0-9_]+$ and ^#[0-9a-fA-F]{6}$. A stock theme is first copied to ~/.config/omarchy/themes, and the
-  //    original colors are kept in colors.orig.toml so reset can restore them.
+  //    against ^[a-z0-9_]+$ and ^#[0-9a-fA-F]{6}$. A stock theme first gets a copy in ~/.config/omarchy/themes (user themes
+  //    win): its own colors.toml, symlinks to the stock theme's other files, and a .theme-colors-copy marker. The original
+  //    colors are kept in colors.orig.toml so reset can restore them.
   // 2. Re-applies the theme. The launcher only rebuilds a theme when the `theme` name in style.toml changes; touching
   //    colors.toml or style.toml does nothing. So, detached with setsid (the tile refreshes as soon as the color is
   //    written), it makes a twin <theme>-reload (a copy of colors.toml, symlinks to the rest), points `theme` at it,
@@ -53,7 +52,7 @@ grep -E '^[a-z0-9_]+ *= *"#[0-9a-fA-F]{6}' "$p" | sed -E 's/^([a-z0-9_]+) *= *"(
   //    The twin looks the same as the theme, so nothing flickers, and style.toml ends as it was.
   // The script is written out here rather than kept in a let, so the store's review shows exactly what runs.
   state applyReq = null
-  on applyReq { run("k=${sh(value.k)}; v=${sh(value.v)}\nt=$(sed -n \"s/^theme *= *\\\"\\(.*\\)\\\"/\\1/p\" ~/.config/omalauncher/style/style.toml)\n[ -n \"$t\" ] || t=$(cat ~/.local/state/omarchy/current/theme.name)\nt=$(printf %s \"$t\" | sed \"s/-reload\\$//\")\nd=~/.config/omarchy/themes/$t\ns=~/.local/share/omarchy/themes/$t\nif [ ! -f \"$d/colors.toml\" ]; then mkdir -p \"$d\" && cp -r \"$s\"/. \"$d\"/ || exit 1; fi\nf=$d/colors.toml\nprintf %s \"$k\" | grep -qE \"^[a-z0-9_]+\\$\" || exit 1\nprintf %s \"$v\" | grep -qE \"^#[0-9a-fA-F]{6}\\$\" || exit 1\ngrep -qE \"^$k *= *\\\"#\" \"$f\" || exit 1\n[ -f \"$d/colors.orig.toml\" ] || cp \"$f\" \"$d/colors.orig.toml\"\nsed -i -E \"s/^($k *= *\\\")#[0-9a-fA-F]{6}/\\1$v/\" \"$f\"\nsetsid -f bash -c 't=$1; d=$2\nst=~/.config/omalauncher/style/style.toml\ncur=~/.local/state/omarchy/current/theme.name\ntw=~/.config/omarchy/themes/$t-reload\n[ -d \"$tw\" ] && { rm -f \"$tw\"/*; rmdir \"$tw\"; }\nmkdir \"$tw\" || exit 1\ncp \"$d/colors.toml\" \"$tw/colors.toml\" || exit 1\nfor x in \"$d\"/*; do case \"$x\" in */colors.toml|*/colors.orig.toml) ;; *) ln -s \"$x\" \"$tw/\" ;; esac; done\nhad=1; grep -q \"^theme *=\" \"$st\" || had=0\nif [ $had = 1 ]; then sed -i \"s/^theme *=.*/theme = \\\"$t-reload\\\"/\" \"$st\"; else sed -i \"1i theme = \\\"$t-reload\\\"\" \"$st\"; fi\nfor i in $(seq 40); do [ \"$(cat \"$cur\")\" = \"$t-reload\" ] && break; sleep 0.25; done\nsleep 0.5\nif [ $had = 1 ]; then sed -i \"s/^theme *=.*/theme = \\\"$t\\\"/\" \"$st\"; else sed -i \"/^theme *=/d\" \"$st\"; fi\nfor i in $(seq 40); do [ \"$(cat \"$cur\")\" = \"$t\" ] && break; sleep 0.25; done\nsleep 1; rm -f \"$tw\"/*; rmdir \"$tw\"' _ \"$t\" \"$d\" </dev/null >/dev/null 2>&1") }
+  on applyReq { run("k=${sh(value.k)}; v=${sh(value.v)}\nt=$(sed -n \"s/^theme *= *\\\"\\(.*\\)\\\"/\\1/p\" ~/.config/omalauncher/style/style.toml)\n[ -n \"$t\" ] || t=$(cat ~/.local/state/omarchy/current/theme.name)\nt=$(printf %s \"$t\" | sed \"s/-reload\\$//\")\nd=~/.config/omarchy/themes/$t\ns=~/.local/share/omarchy/themes/$t\nif [ ! -f \"$d/colors.toml\" ]; then\n[ -f \"$s/colors.toml\" ] || exit 1\nmkdir -p \"$d\" && cp \"$s/colors.toml\" \"$d/colors.toml\" || exit 1\nfor x in \"$s\"/*; do case \"$x\" in */colors.toml) ;; *) ln -s \"$x\" \"$d/\" ;; esac; done\n: > \"$d/.theme-colors-copy\"\nfi\nf=$d/colors.toml\nprintf %s \"$k\" | grep -qE \"^[a-z0-9_]+\\$\" || exit 1\nprintf %s \"$v\" | grep -qE \"^#[0-9a-fA-F]{6}\\$\" || exit 1\ngrep -qE \"^$k *= *\\\"#\" \"$f\" || exit 1\n[ -f \"$d/colors.orig.toml\" ] || cp \"$f\" \"$d/colors.orig.toml\"\nsed -i -E \"s/^($k *= *\\\")#[0-9a-fA-F]{6}/\\1$v/\" \"$f\"\nsetsid -f bash -c 't=$1; d=$2\nst=~/.config/omalauncher/style/style.toml\ncur=~/.local/state/omarchy/current/theme.name\ntw=~/.config/omarchy/themes/$t-reload\n[ -d \"$tw\" ] && { rm -f \"$tw\"/*; rmdir \"$tw\"; }\nmkdir \"$tw\" || exit 1\ncp \"$d/colors.toml\" \"$tw/colors.toml\" || exit 1\nfor x in \"$d\"/*; do case \"$x\" in */colors.toml|*/colors.orig.toml) ;; *) ln -s \"$x\" \"$tw/\" ;; esac; done\nhad=1; grep -q \"^theme *=\" \"$st\" || had=0\nif [ $had = 1 ]; then sed -i \"s/^theme *=.*/theme = \\\"$t-reload\\\"/\" \"$st\"; else sed -i \"1i theme = \\\"$t-reload\\\"\" \"$st\"; fi\nfor i in $(seq 40); do [ \"$(cat \"$cur\")\" = \"$t-reload\" ] && break; sleep 0.25; done\nsleep 0.5\nif [ $had = 1 ]; then sed -i \"s/^theme *=.*/theme = \\\"$t\\\"/\" \"$st\"; else sed -i \"/^theme *=/d\" \"$st\"; fi\nfor i in $(seq 40); do [ \"$(cat \"$cur\")\" = \"$t\" ] && break; sleep 0.25; done\nsleep 1; rm -f \"$tw\"/*; rmdir \"$tw\"' _ \"$t\" \"$d\" </dev/null >/dev/null 2>&1") }
   state hslReq = null
   // The last hue and saturation set: grays have no hue, and black and white have no saturation.
   state hueKeep = 0 persist
@@ -357,10 +356,12 @@ grep -E '^[a-z0-9_]+ *= *"#[0-9a-fA-F]{6}' "$p" | sed -E 's/^([a-z0-9_]+) *= *"(
       align: center
       Text { text: "${L.title} · ${name}"; style: label; weight: 1; maxLines: 1 }
       if hasOrig && picked == null {
-        // Reset: moves colors.orig.toml back over colors.toml, then re-applies the theme as described at applyReq.
+        // Reset: a copy this widget made (the marker, nothing of the user's added) is removed with rm -f and rmdir, so the
+        // stock theme and its later updates show again; otherwise colors.orig.toml moves back over colors.toml. Then it
+        // re-applies the theme as described at applyReq.
         Text {
           text: L.reset; style: small; color: muted
-          onTap: run("t=$(sed -n \"s/^theme *= *\\\"\\(.*\\)\\\"/\\1/p\" ~/.config/omalauncher/style/style.toml)\n[ -n \"$t\" ] || t=$(cat ~/.local/state/omarchy/current/theme.name)\nt=$(printf %s \"$t\" | sed \"s/-reload\\$//\")\nd=~/.config/omarchy/themes/$t\n[ -f \"$d/colors.orig.toml\" ] || exit 1\nmv -f \"$d/colors.orig.toml\" \"$d/colors.toml\"\nsetsid -f bash -c 't=$1; d=$2\nst=~/.config/omalauncher/style/style.toml\ncur=~/.local/state/omarchy/current/theme.name\ntw=~/.config/omarchy/themes/$t-reload\n[ -d \"$tw\" ] && { rm -f \"$tw\"/*; rmdir \"$tw\"; }\nmkdir \"$tw\" || exit 1\ncp \"$d/colors.toml\" \"$tw/colors.toml\" || exit 1\nfor x in \"$d\"/*; do case \"$x\" in */colors.toml|*/colors.orig.toml) ;; *) ln -s \"$x\" \"$tw/\" ;; esac; done\nhad=1; grep -q \"^theme *=\" \"$st\" || had=0\nif [ $had = 1 ]; then sed -i \"s/^theme *=.*/theme = \\\"$t-reload\\\"/\" \"$st\"; else sed -i \"1i theme = \\\"$t-reload\\\"\" \"$st\"; fi\nfor i in $(seq 40); do [ \"$(cat \"$cur\")\" = \"$t-reload\" ] && break; sleep 0.25; done\nsleep 0.5\nif [ $had = 1 ]; then sed -i \"s/^theme *=.*/theme = \\\"$t\\\"/\" \"$st\"; else sed -i \"/^theme *=/d\" \"$st\"; fi\nfor i in $(seq 40); do [ \"$(cat \"$cur\")\" = \"$t\" ] && break; sleep 0.25; done\nsleep 1; rm -f \"$tw\"/*; rmdir \"$tw\"' _ \"$t\" \"$d\" </dev/null >/dev/null 2>&1")
+          onTap: run("t=$(sed -n \"s/^theme *= *\\\"\\(.*\\)\\\"/\\1/p\" ~/.config/omalauncher/style/style.toml)\n[ -n \"$t\" ] || t=$(cat ~/.local/state/omarchy/current/theme.name)\nt=$(printf %s \"$t\" | sed \"s/-reload\\$//\")\nd=~/.config/omarchy/themes/$t\n[ -f \"$d/colors.orig.toml\" ] || exit 1\nown=0\nfor x in \"$d\"/* \"$d\"/.[!.]*; do\n[ -e \"$x\" ] || [ -L \"$x\" ] || continue\ncase \"$x\" in */colors.toml|*/colors.orig.toml|*/.theme-colors-copy) ;; *) [ -L \"$x\" ] || own=1 ;; esac\ndone\nif [ -f \"$d/.theme-colors-copy\" ] && [ $own = 0 ]; then\nfor x in \"$d\"/*; do [ -L \"$x\" ] && rm -f \"$x\"; done\nrm -f \"$d/colors.toml\" \"$d/colors.orig.toml\" \"$d/.theme-colors-copy\"\nrmdir \"$d\" || exit 1\nd=~/.local/share/omarchy/themes/$t\nelse\nmv -f \"$d/colors.orig.toml\" \"$d/colors.toml\"\nfi\nsetsid -f bash -c 't=$1; d=$2\nst=~/.config/omalauncher/style/style.toml\ncur=~/.local/state/omarchy/current/theme.name\ntw=~/.config/omarchy/themes/$t-reload\n[ -d \"$tw\" ] && { rm -f \"$tw\"/*; rmdir \"$tw\"; }\nmkdir \"$tw\" || exit 1\ncp \"$d/colors.toml\" \"$tw/colors.toml\" || exit 1\nfor x in \"$d\"/*; do case \"$x\" in */colors.toml|*/colors.orig.toml) ;; *) ln -s \"$x\" \"$tw/\" ;; esac; done\nhad=1; grep -q \"^theme *=\" \"$st\" || had=0\nif [ $had = 1 ]; then sed -i \"s/^theme *=.*/theme = \\\"$t-reload\\\"/\" \"$st\"; else sed -i \"1i theme = \\\"$t-reload\\\"\" \"$st\"; fi\nfor i in $(seq 40); do [ \"$(cat \"$cur\")\" = \"$t-reload\" ] && break; sleep 0.25; done\nsleep 0.5\nif [ $had = 1 ]; then sed -i \"s/^theme *=.*/theme = \\\"$t\\\"/\" \"$st\"; else sed -i \"/^theme *=/d\" \"$st\"; fi\nfor i in $(seq 40); do [ \"$(cat \"$cur\")\" = \"$t\" ] && break; sleep 0.25; done\nsleep 1; rm -f \"$tw\"/*; rmdir \"$tw\"' _ \"$t\" \"$d\" </dev/null >/dev/null 2>&1")
         }
       }
       // Refresh: re-reads the theme's colors now.
