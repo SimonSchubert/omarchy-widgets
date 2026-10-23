@@ -1,6 +1,6 @@
 face "Feed" {
   page: 0
-  meta { owl: 11; description: "A tailored news and developer feed with live NFL and NCAA football scores, Google News, Hacker News and rising GitHub repositories"; version: "1.0"; license: "MIT"; category: "news" }
+  meta { owl: 13; description: "A tailored news and developer feed with live NFL and NCAA football scores, Google News, Hacker News and rising GitHub repositories"; version: "1.0"; license: "MIT"; category: "news" }
   requires { pacman: ["python"] }
 
   statusBar: true
@@ -109,11 +109,8 @@ face "Feed" {
       Box {
         height: 132
         clip: true
-        onDrag: {
-          if abs(dx) > abs(dy) {
-            scoreOffset = clamp(scoreOffset - dx, 0, scoreMaxOffset)
-          }
-        }
+        drag: horizontal
+        onDrag: scoreOffset = clamp(scoreOffset - dx, 0, scoreMaxOffset)
         Canvas {
           fill: true
           let offset = clamp(scoreOffset, 0, scoreMaxOffset)
