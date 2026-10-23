@@ -1,0 +1,930 @@
+widget "pelosi trades" {
+  page: 1
+  order: 6
+  size: 6x6
+  minSize: 4x4
+  padding: 10
+  meta {
+    description: "Nancy Pelosi congressional stock trades with live P&L, win rate, forecast and charts"
+    version: "1.0"
+    license: "MIT"
+    category: "finance"
+    owl: 5
+  }
+  requires { pacman: ["python"] }
+
+  source data = cmd("""
+python3 - <<'PY'
+import json, os, re, time, urllib.request, urllib.error
+from collections import defaultdict
+from pathlib import Path
+
+CACHE = Path.home() / ".cache" / "omalauncher-pelosi-trades.json"
+CACHE.parent.mkdir(parents=True, exist_ok=True)
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+QQ = "https://www.quiverquant.com/congresstrading/politician/Nancy%20Pelosi-P000197"
+
+def get(url, timeout=22, accept="*/*"):
+    last = None
+    for i in range(3):
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": UA,
+                "Accept": accept,
+                "Accept-Language": "en-US,en;q=0.9",
+            })
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except Exception as e:
+            last = e
+            time.sleep(0.4 + i)
+    raise last if last else RuntimeError("fetch failed")
+
+def fnum(s):
+    if s is None:
+        return None
+    try:
+        return float(str(s).replace(",", "").replace("%", "").replace("+", "").strip())
+    except Exception:
+        return None
+
+def load_cache(max_age=None):
+    try:
+        if not CACHE.exists():
+            return None
+        age = time.time() - CACHE.stat().st_mtime
+        if max_age is not None and age > max_age:
+            return None
+        d = json.loads(CACHE.read_text())
+        if d.get("recent"):
+            return d
+    except Exception:
+        pass
+    return None
+
+def save_cache(d):
+    try:
+        CACHE.write_text(json.dumps(d))
+    except Exception:
+        pass
+
+def parse_trades(html):
+    m = re.search(r"let tradeData\s*=\s*(\[\[.*?\]\]);", html, re.S)
+    if not m:
+        raise RuntimeError("no tradeData")
+    data = json.loads(m.group(1).replace("NaN", "null"))
+    vol_m = re.search(r"let tradeVolTotal\s*=\s*([0-9.]+)", html)
+    vol = float(vol_m.group(1)) if vol_m else 0.0
+    trades = []
+    for r in data:
+        tkr = r[0]
+        side = r[1] or ""
+        ret = r[5]
+        est = r[14]
+        try:
+            ret = round(float(ret), 2) if ret is not None else None
+        except Exception:
+            ret = None
+        try:
+            est = float(est) if est is not None else None
+        except Exception:
+            est = None
+        sl = side.lower()
+        trades.append({
+            "t": tkr if tkr else "—",
+            "side": side,
+            "buy": sl.startswith("pur"),
+            "sell": "sale" in sl or sl.startswith("sal"),
+            "filed": (r[2] or "")[:10],
+            "date": (r[3] or "")[:10],
+            "desc": ((r[4] or "")[:72] if r[4] else ""),
+            "ret": ret,
+            "name": ((r[8] or tkr or "—")[:30]),
+            "type": r[9] or "",
+            "rng": r[10] or "",
+            "sec": r[13] or "",
+            "usd": est,
+            "up": ret is not None and ret >= 0,
+        })
+    return trades, vol
+
+def quotes(syms):
+    if not syms:
+        return {}
+    joined = "|".join(syms[:12])
+    url = (
+        "https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol"
+        f"?symbols={joined}&requestMethod=itv&noform=1&partnerId=2&fund=1&exthdr=1&output=json"
+    )
+    raw = get(url, accept="application/json").decode("utf-8", "replace")
+    if raw.startswith("//"):
+        raw = raw[2:]
+    m = re.match(r"^[^(]*\((.*)\)\s*;?\s*$", raw, re.S)
+    if m:
+        raw = m.group(1)
+    data = json.loads(raw)
+    qs = data.get("FormattedQuoteResult", {}).get("FormattedQuote", [])
+    if isinstance(qs, dict):
+        qs = [qs]
+    out = {}
+    for q in qs:
+        sym = q.get("symbol") or ""
+        last = fnum(q.get("last"))
+        pct = fnum(q.get("change_pct"))
+        chg = fnum(q.get("change"))
+        if last is None:
+            continue
+        out[sym] = {
+            "px": round(last, 2),
+            "pct": round(pct, 2) if pct is not None else None,
+            "chg": round(chg, 2) if chg is not None else None,
+            "up": (pct is not None and pct >= 0) or (chg is not None and chg >= 0),
+        }
+    return out
+
+def spark(sym, span="3M"):
+    try:
+        raw = get(
+            f"https://ts-api.cnbc.com/harmony/app/charts/{span}.json?symbol={sym}",
+            accept="application/json",
+        )
+        d = json.loads(raw)
+        bars = (d.get("barData") or {}).get("priceBars") or []
+        closes = []
+        for b in bars:
+            c = fnum(b.get("close"))
+            if c is not None:
+                closes.append(round(c, 2))
+        if len(closes) > 42:
+            step = max(1, len(closes) // 42)
+            closes = closes[::step][:42]
+        return closes
+    except Exception:
+        return []
+
+def money(n):
+    if n is None:
+        return None
+    a = abs(n)
+    if a >= 1e9:
+        return round(n / 1e9, 2)
+    if a >= 1e6:
+        return round(n / 1e6, 2)
+    if a >= 1e3:
+        return round(n / 1e3, 1)
+    return round(n, 0)
+
+def money_u(n):
+    if n is None:
+        return ""
+    a = abs(n)
+    if a >= 1e9:
+        return "B"
+    if a >= 1e6:
+        return "M"
+    if a >= 1e3:
+        return "K"
+    return ""
+
+def build():
+    html = get(QQ).decode("utf-8", "replace")
+    trades, vol = parse_trades(html)
+
+    eq = [t for t in trades if t["t"] != "—" and t["ret"] is not None]
+    rets = [t["ret"] for t in eq]
+    wins = sum(1 for r in rets if r >= 0)
+    avg = round(sum(rets) / len(rets), 2) if rets else None
+    wsum = wret = 0.0
+    for t in eq:
+        if t["usd"] and t["ret"] is not None:
+            wsum += t["usd"]
+            wret += t["usd"] * t["ret"]
+    wavg = round(wret / wsum, 2) if wsum else avg
+
+    buys = [t for t in eq if t["buy"]]
+    pnl = 0.0
+    for t in buys:
+        if t["usd"] and t["ret"] is not None:
+            pnl += t["usd"] * t["ret"] / 100.0
+    pnl = round(pnl)
+
+    recent_cut = "2025-01-01"
+    yr_eq = [t for t in eq if t["date"] and t["date"] >= recent_cut]
+    yr_avg = round(sum(t["ret"] for t in yr_eq) / len(yr_eq), 2) if yr_eq else None
+    yr_pnl = round(sum(
+        t["usd"] * t["ret"] / 100.0
+        for t in yr_eq if t["buy"] and t["usd"] and t["ret"] is not None
+    ))
+
+    hold = defaultdict(lambda: {"usd": 0.0, "rets": [], "n": 0, "name": "", "sec": "", "buys": 0, "sells": 0})
+    for t in trades:
+        if t["t"] == "—":
+            continue
+        if t["type"] not in ("Stock", "Options", "-", "Call Option", "Put Option", "Stock Option"):
+            if t["ret"] is None:
+                continue
+        h = hold[t["t"]]
+        h["name"] = t["name"]
+        h["sec"] = t["sec"]
+        if t["buy"]:
+            h["usd"] += t["usd"] or 0
+            h["buys"] += 1
+            h["n"] += 1
+            if t["ret"] is not None:
+                h["rets"].append(t["ret"])
+        elif t["sell"]:
+            h["sells"] += 1
+
+    holdings = []
+    for tkr, h in hold.items():
+        if h["buys"] == 0 and h["usd"] == 0:
+            continue
+        avg_r = round(sum(h["rets"]) / len(h["rets"]), 2) if h["rets"] else None
+        holdings.append({
+            "t": tkr,
+            "name": (h["name"] or tkr)[:22],
+            "usd": h["usd"],
+            "n": h["n"],
+            "ret": avg_r,
+            "up": avg_r is not None and avg_r >= 0,
+            "pnl": round(h["usd"] * (avg_r or 0) / 100) if avg_r is not None else None,
+            "sec": h["sec"] or "",
+            "buys": h["buys"],
+            "sells": h["sells"],
+        })
+    holdings.sort(key=lambda x: -x["usd"])
+    top = holdings[:10]
+
+    # monthly cumulative avg-return path
+    months = defaultdict(list)
+    for t in eq:
+        if t["date"]:
+            months[t["date"][:7]].append(t["ret"])
+    keys = sorted(months.keys())[-18:]
+    cum = 0.0
+    chart = []
+    for k in keys:
+        rs = months[k]
+        if rs:
+            cum += sum(rs) / len(rs)
+        chart.append(round(cum, 1))
+
+    # forecast: half of recent avg return as 90d projection on weighted book
+    r_src = [t["ret"] for t in yr_eq] or rets
+    ravg = (sum(r_src) / len(r_src)) if r_src else 0.0
+    f90 = round(ravg / 2.0, 2)
+    f_pnl = round((wsum or 0) * f90 / 100.0) if wsum else None
+
+    # live quotes + sparks
+    qmap = {}
+    try:
+        qmap = quotes([h["t"] for h in top[:8]])
+    except Exception:
+        qmap = {}
+
+    p_sparks = []
+    for h in top[:8]:
+        q = qmap.get(h["t"]) or {}
+        h["px"] = q.get("px")
+        h["dpct"] = q.get("pct")
+        h["dup"] = q.get("up", True)
+        h["mu"] = money(h["usd"])
+        h["mu_u"] = money_u(h["usd"])
+        h["pnl_m"] = money(h["pnl"])
+        h["pnl_u"] = money_u(h["pnl"])
+        try:
+            sp = spark(h["t"], "3M")
+        except Exception:
+            sp = []
+        h["spark"] = sp
+        if len(sp) > 5:
+            p_sparks.append(sp)
+
+    pchart = []
+    if p_sparks:
+        n = min(len(s) for s in p_sparks)
+        norms = []
+        for s in p_sparks:
+            s = s[-n:]
+            base = s[0] or 1.0
+            norms.append([100.0 * x / base for x in s])
+        pchart = [
+            round(sum(norms[j][i] for j in range(len(norms))) / len(norms), 2)
+            for i in range(n)
+        ]
+
+    # day pulse across her book
+    day_pcts = [h["dpct"] for h in top if h.get("dpct") is not None]
+    day = round(sum(day_pcts) / len(day_pcts), 2) if day_pcts else None
+
+    recent = []
+    for t in trades:
+        if t["t"] == "—":
+            continue
+        recent.append({
+            "t": t["t"],
+            "side": "BUY" if t["buy"] else ("SELL" if t["sell"] else t["side"][:4].upper()),
+            "buy": t["buy"],
+            "date": t["date"],
+            "filed": t["filed"],
+            "ret": t["ret"],
+            "up": t["up"],
+            "name": t["name"],
+            "type": t["type"],
+            "rng": t["rng"],
+            "usd": t["usd"],
+            "mu": money(t["usd"]),
+            "mu_u": money_u(t["usd"]),
+            "sec": t["sec"],
+        })
+        if len(recent) >= 24:
+            break
+
+    all_trades = []
+    for t in trades:
+        if t["t"] == "—":
+            continue
+        all_trades.append({
+            "t": t["t"],
+            "side": "BUY" if t["buy"] else ("SELL" if t["sell"] else t["side"][:4].upper()),
+            "buy": t["buy"],
+            "date": t["date"],
+            "ret": t["ret"],
+            "up": t["up"],
+            "name": t["name"],
+            "type": t["type"],
+            "rng": t["rng"],
+            "mu": money(t["usd"]),
+            "mu_u": money_u(t["usd"]),
+        })
+        if len(all_trades) >= 60:
+            break
+
+    buys_n = sum(1 for t in trades if t["buy"])
+    sells_n = sum(1 for t in trades if t["sell"])
+
+    return {
+        "at": int(time.time()),
+        "who": "Nancy Pelosi",
+        "party": "D",
+        "vol": vol,
+        "vol_m": money(vol),
+        "vol_u": money_u(vol),
+        "n": len(trades),
+        "buys_n": buys_n,
+        "sells_n": sells_n,
+        "wins": wins,
+        "win_pct": round(100.0 * wins / len(rets), 1) if rets else None,
+        "avg": avg,
+        "wavg": wavg,
+        "pnl": pnl,
+        "pnl_m": money(pnl),
+        "pnl_u": money_u(pnl),
+        "pnl_up": pnl >= 0,
+        "yr_avg": yr_avg,
+        "yr_pnl": yr_pnl,
+        "yr_pnl_m": money(yr_pnl),
+        "yr_pnl_u": money_u(yr_pnl),
+        "yr_up": (yr_pnl or 0) >= 0,
+        "f90": f90,
+        "f_pnl": f_pnl,
+        "f_pnl_m": money(f_pnl),
+        "f_pnl_u": money_u(f_pnl),
+        "f_up": (f90 or 0) >= 0,
+        "day": day,
+        "day_up": day is None or day >= 0,
+        "chart": chart,
+        "pchart": pchart,
+        "holdings": top,
+        "recent": recent,
+        "trades": all_trades,
+        "src": "quiver",
+        "err": "",
+    }
+
+# Prefer fresh cache (<25m) so slow network never blanks the tile.
+fresh = load_cache(max_age=25 * 60)
+if fresh and not os.environ.get("PELOSI_FORCE"):
+    fresh = dict(fresh)
+    fresh["err"] = fresh.get("err") or ""
+    print(json.dumps(fresh))
+else:
+    try:
+        out = build()
+        save_cache(out)
+    except Exception as e:
+        cached = load_cache(max_age=None)  # any age on failure
+        if cached:
+            cached = dict(cached)
+            cached["err"] = str(e)[:80] or "cached"
+            out = cached
+        else:
+            out = {
+                "at": int(time.time()),
+                "who": "Nancy Pelosi",
+                "err": str(e)[:100],
+                "holdings": [],
+                "recent": [],
+                "trades": [],
+                "chart": [],
+                "pchart": [],
+                "vol_m": None,
+                "pnl_m": None,
+                "win_pct": None,
+                "wavg": None,
+                "f90": None,
+                "day": None,
+                "n": 0,
+                "buys_n": 0,
+                "sells_n": 0,
+                "pnl_up": True,
+                "yr_up": True,
+                "f_up": True,
+                "day_up": True,
+            }
+    print(json.dumps(out))
+PY
+""") every 15m json timeout 90s
+
+  source now = clock every 60s
+
+  let holdings = data.holdings ?? []
+  let recent = data.recent ?? []
+  let trades = data.trades ?? []
+  let chart = data.pchart ?? []
+  let path = data.chart ?? []
+  let use_chart = len(chart) > 3 ? chart : path
+  let lo = len(use_chart) > 0 ? min(use_chart) : null
+  let hi = len(use_chart) > 0 ? max(use_chart) : null
+  let age = data == null || data.at == null ? null : now - data.at
+  let book_up = data.day_up != false
+  let pnl_up = data.pnl_up != false
+  let f_up = data.f_up != false
+  state tab = "activity"
+
+  component Gavel() {
+    Canvas {
+      width: 28
+      height: 28
+      circle(14, 14, 13, fill: mix(accent, blue, 0.35))
+      circle(14, 14, 13, stroke: accent, width: 1.4)
+      rect(8, 11, 12, 3.5, radius: 1, fill: foreground)
+      rect(12.5, 14, 3, 8, fill: foreground)
+      rect(9, 21, 10, 2.2, radius: 1, fill: muted)
+    }
+  }
+
+  component StatPill(label, value, tint = foreground) {
+    Column {
+      gap: 0
+      align: center
+      weight: 1
+      background: alpha(surface, 0.65)
+      radius: 8
+      padding: [6, 6]
+      Text { text: label; style: label; color: muted; align: center; maxLines: 1 }
+      Text { text: value; style: small; bold: true; color: tint; align: center; maxLines: 1; font: mono }
+    }
+  }
+
+  component TradeRow(t) {
+    Row {
+      gap: 6
+      align: center
+      Box {
+        width: 40; height: 18; radius: 4
+        background: alpha(t.buy ? green : red, 0.18)
+        align: center
+        Text {
+          text: t.side
+          fontSize: 10; bold: true; align: center
+          color: t.buy ? green : red; maxLines: 1
+        }
+      }
+      Text { text: t.t; style: small; bold: true; color: accent; width: 52; maxLines: 1; font: mono }
+      Text {
+        text: t.date != "" ? sub(t.date, 5, 10) : "—"
+        style: small; color: muted; width: 40; maxLines: 1; font: mono
+      }
+      Text {
+        text: t.mu == null ? t.rng : "$${t.mu}${t.mu_u}"
+        style: small; color: foreground; weight: 1; maxLines: 1; font: mono
+      }
+      Text {
+        text: t.ret == null ? "—" : "${t.up ? "+" : ""}${fixed(t.ret, 1)}%"
+        style: small; bold: true; width: 62; align: end; maxLines: 1; font: mono
+        color: t.ret == null ? muted : (t.up ? green : red)
+      }
+    }
+  }
+
+  component HoldRow(h) {
+    Row {
+      gap: 6
+      align: center
+      Text { text: h.t; style: small; bold: true; color: accent; width: 52; maxLines: 1; font: mono }
+      Text { text: h.name; style: small; color: muted; weight: 1; maxLines: 1 }
+      Text {
+        text: h.px == null ? "—" : "$${fixed(h.px, 2)}"
+        style: small; bold: true; width: 68; align: end; maxLines: 1; font: mono
+      }
+      Box {
+        width: 58; height: 18; radius: 4
+        background: alpha(h.dup ? green : red, 0.16)
+        align: center
+        Text {
+          text: h.dpct == null ? "—" : "${h.dup ? "▲" : "▼"}${fixed(abs(h.dpct), 1)}%"
+          fontSize: 11; bold: true; color: h.dup ? green : red; align: center; maxLines: 1
+        }
+      }
+      Text {
+        text: h.ret == null ? "—" : "${h.up ? "+" : ""}${fixed(h.ret, 0)}%"
+        style: small; bold: true; width: 52; align: end; maxLines: 1; font: mono
+        color: h.ret == null ? muted : (h.up ? green : red)
+      }
+    }
+  }
+
+  Column {
+    gap: 5
+
+    Row {
+      gap: 8
+      align: center
+      Gavel { }
+      Column {
+        gap: 0
+        weight: 1
+        Text { text: "pelosi trades"; style: label; color: accent; maxLines: 1 }
+        Text {
+          text: data == null ? "loading disclosure feed…" : "House · D · ${data.n} filings · $${data.vol_m}${data.vol_u} vol"
+          style: small; color: muted; maxLines: 1
+        }
+      }
+      if age != null {
+        Text {
+          text: age < 120 ? "live" : age < 3600 ? "${floor(age / 60)}m" : "${floor(age / 3600)}h"
+          style: small; color: age < 900 ? green : muted; width: 36; align: end
+        }
+      }
+    }
+
+    Row {
+      gap: 6
+      StatPill {
+        label: "est. P&L"
+        value: data.pnl_m == null ? "…" : "${pnl_up ? "+" : "−"}$${abs(data.pnl_m)}${data.pnl_u}"
+        tint: pnl_up ? green : red
+      }
+      StatPill {
+        label: "win rate"
+        value: data.win_pct == null ? "…" : "${fixed(data.win_pct, 0)}%"
+        tint: (data.win_pct ?? 0) >= 50 ? green : orange
+      }
+      StatPill {
+        label: "wtd ret"
+        value: data.wavg == null ? "…" : "${data.wavg >= 0 ? "+" : ""}${fixed(data.wavg, 0)}%"
+        tint: (data.wavg ?? 0) >= 0 ? green : red
+      }
+      StatPill {
+        label: "90d fcst"
+        value: data.f90 == null ? "…" : "${f_up ? "+" : ""}${fixed(data.f90, 1)}%"
+        tint: f_up ? green : red
+      }
+    }
+
+    if len(use_chart) > 2 {
+      Column {
+        gap: 2
+        Row {
+          align: center
+          Text {
+            text: len(chart) > 3 ? "book · 3M pulse" : "trade path · cumulative %"
+            style: label; color: muted; maxLines: 1; weight: 1
+          }
+          Text {
+            text: data.day == null ? "" : "day ${book_up ? "+" : ""}${fixed(data.day, 2)}%"
+            style: small; bold: true; color: book_up ? green : red; maxLines: 1; font: mono; width: 88; align: end
+          }
+        }
+        Sparkline {
+          values: use_chart; min: lo; max: hi
+          color: book_up ? green : red
+          area: true; thickness: 2; fill: width; height: 48
+        }
+      }
+    }
+
+    Row {
+      gap: 6
+      align: center
+      Text { text: "recent activity"; style: label; color: yellow; maxLines: 1; weight: 1 }
+      Text {
+        text: data == null ? "" : "${data.buys_n}B · ${data.sells_n}S"
+        style: small; color: muted; maxLines: 1; font: mono; width: 72; align: end
+      }
+    }
+
+    Column {
+      gap: 3
+      weight: 1
+      if data == null {
+        Text { text: "fetching house disclosures…"; style: small; color: muted }
+      } else if data.err != "" && len(recent) == 0 {
+        Text { text: "offline · ${data.err}"; style: small; color: red; onTap: refresh() }
+      }
+      for t in take(recent, 6) key "${t.t}-${t.date}-${t.side}-${t.rng}" {
+        TradeRow { t: t }
+      }
+    }
+  }
+
+  onTap: screen()
+
+  screen {
+    title: "pelosi trades"
+    Column {
+      gap: 10
+      padding: 4
+
+      Row {
+        gap: 10
+        align: center
+        Gavel { }
+        Column {
+          gap: 2
+          weight: 1
+          Text { text: "Nancy Pelosi · House"; style: title; color: accent; maxLines: 1 }
+          Text {
+            text: data.pnl_m == null ? "disclosure tracker" : "est. P&L ${pnl_up ? "+" : "−"}$${abs(data.pnl_m)}${data.pnl_u} · win ${data.win_pct}%"
+            style: small; color: pnl_up ? green : red; maxLines: 1
+          }
+        }
+      }
+
+      Row {
+        gap: 6
+        Box {
+          weight: 1; radius: 8; padding: 8
+          background: alpha(green, 0.1)
+          Column {
+            gap: 2
+            Text { text: "YTD P&L"; style: label; color: muted }
+            Text {
+              text: data.yr_pnl_m == null ? "…" : "${data.yr_up ? "+" : "−"}$${abs(data.yr_pnl_m)}${data.yr_pnl_u}"
+              style: title; color: data.yr_up ? green : red; maxLines: 1; font: mono
+            }
+            Text {
+              text: data.yr_avg == null ? "" : "avg ${data.yr_avg >= 0 ? "+" : ""}${fixed(data.yr_avg, 1)}%"
+              style: small; color: muted; maxLines: 1
+            }
+          }
+        }
+        Box {
+          weight: 1; radius: 8; padding: 8
+          background: alpha(accent, 0.1)
+          Column {
+            gap: 2
+            Text { text: "90-day forecast"; style: label; color: muted }
+            Text {
+              text: data.f90 == null ? "…" : "${f_up ? "+" : ""}${fixed(data.f90, 1)}%"
+              style: title; color: f_up ? green : red; maxLines: 1; font: mono
+            }
+            Text {
+              text: data.f_pnl_m == null ? "on recent book" : "~ $${data.f_pnl_m}${data.f_pnl_u} if trend holds"
+              style: small; color: muted; maxLines: 1
+            }
+          }
+        }
+      }
+
+      if len(use_chart) > 2 {
+        Column {
+          gap: 4
+          fill: width
+          Text {
+            text: len(chart) > 3 ? "holdings pulse · 3 months" : "cumulative trade return path"
+            style: label; color: muted; maxLines: 1
+          }
+          Sparkline {
+            values: use_chart; min: lo; max: hi
+            color: book_up ? green : red
+            area: true; thickness: 2.5; fill: width; height: 88
+          }
+          Row {
+            align: center
+            fill: width
+            Text { text: "vol $${data.vol_m}${data.vol_u}"; style: small; color: muted; maxLines: 1; weight: 1 }
+            Text {
+              text: data.day == null ? "" : "today ${book_up ? "+" : ""}${fixed(data.day, 2)}%"
+              style: small; bold: true; color: book_up ? green : red; font: mono; maxLines: 1; width: 100; align: end
+            }
+          }
+        }
+      }
+
+      Row {
+        gap: 8
+        Button {
+          text: "activity"
+          color: tab == "activity" ? accent : muted
+          onTap: tab = "activity"
+        }
+        Button {
+          text: "book"
+          color: tab == "book" ? accent : muted
+          onTap: tab = "book"
+        }
+        Button {
+          text: "forecast"
+          color: tab == "forecast" ? accent : muted
+          onTap: tab = "forecast"
+        }
+        Spacer { weight: 1 }
+        Button { text: "refresh"; onTap: refresh() }
+      }
+
+      Column {
+        gap: 6
+        weight: 1
+        scroll: true
+
+        if tab == "activity" {
+          Text { text: "recent filings"; style: label; color: yellow }
+          for t in take(trades, 40) key "${t.t}-${t.date}-${t.side}-${t.rng}-${t.type}" {
+            Column {
+              gap: 2
+              padding: [0, 6]
+              background: alpha(t.buy ? green : red, 0.05)
+              radius: 6
+              Row {
+                gap: 8
+                align: center
+                Box {
+                  width: 44; height: 20; radius: 4
+                  background: alpha(t.buy ? green : red, 0.2)
+                  align: center
+                  Text { text: t.side; fontSize: 11; bold: true; color: t.buy ? green : red; align: center }
+                }
+                Text { text: t.t; bold: true; color: accent; width: 56; font: mono }
+                Text { text: t.name; weight: 1; color: muted; maxLines: 1 }
+                Text {
+                  text: t.ret == null ? "—" : "${t.up ? "+" : ""}${fixed(t.ret, 1)}%"
+                  bold: true; width: 70; align: end; font: mono
+                  color: t.ret == null ? muted : (t.up ? green : red)
+                }
+              }
+              Row {
+                gap: 8
+                Text { text: t.date; style: small; color: muted; width: 88; font: mono }
+                Text { text: t.type; style: small; color: muted; width: 72; maxLines: 1 }
+                Text {
+                  text: t.mu == null ? t.rng : "$${t.mu}${t.mu_u}"
+                  style: small; color: foreground; weight: 1; maxLines: 1; font: mono
+                }
+              }
+              onTap: url("https://www.quiverquant.com/congresstrading/stock/${t.t}")
+            }
+          }
+        }
+
+        if tab == "book" {
+          Text { text: "top purchase book"; style: label; color: yellow }
+          for h in holdings key h.t {
+            Column {
+              gap: 3
+              padding: [0, 8]
+              background: alpha(h.up ? green : red, 0.06)
+              radius: 8
+              Row {
+                gap: 8
+                align: center
+                Text { text: h.t; bold: true; color: accent; width: 56; font: mono }
+                Text { text: h.name; weight: 1; color: muted; maxLines: 1 }
+                Text {
+                  text: h.px == null ? "—" : "$${fixed(h.px, 2)}"
+                  bold: true; width: 78; align: end; font: mono
+                }
+              }
+              Row {
+                gap: 8
+                align: center
+                Text {
+                  text: "size $${h.mu}${h.mu_u}"
+                  style: small; color: foreground; weight: 1; font: mono
+                }
+                Text {
+                  text: h.dpct == null ? "day —" : "day ${h.dup ? "+" : ""}${fixed(h.dpct, 2)}%"
+                  style: small; color: h.dup ? green : red; width: 90; align: end; font: mono
+                }
+                Text {
+                  text: h.ret == null ? "ret —" : "ret ${h.up ? "+" : ""}${fixed(h.ret, 1)}%"
+                  style: small; bold: true; color: h.up ? green : red; width: 88; align: end; font: mono
+                }
+              }
+              if len(h.spark) > 3 {
+                let slo = min(h.spark)
+                let shi = max(h.spark)
+                Sparkline {
+                  values: h.spark; min: slo; max: shi
+                  color: h.dup ? green : red
+                  area: true; thickness: 1.5; fill: width; height: 28
+                }
+              }
+              onTap: url("https://www.cnbc.com/quotes/${h.t}")
+            }
+          }
+        }
+
+        if tab == "forecast" {
+          Text { text: "gains · losses · outlook"; style: label; color: yellow }
+          Box {
+            radius: 10; padding: 12
+            background: alpha(surface, 0.8)
+            Column {
+              gap: 8
+              Text { text: "model"; style: label; color: muted }
+              Text {
+                text: "Weighted return on disclosed buys since 2014, with a 90-day outlook = half of the recent average trade return (not advice)."
+                style: small; color: foreground; maxLines: 5
+              }
+              Row {
+                gap: 8
+                Column {
+                  gap: 2; weight: 1
+                  Text { text: "lifetime est."; style: label; color: muted }
+                  Text {
+                    text: data.pnl_m == null ? "…" : "${pnl_up ? "+" : "−"}$${abs(data.pnl_m)}${data.pnl_u}"
+                    style: title; color: pnl_up ? green : red; font: mono
+                  }
+                }
+                Column {
+                  gap: 2; weight: 1
+                  Text { text: "win / lose"; style: label; color: muted }
+                  Text {
+                    text: data.win_pct == null ? "…" : "${data.wins}W · ${fixed(data.win_pct, 0)}%"
+                    style: title; color: (data.win_pct ?? 0) >= 50 ? green : orange; font: mono
+                  }
+                }
+              }
+              Row {
+                gap: 8
+                Column {
+                  gap: 2; weight: 1
+                  Text { text: "wtd return"; style: label; color: muted }
+                  Text {
+                    text: data.wavg == null ? "…" : "${data.wavg >= 0 ? "+" : ""}${fixed(data.wavg, 1)}%"
+                    style: title; color: (data.wavg ?? 0) >= 0 ? green : red; font: mono
+                  }
+                }
+                Column {
+                  gap: 2; weight: 1
+                  Text { text: "90d $ fcst"; style: label; color: muted }
+                  Text {
+                    text: data.f_pnl_m == null ? "…" : "${f_up ? "+" : "−"}$${abs(data.f_pnl_m)}${data.f_pnl_u}"
+                    style: title; color: f_up ? green : red; font: mono
+                  }
+                }
+              }
+            }
+          }
+
+          Text { text: "book contributors"; style: label; color: muted }
+          for h in take(holdings, 8) key "f-${h.t}" {
+            Row {
+              gap: 8
+              align: center
+              padding: [0, 4]
+              Text { text: h.t; bold: true; color: accent; width: 56; font: mono }
+              Progress {
+                value: h.ret == null ? 0 : clamp(abs(h.ret), 0, 200)
+                max: 200
+                color: h.up ? green : red
+                track: alpha(border, 0.5)
+                weight: 1; height: 8
+              }
+              Text {
+                text: h.pnl_m == null ? "—" : "${h.up ? "+" : "−"}$${abs(h.pnl_m)}${h.pnl_u}"
+                bold: true; width: 78; align: end; font: mono
+                color: h.up ? green : red
+              }
+            }
+          }
+
+          Text {
+            text: "Amounts are STOCK Act ranges (midpoints). Returns from public trade trackers. Not investment advice."
+            style: small; color: muted; maxLines: 4
+          }
+        }
+      }
+
+      Row {
+        gap: 8
+        Button { text: "quiver"; onTap: url("https://www.quiverquant.com/congresstrading/politician/Nancy%20Pelosi-P000197") }
+        Button { text: "house"; onTap: url("https://disclosures-clerk.house.gov/PublicDisclosure/FinancialDisclosure") }
+        Spacer { weight: 1 }
+        Button { text: "close"; color: muted; onTap: close() }
+      }
+    }
+  }
+}

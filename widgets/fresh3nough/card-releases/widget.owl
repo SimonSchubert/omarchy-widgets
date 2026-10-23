@@ -1,0 +1,208 @@
+widget "card-releases" {
+  size: 6x2
+  minSize: 3x2
+  meta {
+    description: "Countdown timers for upcoming Pokémon TCG and Magic: The Gathering card releases";
+    version: "1.5";
+    license: "MIT";
+    category: "games";
+    owl: 10
+  }
+
+  source now = clock every 1s
+
+  let pokemonReleases = [
+    { id: "p1", name: "Delta Reign", date: 1793941200 }
+  ]
+
+  let mtgReleases = [
+    { id: "m1", name: "Star Trek", date: 1794546000 },
+    { id: "m2", name: "Nauctis: The Sunken Realm", date: 1801803600 },
+    { id: "m3", name: "Marvel: Darkhold Destiny", date: 1807243200 }
+  ]
+
+  let pokeUp = pokemonReleases.filter(r => r.date > now - 86400).sortBy(r => r.date)
+  let mtgUp = mtgReleases.filter(r => r.date > now - 86400).sortBy(r => r.date)
+  let nextPoke = pokeUp.first()
+  let nextMtg = mtgUp.first()
+
+  let h = rows ?? 4
+  let short = h <= 2
+  let mid = h == 3
+  let tall = h >= 4
+  let fs = short ? 9 : mid ? 11 : null
+  let dayW = short ? 28 : mid ? 36 : 44
+  let pad = short ? 4 : mid ? 6 : 10
+  let g = short ? 2 : mid ? 3 : 6
+  let showN = short ? 4 : mid ? 3 : 2
+
+  component Day(secs, hi = false) {
+    let d = floor(secs / 86400)
+    let label = secs <= 0 ? "out" : d == 0 ? "today" : tall && hi ? (d == 1 ? "1 day" : "${d} days") : "${d}d"
+    let col = secs <= 0 ? green : secs < 86400 * 14 ? #ffd700 : #7fc8f8
+    if tall && hi {
+      Text { text: label; style: title; font: mono; bold: true; color: col }
+    }
+    if !(tall && hi) {
+      Text {
+        text: label
+        style: small
+        font: mono
+        bold: true
+        color: col
+        width: dayW
+        align: end
+        fontSize: fs
+      }
+    }
+  }
+
+  component Line(r, hi = false) {
+    let tr = r.date - now
+    Row {
+      gap: short ? 2 : 4
+      align: center
+      Text {
+        text: r.name
+        style: small
+        bold: hi
+        maxLines: 1
+        weight: 1
+        fontSize: fs
+      }
+      Day { secs: tr; hi: hi }
+    }
+  }
+
+  component Block(title, tint, items) {
+    let head = items.first()
+    let rest = items.drop(1)
+    Column {
+      gap: short ? 0 : 2
+      weight: 1
+      Text { text: title; style: small; bold: true; color: tint; maxLines: 1; fontSize: short ? 8 : mid ? 10 : null }
+      if tall && head != null {
+        Text { text: head.name; style: body; bold: true; maxLines: 1 }
+        Day { secs: head.date - now; hi: true }
+        Text { text: fmtTime(head.date, "MMM d, yyyy"); style: small; color: muted; maxLines: 1 }
+        for r in rest.take(showN) key r.id {
+          Line { r: r }
+        }
+      }
+      if !tall {
+        if head != null {
+          Line { r: head; hi: true }
+        }
+        for r in rest.take(showN) key r.id {
+          Line { r: r }
+        }
+      }
+    }
+  }
+
+  component ScreenCard(r, tint) {
+    let tr = r.date - now
+    let d = floor(tr / 86400)
+    Box {
+      background: alpha(#0d1b2a, 0.9)
+      border: 1
+      borderColor: alpha(tint, 0.45)
+      radius: 10
+      padding: 14
+      Row {
+        gap: 12
+        align: center
+        Column {
+          gap: 3
+          weight: 1
+          Text { text: r.name; style: body; bold: true; maxLines: 2 }
+          Text {
+            text: fmtTime(r.date, "EEE, MMM d yyyy")
+            style: small
+            color: muted
+            maxLines: 1
+          }
+        }
+        Text {
+          text: tr <= 0 ? "out" : d == 0 ? "today" : "${d}d"
+          style: title
+          font: mono
+          color: tr <= 0 ? green : tr < 86400 * 14 ? #ffd700 : #7fc8f8
+          width: 72
+          align: end
+        }
+      }
+    }
+  }
+
+  onTap: screen()
+
+  Column {
+    gap: g
+    padding: pad
+    background: linear(0, 0, 0, tileHeight, [alpha(#1e3c72, 0.95), alpha(#2a5298, 0.9), alpha(#000000, 0.85)])
+
+    if tall {
+      Row {
+        align: center
+        Text { text: "card releases"; style: small; color: muted; maxLines: 1; weight: 1 }
+        Text { text: fmtTime(now, "HH:mm"); style: small; color: muted; font: mono; width: 40; align: end }
+      }
+      Block { title: "POKÉMON"; tint: #ffd700; items: pokeUp }
+      Block { title: "MAGIC"; tint: #c77dff; items: mtgUp }
+    }
+
+    if mid {
+      Row {
+        align: center
+        Text { text: "card releases"; style: small; color: muted; maxLines: 1; weight: 1; fontSize: 10 }
+        Text { text: fmtTime(now, "HH:mm"); style: small; color: muted; font: mono; width: 36; align: end; fontSize: 10 }
+      }
+      Block { title: "POKÉMON"; tint: #ffd700; items: pokeUp }
+      Block { title: "MAGIC"; tint: #c77dff; items: mtgUp }
+    }
+
+    if short {
+      Row {
+        gap: 6
+        weight: 1
+        Block { title: "POKÉMON"; tint: #ffd700; items: pokeUp }
+        Block { title: "MAGIC"; tint: #c77dff; items: mtgUp }
+      }
+    }
+  }
+
+  screen {
+    title: "card releases"
+    Column {
+      scroll: true
+      gap: 18
+      padding: 16
+      background: linear(0, 0, 0, tileHeight, [#0f2027, #203a43, #2c5364])
+
+      Text { text: "Upcoming drops"; style: title; color: #7fc8f8; maxLines: 1 }
+
+      Column {
+        gap: 8
+        Text { text: "POKÉMON TCG"; style: label; bold: true; color: #ffd700; maxLines: 1 }
+        if pokeUp.length == 0 {
+          Text { text: "No upcoming Pokémon sets"; style: small; color: muted }
+        }
+        for r in pokeUp key r.id {
+          ScreenCard { r: r; tint: #4cc9f0 }
+        }
+      }
+
+      Column {
+        gap: 8
+        Text { text: "MAGIC: THE GATHERING"; style: label; bold: true; color: #c77dff; maxLines: 1 }
+        if mtgUp.length == 0 {
+          Text { text: "No upcoming MTG sets"; style: small; color: muted }
+        }
+        for r in mtgUp key r.id {
+          ScreenCard { r: r; tint: #c77dff }
+        }
+      }
+    }
+  }
+}
