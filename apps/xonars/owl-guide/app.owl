@@ -1,5 +1,5 @@
 app "OWL справочник" {
-  meta { owl: 11; description: "Русский справочник OWL: основы, примеры, шаблоны, версии и советы"; version: "1.3"; license: "MIT"; category: "dev" }
+  meta { owl: 11; description: "Русский справочник OWL: основы, примеры, шаблоны, версии и советы"; version: "1.4"; license: "MIT"; category: "dev" }
   icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M24 11C18 6 10 6 4 8v31c7-2 14-1 20 4 6-5 13-6 20-4V8c-6-2-14-2-20 3v32"/><path d="m15 18-5 6 5 6m18-12 5 6-5 6"/></svg>"""
   state tab = "Основы" persist
   state query = ""
@@ -129,7 +129,7 @@ app "OWL справочник" {
     "cat": "Версии",
     "title": "OWL 9",
     "desc": "Даты, коллекции, случайность и обработчики",
-    "body": "Возможности OWL 9 остаются доступны в OWL 13. Объявляйте meta { owl: 9 } для новых функций.\n\nДаты и числа: parseTime, fmtAgo, fmtNum; fmtTime получил часовой пояс и язык. Коллекции: set, remove, merge, reduce, scan, groupBy; сериализация toJson. Также появились capitalize, asin, acos и глубина flatten.\n\nСлучайность: random, shuffle, hash. Обработчики поддерживают if и локальный let; on x first обрабатывает и первое значение источника. Подробные примеры ищите по названиям функций.",
+    "body": "Возможности OWL 9 остаются доступны в OWL 11. Объявляйте meta { owl: 9 } для новых функций.\n\nДаты и числа: parseTime, fmtAgo, fmtNum; fmtTime получил часовой пояс и язык. Коллекции: set, remove, merge, reduce, scan, groupBy; сериализация toJson. Также появились capitalize, asin, acos и глубина flatten.\n\nСлучайность: random, shuffle, hash. Обработчики поддерживают if и локальный let; on x first обрабатывает и первое значение источника. Подробные примеры ищите по названиям функций.",
     "code": "meta { owl: 9 }"
   },
   {
@@ -137,7 +137,7 @@ app "OWL справочник" {
     "cat": "Версии",
     "title": "OWL 8",
     "desc": "Приложения, сеть и мультимедиа",
-    "body": "app-файлы с иконкой и отдельным окном; android.apps со списком приложений, профилем и историей запусков; enc для значений в URL; post для HTTP POST; изображения с HTTPS; sound для коротких звуков; screenInset для нижнего системного отступа.\n\nedge: true позволяет содержимому приложения идти под панель навигации. Держите кнопки выше screenInset, а прокручиваемый список завершайте Spacer соответствующей высоты. Эти возможности требуют минимум OWL 8; текущий локальный README описывает OWL 13.",
+    "body": "app-файлы с иконкой и отдельным окном; android.apps со списком приложений, профилем и историей запусков; enc для значений в URL; post для HTTP POST; изображения с HTTPS; sound для коротких звуков; screenInset для нижнего системного отступа.\n\nedge: true позволяет содержимому приложения идти под панель навигации. Держите кнопки выше screenInset, а прокручиваемый список завершайте Spacer соответствующей высоты. Эти возможности требуют минимум OWL 8.",
     "code": "meta { owl: 8 }"
   },
   {
@@ -169,7 +169,7 @@ app "OWL справочник" {
     "cat": "Советы",
     "title": "Проверка и зависимости",
     "desc": "owl-check, pacman и предпросмотр",
-    "body": "После сохранения запустите owl-check имя.owl. Он ждёт загрузки сохранённой версии, печатает ошибки и путь к PNG с живыми данными. Откройте изображение: проверьте переносы, размеры, прокрутку и кнопки. Для виджета с экраном будет два PNG, для приложения — полный вид.\n\nВсе нужные командам пакеты перечисляйте в requires { pacman: [\"jq\"] } и устанавливайте pacman -S --needed jq. Имя пакета может отличаться от команды: dig входит в bind. Базовые coreutils, grep, sed и bash объявлять необязательно. Примеры в справочнике копируются в буфер и не исполняются.\n\nПредпросмотр LinuxApp проверяет разметку OWL, но не запускает графический клиент. На телефоне отдельно проверьте изображение, ввод, потерю фокуса, поворот, клавиатуру и остановку/повторный запуск.",
+    "body": "После сохранения запустите owl-check имя.owl. Он ждёт загрузки сохранённой версии, печатает ошибки и путь к PNG с живыми данными. Откройте изображение: проверьте переносы, размеры, прокрутку и кнопки. Для виджета с экраном будет два PNG, для приложения — полный вид.\n\nВсе нужные командам пакеты перечисляйте в requires { pacman: [\"jq\"] } и устанавливайте pacman -S --needed jq. Имя пакета может отличаться от команды: dig входит в bind. Базовые coreutils, grep, sed и bash объявлять необязательно. Примеры в справочнике копируются в буфер и не исполняются.",
     "code": "owl-check my-app.owl\npacman -S --needed jq"
   },
   {
@@ -249,7 +249,7 @@ app "OWL справочник" {
     "cat": "Основы",
     "title": "Домашние страницы: face",
     "desc": "Размещение, системные панели и размеры",
-    "body": "face пишется как widget, но без size и minSize; требуется OWL 10. page: 0 размещает её слева от страницы 1, −1 и −2 — ещё левее. Перемещайте страницы в настройках launcher › pages.\n\nФон прозрачен: видны обои. statusBar может быть выражением; false скрывает строку состояния. screenTop учитывает вырез камеры (OWL 12). Добавьте Spacer высотой screenInset над навигацией и клавиатурой.\n\ncols и rows описывают сетку, tileWidth и tileHeight — размер страницы в dp. Жест вверх открывает список приложений; для содержимого используйте вертикальную прокрутку. Пример: examples/00-start.owl.",
+    "body": "face пишется как widget, но без size и minSize; требуется OWL 10. page: 0 размещает её слева от страницы 1, −1 и −2 — ещё левее. Перемещайте страницы в настройках launcher › pages.\n\nФон прозрачен: видны обои. statusBar может быть выражением; false скрывает строку состояния. Добавьте Spacer высотой screenInset над навигацией и клавиатурой.\n\ncols и rows описывают сетку, tileWidth и tileHeight — размер страницы в dp. Жест вверх открывает список приложений; для содержимого используйте вертикальную прокрутку. Пример: examples/00-start.owl.",
     "code": ""
   },
   {
@@ -293,60 +293,12 @@ app "OWL справочник" {
     "code": "owl-send build.owl set status passing\nowl-send build.owl set info - < info.json\nowl-send build.owl refresh"
   },
   {
-    "id": "34",
-    "cat": "Версии",
-    "title": "OWL 12",
-    "desc": "Клавиши, секреты и системные отступы",
-    "body": "screenTop, keybar, pressKey, typeText, latch, android.modifiers, onPress, onRelease и repeats.\n\npost поддерживает method; появились toBase64 и fromBase64, state secret и Input.password. Объявляйте meta { owl: 12 }.",
-    "code": "meta { owl: 12 }"
-  },
-  {
-    "id": "35",
-    "cat": "Версии",
-    "title": "OWL 13",
-    "desc": "Private space, LinuxApp и LinuxKey",
-    "body": "Актуальный README указывает OWL 13. Добавлены privateSpace для приватного пространства Android, LinuxApp для встроенного окна Wayland и LinuxKey для физических клавиш этого окна.\n\nОбъявляйте минимальную версию, покрывающую используемые возможности. Вводная строка docs/versions.md ещё говорит о 12, но её список уже содержит 13.",
-    "code": "meta { owl: 13 }"
-  },
-  {
     "id": "36",
     "cat": "Основы",
     "title": "Панели и поиск приложений",
     "desc": "panel, android.drawer, rank и lazy",
     "body": "panel — отдельный файл, открываемый жестом. Панели назначаются в настройках gestures; drawer.owl — список приложений.\n\nПанель снизу получает query из строки ввода и onSubmit с value. rank(d.apps, query) ранжирует приложения; strongMatch помогает выбрать между запуском и вопросом агенту. Для длинных списков используйте lazy: true. Панель сверху не получает ввод строки.",
     "code": "panel \"Приложения\" {\n  meta { owl: 11 }\n  source d = android.drawer\n  Grid {\n    columns: 4\n    lazy: true\n    weight: 1\n    for a in rank(d.apps, query) key a.key {\n      Button { text: a.name; onTap: open(a.key) }\n    }\n  }\n}"
-  },
-  {
-    "id": "37",
-    "cat": "Шаблоны",
-    "title": "Дополнительные клавиши",
-    "desc": "keybar, onPress и pressKey",
-    "body": "keybar.owl задаёт полосу над экранной клавиатурой. Клавиши не забирают фокус. onPress срабатывает при нажатии; repeats повторяет удерживаемую стрелку. latch удерживает модификатор, typeText вводит текст в Linux-окно.",
-    "code": "keybar \"Клавиши\" {\n  meta { owl: 12 }\n  Row {\n    Button { text: \"Esc\"; onPress: pressKey(\"esc\") }\n    Button { text: \"↑\"; repeats: true; onPress: pressKey(\"up\") }\n    Button { text: \"Ctrl\"; onTap: latch(\"ctrl\") }\n  }\n}"
-  },
-  {
-    "id": "38",
-    "cat": "Советы",
-    "title": "Токены и пароли",
-    "desc": "secret, password и HTTP method",
-    "body": "Храните токены в state token = null secret: они сохраняются зашифрованно. Секрет разрешён в заголовках http/post и теле post с фиксированным сервером, а также в проверках наличия. Нельзя выводить его, передавать в shell или URL.\n\nInput { password: true } скрывает ввод. post поддерживает method: для других HTTP-методов. Base64 — кодирование, а не шифрование.",
-    "code": "state token = null secret\nInput { password: true; placeholder: \"Токен\"; onSubmit: token = value }"
-  },
-  {
-    "id": "39",
-    "cat": "Основы",
-    "title": "LinuxApp и LinuxKey",
-    "desc": "Встроенное окно Wayland и управление",
-    "body": "LinuxApp встраивает одно окно Wayland в виджет или face. command запускается в bash; клиент должен работать на переднем плане и передавать автоматический OMALAUNCHER_APP_ID как свой app ID. Все пакеты клиента объявляются в requires.\n\nНажмите узел для запуска, затем окно для ввода. Кнопка ⌨ открывает клавиатуру, × останавливает процесс. Уход со страницы или скрытие узла сохраняет процесс; перед скрытием остановите его через ×.\n\nLinuxKey с target, совпадающим с inputId окна, удерживает физические клавиши; несколько пальцев могут держать их одновременно. keys: [\"leftctrl\", \"s\"] задаёт сочетание. Стабильные key в циклах сохраняют правильные сессии.\n\nowl-check не запускает клиент. Проверьте на телефоне рендеринг, ввод, потерю фокуса, изменение размеров с клавиатурой и остановку/повторный запуск.",
-    "code": "face \"Linux-окно\" {\n  meta { owl: 13 }\n  requires { pacman: [\"foot\", \"bash\"] }\n  Column {\n    fill: true\n    LinuxApp {\n      inputId: \"client\"\n      command: 'foot --app-id=\"$OMALAUNCHER_APP_ID\" -e bash'\n      weight: 1\n      fill: width\n    }\n    LinuxKey { target: \"client\"; keys: [\"leftctrl\", \"c\"]; text: \"Ctrl+C\" }\n  }\n}"
-  },
-  {
-    "id": "40",
-    "cat": "Основы",
-    "title": "Приватное пространство",
-    "desc": "android.drawer.private и privateSpace",
-    "body": "Приватные приложения доступны через android.drawer только после разблокировки пространства; android.apps их не перечисляет. d.private содержит locked, hidden и settings либо null.\n\nprivateSpace(\"toggle\") блокирует или разблокирует пространство, privateSpace(\"hide\") переключает скрытие при блокировке, privateSpace(\"settings\") открывает его настройки. Проверяйте наличие d.private перед показом управления.",
-    "code": ""
   }
 ]
 
@@ -366,7 +318,7 @@ app "OWL справочник" {
           if query != "" { Text { text: "×"; width: 32; align: center; onTap: query = "" } }
         }
         Row {
-          Text { text: "OWL 1–13 · офлайн"; style: small; color: mix(muted, foreground, 0.45); weight: 1 }
+          Text { text: "OWL 1–11 · офлайн"; style: small; color: mix(muted, foreground, 0.45); weight: 1 }
           Text { text: onlySaved ? "★ Избранное" : "☆ Избранное"; style: small; color: onlySaved ? accent : mix(muted, foreground, 0.45); width: 130; align: end; onTap: onlySaved = !onlySaved }
         }
       }
@@ -393,7 +345,7 @@ app "OWL справочник" {
             if trim(query) != "" { Text { text: a.cat; style: small; color: accent } }
           }
         }
-        Text { text: "Источник: README.md и docs/ · OWL 13 · 21.10.2026"; style: small; color: mix(muted, foreground, 0.45); padding: [0, 12] }
+        Text { text: "Источник: README.md и docs/ · OWL 11 · 23.10.2026"; style: small; color: mix(muted, foreground, 0.45); padding: [0, 12] }
       }
       Box { height: 1; fill: width; background: alpha(muted, 0.25) }
       Row {
