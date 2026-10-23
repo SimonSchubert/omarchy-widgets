@@ -1,10 +1,10 @@
 widget "currencies" {
   size: 3x2
-  minSize: 2x2
+  minSize: 3x2
   padding: 8
   meta {
     owl: 11
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "finance"
     description: "Currency exchange rates worldwide, with flags, movement arrows, customisable favourites and a built-in currency converter."
@@ -68,14 +68,17 @@ widget "currencies" {
         let series = historyRows.filter(r => r.quote == code).sortBy(r => r.date)
         let foundCurrent = rate != null && any(series, r => r.date == rate.date)
         let previous = rate == null ? null : last(series.filter(r => r.date < rate.date))
-        let movement = !foundCurrent || previous == null ? 0 : sign(rate.rate - previous.rate)
+        let reversed = rate != null && rate.rate < 1
+        let displayed = rate == null ? null : reversed ? 1 / rate.rate : rate.rate
+        let movement = !foundCurrent || previous == null ? 0 : (reversed ? sign(previous.rate - rate.rate) : sign(rate.rate - previous.rate))
         let arrow = movement > 0 ? "▲" : movement < 0 ? "▼" : ""
         let flag = code == "GBP" ? "🇬🇧" : code == "USD" ? "🇺🇸" : code == "EUR" ? "🇪🇺" : code == "TRY" ? "🇹🇷" : code == "CNY" ? "🇨🇳" : code == "JPY" ? "🇯🇵" : code == "HKD" ? "🇭🇰" : code == "TWD" ? "🇹🇼" : code == "KRW" ? "🇰🇷" : code == "INR" ? "🇮🇳" : code == "PKR" ? "🇵🇰" : code == "BDT" ? "🇧🇩" : code == "AED" ? "🇦🇪" : code == "SAR" ? "🇸🇦" : code == "QAR" ? "🇶🇦" : code == "KWD" ? "🇰🇼" : code == "BHD" ? "🇧🇭" : code == "OMR" ? "🇴🇲" : code == "CAD" ? "🇨🇦" : code == "AUD" ? "🇦🇺" : code == "NZD" ? "🇳🇿" : code == "CHF" ? "🇨🇭" : code == "SGD" ? "🇸🇬" : code == "MYR" ? "🇲🇾" : code == "THB" ? "🇹🇭" : code == "IDR" ? "🇮🇩" : code == "PHP" ? "🇵🇭" : code == "VND" ? "🇻🇳" : code == "BRL" ? "🇧🇷" : code == "MXN" ? "🇲🇽" : code == "ARS" ? "🇦🇷" : code == "ZAR" ? "🇿🇦" : code == "EGP" ? "🇪🇬" : code == "NGN" ? "🇳🇬" : code == "KES" ? "🇰🇪" : code == "SEK" ? "🇸🇪" : code == "NOK" ? "🇳🇴" : code == "DKK" ? "🇩🇰" : code == "PLN" ? "🇵🇱" : code == "CZK" ? "🇨🇿" : code == "HUF" ? "🇭🇺" : code == "RON" ? "🇷🇴" : code == "UAH" ? "🇺🇦" : code == "ILS" ? "🇮🇱" : "🌐"
         Row {
           gap: 4
-          Text { text: "${flag} ${code}"; fontSize: 14; color: muted; width: 78 }
-          Text { text: rate == null ? "—" : fmtNum(rate.rate, rate.rate < 0.01 ? 6 : 4); fontSize: 14; align: end; weight: 1; maxLines: 1 }
-          Text { text: arrow; color: movement > 0 ? green : movement < 0 ? red : muted; fontSize: 12; width: 15 }
+          Text { text: "${flag} ${code}"; fontSize: 14; color: muted; width: 54 }
+          Text { text: reversed ? "1 ${code}" : "1 ${base}"; fontSize: 13; color: muted; width: 38; maxLines: 1 }
+          Text { text: rate == null ? "—" : fmtNum(displayed, displayed >= 10 ? 2 : 4); fontSize: 14; align: end; weight: 1; maxLines: 1 }
+          Text { text: arrow; color: movement > 0 ? #22c55e : movement < 0 ? #ef4444 : muted; fontSize: 14; width: 15 }
         }
       }
       if len(selected) == 0 { Text { text: "Tap to add currencies"; style: small; color: muted } }

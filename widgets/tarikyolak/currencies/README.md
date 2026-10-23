@@ -8,7 +8,8 @@ Track currencies worldwide with country flags, daily reference rates, movement a
 
 - Worldwide currency selection with searchable names and ISO codes
 - Customisable base currency and favourites
-- Green and red arrows comparing successive published rates
+- Green and red arrows track movement in the displayed exchange-rate direction
+- Automatic reversed rates when appropriate (e.g. 1 USD = 49.50 TRY when TRY is selected)
 - Built-in amount converter
 - Offline access to previously saved rates
 - Automatic exchange-rate refresh
@@ -20,7 +21,7 @@ Track currencies worldwide with country flags, daily reference rates, movement a
 - Base currency: GBP
 - Favourites: TRY, EUR, USD, CNY
 - Widget size: 3x2
-- Minimum size: 2x2
+- Minimum size: 3x2
 
 Users can change their selections at any time.
 
