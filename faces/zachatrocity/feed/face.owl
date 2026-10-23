@@ -11,41 +11,9 @@ face "Feed" {
   source feeds = cmd("""
     python - <<'PY'
     import json
-    import re
     import urllib.request
     import xml.etree.ElementTree as ET
-    from concurrent.futures import ThreadPoolExecutor
 
-    def preview_image(url):
-        if not url or not url.startswith("https://"):
-            return None
-        try:
-            request = urllib.request.Request(url, headers={"User-Agent": "omalauncher-feed/1.0"})
-            with urllib.request.urlopen(request, timeout=4) as response:
-                html = response.read(200000).decode("utf-8", "ignore")
-            patterns = [
-                r"<meta[^>]+(?:property|name)=[\"'](?:og:image|twitter:image)[\"'][^>]+content=[\"'](https://[^\"']+)",
-                r"<meta[^>]+content=[\"'](https://[^\"']+)[\"'][^>]+(?:property|name)=[\"'](?:og:image|twitter:image)[\"']",
-            ]
-            for pattern in patterns:
-                match = re.search(pattern, html, re.IGNORECASE)
-                if match:
-                    return match.group(1).replace("&amp;", "&")
-        except Exception:
-            pass
-        return None
-
-    def enrich(items):
-        pending = [
-            (item, item.get("url"))
-            for item in items
-            if not item.get("image") and (item.get("url") or "").startswith("https://")
-        ]
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            images = pool.map(preview_image, [url for _, url in pending])
-            for (item, _), image in zip(pending, images):
-                if image:
-                    item["image"] = image
 
     news = []
     try:
@@ -58,23 +26,11 @@ face "Feed" {
         for index, item in enumerate(root.findall("./channel/item")):
             title = (item.findtext("title") or "").strip()
             url = (item.findtext("link") or "").strip()
-            image = None
-            for child in item:
-                tag = child.tag.rsplit("}", 1)[-1]
-                candidate = child.attrib.get("url") if tag in ("content", "thumbnail", "enclosure") else None
-                if candidate and candidate.startswith("https://"):
-                    image = candidate
-                    break
-            if image is None:
-                description = item.findtext("description") or ""
-                match = re.search(r"<img[^>]+src=[\"'](https://[^\"']+)", description)
-                image = match.group(1) if match else None
             if title and url:
                 news.append({
                     "id": (item.findtext("guid") or str(index)).strip(),
                     "title": title,
                     "url": url,
-                    "image": image,
                     "source": (item.findtext("source") or "Google News").strip(),
                     "published": (item.findtext("pubDate") or "").strip(),
                 })
@@ -88,12 +44,11 @@ face "Feed" {
     except Exception:
         pass
 
-    enrich(news[:12])
-    enrich(hn[:12])
     print(json.dumps({"news": news[:12], "hn": hn[:12]}, separators=(",", ":")))
     PY
   """) every 15m json timeout 25s
-  let since = fmtTime(now - 7 * 86400, "yyyy-MM-dd")
+  state githubToday = false
+  let since = fmtTime(now - (githubToday ? 86400 : 7 * 86400), "yyyy-MM-dd")
   source gh = http("https://api.github.com/search/repositories?q=created%3A%3E${enc(since)}%20stars%3A%3E25&sort=stars&order=desc&per_page=12", {Accept: "application/vnd.github+json"}) every 1h timeout 15s json
   source nfl = http("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard") every 5m timeout 15s json
   source ncaa = http("https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard") every 5m timeout 15s json
@@ -103,6 +58,10 @@ face "Feed" {
     (nfl.events ?? []).map(e => {league: "NFL", event: e}),
     (ncaa.events ?? []).map(e => {league: "NCAA", event: e})
   ]).sortBy(g => parseTime(g.event.date) ?? 9999999999)
+  let scoreCardW = 172
+  let scoreCardGap = 10
+  let scoreViewport = max(0, (tileWidth ?? 0) - 24)
+  let scoreMaxOffset = max(0, len(events) * (scoreCardW + scoreCardGap) - scoreCardGap - scoreViewport + 8)
   let newsItems = (feeds.news ?? []).take(8)
   let hnItems = (feeds.hn ?? []).take(8)
   let repoItems = (gh.items ?? []).take(8)
@@ -150,13 +109,14 @@ face "Feed" {
       Box {
         height: 132
         clip: true
-        onDrag: scoreOffset = max(0, scoreOffset - dx)
+        onDrag: {
+          if abs(dx) > abs(dy) {
+            scoreOffset = clamp(scoreOffset - dx, 0, scoreMaxOffset)
+          }
+        }
         Canvas {
           fill: true
-          let cardW = 172
-          let cardGap = 10
-          let maxOffset = max(0, len(events) * (cardW + cardGap) - cardGap - width + 8)
-          let offset = clamp(scoreOffset, 0, maxOffset)
+          let offset = clamp(scoreOffset, 0, scoreMaxOffset)
           if len(events) == 0 {
             rect(0, 0, width, height, radius: 15 * corners, fill: glass)
             text("no live or upcoming games", width / 2, 68, size: 13, align: center, color: muted)
@@ -165,22 +125,22 @@ face "Feed" {
             let competition = g.event.competitions[0]
             let home = competition == null ? null : competition.competitors.find(t => t.homeAway == "home")
             let away = competition == null ? null : competition.competitors.find(t => t.homeAway == "away")
-            let x = 4 + i * (cardW + cardGap) - offset
+            let x = 4 + i * (scoreCardW + scoreCardGap) - offset
             let detail = competition == null ? "scheduled" : (competition.status.type.shortDetail ?? competition.status.type.detail ?? "scheduled")
             let homeName = home == null ? "HOME" : upper(home.team.abbreviation ?? home.team.shortDisplayName ?? "HOME")
             let awayName = away == null ? "AWAY" : upper(away.team.abbreviation ?? away.team.shortDisplayName ?? "AWAY")
             let homeLogo = home == null ? null : (home.team.logo ?? home.team.logos[0].href)
             let awayLogo = away == null ? null : (away.team.logo ?? away.team.logos[0].href)
-            if x + cardW > 0 && x < width {
-              rect(x, 0, cardW, height, radius: 15 * corners, fill: glass)
+            if x + scoreCardW > 0 && x < width {
+              rect(x, 0, scoreCardW, height, radius: 15 * corners, fill: glass)
               text(g.league, x + 14, 20, size: 10, font: mono, bold: true, color: orange)
-              text(sub(g.event.shortName ?? g.event.name ?? "", 0, 12), x + cardW - 12, 20, size: 8, align: end, color: muted)
+              text(sub(g.event.shortName ?? g.event.name ?? "", 0, 12), x + scoreCardW - 12, 20, size: 8, align: end, color: muted)
               text(awayName, x + 14, 54, size: 14, font: mono, color: foreground)
               if awayLogo != null { image(awayLogo, x + 106, 42, 20, 20) }
-              text(away == null ? "-" : (away.score ?? "-"), x + cardW - 14, 54, size: 18, font: mono, bold: true, align: end, color: away != null && away.winner ? accent : foreground)
+              text(away == null ? "-" : (away.score ?? "-"), x + scoreCardW - 14, 54, size: 18, font: mono, bold: true, align: end, color: away != null && away.winner ? accent : foreground)
               text(homeName, x + 14, 84, size: 14, font: mono, color: foreground)
               if homeLogo != null { image(homeLogo, x + 106, 72, 20, 20) }
-              text(home == null ? "-" : (home.score ?? "-"), x + cardW - 14, 84, size: 18, font: mono, bold: true, align: end, color: home != null && home.winner ? accent : foreground)
+              text(home == null ? "-" : (home.score ?? "-"), x + scoreCardW - 14, 84, size: 18, font: mono, bold: true, align: end, color: home != null && home.winner ? accent : foreground)
               text(sub(detail, 0, 25), x + 14, 112, size: 10, color: muted)
             }
           }
@@ -222,7 +182,6 @@ face "Feed" {
             source: item.source ?? "Google News"
             meta: fmtAgo(parseTime(item.published), now)
             link: item.url
-            image: item.image
             tint: cyan
           }
         }
@@ -243,7 +202,11 @@ face "Feed" {
         }
       }
 
-      Section { label: "github rising"; note: "last 7 days"; tint: magenta }
+      Box {
+        fill: width
+        onTap: githubToday = !githubToday
+        Section { label: "github rising"; note: githubToday ? "today" : "last 7 days"; tint: magenta }
+      }
       if len(repoItems) == 0 {
         Text { text: "GitHub repositories are loading or unavailable"; style: small; color: muted }
       } else {
