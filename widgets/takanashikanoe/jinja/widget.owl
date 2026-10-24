@@ -1,7 +1,8 @@
 widget "jinja" {
   // jinja — a torii in the sunset sea, drawn as animated block glyphs.
   // The whole scene is a GPU fragment shader ported from the generator of
-  // "sea torii sunset" on ascii-magic.com (artwork by Streider); the 96x54
+  // "sea torii sunset" on ascii-magic.com (© 2026 ASCII Magic, MIT licensed,
+  // https://github.com/kailashsr38/ascii-magic-art); the 96x54
   // block-glyph grid is recreated by cell quantization + bottom-aligned fills,
   // so waves drift, ripples spread, rock foam blinks and gulls cross the sky.
   // Tap the tile: settings for playback, 24 fps, brightness, contrast, an RGB
