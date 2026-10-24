@@ -1,0 +1,10 @@
+widget "x" {
+  meta { owl: 13 }
+  Row {
+    Button { text: "a"; onTap: notification("action", "k", 0) }
+    Button { text: "b"; onTap: notification("snooze", "k", 600) }
+    Button { text: "c"; onTap: notification("snoozeAll", 600) }
+    Button { text: "d"; onTap: notification("unsnoozeAll") }
+    Button { text: "e"; onTap: notification("open", "k") }
+  }
+}

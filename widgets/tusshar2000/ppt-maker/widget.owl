@@ -1,7 +1,7 @@
 widget "ppt maker" {
   size: 6x4
   minSize: 3x3
-  meta { owl: 6; description: "Type a topic and Claude Code makes a PowerPoint deck with real photos and diagrams: quick ones in a minute, or designed and checked ones. Edit or delete decks from the full screen"; version: "1.5"; license: "MIT"; category: "productivity" }
+  meta { owl: 6; description: "Type a topic and Claude Code makes a PowerPoint deck with real photos and diagrams: quick ones in a minute, or designed and checked ones. Edit or delete decks from the full screen"; version: "1.5.1"; license: "MIT"; category: "productivity" }
 
   requires { pacman: ["jq", "curl", "python", "python-lxml", "python-pillow"] }
 
@@ -948,7 +948,8 @@ say done "pro ready"
       if ready && len(list) == 0 {
         Text { text: "no decks yet"; style: small; color: muted }
       }
-      for f in list.take(rows >= 4 ? 4 : 2) key f {
+      // As many decks as fit, about 24dp each under 110dp of header, input and status.
+      for f in list.take(max(2, floor(((tileHeight ?? 0) - 110) / 24))) key f {
         DeckRow { f: f }
       }
     }

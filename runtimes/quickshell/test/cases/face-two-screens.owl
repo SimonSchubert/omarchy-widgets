@@ -1,0 +1,6 @@
+face "x" {
+  meta { owl: 10 }
+  Text { text: "hi" }
+  screen { Text { text: "a" } }
+  screen { Text { text: "b" } }
+}

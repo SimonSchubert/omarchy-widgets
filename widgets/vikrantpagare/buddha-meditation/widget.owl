@@ -5,7 +5,7 @@ widget "buddha-meditation" {
   background: "#050810"
   meta {
     description: "A serene Buddha meditating by a moonlit lake, with drifting stars, shooting stars and rippling reflections"
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "fun"
     owl: 6

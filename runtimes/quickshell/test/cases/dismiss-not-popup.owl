@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 10 }
+  state open = true
+  Text { text: "m"; onDismiss: open = false }
+}

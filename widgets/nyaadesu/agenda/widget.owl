@@ -1,5 +1,5 @@
 widget "agenda" {
-  meta { owl: 6; description: "Your next two weeks from any number of Google (or other iCal) calendars, color-coded, with a full agenda on tap"; version: "1.0"; license: "MIT"; category: "productivity" }
+  meta { owl: 6; description: "Your next two weeks from any number of Google (or other iCal) calendars, color-coded, with a full agenda on tap"; version: "1.0.1"; license: "MIT"; category: "productivity" }
   size: 3x5
   minSize: 2x3
   requires { pacman: ["python", "python-icalendar", "python-recurring-ical-events", "nano"] }
@@ -163,6 +163,23 @@ widget "agenda" {
   let n = max(2, count(range(len(lines)), i => sum(heights.take(i + 1)) <= room))
   // Don't end on a day heading whose events didn't fit.
   let fit = n < len(lines) && lines[n - 1].head ? n - 1 : n
+  // A wide tile (landscape) flows the days into two columns. Measured line heights: heading 15,
+  // all-day event 13, timed event 23 (plus 15 for "nothing on"); the header row and padding take 42.
+  let wide = (tileWidth ?? 0) > (tileHeight ?? 0) * 1.5
+  let wlines = flatten(flatten(days.filter(d => d.label == "Today" || len(d.events) > 0).take(8).map(d => [[{head: d.label, empty: len(d.events) == 0}], d.events.map(e => {ev: e, day: d.label})])))
+  let wroom = (tileHeight ?? 300) - 42 - (len(failed) > 0 ? 18 : 0)
+  let wh1 = wlines.map(l => l.head ? (l.empty ? 30 : 15) : l.ev.allDay ? 13 : 23)
+  let wn1 = max(2, count(range(len(wlines)), i => sum(wh1.take(i + 1)) <= wroom))
+  let wf1 = wn1 < len(wlines) && wlines[wn1 - 1].head ? wn1 - 1 : wn1
+  let wrest1 = wlines.drop(wf1)
+  // A day that carries on into the second column gets its heading again there.
+  let col2 = len(wrest1) > 0 && !wrest1[0].head ? flatten([[{head: wrest1[0].day, empty: false}], wrest1]) : wrest1
+  let wh2 = col2.map(l => l.head ? (l.empty ? 30 : 15) : l.ev.allDay ? 13 : 23)
+  // Keep a line for "+ N more" unless the rest fits.
+  let wroom2 = sum(wh2) <= wroom ? wroom : wroom - 15
+  let wn2 = count(range(len(col2)), i => sum(wh2.take(i + 1)) <= wroom2)
+  let wf2 = wn2 < len(col2) && wn2 > 0 && col2[wn2 - 1].head ? wn2 - 1 : wn2
+  let wmore = count(col2.drop(wf2), l => !l.head)
 
   onTap: screen()
 
@@ -189,6 +206,20 @@ widget "agenda" {
     }
   }
 
+  component Lines(ls) {
+    Column {
+      gap: 1
+      for l, i in ls {
+        if l.head {
+          Text { text: l.head; style: label; color: accent; bold: true; padding: [0, i == 0 ? 0 : 3, 0, 0] }
+          if l.empty { Text { text: "nothing on"; style: small; color: muted } }
+        } else {
+          Event { e: l.ev }
+        }
+      }
+    }
+  }
+
   Column {
     gap: 1
     Row {
@@ -203,6 +234,18 @@ widget "agenda" {
     } else if cal.setup {
       Text { text: "add your calendars' secret iCal addresses to ~/.config/gcal-agenda/urls"; style: small; color: muted }
       Text { text: "tap to set up"; style: small; color: accent }
+    } else if wide {
+      Row {
+        gap: 12
+        align: top
+        Lines { ls: wlines.take(wf1); weight: 1 }
+        Column {
+          gap: 1
+          weight: 1
+          Lines { ls: col2.take(wf2) }
+          if wmore > 0 { Text { text: "+ ${wmore} more"; style: label; color: muted } }
+        }
+      }
     } else {
       for l, i in lines.take(fit) {
         if l.head {

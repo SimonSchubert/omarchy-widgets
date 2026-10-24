@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 11 }
+  Shader { code: "half4 main(float2 p) { float times = 2.0; return half4(times, 0, 0, 1); }" }
+}

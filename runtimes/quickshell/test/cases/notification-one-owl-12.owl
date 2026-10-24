@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 12 }
+  state what = "clear"
+  Button { text: "x"; onTap: notification(what) }
+}

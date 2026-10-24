@@ -1,6 +1,4 @@
 widget "bookmarks" {
-  page: 1
-  order: 6
   size: 3x4
   minSize: 2x3
 

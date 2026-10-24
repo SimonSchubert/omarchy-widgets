@@ -1,12 +1,3 @@
-# The order of the store: these widget ids first, in this order; the rest by name;
-# the ids after "..." last. CI applies it when it builds index.json.
-simonschubert/earthquakes
-simonschubert/feeds
-simonschubert/github-trending
-simonschubert/launches
-simonschubert/sun-and-moon
-simonschubert/todo
-...
-simonschubert/analog-clock
-simonschubert/countdown
-simonschubert/crypto
+# The order of the store: ids listed here would go first, in this order, and ids after a "..." line
+# last; nothing is listed, so every widget, face and app is shuffled anew on every push.
+# CI applies it when it builds index.json, and apps.json for apps.

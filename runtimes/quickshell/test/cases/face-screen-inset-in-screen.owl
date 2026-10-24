@@ -1,0 +1,5 @@
+face "x" {
+  meta { owl: 10 }
+  Text { text: "hi"; onTap: screen() }
+  screen { Spacer { height: screenInset } }
+}

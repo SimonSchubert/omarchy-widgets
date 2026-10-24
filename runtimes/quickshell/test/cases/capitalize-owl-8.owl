@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 8 }
+  Text { text: capitalize("a") }
+}

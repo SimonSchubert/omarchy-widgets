@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 8 }
+  source now = clock
+  Text { text: fmtTime(now, "HH:mm", "UTC") }
+}

@@ -1,0 +1,11 @@
+widget "x" {
+  meta { owl: 12 }
+  Row {
+    Button { text: "a"; onTap: pressKey("ctrl+shift+T") }
+    Button { text: "b"; onTap: pressKey("ctrl++") }
+    Button { text: "c"; onTap: pressKey(":") }
+    Button { text: "d"; onTap: pressKey("F12") }
+    Button { text: "e"; onTap: typeText("ls -la") }
+    Button { text: "f"; onTap: latch("ctrl", "once") }
+  }
+}

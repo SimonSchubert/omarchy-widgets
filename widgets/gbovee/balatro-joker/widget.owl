@@ -1,5 +1,5 @@
 widget "balatro joker" {
-  meta { description: "A random Joker from Balatro with its effect, cost and rarity. Tap for another"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { description: "A random Joker from Balatro with its effect, cost and rarity. Tap for another"; version: "1.0.1"; license: "MIT"; category: "games" }
   size: 3x3
   minSize: 2x2
 
@@ -48,6 +48,9 @@ jq -c '.[]' "$d/jokers.json" | shuf -n1
 
   let art = "~/.cache/balatro/img/${pick.file}"
   let rarityColor = pick.rarity == "Legendary" ? magenta : pick.rarity == "Rare" ? red : pick.rarity == "Uncommon" ? green : blue
+  // a short tile (the landscape home screen) shrinks the art so the effect gets more lines
+  let short = tileWidth != null && tileHeight != null && tileHeight < tileWidth
+  let artH = short ? clamp(tileHeight * 0.4, 48, 96) : 96
 
   onTap: refresh()
 
@@ -72,7 +75,7 @@ jq -c '.[]' "$d/jokers.json" | shuf -n1
       Row {
         gap: 10
         align: center
-        Image { src: art; fit: contain; width: 72; height: 96 }
+        Image { src: art; fit: contain; width: artH * 0.75; height: artH }
         Header { weight: 1 }
       }
       Text { text: pick.effect; style: small; weight: 1 }

@@ -29,6 +29,12 @@ The widget requests only the data needed to render it. It does not upload local 
 
 Install this unified widget, confirm that it appears on the home screen, then remove the separate English and Chinese quota widgets so you do not keep duplicate monitors.
 
+## Update notes — 2.2.0
+
+- Fixed **My quota** so tapping it requests a fresh local quota scan.
+- Added theme-matched tap feedback and a visible refreshing state.
+- Reworked compact and elongated tile layouts, including 2×2, 2×3, 3×2, 3×3, 3×4, 4×3, and 5×3, to keep content readable without clipping or overlap.
+
 ## Source
 
 - [Codex Reset API documentation](https://codex-reset.com/developers)

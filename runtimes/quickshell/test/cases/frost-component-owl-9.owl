@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 9 }
+  component Card { Text { text: "c" } }
+  Card { frost: 8 }
+}

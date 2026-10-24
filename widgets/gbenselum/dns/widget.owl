@@ -2,7 +2,7 @@ widget "dns" {
   size: 3x1
   minSize: 1x1
 
-  meta { owl: 6; description: "Switch this machine's DNS resolver between Cloudflare, Google, Quad9 and the default in /etc/resolv.conf, with brand marks, the active provider and its latency."; version: "1.3"; license: "MIT"; category: "system" }
+  meta { owl: 6; description: "Switch this machine's DNS resolver between Cloudflare, Google, Quad9 and the default in /etc/resolv.conf, with brand marks, the active provider and its latency."; version: "1.4"; license: "MIT"; category: "system" }
 
   requires { pacman: ["bind", "gawk"] }
 
@@ -51,14 +51,19 @@ widget "dns" {
 
   Column {
     gap: 5
-    Row {
-      fill: width
-      Text { text: "ARCH DNS PROVIDER"; style: label; color: muted; weight: 1; maxLines: 1 }
-      if roomy {
-        Text { text: len(probe ?? "") > 0 ? "${who} · ${probe} ms" : who; style: small; color: muted; width: 96; align: end; maxLines: 1 }
-      } else {
-        Text { text: len(probe ?? "") > 0 ? "${probe} ms" : ""; style: small; color: muted; width: 52; align: end; maxLines: 1 }
+    if wide {
+      Row {
+        fill: width
+        Text { text: "ARCH DNS PROVIDER"; style: label; color: muted; weight: 1; maxLines: 1 }
+        if roomy {
+          Text { text: len(probe ?? "") > 0 ? "${who} · ${probe} ms" : who; style: small; color: muted; width: 96; align: end; maxLines: 1 }
+        } else {
+          Text { text: len(probe ?? "") > 0 ? "${probe} ms" : ""; style: small; color: muted; width: 52; align: end; maxLines: 1 }
+        }
       }
+    } else {
+      // A narrow stacked tile only has room for the latency above the pills.
+      Text { text: len(probe ?? "") > 0 ? "${probe} ms" : "DNS"; style: small; color: muted; align: center; maxLines: 1; fill: width }
     }
     if wide {
       Row {
@@ -71,12 +76,13 @@ widget "dns" {
         Pill { logo: q9; preset: "quad9"; tint: #d71b5b; logoTint: #d71b5b; weight: 1; fill: height }
       }
     } else {
-      Pill { logo: net; preset: "default"; tint: muted; logoTint: foreground; fill: true }
-      Pill { logo: cf; preset: "cloudflare"; tint: orange; fill: true }
-      Pill { logo: goog; preset: "google"; tint: blue; fill: true }
-      Pill { logo: q9; preset: "quad9"; tint: #d71b5b; logoTint: #d71b5b; fill: true }
+      Pill { logo: net; preset: "default"; tint: muted; logoTint: foreground; weight: 1; fill: width }
+      Pill { logo: cf; preset: "cloudflare"; tint: orange; weight: 1; fill: width }
+      Pill { logo: goog; preset: "google"; tint: blue; weight: 1; fill: width }
+      Pill { logo: q9; preset: "quad9"; tint: #d71b5b; logoTint: #d71b5b; weight: 1; fill: width }
     }
-    if roomy {
+    // The server list is cut to one address in a narrow stacked tile, so it's left out there.
+    if roomy && wide {
       Text { text: join(servers, "  ·  "); style: muted; color: muted; maxLines: 1; fill: width }
     }
   }

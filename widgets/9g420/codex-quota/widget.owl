@@ -4,10 +4,11 @@ widget "Codex Quota and Resets" {
   size: 6x4
   minSize: 2x2
   padding: 10
-  meta { owl: 6; version: "2.1.0"; author: "9G420"; license: "MIT"; category: "dev"; description: "Seven-language Codex quota card with reset countdowns, Tibo announcements, statistics and a calendar." }
+  meta { owl: 6; version: "2.2.1"; author: "9G420"; license: "MIT"; category: "dev"; description: "Seven-language Codex quota card with reset countdowns, Tibo announcements, statistics and a calendar." }
   requires { pacman: ["python"] }
 
   state refreshRequest = 0
+  state quotaRefreshing = false
   state selectedDate = ""
   state monthOffset = 0
   state tab = "monitor"
@@ -18,7 +19,7 @@ widget "Codex Quota and Resets" {
   state remindWeek = 0 persist
 
 
-  source q = cmd("""python -I - <<'CODEX_QUOTA_PY'
+  source q = cmd("python -I - --refresh-request ${int(max(0, min(999999, num(refreshRequest, 0))))} <<'CODEX_QUOTA_PY'\n" + """
 import argparse
 import datetime as dt
 import json
@@ -204,11 +205,11 @@ def snapshot_from_file(path, stat):
     return None
 
 
-def latest(sessions, saved):
+def latest(sessions, saved, force=False):
     files = candidates(sessions)
     marker = file_marker(*files[0]) if files else None
     previous = valid_snapshot(saved.get('snapshot'))
-    if marker == saved.get('scan_marker') and (previous or marker is None):
+    if not force and marker == saved.get('scan_marker') and (previous or marker is None):
         return None, marker, saved.get('source_file'), False
     for path, stat in files:
         snapshot = snapshot_from_file(path, stat)
@@ -223,6 +224,7 @@ def main():
     parser.add_argument('--cache', type=Path,
                         default=Path.home() / '.cache/codex-quota-community/account.json')
     parser.add_argument('--now', type=int, default=int(time.time()))
+    parser.add_argument('--refresh-request', type=int, default=0)
     args = parser.parse_args()
     old = load(args.cache)
     migrated = False
@@ -231,7 +233,8 @@ def main():
         migrated = bool(old.get('snapshot'))
     previous = valid_snapshot(old.get('snapshot')) or {}
     events = clean_events(old.get('events'))
-    fresh, marker, source_file, scanned = latest(args.sessions, old)
+    force_scan = args.refresh_request != old.get('refresh_request', 0)
+    fresh, marker, source_file, scanned = latest(args.sessions, old, force=force_scan)
     snapshot = previous
     if fresh and fresh['updated_at'] > previous.get('updated_at', -1):
         for name, window in fresh['windows'].items():
@@ -244,10 +247,13 @@ def main():
     if scanned or fresh or migrated:
         try:
             save(args.cache, {'snapshot': snapshot, 'events': events[:20],
-                              'scan_marker': marker, 'source_file': source_file})
+                              'scan_marker': marker, 'source_file': source_file,
+                              'refresh_request': args.refresh_request})
         except OSError:
             pass
     result = {'available': bool(snapshot.get('windows')), 'updated_at': snapshot.get('updated_at'),
+              'checked_at': args.now,
+              'refresh_request': args.refresh_request,
               'stale': bool(snapshot and args.now - snapshot.get('updated_at', 0) > 900),
               'events': events[:20]}
     for name in ('five', 'week'):
@@ -264,8 +270,7 @@ def main():
 
 if __name__ == '__main__':
     main()
-CODEX_QUOTA_PY
-""") every 5m timeout 15s json
+""" + "\nCODEX_QUOTA_PY\n") every 5m timeout 15s json
   let resetScript = """import argparse
 import calendar
 import datetime as dt
@@ -652,8 +657,10 @@ if __name__ == '__main__':
     original_post: ["Original post ↗", "查看原文 ↗", "Publicación original ↗", "Originalbeitrag ↗", "Publication d’origine ↗", "元の投稿 ↗", "원문 보기 ↗"],
     five_hour: ["5-hour quota", "5 小时额度", "Cuota de 5 horas", "5-Stunden-Kontingent", "Quota sur 5 heures", "5時間の利用枠", "5시간 할당량"],
     five_hour_short: ["5h", "5小时", "5 h", "5 Std.", "5 h", "5時間", "5시간"],
+    five_hour_micro: ["5h", "5时", "5h", "5h", "5h", "5時間", "5시간"],
     weekly: ["Weekly quota", "周额度", "Cuota semanal", "Wöchentliches Kontingent", "Quota hebdomadaire", "週間利用枠", "주간 할당량"],
     weekly_short: ["Weekly", "周额度", "Semanal", "Woche", "Hebdo", "週間", "주간"],
+    weekly_micro: ["Wk", "周", "Sem", "W", "Heb", "週", "주"],
     stale_short: [" · stale", " · 延迟", " · atrasado", " · veraltet", " · retard", " · 遅延", " · 지연"],
     delayed_prefix: ["Delayed · ", "数据延迟 · ", "Atrasado · ", "Verzögert · ", "En retard · ", "遅延 · ", "지연 · "],
     monitor_delayed: ["Monitor delayed", "监控数据延迟", "Monitor atrasado", "Monitor verzögert", "Suivi en retard", "モニター遅延中", "모니터 지연"],
@@ -672,6 +679,7 @@ if __name__ == '__main__':
     my_remaining: ["My remaining quota", "我的剩余额度", "Mi cuota restante", "Mein verbleibendes Kontingent", "Mon quota restant", "残りの利用枠", "남은 할당량"],
     no_local_record: ["No local account record yet", "还没有本地账户记录", "Aún no hay registros locales de la cuenta", "Noch keine lokalen Kontodaten", "Aucun relevé local du compte", "ローカルアカウント記録はありません", "로컬 계정 기록이 없습니다"],
     refresh_quota: ["Refresh local quota", "刷新本地额度", "Actualizar cuota local", "Lokales Kontingent aktualisieren", "Actualiser le quota local", "ローカル利用枠を更新", "로컬 할당량 새로고침"],
+    refreshing_quota: ["Refreshing…", "正在刷新…", "Actualizando…", "Wird aktualisiert…", "Actualisation…", "更新中…", "새로고침 중…"],
     quota_explanation: ["Quota is read from local Codex session records. Countdown is an estimate; a new account record must confirm a refill.", "额度读取自本机 Codex 会话记录。倒计时仅供参考；需用新的账户记录确认额度已恢复。", "La cuota se lee de las sesiones locales de Codex. La cuenta atrás es estimada; un nuevo registro debe confirmar la recarga.", "Das Kontingent stammt aus lokalen Codex-Sitzungen. Der Countdown ist geschätzt; ein neuer Kontostand muss die Aufladung bestätigen.", "Le quota provient des sessions Codex locales. Le compte à rebours est estimé ; un nouveau relevé doit confirmer le rétablissement.", "利用枠は端末内の Codex セッション記録から取得します。残り時間は推定です。新しい記録で回復を確認してください。", "할당량은 로컬 Codex 세션 기록에서 읽습니다. 카운트다운은 예상치이며 새 기록으로 복구를 확인해야 합니다."],
     recent_changes: ["Recent quota changes", "最近额度变化", "Cambios recientes de cuota", "Letzte Kontingentänderungen", "Changements récents du quota", "最近の利用枠の変化", "최근 할당량 변경"],
     tibo_monitor: ["Tibo Reset Monitor", "Tibo 额度重置监控", "Monitor de reinicios de Tibo", "Tibo-Reset-Monitor", "Suivi des réinitialisations Tibo", "Tibo リセットモニター", "Tibo 재설정 모니터"],
@@ -741,7 +749,7 @@ if __name__ == '__main__':
   let quiet = alpha(foreground, 0.52)
   let panel = alpha(foreground, 0.055)
   let unreadReset = tibo.reset_key != null && ackResetKey != "" && tibo.reset_key != ackResetKey
-  let tight = (cols ?? 3) < 3 || (rows ?? 4) < 4
+  let tight = ((cols ?? 4) < 4 && (rows ?? 4) < 4) || (cols ?? 4) <= 2 || (rows ?? 4) <= 2
   let publicEvents = tibo.events ?? []
   let calendarMonths = tibo.calendars ?? []
   let monthIndex = floor(max(0, min(36, num(monthOffset, 0) + 24)))
@@ -750,6 +758,10 @@ if __name__ == '__main__':
   let selectedEntries = publicEvents.filter(event => event.date == activeDate)
   let latestReset = tibo.latest
   let monitorItem = latestReset ?? tibo.featured
+  let tiny = (cols ?? 4) <= 2 && (rows ?? 4) <= 2
+  let narrow = (cols ?? 4) <= 2 && (rows ?? 4) > 2
+  let wide = (cols ?? 4) > (rows ?? 4)
+  let slimCards = (tileWidth ?? 400) < 340
 
   when tibo.reset_key != null && ackResetKey == "" { ackResetKey = tibo.reset_key }
   when tibo.key != null && seenTibo == "" { seenTibo = tibo.key }
@@ -757,6 +769,7 @@ if __name__ == '__main__':
     notify(value != null && seenTibo != "" && value != seenTibo ? strings.notification_update[languageIndex] : null, tibo.headline)
     seenTibo = value ?? seenTibo
   }
+  on q.refresh_request { quotaRefreshing = false }
   at q.five.resets_at {
     notify(q.five.resets_at != null && remindFive != q.five.resets_at ? strings.notification_five[languageIndex] : null, strings.notification_due[languageIndex])
     remindFive = q.five.resets_at ?? remindFive
@@ -775,40 +788,75 @@ if __name__ == '__main__':
     }
   }
   component Rule() { Spacer { height: 1; fill: width; background: alpha(foreground, 0.12) } }
-  component Quota(label, data, dense = false) {
+  component Quota(label, data, dense = false, mini = false, horizontal = false) {
     Column {
-      gap: dense ? 3 : 5
-      padding: dense ? 8 : 14
+      gap: mini ? 2 : dense ? 3 : 5
+      padding: mini ? 4 : dense ? 8 : slimCards ? 10 : 14
       background: panel
       radius: 0
-      Text { text: label; font: sans; fontSize: dense ? 12 : 14; color: secondary; maxLines: 1 }
-      Text {
-        text: data.remaining == null ? strings.unknown[languageIndex] : "${data.remaining}%"
-        fontSize: dense ? 26 : 34
-        bold: true
-        color: data.remaining != null && data.remaining <= 15 ? #fb927d : foreground
-        maxLines: 1
-      }
-      if data.remaining != null {
-        Progress { value: data.remaining; color: alpha(foreground, 0.75); track: alpha(foreground, 0.12); height: 3; fill: width }
-      }
-      let left = data.resets_at == null ? null : max(data.resets_at - now, 0)
-      let secondsLeft = left ?? 0
-      let daysLeft = floor(secondsLeft / 86400)
-      let hoursLeft = floor(secondsLeft % 86400 / 3600)
-      let hoursOnly = floor(secondsLeft / 3600)
-      let minutesLeft = floor(secondsLeft % 3600 / 60)
-      let dayText = strings.days_prefix[languageIndex] + str(daysLeft) + strings.day_unit[languageIndex] + strings.time_join[languageIndex] + str(hoursLeft) + strings.hour_unit[languageIndex] + (dense ? strings.time_left_suffix[languageIndex] : strings.time_until_suffix[languageIndex])
-      let hourText = strings.hours_prefix[languageIndex] + str(hoursOnly) + strings.hour_unit[languageIndex] + strings.time_join[languageIndex] + str(minutesLeft) + strings.minute_unit[languageIndex] + (dense ? strings.time_left_suffix[languageIndex] : strings.time_until_suffix[languageIndex])
-      Text {
-        text: left == null ? strings.no_reset_time[languageIndex] : left <= 0 ? strings.due_unconfirmed[languageIndex] : left >= 86400 ? dayText : hourText
-        font: sans
-        fontSize: dense ? 10 : 12
-        color: secondary
-        maxLines: 1
-      }
-      if !dense && data.resets_at != null {
-        Text { text: strings.expected_reset[languageIndex] + fmtTime(data.resets_at, "MM-dd HH:mm"); font: sans; fontSize: 12; color: quiet; maxLines: 1 }
+      if mini {
+        if horizontal {
+          Text {
+            text: label + "  " + (data.remaining == null ? "—" : "${round(data.remaining)}%")
+            fontSize: 13
+            bold: true
+            color: data.remaining != null && data.remaining <= 15 ? #fb927d : foreground
+            maxLines: 1
+          }
+          if data.remaining != null {
+            Progress { value: data.remaining; color: alpha(foreground, 0.75); track: alpha(foreground, 0.12); height: 2; fill: width }
+          }
+          let left = data.resets_at == null ? null : max(data.resets_at - now, 0)
+          let compactReset = left == null ? strings.no_reset_time[languageIndex] : left <= 0 ? strings.due_unconfirmed[languageIndex] : left >= 86400 ? strings.days_prefix[languageIndex] + str(floor(left / 86400)) + strings.day_unit[languageIndex] + strings.time_join[languageIndex] + str(floor(left % 86400 / 3600)) + strings.hour_unit[languageIndex] + strings.time_left_suffix[languageIndex] : strings.hours_prefix[languageIndex] + str(floor(left / 3600)) + strings.hour_unit[languageIndex] + strings.time_join[languageIndex] + str(floor(left % 3600 / 60)) + strings.minute_unit[languageIndex] + strings.time_left_suffix[languageIndex]
+          Text { text: compactReset; font: sans; fontSize: 9; color: secondary; maxLines: 1 }
+        } else {
+          Text { text: label; font: sans; fontSize: 10; color: secondary; maxLines: 1 }
+          Text {
+            text: data.remaining == null ? "—" : "${round(data.remaining)}%"
+            fontSize: 16
+            bold: true
+            color: data.remaining != null && data.remaining <= 15 ? #fb927d : foreground
+            maxLines: 1
+          }
+          if data.remaining != null {
+            Progress { value: data.remaining; color: alpha(foreground, 0.75); track: alpha(foreground, 0.12); height: 2; fill: width }
+          }
+        }
+      } else {
+        Text { text: label; font: sans; fontSize: dense ? 12 : 14; color: secondary; maxLines: 1 }
+        Text {
+          text: data.remaining == null ? strings.unknown[languageIndex] : "${data.remaining}%"
+          fontSize: dense ? 26 : 34
+          bold: true
+          color: data.remaining != null && data.remaining <= 15 ? #fb927d : foreground
+          maxLines: 1
+        }
+        if data.remaining != null {
+          Progress { value: data.remaining; color: alpha(foreground, 0.75); track: alpha(foreground, 0.12); height: 3; fill: width }
+        }
+        let left = data.resets_at == null ? null : max(data.resets_at - now, 0)
+        let secondsLeft = left ?? 0
+        let daysLeft = floor(secondsLeft / 86400)
+        let hoursLeft = floor(secondsLeft % 86400 / 3600)
+        let hoursOnly = floor(secondsLeft / 3600)
+        let minutesLeft = floor(secondsLeft % 3600 / 60)
+        let dayText = strings.days_prefix[languageIndex] + str(daysLeft) + strings.day_unit[languageIndex] + strings.time_join[languageIndex] + str(hoursLeft) + strings.hour_unit[languageIndex] + (dense ? strings.time_left_suffix[languageIndex] : strings.time_until_suffix[languageIndex])
+        let hourText = strings.hours_prefix[languageIndex] + str(hoursOnly) + strings.hour_unit[languageIndex] + strings.time_join[languageIndex] + str(minutesLeft) + strings.minute_unit[languageIndex] + (dense ? strings.time_left_suffix[languageIndex] : strings.time_until_suffix[languageIndex])
+        Text {
+          text: left == null ? strings.no_reset_time[languageIndex] : left <= 0 ? strings.due_unconfirmed[languageIndex] : left >= 86400 ? dayText : hourText
+          font: sans
+          fontSize: dense ? 10 : 12
+          color: secondary
+          maxLines: 1
+        }
+        if !dense && data.resets_at != null {
+          if slimCards {
+            Text { text: trim(strings.expected_reset[languageIndex]); font: sans; fontSize: 12; color: quiet; maxLines: 1 }
+            Text { text: fmtTime(data.resets_at, "MM-dd HH:mm"); font: sans; fontSize: 12; color: quiet; maxLines: 1 }
+          } else {
+            Text { text: strings.expected_reset[languageIndex] + fmtTime(data.resets_at, "MM-dd HH:mm"); font: sans; fontSize: 12; color: quiet; maxLines: 1 }
+          }
+        }
       }
     }
   }
@@ -851,38 +899,95 @@ if __name__ == '__main__':
   }
 
   Column {
-    gap: tight ? 2 : 8
-    padding: tight ? 6 : 10
+    gap: tight ? 2 : (rows ?? 4) < 4 ? 3 : 8
+    padding: tight ? 6 : (rows ?? 4) < 4 ? 8 : 10
     Row {
       align: center
-      Text { text: "Codex"; font: sans; fontSize: tight ? 12 : 14; bold: true; weight: 1; maxLines: 1 }
-      Button { text: languageShort; onTap: language = nextLanguage }
+      Text { text: "Codex"; font: sans; fontSize: tight ? 10 : 14; bold: true; weight: 1; maxLines: 1 }
+      if tight {
+        Button { text: languageShort; width: 36; height: 28; padding: 0; onTap: language = nextLanguage }
+      } else {
+        Button { text: languageShort; onTap: language = nextLanguage }
+      }
       Lamp { lit: unreadReset; diameter: 9 }
     }
     if tight {
-      for data, i in [q.five, q.week] {
+      if tiny {
+        Row {
+          gap: 4
+          Quota { label: strings.five_hour_short[languageIndex]; data: q.five; mini: true; weight: 1 }
+          Quota { label: strings.weekly_short[languageIndex]; data: q.week; mini: true; weight: 1 }
+        }
+        Text { text: monitorItem != null ? ("Tibo · " + (tibo.stale ? (strings.delayed_prefix[languageIndex] + monitorItem.title) : monitorItem.title)) : (tibo.stale ? strings.monitor_unavailable[languageIndex] : strings.no_updates[languageIndex]); font: sans; fontSize: 9; color: unreadReset ? #34d399 : secondary; maxLines: 1 }
+      } else if narrow {
+        Column {
+          gap: 4
+          Quota { label: strings.five_hour_short[languageIndex]; data: q.five; mini: true; horizontal: true }
+          Quota { label: strings.weekly_short[languageIndex]; data: q.week; mini: true; horizontal: true }
+        }
         Row {
           align: center
-          Text { text: (i == 0 ? strings.five_hour_short[languageIndex] : strings.weekly_short[languageIndex]) + (i == 0 && q.stale ? strings.stale_short[languageIndex] : ""); font: sans; fontSize: 10; color: secondary; weight: 1; maxLines: 1 }
-          Text { text: data.remaining == null ? "—" : "${data.remaining}%"; fontSize: 18; bold: true; width: 56; align: end; maxLines: 1 }
+          Text { text: "Tibo"; font: sans; fontSize: 11; bold: true; weight: 1; maxLines: 1 }
+          Text { text: unreadReset ? strings.new_update[languageIndex] : strings.view[languageIndex]; font: sans; fontSize: 10; color: unreadReset ? #34d399 : secondary; width: 64; align: end; maxLines: 1 }
+        }
+        Text { text: monitorItem != null ? (tibo.stale ? (strings.delayed_prefix[languageIndex] + monitorItem.title) : monitorItem.title) : (tibo.stale ? strings.monitor_unavailable[languageIndex] : strings.no_updates[languageIndex]); font: sans; fontSize: 10; color: secondary; maxLines: 2 }
+        Row {
+          align: center
+          Text { text: q.updated_at == null ? strings.waiting_quota[languageIndex] : strings.quota_record[languageIndex] + fmtTime(q.updated_at, "HH:mm") + (q.stale ? strings.stale_suffix[languageIndex] : ""); font: sans; fontSize: 9; color: quiet; weight: 1; maxLines: 1 }
+          Text { text: "codex-reset.com"; font: sans; width: 80; fontSize: 9; color: quiet; align: end; onTap: url("https://codex-reset.com/") }
+        }
+      } else if wide {
+        Row {
+          gap: 6
+          Quota { label: strings.five_hour_micro[languageIndex]; data: q.five; mini: true; horizontal: true; weight: 1 }
+          Quota { label: strings.weekly_micro[languageIndex]; data: q.week; mini: true; horizontal: true; weight: 1 }
+        }
+        Row {
+          align: center
+          Text { text: strings.reset_updates[languageIndex]; font: sans; fontSize: 11; bold: true; weight: 1; maxLines: 1 }
+          Text { text: unreadReset ? strings.new_update[languageIndex] : strings.view[languageIndex]; font: sans; fontSize: 10; color: unreadReset ? #34d399 : secondary; width: 64; align: end; maxLines: 1 }
+        }
+        Text { text: monitorItem != null ? (tibo.stale ? (strings.delayed_prefix[languageIndex] + monitorItem.title) : monitorItem.title) : (tibo.stale ? strings.monitor_unavailable[languageIndex] : strings.no_updates[languageIndex]); font: sans; fontSize: 10; color: secondary; maxLines: 1 }
+      } else {
+        Row {
+          gap: 6
+          Quota { label: strings.five_hour_short[languageIndex]; data: q.five; dense: true; weight: 1 }
+          Quota { label: strings.weekly_short[languageIndex]; data: q.week; dense: true; weight: 1 }
+        }
+        Row {
+          align: center
+          Text { text: strings.reset_updates[languageIndex]; font: sans; fontSize: 11; bold: true; weight: 1; maxLines: 1 }
+          Text { text: unreadReset ? strings.new_update[languageIndex] : strings.view[languageIndex]; font: sans; fontSize: 10; color: unreadReset ? #34d399 : secondary; width: 64; align: end; maxLines: 1 }
+        }
+        Text { text: monitorItem != null ? (tibo.stale ? (strings.delayed_prefix[languageIndex] + monitorItem.title) : monitorItem.title) : (tibo.stale ? strings.monitor_unavailable[languageIndex] : strings.no_updates[languageIndex]); font: sans; fontSize: 10; color: secondary; maxLines: 1 }
+        Row {
+          align: center
+          Text { text: q.updated_at == null ? strings.waiting_quota[languageIndex] : strings.quota_record[languageIndex] + fmtTime(q.updated_at, "HH:mm") + (q.stale ? strings.stale_suffix[languageIndex] : ""); font: sans; fontSize: 9; color: quiet; weight: 1; maxLines: 1 }
+          Text { text: "codex-reset.com"; font: sans; width: 80; fontSize: 9; color: quiet; align: end; onTap: url("https://codex-reset.com/") }
         }
       }
-      Text { text: monitorItem != null ? (tibo.stale ? (strings.delayed_prefix[languageIndex] + monitorItem.title) : monitorItem.title) : (tibo.stale ? strings.monitor_delayed[languageIndex] : strings.no_updates[languageIndex]); font: sans; fontSize: 9; color: unreadReset ? #34d399 : secondary; maxLines: 1 }
-      Button { text: strings.source_credit[languageIndex] + ": codex-reset.com"; onTap: url("https://codex-reset.com/") }
     } else {
       Row {
         gap: 8
-        Quota { label: strings.five_hour[languageIndex]; data: q.five; dense: (rows ?? 3) < 4; weight: 1 }
-        Quota { label: strings.weekly[languageIndex]; data: q.week; dense: (rows ?? 3) < 4; weight: 1 }
+        Quota { label: ((cols ?? 4) < 4 || (rows ?? 4) < 4) ? strings.five_hour_short[languageIndex] : strings.five_hour[languageIndex]; data: q.five; dense: (cols ?? 4) < 4 || (rows ?? 4) < 4; weight: 1 }
+        Quota { label: ((cols ?? 4) < 4 || (rows ?? 4) < 4) ? strings.weekly_short[languageIndex] : strings.weekly[languageIndex]; data: q.week; dense: (cols ?? 4) < 4 || (rows ?? 4) < 4; weight: 1 }
       }
       Row {
         align: center
-        Text { text: strings.reset_updates[languageIndex]; font: sans; fontSize: 12; bold: true; weight: 1; maxLines: 1 }
+        Text { text: (cols ?? 4) < 4 ? "Tibo" : strings.reset_updates[languageIndex]; font: sans; fontSize: 12; bold: true; weight: 1; maxLines: 1 }
         Text { text: unreadReset ? strings.new_update[languageIndex] : strings.view[languageIndex]; font: sans; fontSize: 11; color: unreadReset ? #34d399 : secondary; width: 80; align: end; maxLines: 1 }
       }
       Text { text: monitorItem != null ? (tibo.stale ? (strings.delayed_prefix[languageIndex] + monitorItem.title) : monitorItem.title) : (tibo.stale ? strings.monitor_unavailable[languageIndex] : strings.no_updates[languageIndex]); font: sans; fontSize: 11; color: secondary; maxLines: 1 }
-      Text { text: q.updated_at == null ? strings.waiting_quota[languageIndex] : strings.quota_record[languageIndex] + fmtTime(q.updated_at, "HH:mm") + (q.stale ? strings.stale_suffix[languageIndex] : ""); font: sans; fontSize: 10; color: quiet; maxLines: 1 }
-      Button { text: strings.source_credit[languageIndex] + ": codex-reset.com"; onTap: url("https://codex-reset.com/") }
+      if (cols ?? 4) < 4 || (rows ?? 4) < 4 {
+        Row {
+          align: center
+          Text { text: q.updated_at == null ? strings.waiting_quota[languageIndex] : strings.quota_record[languageIndex] + fmtTime(q.updated_at, "HH:mm") + (q.stale ? strings.stale_suffix[languageIndex] : ""); font: sans; fontSize: 9; color: quiet; weight: 1; maxLines: 1 }
+          Text { text: "codex-reset.com"; font: sans; width: 80; fontSize: 9; color: quiet; align: end; onTap: url("https://codex-reset.com/") }
+        }
+      } else {
+        Text { text: q.updated_at == null ? strings.waiting_quota[languageIndex] : strings.quota_record[languageIndex] + fmtTime(q.updated_at, "HH:mm") + (q.stale ? strings.stale_suffix[languageIndex] : ""); font: sans; fontSize: 10; color: quiet; maxLines: 1 }
+        Button { text: strings.source_credit[languageIndex] + ": codex-reset.com"; onTap: url("https://codex-reset.com/") }
+      }
     }
   }
 
@@ -917,7 +1022,16 @@ if __name__ == '__main__':
           Quota { label: strings.weekly[languageIndex]; data: q.week; weight: 1 }
         }
         Text { text: q.updated_at == null ? strings.no_local_record[languageIndex] : strings.recorded_at[languageIndex] + fmtTime(q.updated_at, "MM-dd HH:mm") + (q.stale ? strings.stale_suffix[languageIndex] : ""); font: sans; fontSize: 13; color: secondary }
-        Button { text: strings.refresh_quota[languageIndex]; onTap: refresh() }
+        Button {
+          text: quotaRefreshing ? strings.refreshing_quota[languageIndex] : strings.refresh_quota[languageIndex]
+          color: quotaRefreshing ? accent : foreground
+          background: quotaRefreshing ? alpha(accent, 0.16) : panel
+          border: 1
+          borderColor: quotaRefreshing ? accent : alpha(foreground, 0.14)
+          animate background: tween(180ms, "out")
+          animate color: tween(180ms, "out")
+          onTap: { quotaRefreshing = true; refreshRequest = refreshRequest + 1; refresh() }
+        }
         Text { text: strings.quota_explanation[languageIndex]; font: sans; fontSize: 13; color: secondary }
         if len(q.events) > 0 {
           Rule { }

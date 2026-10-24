@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 9 }
+  source a = android.agents
+  Text { text: a }
+}

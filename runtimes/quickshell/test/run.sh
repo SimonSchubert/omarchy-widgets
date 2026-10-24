@@ -6,11 +6,12 @@
 # walk.js does the same walk with Owl.js. They must print the same JSON, numbers
 # alike to 1e-9:
 #
-#   edge.owl                198 expressions chosen to break a port
+#   edge.owl                expressions and nodes chosen to break a port
 #   <widget>.fixture.json   store widgets with the data their sources gave once
-#   every store widget      with no source data at all
+#   every store widget      with no source data at all, and every face
 #
-# and `owl check` and Owl.js must accept and reject the same files.
+# and `owl check` and Owl.js must accept and reject the same files: those, and
+# cases/*.owl, small files that each pass or fail one rule.
 #
 # Needs java (17+), javac and node. The expected output is never stored:
 # it comes from the jar in this repo, so a new owl.jar is checked as it lands.
@@ -58,6 +59,20 @@ same() {
     process.exit(eq(a, b) ? 0 : 1)' "$1" "$2"
 }
 
+# Store widgets above Owl.js's level are left out until it's ported: Quickshell
+# shows them as needing an update, as an older launcher does.
+js_level=$(sed -n 's/^var LEVEL = \([0-9]*\).*/\1/p' "$owl")
+level() { awk 'match($0, /(^|[^A-Za-z0-9_])owl:[ \t]*[0-9]+/) { s = substr($0, RSTART, RLENGTH); sub(/.*:[ \t]*/, "", s); print s; found = 1; exit } END { if (!found) print 1 }' "$1"; }
+widgets=()
+for w in "$repo"/widgets/*/*/widget.owl "$repo"/faces/*/*/face.owl; do
+  lv=$(level "$w")
+  if [ "$lv" -le "$js_level" ]; then
+    widgets+=("$w")
+  else
+    echo "skip - $(basename "$(dirname "$w")") needs owl $lv, Owl.js runs up to $js_level"
+  fi
+done
+
 failed=0
 check() {
   local name=$1 src=$2 fixture=$3
@@ -67,7 +82,7 @@ check() {
     echo "ok - $name"
   else
     echo "not ok - $name"
-    diff <(tr ',' '\n' <"$out/java.json") <(tr ',' '\n' <"$out/js.json") | head -10
+    diff <(tr ',' '\n' <"$out/java.json") <(tr ',' '\n' <"$out/js.json") | head -10 || true
     failed=1
   fi
 }
@@ -78,7 +93,7 @@ for f in "$here"/*.fixture.json; do
   case $name in edge | base) continue ;; esac
   check "$name with data" "$repo/widgets/simonschubert/$name/widget.owl" "$f"
 done
-for w in "$repo"/widgets/*/*/widget.owl; do
+for w in "${widgets[@]}"; do
   check "$(basename "$(dirname "$w")") without data" "$w" "$here/base.fixture.json"
 done
 
@@ -91,11 +106,11 @@ mine=$(node -e '
     const src = fs.readFileSync(f, "utf8")
     try { m.exports.compile(src); console.log("OK  " + f) }
     catch (e) { console.log("ERR " + f + ":" + m.exports.formatError(src, e).split("\n")[0]) }
-  }' "$owl" "$repo"/widgets/*/*/widget.owl "$here/edge.owl" | sort)
-theirs=$(java "${java_opts[@]}" -cp "$jar" dev.omalauncher.widgets.cli.MainKt check "$repo"/widgets/*/*/widget.owl "$here/edge.owl" 2>&1 |
-  grep -E '^(ok|ERR)' | sed -E 's/^ok  ([^ ]+).*/OK  \1/' | sort)
+  }' "$owl" "${widgets[@]}" "$here/edge.owl" "$here"/cases/*.owl | sort)
+theirs=$(java "${java_opts[@]}" -cp "$jar" dev.omalauncher.widgets.cli.MainKt check "${widgets[@]}" "$here/edge.owl" "$here"/cases/*.owl 2>&1 |
+  grep -E '^(ok|ERR)' | sed -E 's/^ok  ([^ ]+).*/OK  \1/' | sort) || true # it exits 1 for the cases meant to fail
 if [ "$mine" = "$theirs" ]; then
-  echo "ok - owl check and Owl.js agree on every widget"
+  echo "ok - owl check and Owl.js agree on every widget, face and case"
 else
   echo "not ok - owl check and Owl.js disagree"
   diff <(echo "$theirs") <(echo "$mine") | head -10

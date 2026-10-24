@@ -1,10 +1,9 @@
 widget "tesla" {
-  page: 1
   size: 3x3
   minSize: 3x3
   meta {
     description: "Read-only Tesla status: battery, range, lock, climate, tires and charge limit. It never wakes the car."
-    version: "1.5"
+    version: "1.6"
     license: "MIT"
     category: "home"
     owl: 6
@@ -576,6 +575,14 @@ widget "tesla" {
   let tyreSpread = car.tyres == null ? 0 : car.tyres.max - car.tyres.min
   let tyreTint = car.tyres != null && (car.tyre_unit == "psi" ? tyreSpread >= 3 : tyreSpread >= 0.2) ? yellow : foreground
   let roomy = rows != null && rows >= 4
+  // The tile's inside, less its 12dp padding. The header takes about 46dp and each
+  // fact row about 42dp (the first one with its rule 53dp); the ring gets what is left.
+  let innerW = (tileWidth ?? 197) - 24
+  let innerH = (tileHeight ?? 211) - 24
+  let factRows = innerH >= 221 ? 2 : innerH >= 171 ? 1 : 0
+  let factBlock = factRows == 2 ? 95 : factRows == 1 ? 53 : 0
+  let ringSize = clamp(min(innerW * 0.45, innerH - 46 - factBlock - 4), 56, roomy ? 120 : 104)
+  let pctSize = clamp((innerW - ringSize - 14) / 2.5, 22, 32)
   let sideLabel = chargingNow ? "charge" : car.sentry == true ? "sentry" : "climate"
   let sideValue = chargingNow ? "${round(car.charger_power ?? 0)} kW" : car.sentry == true ? "on" : climateText
   let sideTint = chargingNow ? cyan : car.sentry == true ? yellow : car.climate_on == true ? cyan : foreground
@@ -669,7 +676,7 @@ widget "tesla" {
         Ring {
           value: car.battery ?? 0
           max: 100
-          size: roomy ? 120 : 104
+          size: ringSize
           thickness: 8
           color: ringColor
           track: alpha(muted, 0.25)
@@ -678,28 +685,32 @@ widget "tesla" {
         Column {
           gap: 0
           weight: 1
-          ChargeLine { big: 32 }
+          ChargeLine { big: pctSize }
           Text { text: heroMid; color: heroMidColor; maxLines: 1 }
           if heroFoot != null && heroFoot != "" {
             Text { text: heroFoot; style: small; color: heroFootColor; maxLines: 1 }
           }
         }
       }
-      if roomy { Spacer { weight: 1 } } else { Spacer { height: 12 } }
-      Rule {}
-      Spacer { height: 10 }
-      Row {
-        gap: 8
-        Fact { label: "inside"; value: inside; tint: insideTint; weight: 1 }
-        Fact { label: "outside"; value: outside; weight: 1 }
-        Fact { label: sideLabel; value: sideValue; tint: sideTint; weight: 1 }
+      if factRows > 0 {
+        if roomy { Spacer { weight: 1 } } else { Spacer { height: 10 } }
+        Rule {}
+        Spacer { height: 10 }
+        Row {
+          gap: 8
+          Fact { label: "inside"; value: inside; tint: insideTint; weight: 1 }
+          Fact { label: "outside"; value: outside; weight: 1 }
+          Fact { label: sideLabel; value: sideValue; tint: sideTint; weight: 1 }
+        }
       }
-      Spacer { height: 10 }
-      Row {
-        gap: 8
-        Fact { label: extraLabel; value: extraValue; tint: extraTint; weight: 1 }
-        Fact { label: "lock"; value: lockText; tint: lockTint; weight: 1 }
-        Fact { label: "tires"; value: tyreShort; tint: tyreTint; weight: 1 }
+      if factRows > 1 {
+        Spacer { height: 10 }
+        Row {
+          gap: 8
+          Fact { label: extraLabel; value: extraValue; tint: extraTint; weight: 1 }
+          Fact { label: "lock"; value: lockText; tint: lockTint; weight: 1 }
+          Fact { label: "tires"; value: tyreShort; tint: tyreTint; weight: 1 }
+        }
       }
       if attention != null {
         Spacer { height: 8 }

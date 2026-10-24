@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 12 }
+  state x = 0
+  Box { onDrag: x = x + dx; onDragEnd: x = 0; Text { text: x } }
+}

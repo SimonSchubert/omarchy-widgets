@@ -2,31 +2,29 @@ widget "departures" {
   size: 3x2
   minSize: 2x1
   requires { pacman: [] }
-  meta { description: "Live departures from a stop you pick, anywhere Transitous has open timetables: line, direction, platform and minutes to go, with delays. Tap the tile for the full board or to change the stop"; version: "1.0"; license: "MIT"; category: "world"; owl: 5 }
+  meta { description: "Live departures from a stop you pick, anywhere Transitous has open timetables: line, direction, platform and minutes to go, with delays. Tap the tile for the full board or to change the stop"; version: "1.3"; license: "MIT"; category: "world"; owl: 8 }
 
   // The stop, picked in the full screen and kept across restarts. No location is hard-coded.
   state stopId = "" persist
   state stopName = "" persist
+  // The last three stops picked, as buttons under the search.
+  state recent = [] persist
   state query = ""
+
+  // Some stops come as "Name,  -"; drop the empty tail.
+  let displayName = replace(replace(stopName, ",  -", ""), ", -", "")
 
   source now = clock every 15s
   // Transitous (https://transitous.org) asks clients to name themselves.
   let ua = {"User-Agent": "omarchy-widgets/departures (+https://github.com/SimonSchubert/omarchy-widgets)"}
 
-  // There is no urlencode: escape what stop names contain. % goes first.
-  let q = replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(
-    trim(query), "%", "%25"), " ", "%20"), "&", "%26"), "#", "%23"), "?", "%3F"), "+", "%2B"), "/", "%2F"),
-    "ä", "%C3%A4"), "ö", "%C3%B6"), "ü", "%C3%BC"), "Ä", "%C3%84"), "Ö", "%C3%96"), "Ü", "%C3%9C"), "ß", "%C3%9F"),
-    "é", "%C3%A9"), "è", "%C3%A8"), "à", "%C3%A0"), "ç", "%C3%A7"), "ñ", "%C3%B1"), "ø", "%C3%B8")
-  let sid = replace(replace(replace(replace(stopId, "%", "%25"), ":", "%3A"), "#", "%23"), " ", "%20")
-
-  // An empty URL makes no request: it just comes back not ok.
-  source found = http(len(trim(query)) < 2 ? "" : "https://api.transitous.org/api/v1/geocode?type=STOP&text=${q}", ua) every 1h timeout 15s json status
-  source board = http(stopId == "" ? "" : "https://api.transitous.org/api/v6/stoptimes?stopId=${sid}&n=20", ua) every 30s timeout 15s json status
+  // A null URL makes no request.
+  source found = http(len(trim(query)) < 2 ? null : "https://api.transitous.org/api/v1/geocode?type=STOP&text=${enc(trim(query))}", ua) every 1h timeout 15s json status
+  source board = http(stopId == "" ? null : "https://api.transitous.org/api/v6/stoptimes?stopId=${enc(stopId)}&n=20", ua) every 30s timeout 15s json status
 
   let stops = (found != null && found.ok ? found.out ?? [] : []).take(8).map(s => {
     id: s.id,
-    name: s.name,
+    name: replace(replace(s.name, ",  -", ""), ", -", ""),
     area: (s.areas ?? []).find(a => a.default == true).name ?? s.country ?? "",
     modes: lower(join((s.modes ?? []).take(3), ", "))
   })
@@ -128,7 +126,7 @@ widget "departures" {
     gap: 2
     justify: center
     if showName {
-      Text { text: stopName == "" ? "departures" : stopName; style: label; color: muted; maxLines: 1 }
+      Text { text: displayName == "" ? "departures" : displayName; style: label; color: muted; maxLines: 1 }
     }
     if stopId == "" {
       Text { text: "Tap to pick a stop."; style: small; color: muted }
@@ -151,11 +149,28 @@ widget "departures" {
   }
 
   screen {
-    title: stopName == "" ? "departures" : stopName
+    title: displayName == "" ? "departures" : displayName
     Column {
       scroll: true
       gap: 8
       Input { placeholder: stopName == "" ? "search for a stop" : "change stop"; clear: true; onSubmit: { query = value; refresh() } }
+      if len(recent) > 0 {
+        Row {
+          fill: width
+          gap: 6
+          for r in recent key r.id {
+            Box {
+              weight: 1
+              background: r.id == stopId ? alpha(accent, 0.25) : alpha(muted, 0.15)
+              radius: 8
+              padding: [4, 6]
+              align: center
+              onTap: { stopId = r.id; stopName = r.name; refresh() }
+              Text { text: r.name; style: small; color: r.id == stopId ? foreground : muted; maxLines: 1 }
+            }
+          }
+        }
+      }
       if len(trim(query)) >= 2 {
         if found == null {
           Text { text: "searching…"; style: small; color: muted }
@@ -167,7 +182,10 @@ widget "departures" {
             Column {
               gap: 0
               padding: [0, 6]
-              onTap: { stopId = s.id; stopName = s.name; query = ""; refresh() }
+              onTap: {
+                recent = ([{id: s.id, name: s.name}] + recent.filter(x => x.id != s.id)).take(3)
+                stopId = s.id; stopName = s.name; query = ""; refresh()
+              }
               Text { text: s.name; style: body; maxLines: 1 }
               Text { text: [s.area, s.modes].filter(x => x != "").join(" · "); style: small; color: muted; maxLines: 1 }
             }

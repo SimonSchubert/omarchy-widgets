@@ -1,0 +1,16 @@
+face "drawer" {
+  meta { owl: 11 }
+  source d = android.drawer
+  state menu = []
+  state q = "cal"
+  Column { lazy: true; reverse: true
+    for a in rank(d.apps, q) {
+      Row {
+        Column { Image { src: a.icon; label: a.label; size: 32 } Text { text: a.name; minLines: 1 } }
+        Text { text: strongMatch(a, q) ? "open" : "ask"; onTap: appAction(a.actions[0], a.key); onLongPress: menu = shortcuts(a.key) }
+      }
+    }
+  }
+  Text { text: d.updates; onTap: appAction("uninstall", d.apps[0].key) }
+  Text { text: len(chunk(menu, 4)); onTap: workApps("toggle") }
+}

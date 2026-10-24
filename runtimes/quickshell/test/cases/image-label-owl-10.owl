@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 10 }
+  Image { src: "x.png"; label: "x" }
+}

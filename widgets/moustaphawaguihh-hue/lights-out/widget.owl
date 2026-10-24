@@ -1,5 +1,5 @@
 widget "lights out" {
-  meta { owl: 5; description: "The Lights Out puzzle. Tap a light to flip it and its neighbours until every light is off"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { owl: 5; description: "The Lights Out puzzle. Tap a light to flip it and its neighbours until every light is off"; version: "1.0.1"; license: "MIT"; category: "games" }
   size: 4x5
   minSize: 3x4
   padding: 10
@@ -25,7 +25,11 @@ widget "lights out" {
   let gap = 4
   // One cell in dp, from whichever side of the tile is tighter; the height
   // also leaves room for the status line and the buttons under the board.
-  let cell = max(floor((min((tileWidth ?? 300) - 28, (tileHeight ?? 360) - 90) - (n - 1) * gap) / n), 10)
+  // A wide tile (landscape) puts the status and buttons beside the board
+  // instead, so the board can take the full height.
+  let wide = tileWidth != null && tileHeight != null && tileWidth > tileHeight * 1.3
+  let side = wide ? min(tileHeight - 28, tileWidth - 28 - 140) : min((tileWidth ?? 300) - 28, (tileHeight ?? 360) - 90)
+  let cell = max(floor((side - (n - 1) * gap) / n), 10)
   let step = cell + gap
   let gridPx = n * cell + (n - 1) * gap
 
@@ -38,9 +42,7 @@ widget "lights out" {
   let tapCells = range(n * n).filter(c => ((seed * 25 + c) * 7919 + pow(seed * 25 + c, 2) % 104729) % 1000 < 400)
   let fresh = range(n * n).map(j => sum(tapCells.map(c => (c == j || abs(c - j) == n || (abs(c - j) == 1 && floor(c / n) == floor(j / n))) ? 1 : 0)) % 2)
 
-  Column {
-    gap: 6
-    align: center
+  component Board() {
     Canvas {
       width: gridPx
       height: gridPx
@@ -73,12 +75,9 @@ widget "lights out" {
         }
       }
     }
-    Text {
-      style: small
-      align: center
-      color: solved ? green : muted
-      text: solved ? "solved in ${moves}  ·  best ${best == 0 ? moves : best}" : "${lit} lit  ·  ${moves} moves${best > 0 ? "  ·  best ${best}" : ""}"
-    }
+  }
+
+  component Controls() {
     Row {
       gap: 6
       justify: center
@@ -92,6 +91,46 @@ widget "lights out" {
         }
       }
       Button { text: "new"; onTap: { board = fresh; history = []; moves = 0 } }
+    }
+  }
+
+  if wide {
+    Row {
+      gap: 12
+      align: center
+      justify: center
+      Board {}
+      Column {
+        gap: 8
+        align: center
+        weight: 1
+        Text {
+          style: title
+          align: center
+          color: solved ? green : foreground
+          text: solved ? "solved" : "${lit} lit"
+        }
+        Text {
+          style: small
+          align: center
+          color: solved ? green : muted
+          text: solved ? "in ${moves}  ·  best ${best == 0 ? moves : best}" : "${moves} moves${best > 0 ? "  ·  best ${best}" : ""}"
+        }
+        Controls {}
+      }
+    }
+  } else {
+    Column {
+      gap: 6
+      align: center
+      Board {}
+      Text {
+        style: small
+        align: center
+        color: solved ? green : muted
+        text: solved ? "solved in ${moves}  ·  best ${best == 0 ? moves : best}" : "${lit} lit  ·  ${moves} moves${best > 0 ? "  ·  best ${best}" : ""}"
+      }
+      Controls {}
     }
   }
 }

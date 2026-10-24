@@ -1,0 +1,4 @@
+widget "x" {
+  let twice = 2
+  Text { text: twice(3) }
+}

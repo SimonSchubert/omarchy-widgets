@@ -1,0 +1,5 @@
+face "x" {
+  meta { owl: 10 }
+  size: 4x2
+  Text { text: "hi" }
+}

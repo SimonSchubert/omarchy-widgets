@@ -2,13 +2,11 @@ widget "nfl" {
   meta {
     owl: 5
     description: "NFL scores and standings from ESPN with team logos: live games first, then finals and this week's upcoming games. Tap for every game and both conferences"
-    version: "1.0"
+    version: "1.0.1"
     license: "MIT"
-    category: "world"
+    category: "sport"
   }
   requires { pacman: ["curl"] }
-  page: 1
-  order: 45
   size: 6x4
   minSize: 3x3
 
@@ -60,8 +58,9 @@ widget "nfl" {
     // Every row has the same shape - badge, team, centre, team, badge - and the
     // centre keeps one width whether or not there are scores in it, so the
     // badges and abbreviations line up down the whole list.
-    let vw = max(max(screenWidth ?? 0, tileWidth ?? 0), 240)
-    let wide = vw >= 280
+    // Decide from the tile itself: on the landscape home screen the screen is
+    // wide but the tile is narrow, and the wide centre left no room for the teams.
+    let wide = (tileWidth ?? 240) >= 340
     let px = wide ? 18 : 14
     let scW = wide ? 24 : 18
     let dotW = wide ? 8 : 6
@@ -76,7 +75,7 @@ widget "nfl" {
     Row {
       gap: gap
       Badge { t: away; px: px }
-      Text { text: away.team.abbreviation; style: small; weight: 1; color: final && !away.winner ? muted : foreground }
+      Text { text: away.team.abbreviation; style: small; weight: 1; maxLines: 1; color: final && !away.winner ? muted : foreground }
       if pre {
         Text { text: kick; style: small; width: ctrW; align: center; color: muted; maxLines: 1 }
       } else {
@@ -89,7 +88,7 @@ widget "nfl" {
           Text { text: home.score ?? '–'; style: small; width: scW; padding: [5, 0, 0, 0]; align: start; bold: final && home.winner; color: live ? accent : final && !home.winner ? muted : foreground }
         }
       }
-      Text { text: home.team.abbreviation; style: small; weight: 1; align: end; color: final && !home.winner ? muted : foreground }
+      Text { text: home.team.abbreviation; style: small; weight: 1; maxLines: 1; align: end; color: final && !home.winner ? muted : foreground }
       Badge { t: home; px: px }
     }
   }

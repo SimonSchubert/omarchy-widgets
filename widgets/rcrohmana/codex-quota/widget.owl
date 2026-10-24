@@ -2,7 +2,7 @@ widget "codex quota" {
   size: 6x4
   minSize: 3x4
   padding: 10
-  meta { description: "Codex 5-hour and weekly usage from the account signed into Codex CLI, with reset times and explicit auth status"; version: "1.4"; license: "MIT"; category: "dev" }
+  meta { description: "Codex 5-hour and weekly usage from the account signed into Codex CLI, with reset times and explicit auth status"; version: "1.5"; license: "MIT"; category: "dev" }
   requires { pacman: ["bash", "python"] }
 
   source now = clock every 30s
@@ -67,6 +67,12 @@ except Exception:
 PY
   """) every 5m json timeout 25s
 
+  // The percent grows with the card: by tile height, capped so "100%" fits the card width.
+  // On a tile taller than wide the cards are narrow, so "left" goes under the percent.
+  let cardInner = ((tileWidth ?? 300) - 28) / 2 - 20
+  let narrowCards = tileWidth != null && tileHeight != null && tileHeight > tileWidth
+  let big = clamp(min((tileHeight ?? 200) * 0.2, narrowCards ? cardInner / 2.5 : (cardInner - 30) / 2.6), 28, 72)
+
   let quotaError = u.error ?? (u != null && u.five == null && u.week == null ? "No quota available for this Codex account." : null)
 
   component Limit(label, data) {
@@ -90,11 +96,17 @@ PY
         }
       } else {
         Text { text: label; fontSize: 10; bold: true; color: muted }
-        Row {
-          align: bottom
-          gap: 4
-          Text { text: remaining == null ? "—" : "${round(remaining)}%"; fontSize: 28; bold: true; color: tint; weight: 1 }
-          Text { text: "left"; fontSize: 11; color: muted; width: 26 }
+        Spacer { weight: 1 }
+        if narrowCards {
+          Text { text: remaining == null ? "—" : "${round(remaining)}%"; fontSize: big; bold: true; color: tint }
+          Text { text: "left"; fontSize: 11; color: muted }
+        } else {
+          Row {
+            align: bottom
+            gap: 4
+            Text { text: remaining == null ? "—" : "${round(remaining)}%"; fontSize: big; bold: true; color: tint; weight: 1 }
+            Text { text: "left"; fontSize: 11; color: muted; width: 26 }
+          }
         }
         Spacer { weight: 1 }
       }

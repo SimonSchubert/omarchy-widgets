@@ -1,13 +1,13 @@
 name: review
 
-# Checks every widget a pull request adds or changes and writes a summary for
+# Checks every widget, face and app a pull request adds or changes and writes a summary for
 # the reviewer: what it runs, what it installs, and anything that looks risky.
 #
 # pull_request_target, so a pull request can't bring its own copy of this check:
 # nothing from it is checked out or run, and the token stays read-only.
 on:
   pull_request_target:
-    paths: ["widgets/**"]
+    paths: ["widgets/**", "faces/**", "apps/**"]
 
 permissions:
   contents: read
@@ -23,9 +23,9 @@ jobs:
     container: archlinux:latest
     steps:
       - name: Tools
-        run: pacman -Syu --noconfirm --needed git jre-openjdk-headless >/dev/null
+        run: pacman -Syu --noconfirm --needed git diffutils jre-openjdk-headless >/dev/null
 
-      # The base branch as it is now: this workflow and tools/owl.jar are the reviewed
+      # The base branch as it is now: this workflow, owl.txt and tools/owl.jar are the reviewed
       # ones, not the pull request's, and the newest, even for a branch made before
       # them. The pull request's files are only read as data, by verify-pr.sh.
       - uses: actions/checkout@v4

@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 9 }
+  Text { text: "a"; onTap: ask("hi") }
+}

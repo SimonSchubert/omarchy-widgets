@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 13 }
+  state x = 0
+  Box { drag: vertical; offset: [0, x]; onDrag: x = x + dy; onDragEnd: x = vy > 500 ? 300 : 0; animate offset: 300ms; Text { text: x } }
+}

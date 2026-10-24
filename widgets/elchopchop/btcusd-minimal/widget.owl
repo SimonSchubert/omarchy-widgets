@@ -8,7 +8,7 @@ widget "btc" {
     description: "The live BTC/USD price from Coinbase in a tiny 1x1 tile, green if it rose over the last 24 hours and red if it fell."
     version: "1.1"
     license: "MIT"
-    category: "world"
+    category: "finance"
   }
 
   // Fetched by Android itself; no shell and no packages needed.

@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 9 }
+  let r = random(1, 6)
+  Text { text: r }
+}

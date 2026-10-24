@@ -1,6 +1,4 @@
 widget "flipper zero" {
-  page: 2
-  order: 2
   size: 6x3
   minSize: 3x3
 

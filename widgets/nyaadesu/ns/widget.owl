@@ -1,6 +1,4 @@
 widget "ns" {
-  page: 1
-  order: 3
   size: 6x5
   minSize: 3x3
   padding: 10

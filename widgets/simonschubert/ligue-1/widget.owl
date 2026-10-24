@@ -2,13 +2,11 @@ widget "ligue-1" {
   meta {
     owl: 5
     description: "Ligue 1 results, live scores and kick-offs from ESPN with club crests, and the table with European and relegation places. Tap for every match"
-    version: "1.0"
+    version: "1.1.1"
     license: "MIT"
-    category: "world"
+    category: "sport"
   }
   requires { pacman: ["curl", "jq"] }
-  page: 1
-  order: 45
   size: 6x4
   minSize: 3x3
 
@@ -17,9 +15,10 @@ widget "ligue-1" {
   // referred to by file name, kept to [a-z0-9].png.
   source games = cmd("""
     u=https://site.api.espn.com/apis/site/v2/sports/soccer/fra.1/scoreboard
-    for i in -3 -2 -1 0 1 2 3 4 5 6; do
-      curl -fsm 10 --compressed "$u?dates=$(date -d "$i day" +%Y%m%d)"
-    done | jq -sc '[.[].events[] | .competitions[0] as $c | {
+    # One curl for all the days, so one process and connection rather than one each, and the dates from bash itself.
+    printf -v now '%(%s)T' -1
+    urls=(); for i in -3 -2 -1 0 1 2 3 4 5 6; do printf -v d '%(%Y%m%d)T' $((now + i * 86400)); urls+=("$u?dates=$d"); done
+    curl -fsm 10 --compressed "${urls[@]}" | jq -sc '[.[].events[] | .competitions[0] as $c | {
       id, at: (.date[0:16] + ":00Z" | fromdateiso8601),
       state: $c.status.type.state, detail: $c.status.type.shortDetail,
       teams: [$c.competitors[] | {
@@ -63,7 +62,10 @@ widget "ligue-1" {
   let cap = clamp((rows ?? 4) * 3 - 2, 5, 14)
   let picked = flatten([live, done.take(ceil(cap / 2)), next]).take(cap)
   let groups = table ?? []
-  let wide = max(max(screenWidth ?? 0, tileWidth ?? 0), 240) >= 280
+  // Full club names need room: the tile decides from its own width (the landscape tile, ~290dp,
+  // gets abbreviations), the full screen from the screen's.
+  let tileWide = (tileWidth ?? 0) >= 360
+  let screenWide = max(max(screenWidth ?? 0, tileWidth ?? 0), 240) >= 280
 
   component Crest(logo, px = 18) {
     if logo {
@@ -73,7 +75,7 @@ widget "ligue-1" {
     }
   }
 
-  component GameRow(g) {
+  component GameRow(g, wide = false) {
     let away = g.teams.find(t => t.side == 'away') ?? g.teams[1]
     let home = g.teams.find(t => t.side == 'home') ?? g.teams[0]
     let live = g.state == 'in'
@@ -91,7 +93,7 @@ widget "ligue-1" {
       Crest { logo: home.logo; px: px }
       Text { text: wide ? home.name : home.abbr; style: small; weight: 1; maxLines: 1; color: final && away.winner ? muted : foreground }
       if g.state == 'pre' {
-        Text { text: fmtTime(g.at, wide ? "EEE HH:mm" : "HH:mm"); style: small; width: ctrW; align: center; color: muted; maxLines: 1 }
+        Text { text: fmtTime(g.at, "EEE HH:mm"); style: small; width: ctrW; align: center; color: muted; maxLines: 1 }
       } else {
         Row {
           width: ctrW; gap: 0; align: center
@@ -107,7 +109,7 @@ widget "ligue-1" {
     }
   }
 
-  component TeamRow(t, full = false) {
+  component TeamRow(t, full = false, wide = false) {
     let zc = t.zone == 'green' ? green : t.zone == 'blue' ? blue : t.zone == 'orange' ? orange : t.zone == 'red' ? red : rgb(0, 0, 0, 0)
     Row {
       gap: 6
@@ -147,11 +149,11 @@ widget "ligue-1" {
         if count(picked) == 0 {
           Text { text: games == null ? "loading…" : "no matches this week"; style: small; color: muted }
         } else {
-          for g in picked key g.id { GameRow { g: g } }
+          for g in picked key g.id { GameRow { g: g; wide: tileWide } }
         }
       } else {
         for grp in groups {
-          for t in grp.teams key t.id { TeamRow { t: t } }
+          for t in grp.teams key t.id { TeamRow { t: t; wide: tileWide } }
         }
       }
     }
@@ -163,10 +165,10 @@ widget "ligue-1" {
       scroll: true
       Text { text: "matches"; style: title }
       if count(all) == 0 { Text { text: "no matches this week"; style: small; color: muted } }
-      for g in all key g.id { GameRow { g: g } }
+      for g in all key g.id { GameRow { g: g; wide: screenWide } }
       Text { text: "table"; style: title }
       for grp in groups {
-        for t in grp.teams key t.id { TeamRow { t: t; full: true } }
+        for t in grp.teams key t.id { TeamRow { t: t; full: true; wide: screenWide } }
       }
       Button { text: "close"; onTap: close() }
     }

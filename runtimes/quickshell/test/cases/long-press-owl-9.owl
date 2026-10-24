@@ -1,0 +1,6 @@
+widget "x" {
+  meta { owl: 9 }
+  state n = 0
+  Text { text: n; onTap: screen() }
+  screen { Text { text: n; onLongPress: n = 1 } }
+}

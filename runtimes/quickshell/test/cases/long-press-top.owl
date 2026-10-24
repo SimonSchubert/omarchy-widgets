@@ -1,0 +1,6 @@
+widget "x" {
+  meta { owl: 10 }
+  state n = 0
+  onLongPress: n = 1
+  Text { text: n }
+}

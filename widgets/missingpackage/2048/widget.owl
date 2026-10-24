@@ -1,5 +1,5 @@
 widget "2048" {
-  meta { owl: 6; description: "The 2048 puzzle: swipe the board, or tap one of its edges, to slide the tiles; equal ones merge. The game and your best score are kept"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { owl: 6; description: "The 2048 puzzle: swipe the board, or tap one of its edges, to slide the tiles; equal ones merge. The game and your best score are kept"; version: "1.0"; license: "MIT"; category: "games" }
   size: 4x4
   minSize: 3x3
   padding: 10

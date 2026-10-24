@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 10 }
+  state s = []
+  Text { text: 1; onTap: s = shortcuts("a:x") }
+}

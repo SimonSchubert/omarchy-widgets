@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 9 }
+  Box { frost: 8; Text { text: "f" } }
+}

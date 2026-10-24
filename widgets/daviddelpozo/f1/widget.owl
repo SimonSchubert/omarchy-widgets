@@ -1,5 +1,5 @@
 widget "f1" {
-  meta { owl: 5; description: "F1 calendar: next race countdown, results, driver and team standings"; version: "1.0"; license: "MIT"; category: "news" }
+  meta { owl: 5; description: "F1 calendar: next race countdown, results, driver and team standings"; version: "1.0.1"; license: "MIT"; category: "sport" }
 
   requires { pacman: ["curl", "jq"] }
 
@@ -36,6 +36,9 @@ widget "f1" {
   let nextRound = next != null ? next.round : total
   let lastRace = results.last()
   let latestTeams = res.latest.teams ?? {}
+  // A wide, low tile (landscape home screen) puts the last race and the season bar beside the
+  // countdown instead of below it, where they ran off the bottom.
+  let wide = tileWidth != null && tileHeight != null && tileWidth > tileHeight * 1.3
   let flags = {Australia: "🇦🇺", China: "🇨🇳", Japan: "🇯🇵", USA: "🇺🇸", Canada: "🇨🇦", Monaco: "🇲🇨", Spain: "🇪🇸", Austria: "🇦🇹", UK: "🇬🇧", Belgium: "🇧🇪", Hungary: "🇭🇺", Netherlands: "🇳🇱", Italy: "🇮🇹", Azerbaijan: "🇦🇿", Malaysia: "🇲🇾", Singapore: "🇸🇬", Mexico: "🇲🇽", Brazil: "🇧🇷", Qatar: "🇶🇦", UAE: "🇦🇪"}
   let medals = ["🥇", "🥈", "🥉"]
   state view = "calendario"
@@ -48,51 +51,104 @@ widget "f1" {
 
   Column {
     gap: 6
-    Row {
-      align: center
-      Text { text: "f1 ${f1.season ?? ""}"; style: muted; width: 60 }
-      Spacer { weight: 1 }
-      Text { text: done ? "🏁" : flags[next.country] ?? "🏎️"; fontSize: 22; width: 30; align: end }
-    }
-
-    if count(races) == 0 {
-      Text { text: "…"; style: title }
-    } else if done {
-      Text { text: L.seasonOver; style: title }
-    } else {
-      Text { text: "R${next.round} · ${next.gp}"; style: title; maxLines: 2 }
-      Text { text: fmtTime(next.ts, "EEE d MMM · HH:mm"); style: body }
-      Text { text: "${L.in} ${fmtDuration(next.ts - now)}"; style: title; color: accent }
-
-      Column {
-        gap: 4
-        if next.sprint != null && next.sprint > now {
-          Text { text: "sprint ${fmtTime(next.sprint, "EEE HH:mm")}"; style: label; color: background; background: orange; radius: 4; padding: [6, 2]; width: 120; align: center }
-        }
-        if next.quali != null && next.quali > now {
-          Text { text: "${L.quali} ${fmtTime(next.quali, "EEE HH:mm")}"; style: label; color: background; background: blue; radius: 4; padding: [6, 2]; width: 120; align: center }
-        }
-      }
-    }
-
-    if lastRace != null {
+    if wide {
       Row {
-        gap: 6
-        Text { text: flags[lastRace.country] ?? "🏁"; fontSize: 14; width: 24 }
+        align: center
+        Text { text: "f1 ${f1.season ?? ""}"; style: muted; width: 60 }
+        Spacer { weight: 1 }
+        Text { text: done ? "🏁" : flags[next.country] ?? "🏎️"; fontSize: 22; width: 30; align: end }
+      }
+
+      if count(races) == 0 {
+        Text { text: "…"; style: title }
+      } else if done {
+        Text { text: L.seasonOver; style: title; maxLines: 1 }
+      } else {
+        Text { text: "R${next.round} · ${next.gp}"; style: title; maxLines: 1 }
+      }
+
+      Row {
+        gap: 10
+        align: top
         Column {
-          gap: 0
+          gap: 6
           weight: 1
-          Text { text: lastRace.name; style: label; color: muted }
-          Text { text: lastRace.top3.map(t => t.code).join(" · "); style: small; maxLines: 1 }
+          if next != null {
+            Text { text: fmtTime(next.ts, "EEE d MMM HH:mm"); style: body; maxLines: 1 }
+            Text { text: "${L.in} ${fmtDuration(next.ts - now)}"; style: title; color: accent; maxLines: 1 }
+          }
+        }
+        Column {
+          gap: 6
+          width: 130
+          if next != null && next.sprint != null && next.sprint > now {
+            Text { text: "sprint ${fmtTime(next.sprint, "EEE HH:mm")}"; style: label; color: background; background: orange; radius: 4; padding: [6, 2]; width: 120; align: center }
+          }
+          if next != null && next.quali != null && next.quali > now {
+            Text { text: "${L.quali} ${fmtTime(next.quali, "EEE HH:mm")}"; style: label; color: background; background: blue; radius: 4; padding: [6, 2]; width: 120; align: center }
+          }
+          if lastRace != null {
+            Column {
+              gap: 0
+              Text { text: "${flags[lastRace.country] ?? "🏁"} ${lastRace.name}"; style: label; color: muted; maxLines: 1 }
+              Text { text: lastRace.top3.map(t => t.code).join(" · "); style: small; maxLines: 1 }
+            }
+          }
+          Row {
+            align: center
+            gap: 8
+            Progress { value: nextRound; max: total; color: accent; weight: 1; height: 6 }
+            Text { text: "${nextRound}/${total}"; style: label; color: muted; width: 40; align: end }
+          }
         }
       }
-    }
+    } else {
+      Row {
+        align: center
+        Text { text: "f1 ${f1.season ?? ""}"; style: muted; width: 60 }
+        Spacer { weight: 1 }
+        Text { text: done ? "🏁" : flags[next.country] ?? "🏎️"; fontSize: 22; width: 30; align: end }
+      }
 
-    Row {
-      align: center
-      gap: 8
-      Progress { value: nextRound; max: total; color: accent; weight: 1; height: 6 }
-      Text { text: "${nextRound}/${total}"; style: label; color: muted; width: 40; align: end }
+      if count(races) == 0 {
+        Text { text: "…"; style: title }
+      } else if done {
+        Text { text: L.seasonOver; style: title }
+      } else {
+        Text { text: "R${next.round} · ${next.gp}"; style: title; maxLines: 2 }
+        Text { text: fmtTime(next.ts, "EEE d MMM · HH:mm"); style: body }
+        Text { text: "${L.in} ${fmtDuration(next.ts - now)}"; style: title; color: accent }
+
+        Column {
+          gap: 4
+          if next.sprint != null && next.sprint > now {
+            Text { text: "sprint ${fmtTime(next.sprint, "EEE HH:mm")}"; style: label; color: background; background: orange; radius: 4; padding: [6, 2]; width: 120; align: center }
+          }
+          if next.quali != null && next.quali > now {
+            Text { text: "${L.quali} ${fmtTime(next.quali, "EEE HH:mm")}"; style: label; color: background; background: blue; radius: 4; padding: [6, 2]; width: 120; align: center }
+          }
+        }
+      }
+
+      if lastRace != null {
+        Row {
+          gap: 6
+          Text { text: flags[lastRace.country] ?? "🏁"; fontSize: 14; width: 24 }
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: lastRace.name; style: label; color: muted }
+            Text { text: lastRace.top3.map(t => t.code).join(" · "); style: small; maxLines: 1 }
+          }
+        }
+      }
+
+      Row {
+        align: center
+        gap: 8
+        Progress { value: nextRound; max: total; color: accent; weight: 1; height: 6 }
+        Text { text: "${nextRound}/${total}"; style: label; color: muted; width: 40; align: end }
+      }
     }
   }
 

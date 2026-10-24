@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 12 }
+  Button { text: "go"; onTap: post("https://api.example.com/x", null, null, method: "GET") }
+}

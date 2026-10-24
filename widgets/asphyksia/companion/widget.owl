@@ -7,7 +7,7 @@ widget "companion" {
     description: "An agent core with its own genome: a derived seed shapes its form and colour, use bends it, and rare rolls give aurora, eclipse or a one-in-4096 shiny."
     version: "2.0"
     license: "MIT"
-    category: "dev"
+    category: "pets"
   }
 
   requires { pacman: ["procps-ng"] }

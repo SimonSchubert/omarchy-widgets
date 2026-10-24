@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 9 }
+  Box { background: true ? linear(0, 0, 1, 1, [red, blue]) : red; Text { text: "g" } }
+}

@@ -9,8 +9,6 @@ widget "vcard" {
 
   requires { pacman: ["qrencode", "gawk"] }
 
-  page: 1
-  order: 7
   size: 3x3
   minSize: 2x2
 

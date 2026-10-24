@@ -1,0 +1,4 @@
+widget "x" {
+  page: 99999
+  Text { text: "a" }
+}

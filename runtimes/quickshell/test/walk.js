@@ -14,6 +14,9 @@ function load(file) {
   m._compile(fs.readFileSync(file, 'utf8').replace(/^\.pragma library/, '//'), file)
   return m.exports
 }
+// random() and shuffle(list) draw the same numbers as OwlOracle.java's Fixed.
+let x = 0
+Math.random = () => (x = (x + 0.6180339887498949) % 1)
 const Owl = load(path.resolve(process.argv[2]))
 const src = fs.readFileSync(process.argv[3], 'utf8')
 const fx = JSON.parse(fs.readFileSync(process.argv[4], 'utf8'))
@@ -23,7 +26,7 @@ const program = Owl.compile(src)
 const host = {
   theme: n => fx.theme[n] === undefined ? null : fx.theme[n] >>> 0,
   tile: n => fx.tile[n] === undefined ? null : fx.tile[n],
-  act() {}, runInto() {}, report: m => process.stderr.write('report: ' + m + '\n'), changed() {}
+  act() {}, runInto() {}, post() {}, report: m => process.stderr.write('report: ' + m + '\n'), changed() {}
 }
 const inst = new Owl.Instance(program, host, {})
 inst.time = fx.time
@@ -79,6 +82,9 @@ function draws(list, env) {
     return s + '}'
   }).filter(s => s !== '').join(',')
 }
-let out = '{"root":[' + nodes(program.root, inst.env) + ']'
+// What the file says about itself: where it goes, and a face's status bar.
+let out = '{"program":{"face":' + program.isFace + ',"page":' + program.page + ',"order":' + program.order
+  + ',"padding":' + q(Owl.show(program.padding)) + ',"background":' + (program.background ? show(program.background, inst.env) : 'null')
+  + ',"statusBar":' + (program.statusBar ? show(program.statusBar, inst.env) : 'null') + '},"root":[' + nodes(program.root, inst.env) + ']'
 if (program.screen) out += ',"screen":[' + nodes(program.screen, inst.env) + ']'
 console.log(out + '}')

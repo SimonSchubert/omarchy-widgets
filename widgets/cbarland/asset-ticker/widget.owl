@@ -1,7 +1,7 @@
 widget "asset ticker" {
   size: 6x3
   minSize: 3x2
-  meta { owl: 6; description: "An editable Yahoo Finance watchlist for stocks, ETFs, crypto, forex, indices and futures, with monthly charts."; version: "1.2"; license: "MIT"; category: "world" }
+  meta { owl: 6; description: "An editable Yahoo Finance watchlist for stocks, ETFs, crypto, forex, indices and futures, with monthly charts."; version: "1.2"; license: "MIT"; category: "finance" }
   requires { pacman: ["python"] }
   state watchlist = "AAPL SPY BTC-USD EURUSD=X GC=F" persist
   padding: 8

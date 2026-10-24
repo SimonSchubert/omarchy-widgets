@@ -1,5 +1,5 @@
 widget "red panda" {
-  meta { owl: 3; description: "A pixel red panda living in a tree. Pet it, tickle it, scritch it, feed it bamboo, shake its leaves; it naps draped over its branch and holds a leaf over its head when it rains (weather from wttr.in)"; version: "1.1"; license: "MIT"; category: "fun" }
+  meta { owl: 3; description: "A pixel red panda living in a tree. Pet it, tickle it, scritch it, feed it bamboo, shake its leaves; it naps draped over its branch and holds a leaf over its head when it rains (weather from wttr.in)"; version: "1.1"; license: "MIT"; category: "pets" }
   size: 3x3
   minSize: 2x2
   padding: 0

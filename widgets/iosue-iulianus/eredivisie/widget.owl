@@ -2,13 +2,11 @@ widget "eredivisie" {
   meta {
     owl: 5
     description: "Eredivisie matches by matchday and the table from ESPN, with club logos: live scores, every matchday of the season and the table as it stood after each"
-    version: "1.2"
+    version: "1.2.1"
     license: "MIT"
-    category: "world"
+    category: "sport"
   }
   requires { pacman: ["curl", "jq", "coreutils", "findutils"] }
-  page: 1
-  order: 46
   size: 6x4
   minSize: 3x3
 
@@ -162,7 +160,14 @@ widget "eredivisie" {
     Box { width: 3; height: 16; radius: 1.5; background: c ?? rgb(0, 0, 0, 0) }
   }
 
-  component GameRow(g) {
+  // Club names by width: the tile decides from its own width (the landscape tile, ~290dp, gets
+  // abbreviations), the full screen from the screen's.
+  let tileW = tileWidth ?? 0
+  let screenW = max(max(screenWidth ?? 0, tileWidth ?? 0), 240)
+  let tileWide = tileW >= 360
+  let screenWide = screenW >= 280
+
+  component GameRow(g, wide = false) {
     let c = g.competitions[0]
     let home = c.competitors.filter(t => t.homeAway == 'home')[0] ?? c.competitors[0]
     let away = c.competitors.filter(t => t.homeAway == 'away')[0] ?? c.competitors[1]
@@ -173,8 +178,6 @@ widget "eredivisie" {
 
     // Home on the left. Same shape on every row - badge, club, centre, club,
     // badge - with a fixed centre, so the columns line up down the list.
-    let vw = max(max(screenWidth ?? 0, tileWidth ?? 0), 240)
-    let wide = vw >= 280
     let px = wide ? 18 : 14
     let scW = wide ? 22 : 18
     let dotW = wide ? 7 : 5
@@ -206,9 +209,7 @@ widget "eredivisie" {
     }
   }
 
-  component TableHeader() {
-    let vw = max(max(screenWidth ?? 0, tileWidth ?? 0), 240)
-    let wide = vw >= 280
+  component TableHeader(wide = false) {
     Row {
       gap: 6
       Text { text: "#"; width: 22; style: label; color: muted }
@@ -221,17 +222,15 @@ widget "eredivisie" {
     }
   }
 
-  component TableRow(r) {
+  component TableRow(r, wide = false, full = false) {
     // "Feyenoord Rotterdam" on the full screen, "Feyenoord" on a tile, "FEY" on a narrow one.
-    let vw = max(max(screenWidth ?? 0, tileWidth ?? 0), 240)
-    let wide = vw >= 280
     Row {
       gap: 6
       align: center
       Text { text: r.rank; width: 22; style: small; color: muted }
       ZoneBar { rank: r.rank }
       Badge { id: r.id; px: wide ? 18 : 14 }
-      Text { text: vw >= 480 ? r.name : wide ? r.short ?? r.abbr : r.abbr; weight: 1; style: small; maxLines: 1 }
+      Text { text: full ? r.name : wide ? r.short ?? r.abbr : r.abbr; weight: 1; style: small; maxLines: 1 }
       Text { text: r.p; width: 24; style: small; color: muted; align: end }
       if wide { Text { text: "${r.w}-${r.d}-${r.l}"; width: 64; style: small; color: muted; align: end } }
       Text { text: r.gd > 0 ? "+${r.gd}" : "${r.gd}"; width: 36; style: small; align: end; color: r.gd > 0 ? green : r.gd < 0 ? red : muted }
@@ -282,7 +281,7 @@ widget "eredivisie" {
       Button { text: "matches"; weight: 1; color: view == "matches" ? accent : muted; onTap: view = "matches" }
       Button { text: "table"; weight: 1; color: view == "table" ? accent : muted; onTap: view = "table" }
     }
-    if view == "matches" { WeekPicker { } } else { TableHeader { } }
+    if view == "matches" { WeekPicker { } } else { TableHeader { wide: tileWide } }
     Column {
       weight: 1
       scroll: true
@@ -293,11 +292,11 @@ widget "eredivisie" {
           if count(ordered) == 0 {
             Text { text: "no matches"; style: small; color: muted }
           } else {
-            for g in ordered key g.id { GameRow { g: g } }
+            for g in ordered key g.id { GameRow { g: g; wide: tileWide } }
           }
         }
       } else {
-        for r in current key r.id { TableRow { r: r } }
+        for r in current key r.id { TableRow { r: r; wide: tileWide; full: tileW >= 480 } }
       }
     }
   }
@@ -308,10 +307,10 @@ widget "eredivisie" {
       scroll: true
       Text { text: "matches"; style: title }
       WeekPicker { }
-      for g in ordered key g.id { GameRow { g: g } }
+      for g in ordered key g.id { GameRow { g: g; wide: screenWide } }
       Text { text: past ? "table after ${wkLabel}" : "table"; style: title }
-      TableHeader { }
-      for r in shownTable key r.id { TableRow { r: r } }
+      TableHeader { wide: screenWide }
+      for r in shownTable key r.id { TableRow { r: r; wide: screenWide; full: screenW >= 480 } }
       Legend { }
       Button { text: "close"; onTap: close() }
     }

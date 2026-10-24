@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 12 }
+  state n = 0
+  Text { text: n; repeats: true; onPress: n = n + repeat; onRelease: n = 0 }
+}

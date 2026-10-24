@@ -1,5 +1,5 @@
 widget "dice" {
-  meta { owl: 6; description: "A set of dice from d2 to d100: pick one and tap it to roll. The d100 rolls a tens die and a units die, and the last rolls stay on the tile"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { owl: 6; description: "A set of dice from d2 to d100: pick one and tap it to roll. The d100 rolls a tens die and a units die, and the last rolls stay on the tile"; version: "1.0"; license: "MIT"; category: "games" }
   size: 3x3
   minSize: 3x3
 

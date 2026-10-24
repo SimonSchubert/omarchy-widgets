@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 13 }
+  component Card(t) { Text { text: t } }
+  Card { t: "a"; drag: vertical }
+}

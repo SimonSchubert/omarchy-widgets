@@ -1,0 +1,6 @@
+widget "x" {
+  meta { owl: 8 }
+  state n = 1
+  on n first { n = 2 }
+  Text { text: n }
+}

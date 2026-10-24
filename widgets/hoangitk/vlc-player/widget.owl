@@ -1,9 +1,7 @@
 widget "vlc" {
-  page: 1
-  order: 55
   size: 6x2
   minSize: 3x2
-  meta { description: "VLC for Android player: album art, progress, controls and volume. Tap for a full-screen view with 11 animated backdrops, auto-changing per song"; version: "2.1"; license: "MIT"; category: "fun"; owl: 7 }
+  meta { description: "VLC for Android player: album art, progress, controls and volume. Tap for a full-screen view with 11 animated backdrops, auto-changing per song"; version: "2.1"; license: "MIT"; category: "media"; owl: 7 }
 
   // Needs notification access; shows only VLC's session.
   source vol = android.volume

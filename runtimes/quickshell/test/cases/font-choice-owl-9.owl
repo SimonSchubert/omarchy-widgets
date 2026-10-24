@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 9 }
+  state on = false
+  Text { text: "a"; font: on ? "serif" : "/usr/share/fonts/a.ttf" }
+}

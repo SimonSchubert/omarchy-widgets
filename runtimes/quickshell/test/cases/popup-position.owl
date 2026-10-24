@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 10 }
+  state open = true
+  Popup { position: sideways; onDismiss: open = false; Text { text: "m" } }
+}

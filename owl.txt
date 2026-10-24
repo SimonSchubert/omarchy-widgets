@@ -1,0 +1,21 @@
+# The owl levels the store takes, and the first launcher release that runs each.
+# A new widget or app, or an update to one, must declare a supported level in
+# meta { owl: N } (no owl: is level 1). Ones already on a deprecated level stay in
+# the store until their next update. A level that isn't listed isn't taken yet,
+# even when tools/owl.jar reads it. A launcher below a widget's level shows it as
+# needing a newer launcher, and doesn't offer it as an update.
+#
+# owl  status      launcher
+13     supported   0.12.0
+12     supported   0.11.0
+11     supported   0.10.0
+10     supported   0.9.0
+9      supported   0.8.1
+8      supported   0.8.0
+7      supported   0.7.0
+6      supported   0.6.0
+5      supported   0.5.0
+4      supported   0.5.0
+3      supported   0.5.0
+2      supported   0.5.0
+1      supported   0.5.0

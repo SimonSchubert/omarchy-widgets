@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 4 }
+  state f = "serif"
+  Text { text: "a"; font: f; onTap: f = "mono" }
+}

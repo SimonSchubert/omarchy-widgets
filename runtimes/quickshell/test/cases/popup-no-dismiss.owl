@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 10 }
+  Popup { Text { text: "m" } }
+}

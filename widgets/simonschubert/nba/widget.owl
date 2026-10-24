@@ -2,13 +2,11 @@ widget "nba" {
   meta {
     owl: 5
     description: "NBA scores from ESPN with team logos: live games first, then last night's finals and today's tip-offs. Tap for every game and both conference standings"
-    version: "1.0"
+    version: "1.2"
     license: "MIT"
-    category: "world"
+    category: "sport"
   }
   requires { pacman: ["curl", "jq"] }
-  page: 1
-  order: 45
   size: 6x4
   minSize: 3x3
 
@@ -17,9 +15,10 @@ widget "nba" {
   // [a-z0-9].png.
   source games = cmd("""
     u=https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard
-    for i in -1 0 1; do
-      curl -fsm 10 --compressed "$u?dates=$(date -d "$i day" +%Y%m%d)"
-    done | jq -sc '[.[].events[] | .competitions[0] as $c | {
+    # One curl for all the days, so one process and connection rather than one each, and the dates from bash itself.
+    printf -v now '%(%s)T' -1
+    urls=(); for i in -1 0 1; do printf -v d '%(%Y%m%d)T' $((now + i * 86400)); urls+=("$u?dates=$d"); done
+    curl -fsm 10 --compressed "${urls[@]}" | jq -sc '[.[].events[] | .competitions[0] as $c | {
       id, at: (.date[0:16] + ":00Z" | fromdateiso8601),
       state: $c.status.type.state, detail: $c.status.type.shortDetail,
       teams: [$c.competitors[] | {
@@ -58,7 +57,10 @@ widget "nba" {
   let cap = clamp((rows ?? 4) * 3 - 2, 5, 14)
   let picked = flatten([live, done.take(ceil(cap / 2)), next]).take(cap)
   let groups = table ?? []
-  let wide = max(max(screenWidth ?? 0, tileWidth ?? 0), 240) >= 280
+  // Tile width only: on a phone the screen is always wide, but a landscape tile
+  // leaves no room for full names beside the fixed-width score centre.
+  let tw = tileWidth ?? screenWidth ?? 240
+  let wide = tw >= 360
   // A line under the last playoff seed, and under the play-in.
   let cuts = [6, 10]
   let bLabel = "GB"
@@ -110,7 +112,7 @@ widget "nba" {
       gap: 6
       Text { text: t.seed < 99 ? t.seed : '–'; width: 20; style: small; color: muted; align: end }
       Badge { logo: t.logo; px: 16 }
-      Text { text: wide ? t.name : t.abbr; weight: 1; style: small; maxLines: 1 }
+      Text { text: tw >= 280 ? t.name : t.abbr; weight: 1; style: small; maxLines: 1 }
       Text { text: t.rec; width: 56; style: small; bold: true; align: end }
       Text { text: t.b ?? '–'; width: 36; style: small; color: muted; align: end }
     }

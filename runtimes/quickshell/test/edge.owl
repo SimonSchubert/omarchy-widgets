@@ -1,5 +1,5 @@
 widget "edge" {
-  meta { owl: 6 }
+  meta { owl: 13 }
   source raw = cmd("printf '%s' '{\"b\":2,\"a\":[1,\"2\",null,true],\"10\":\"x\",\"2\":\"y\",\"n\":-0.5}'") json
   source txt = cmd("printf ' 81%% \n\nnext line \n'")
   source now = clock every 1s
@@ -8,6 +8,12 @@ widget "edge" {
   let xs = [3, "10", 2, "b", "a", null, 1.5]
   let h = history(count, 5)
   let p = prev(count)
+  state open = false
+  state missing = null
+  state seed = random(1000000)
+  asset face = base64"AAEAAAA="
+  on count first { seed = random(1, 6); open = shuffle([1, 2]) == [1, 2] }
+  onTap: { let v = random(); if v > 0.5 { count = count + 1 } }
   Column {
     for e, i in [
       1 + 2, 1 / 0, 7 % -3, -7 % 3, 0.1 + 0.2, 10000000 + 0.5, 1000000000000000000000, 123456789012345678, 0.0001, 2 / 3, -0, 0.0000001,
@@ -17,6 +23,7 @@ widget "edge" {
       clamp(5, 10, 1), lerp(0, 10, 0.25), min(3, "1", 2), max([1, "7", "x", null]), min([]), num("12%"), num(" 4.5 "), num("x", 9), int(3.9), int(-3.9), int("7.2"),
       str(null), str(1.0), str([1, "a"]), len("héllo"), len([1, 2]), len({a: 1}), len(5), trim("  a b  "), upper("aé"), lower("ÀB"),
       lines("a\n\n b \r\nc"), words("  a  b\tc "), split("a,b,,c", ","), split("ab", ""), join([1, "a", null], "-"), replace("aaa", "a", "b"), replace("ab", "", "-"), sh("it's"), sh(null), sh(1.5), sh(" a \n"), sh(txt), sh([1, "a"]),
+      enc("a b/c?d&e#f=g+h"), enc("it's (x)!~*_.-"), enc(null), enc(1.5), enc("héllo €"), enc(txt), enc([1, "a"]),
       startsWith("hello", "he"), endsWith("hello", "lo"), contains("hello", "ell"), contains([1, "2"], 2), contains({a: 1}, "a"),
       sub("hello", 1, 3), sub("hello", -3), sub("hello", 4, 2), sub("hello", -10, 100), pad(5, 3, "0"), pad("ab", -5, "."), pad(null, 3), fixed(2.345, 2), fixed(1.005, 2), fixed(-0.04, 1), fixed(3, 0),
       fmtBytes(1023), fmtBytes(1536), fmtBytes(10485760), fmtBytes(5000000000000), fmtDuration(59), fmtDuration(3600), fmtDuration(90061), fmtDuration(-5),
@@ -33,6 +40,107 @@ widget "edge" {
       count, h, p, now, fmtTime(now, "HH:mm"), tileWidth, linux, time, cols, corners, 8 * corners
     ] {
       Text { text: "${i}: ${e}"; color: i % 2 == 0 ? accent : alpha(red, 0.5) }
+    }
+    // owl 9 and 10
+    for e, i in [
+      1792231445.5, 0.000001, 0.0000001, -0.00000015, 1000000000000000000000, 15000000000000000000000, 123456789.123, 1000000000000000 + 0.5, 1 / 3 / 1000000000,
+      parseTime("2026-10-17T10:04:00Z"), parseTime("2026-10-17"), parseTime("2026-10-17 10:04:05.123+02:00"), parseTime("2026-10-17t10:04z"),
+      parseTime("20261017T100405Z"), parseTime("20261017"), parseTime(" Sat, 17 Oct 2026 10:04:00 GMT "), parseTime("Fri, 17 Oct 2026 10:04:00 GMT"),
+      parseTime("17 Oct 2026 10:04 PDT"), parseTime("Sat, 17 Oct 2026 10:04:00 +0530"), parseTime("2026-02-30"), parseTime("2026-10-17T24:00"), parseTime("nope"), parseTime(null),
+      parseTime("17.10.2026 10:04", "dd.MM.yyyy HH:mm"), parseTime("17.10.2026", "dd.MM.yyyy", "America/New_York"), parseTime("oct 17, 2026 3:04 pm", "MMM d, yyyy h:mm a"),
+      parseTime("October 17 2026", "MMMM d yyyy", "UTC"), parseTime("31.04.2026", "dd.MM.yyyy", "UTC"), parseTime("17/10/26 07:08:09", "dd/MM/yy HH:mm:ss", "+05:30"),
+      parseTime("2026-10-17 10:04 +0200", "yyyy-MM-dd HH:mm Z"), parseTime("Saturday 2026-10-17", "EEEE yyyy-MM-dd", "UTC"), parseTime("Friday 2026-10-17", "EEEE yyyy-MM-dd", "UTC"),
+      parseTime("2026-10-17T10:04:00", "", "Asia/Tokyo"), parseTime("2026-03-29T02:30:00", "", "Europe/Berlin"), parseTime("2026-10-25T02:30:00", "", "Europe/Berlin"),
+      parseTime("2026-01-15T12:00", "", "Australia/Sydney"), parseTime("2026-07-15T12:00", "", "America/Sao_Paulo"), parseTime("2040-07-01T12:00", "", "Europe/London"),
+      parseTime("2026-10-17", "", "GMT+3"), parseTime("2026-10-17", "", "UTC-04:30"), parseTime("2026-10-17", "", "-7"),
+      fmtTime(1759600000, "yyyy-MM-dd HH:mm XXX", "Asia/Kolkata"), fmtTime(1759600000, "HH:mm X x", "UTC"), fmtTime(1759600000, "HH:mm Z ZZZZ ZZZZZ", "+05:30"),
+      fmtTime(1759600000, "HH:mm X XX", "America/St_Johns"), fmtTime(1777777777, "yyyy-MM-dd HH:mm", "America/Sao_Paulo"), fmtTime(1759600000, "HH:mm", "Australia/Sydney"),
+      fmtTime(1767225600, "HH:mm", "Australia/Lord_Howe"), fmtTime(2240000000, "yyyy-MM-dd HH:mm", "America/New_York"), fmtTime(-86400.5, "yyyy-MM-dd HH:mm:ss.SSS", "UTC"),
+      fmtTime(1759600000, "HH:mm", ""), fmtTime(1759600000, "HH:mm", null), fmtTime(1759600000, "EEEE d MMMM", "UTC", "de"), fmtTime(1759600000, "EEE MMM", "UTC", "fr"),
+      fmtAgo(100, 400), fmtAgo(400, 100), fmtAgo(0, 691200), fmtAgo(0, 59), fmtAgo(0, 3599), fmtAgo(0, 40000000), fmtAgo(1, null), fmtAgo(null, 5), fmtAgo(now, now),
+      fmtNum(1234567.891), fmtNum(1234.5, 2), fmtNum(-1234.5), fmtNum(999.97, {compact: true}), fmtNum(1500, {compact: true}), fmtNum(1500000, {compact: true, digits: 2}),
+      fmtNum(12, {sign: true}), fmtNum(-0.4), fmtNum(9.95, {compact: true}), fmtNum(0.04, {compact: true}), fmtNum(1000000000000000000, {compact: true}), fmtNum(-2500, {compact: true}),
+      fmtNum(null), fmtNum(0.125, 2), fmtNum(2.5), fmtNum(raw.n, {sign: true, digits: 1}), fmtNum("1234"),
+      hash("a"), hash("ab", "c"), hash("a", "bc"), hash(1.5), hash([1, "a"]), hash({a: 1}), hash(null), hash(""), hash("é€😀"), hash(1792231445.5),
+      shuffle(range(10), 42), shuffle(["a", "b", "c"], "seed"), shuffle([], 1), shuffle(xs, null),
+      set([1, 2, 3], 1, "x"), set([1, 2, 3], -1, 9), set([1], 5, 0), set({a: 1}, "b", 2), set({a: 1}, "a", null), set(null, "k", 1), set("str", 0, 1), set(raw.a, "1", 0),
+      remove([1, 2, 3], 0), remove([1, 2, 3], -1), remove({a: 1, b: 2}, "a"), remove(null, "a"), remove([1], 3),
+      merge({a: 1}, {b: 2}, {a: 3}, 5), merge(null), merge(raw, {b: "new"}), reduce([1, 2, 3], (t, x, i) => t + x * i, 0), reduce([], (t, x) => t + x, "z"),
+      scan([1, 2, 3], (t, x) => t + x, 10), groupBy(xs, x => num(x) != null), groupBy([], x => x), groupBy([{d: 1, v: "a"}, {d: 2}, {d: 1, v: "b"}], x => x.d),
+      toJson(raw), toJson([1, "a\n\"b\u0001", null, true, 1.5, {k: []}, 1792231445.5, 0.0000001]), toJson(txt), toJson({"x y": now}),
+      capitalize("hello world"), capitalize(""), capitalize(null), capitalize("élan"), capitalize(12), asin(0.5), acos(2), asin("1"), acos(null),
+      flatten([1, [2, [3, [4]]]], 2), flatten([1, [2]], 0), flatten([[[[1]]]], 99), flatten([1, [2, [3]]], -1),
+      chunk([1, 2, 3, 4, 5], 2), chunk([], 3), chunk([1, 2], 0), chunk([1, 2], -3), chunk(xs, "2"), chunk(raw, 2), chunk(null, 2), chunk([1, 2, 3], 2.9),
+      rank(["Calendar", "Calculator", "Café", "cal"], "cal"), rank([{name: "Calendar", score: 0}, {name: "Calculator", score: 5}, {name: "Calc", score: 99}], "cal"),
+      rank([{name: "WhatsApp", alias: "WhatsApp work"}, {name: "Work Mail"}, {name: "Files"}], "work"), rank(["Claude Code", "Visual Studio Code", "vscode"], "vsc"),
+      rank(["İstanbul", "Ärzte", "ÆON", "naïve café", "Straße"], "a"), rank(["Café Bar", "cafe", "CAFÉ"], "  CAFE "), rank([1, 12, null, true, [1]], "1"),
+      rank(["b a", "a b", "ab"], "a b"), rank(["x"], ""), rank([{name: null}, {score: 3}, {name: "x", score: "4%"}, {name: "x", score: -2}], "x"), rank(xs, "1"),
+      strongMatch("Files", "fi"), strongMatch("Visual Studio Code", "vsc"), strongMatch("Files", "il"), strongMatch("Visual Studio Code", "vis stu code"),
+      strongMatch("Visual Studio Code", "vis\ncode"), strongMatch({name: "WhatsApp", alias: "WhatsApp work"}, "work"), strongMatch(null, "x"), strongMatch("x", ""),
+      strongMatch("Ärzte Termin", "at"), strongMatch(12, "12"),
+      round(999998000001, 8), round(2.5), round(0.49999999999999994), round(-0.5), round(1000000000000000000000 * 1000000000000000000000, 2), round(4503599627370497), round(1.23456, 3)
+    ] {
+      Text { text: "${i}: ${e}" }
+    }
+    // owl 12 and 13, and what changed at every level
+    for e, i in [
+      toBase64("héllo €"), toBase64(""), toBase64(null), toBase64(12), fromBase64("aMOpbGxvIOKCrA"), fromBase64("aGk-_w=="), fromBase64(" aGk=\n"),
+      fromBase64("!!"), fromBase64("a"), fromBase64("aGk=aGk="), fromBase64("/w"), fromBase64(toBase64("round ✓ trip")), fromBase64(null),
+      fmtTime(sqrt(-1), "HH:mm"), fmtNum(sqrt(-1)), fmtNum(sqrt(-1), {compact: true}), sqrt(-1) < 1, sqrt(-1) > 1, sqrt(-1) == sqrt(-1), "NaN" > 1, "NaN" <= "NaN",
+      -0 < 0, -0 >= 0, 0 > -0, sort([1, -0, 0, sqrt(-1), -1, "NaN"]), sortBy([3, sqrt(-1), 1], x => x), min([sqrt(-1), 1]), max([2, sqrt(-1)]),
+      parseTime("2026-10-17T10:04:00+99:99"), parseTime("2026-10-17T10:04:00+18:00"), parseTime("2026-10-17T10:04:00-19"),
+      "${missing}/x", gapsIn, gapsOut, borderWidth, tileOpacity, tileFrost
+    ] {
+      Text { text: "${i}: ${e}" }
+    }
+    Image { src: "https://img.example.com/${missing}.png" }
+    Image { src: open ? "https://img.example.com/${count}.png" : "https://img.example.com/${enc(missing)}.png" }
+    Row {
+      Box { drag: horizontal; offset: [count, 0]; animate offset: 300ms; onDrag: count = count + dx; onDragEnd: count = vx > 100 ? 1 : 0; Text { text: "drag" } }
+      Text { text: "hold"; repeats: true; onPress: count = count + repeat; onRelease: open = false }
+      Button { text: "keys"; onTap: { pressKey("ctrl+c"); typeText("ls"); latch("shift", "locked"); settings("wifi"); dnd("priority"); torch(30); volume(20, "alarm") } }
+      Button { text: "cards"; onTap: notification("snooze", "k", 300) }
+    }
+    Text { text: fmtTime(now, "H", "Mars/" + txt) }
+    Text { text: fmtNum(5, txt) }
+    Text { text: toJson(fn) }
+    Text { text: toJson([now, red]) }
+    Text { text: round(num(sub(txt, 99) + "NaN")) }
+    Row {
+      Text { spans: [{text: "12", color: accent, fontWeight: 700}, {text: ":", italic: true}, {text: "30 ", font: "serif", fontSize: 9}]; fontWeight: 300; letterSpacing: 1.5 }
+      Text { text: "fonts"; font: "https://example.com/fonts/Inter.ttf" }
+      Text { text: "asset"; font: face }
+      Text { text: "file"; font: open ? "~/.fonts/A.otf" : "mono" }
+      Box { background: linear(0, 0, 1, 0, [red, blue]); frost: 12; radius: 8; padding: 4; Text { text: "glass" } }
+      Box { background: open ? radial(0.5, 0.5, 0.7, [accent, transparent]) : surface; Text { text: "?" } }
+      Input { text: "x"; underline: false; placeholder: "type"; onChange: if value == "" { open = false } else { let v = upper(value); open = v != "X" } }
+      Popup {
+        position: above
+        gap: 4
+        onDismiss: open = false
+        Text { text: "menu"; onTap: { let n = count + 1; count = n; if n > 9 { count = 0 } else if n > 5 { count = 5 } } }
+      }
+      Image { src: "icon:com.android.chrome" }
+      Canvas {
+        text("styled", 0, 0, font: "serif", fontWeight: 600, italic: true, letterSpacing: 2)
+        text("plain", 0, 10, size: 9, bold: true)
+      }
+    }
+    Column { lazy: true; reverse: count > 0; gap: 2
+      for a in chunk(xs, 3) { Text { text: join(a, " "); minLines: 2; maxLines: 3 } }
+      Image { src: "x.png"; label: "an ${count}" }
+    }
+    Grid { lazy: true; reverse: true; columns: 2
+      Text { text: "g"; minLines: count }
+    }
+    let label = "shadowed"
+    Text { text: label; style: label }
+    Image { src: "https://flagcdn.com/${enc(label)}.svg" }
+  }
+  screen {
+    title: "edge ${count}"
+    Column {
+      Text { text: "hold"; onLongPress: { let a = x; let b = a + y; if b > 100 { count = int(b) } } }
     }
   }
 }

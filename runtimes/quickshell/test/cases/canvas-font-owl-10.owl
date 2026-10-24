@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 10 }
+  Canvas { text("a", 0, 0, font: "https://example.com/b.otf", italic: true) }
+}

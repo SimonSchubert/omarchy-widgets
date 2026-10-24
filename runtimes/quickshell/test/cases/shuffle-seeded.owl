@@ -1,0 +1,6 @@
+widget "x" {
+  meta { owl: 9 }
+  state seed = random(1000000)
+  let l = shuffle([1, 2, 3], seed)
+  Text { text: l; onTap: { seed = random(1000000); let s = shuffle(l); seed = len(s) } }
+}

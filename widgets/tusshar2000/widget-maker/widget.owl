@@ -1,7 +1,7 @@
 widget "widget maker" {
   size: 6x4
   minSize: 4x3
-  meta { owl: 6; description: "Describe a widget in plain words and Claude Code writes and checks it. You see what it runs before you add it to your home screen"; version: "1.2"; license: "MIT"; category: "dev" }
+  meta { owl: 6; description: "Describe a widget in plain words and Claude Code writes and checks it. You see what it runs before you add it to your home screen"; version: "1.2.1"; license: "MIT"; category: "dev" }
 
   requires { pacman: ["jq", "diffutils"] }
 
@@ -316,10 +316,13 @@ chmod +x ~/.local/share/owlmaker/make.new &&
       if len(drafts) > 0 {
         Text { text: "✓ ${len(drafts)} ready: ${drafts[0].title}. Tap to see what it runs and add it"; style: small; color: green; maxLines: 2 }
       }
+      // As many as fit, about 18dp each under 90dp of header and input; clipped while a
+      // job's status or a draft takes more.
       Column {
         gap: 4
         weight: 1
-        for m in list.take(rows >= 4 ? 3 : 1) key m.file {
+        clip: true
+        for m in list.take(clamp(floor(((tileHeight ?? 0) - 90) / 18), 1, 12)) key m.file {
           Text { text: "▸ ${m.title}"; style: small; color: muted; maxLines: 1 }
         }
       }

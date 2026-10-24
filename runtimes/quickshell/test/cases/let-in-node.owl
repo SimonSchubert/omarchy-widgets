@@ -1,0 +1,7 @@
+widget "x" {
+  Column {
+    let inner = 2
+    Text { text: inner }
+  }
+  Text { text: inner }
+}

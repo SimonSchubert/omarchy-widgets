@@ -1,0 +1,16 @@
+face "x" {
+  meta { owl: 10 }
+  page: -2000
+  statusBar: n < 3
+  background: linear(0, 0, 0, 1, [background, surface])
+  state n = 0
+  component Bar(h = 1) { Spacer { height: screenInset + h } }
+  let inset = screenInset
+  Column {
+    Text { text: "inset ${inset}"; onLongPress: n = n + 1 }
+    Bar { }
+    Input { text: ""; underline: false; onSubmit: ask(value) }
+    Text { text: "open"; onTap: open("com.android.chrome") }
+  }
+  screen { Text { text: "s" } }
+}

@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 10 }
+  source d = android.drawer
+  Text { text: 1 }
+}

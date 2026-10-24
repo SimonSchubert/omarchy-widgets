@@ -60,8 +60,8 @@ that read it redraw. Properties are separated by newlines or `;`.
 
 Sources only run while their page (or a neighbour) is on screen, and
 identical commands in several widgets run once. Keep commands fast. A command
-can depend on state (`cmd("curl wttr.in/${sh(city)}")`) and re-runs with the new
-value at its next interval.
+can depend on state (`cmd("curl wttr.in/${sh(city)}")`) and runs again as soon as the
+value changes, at most once a second (launchers from before owl 8 wait for its next interval).
 
 A value goes into a command as `${sh(value)}`, outside any quotes: `sh` puts it in single quotes,
 so bash reads it as one word, whatever it holds. Unquoted, a `'` or `;` in a city name, a file or
@@ -245,7 +245,7 @@ https://github.com/SimonSchubert/omarchy-widgets. To publish one, long-press it,
 and the default agent opens a pull request there with the GitHub CLI. The store needs:
 
 - `meta` with a `description` (10-200 characters), a `version` and a `license`, and ideally a `category`:
-  `news`, `dev`, `productivity`, `time`, `world`, `fun`, `home` or `system`
+  `news`, `dev`, `productivity`, `time`, `world`, `sport`, `finance`, `media`, `games`, `pets`, `fun`, `home` or `system`
 - every package in `requires`
 - values in commands as `${sh(value)}` (or numbers), so what a command runs is all in the file
 - nothing personal: no tokens, personal paths or hard-coded location
@@ -276,10 +276,15 @@ and the message goes to `.errors/`.
 - The phone is portrait: 6 columns, ~12 rows. A full-width widget is `6xN`,
   half-width `3xN`. Set `minSize` to what the layout still fits in.
 - Use `weight: 1` to fill leftover space and `fill: width` to stretch across.
-- A `Text` without `width`, `weight` or `fill` takes the full width. In a `Row`, give the Texts
-  next to a `weight: 1` one a `width`, or the weighted one is squeezed to nothing.
-- `cols`, `rows` (grid cells) and `tileWidth`, `tileHeight` (dp) are the tile's size, to pick a
-  layout that fits. In landscape a tile can be taller than wide.
+- A `Text` in a `Row` or `Flow` is as wide as its text, and with `meta { owl: 11 }` so is a
+  `Column` without a size in a `Row`. Give a long one `weight: 1` and `maxLines: 1` so it takes what's left and doesn't push
+  the rest out. With `meta { owl: 9 }` or lower, a `Text` without `width`, `weight` or `fill` takes
+  the full width, so there give the Texts next to a `weight: 1` one a `width`, or the weighted one
+  is squeezed to nothing.
+- `tileWidth`, `tileHeight` (dp) are the tile's size, to pick a layout that fits:
+  `let short = (tileHeight ?? 999) < 185`. Don't decide by `cols`, `rows` (grid cells): a row is
+  a different number of dp on every phone, so a 3-row tile on a tall phone has room a check like
+  `rows < 4` throws away. In landscape a tile can be taller than wide.
 - `corners` is the user's corner style as a multiplier, not a radius: 0 (edge, square),
   0.5 (soft) or 1 (round). Multiply the radius a shape would have on round by it:
   `radius: 8 * corners` for cards and album art, `3 * corners` for small chips, and the same in

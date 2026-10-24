@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 9 }
+  Text { text: fmtTime(0, "HH:mm 'oops") }
+}

@@ -1,6 +1,4 @@
 widget "reminders" {
-  page: 1
-  order: 4
   size: 3x5
   minSize: 3x3
 

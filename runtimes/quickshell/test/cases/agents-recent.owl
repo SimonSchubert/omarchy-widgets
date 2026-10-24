@@ -1,0 +1,6 @@
+widget "x" {
+  meta { owl: 10 }
+  source a = android.agents
+  source r = android.recent
+  Text { text: a.default ?? len(r); onTap: ask("hello", "claude") }
+}

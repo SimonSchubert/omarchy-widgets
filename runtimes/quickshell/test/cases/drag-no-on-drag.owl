@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 13 }
+  Box { drag: vertical; Text { text: "a" } }
+}

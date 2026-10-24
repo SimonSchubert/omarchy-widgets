@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 12 }
+  state level = 40
+  Button { text: "x"; onTap: torch(level) }
+}

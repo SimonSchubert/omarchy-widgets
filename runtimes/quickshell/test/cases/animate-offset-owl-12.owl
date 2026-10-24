@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 12 }
+  state x = 0
+  Text { text: "a"; offset: [x, 0]; animate offset: 300ms }
+}

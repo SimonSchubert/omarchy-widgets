@@ -1,0 +1,4 @@
+face "x" {
+  meta { owl: 9 }
+  Text { text: "hi" }
+}

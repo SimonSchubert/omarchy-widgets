@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 9 }
+  state open = true
+  Popup { onDismiss: open = false; Text { text: "m" } }
+}

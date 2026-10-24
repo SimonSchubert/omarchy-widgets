@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 10 }
+  Text { text: "a"; font: "http://example.com/a.ttf" }
+}

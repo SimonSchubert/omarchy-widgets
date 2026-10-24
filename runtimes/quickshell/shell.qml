@@ -2,9 +2,10 @@
 //
 //   quickshell -p runtimes/quickshell
 //
-// It draws every widget.owl under OWL_WIDGETS (default: this repo's
+// It draws every .owl file under OWL_WIDGETS (default: this repo's faces/ and
 // widgets/) on the launcher's 6-column grid, in the Omarchy theme when there
-// is one, and saves what they persist under ~/.local/state/owl/. The runtime
+// is one, and saves what they persist under ~/.local/state/owl/. A face takes
+// the board's whole width and a window's height, as it takes a whole home page. The runtime
 // is the folder above; a shell that embeds it does what this file does.
 
 import QtQuick
@@ -19,12 +20,11 @@ ShellRoot {
   id: shell
 
   readonly property string home: Quickshell.env("HOME") || ""
-  readonly property string dir: {
-    var d = Quickshell.env("OWL_WIDGETS")
-    if (d) return d
-    var u = String(Qt.resolvedUrl("../../widgets"))
+  function path(rel) {
+    var u = String(Qt.resolvedUrl(rel))
     return u.indexOf("file://") === 0 ? decodeURIComponent(u.slice(7)) : u
   }
+  readonly property var dirs: Quickshell.env("OWL_WIDGETS") ? [Quickshell.env("OWL_WIDGETS")] : [path("../../faces"), path("../../widgets")]
 
   // Omarchy's palette when the theme is there, Tokyo Night's otherwise.
   property var palette: OwlJs.themeFromToml("")
@@ -46,7 +46,7 @@ ShellRoot {
   Process {
     id: find
     running: true
-    command: ["bash", "-c", "find \"$1\" -name '*.owl' | sort", "find", shell.dir]
+    command: ["bash", "-c", "for d; do find \"$d\" -name '*.owl' 2>/dev/null | sort; done", "find"].concat(shell.dirs)
     stdout: StdioCollector {
       onStreamFinished: shell.files = text.split("\n").filter(function(l) { return l !== "" })
     }
@@ -71,7 +71,7 @@ ShellRoot {
       var used = [], out = []
       for (var i = 0; i < tiles.count; i++) {
         var t = tiles.itemAt(i)
-        var size = t && t.owl.program ? t.owl.size : [3, 2]
+        var size = t && t.owl.program ? (t.owl.isFace ? [6, Math.max(1, Math.floor(window.height / window.pitch))] : t.owl.size) : [3, 2]
         var w = Math.min(size[0], 6), h = size[1]
         search: for (var y = 0; ; y++) for (var x = 0; x + w <= 6; x++) {
           var free = true
@@ -114,8 +114,16 @@ ShellRoot {
             y: tile.place.y * window.pitch
             width: tile.place.w * window.pitch - window.gap
             height: tile.place.h * window.pitch - window.gap
-            color: widget.alpha(widget.ink("background"), 0.88)
+            color: widget.isFace ? "transparent" : widget.alpha(widget.ink("background"), 0.88)
             clip: true
+
+            // A face's own background, a color or since owl 10 a gradient; it has no tile behind it.
+            Owl.OwlNode {
+              anchors.fill: parent
+              visible: widget.isFace && !!widget.tree && !!widget.tree.background
+              widget: widget
+              node: widget.isFace && widget.tree ? { kind: "Box", p: { background: widget.tree.background }, h: {}, a: {}, c: [], level: widget.level } : null
+            }
 
             Owl.OwlWidget {
               id: widget
@@ -155,8 +163,9 @@ ShellRoot {
               wrapMode: Text.Wrap
             }
 
-            // The launcher's frame: square, 2 dp, the theme's muted color.
+            // The launcher's frame: square, 2 dp, the theme's muted color. A face has none.
             Rectangle {
+              visible: !widget.isFace
               anchors.fill: parent
               color: "transparent"
               border.width: 2 * widget.dp

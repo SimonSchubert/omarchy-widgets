@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 11 }
+  Text { text: 1; onTap: shortcuts("a:x") }
+}

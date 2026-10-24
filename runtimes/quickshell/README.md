@@ -6,7 +6,7 @@ A second runtime for OWL, the widget language of this store: the same
 is built on it.
 
 ```sh
-quickshell -p runtimes/quickshell                              # every widget in this repo
+quickshell -p runtimes/quickshell                              # every face and widget in this repo
 OWL_WIDGETS=~/my-widgets quickshell -p runtimes/quickshell     # a folder of your own
 ```
 
@@ -21,7 +21,7 @@ OWL_WIDGETS=~/my-widgets quickshell -p runtimes/quickshell     # a folder of you
 | `OwlCanvas.qml` | `Canvas` drawing calls, replayed onto a QML Canvas each frame |
 | `OwlTerminal.qml` | `Terminal { }` |
 | `OwlHost.qml` | what a widget needs from the shell around it, with defaults |
-| `owl-source` | android.device, android.system (with the Arch facts as `linux`), android.volume and android.modes, read from Linux |
+| `owl-source` | android.device, android.system (with the Arch facts as `linux`), android.volume, android.modes and android.network, read from Linux |
 | `shell.qml` | a board of widgets in a window: the example, and `quickshell -p`'s entry |
 
 Quickshell draws everything; `Owl.js` decides what. Each widget is compiled
@@ -64,10 +64,11 @@ keyboard.
 The language half is a port of the reference implementation, the `owl`
 module in `tools/owl.jar`, and is held to it by `test/run.sh`: the jar's
 compiler and evaluator and `Owl.js` walk the same widgets with the same data
-and must print the same bytes -- every store widget, with and without data,
-and 196 expressions chosen to break a port -- and `owl check` and `Owl.js`
-must accept and reject the same files with the same messages. CI runs it on
-every change to this folder or to the jar.
+and must print the same bytes -- every store widget and face, with and without
+data, and a few hundred expressions chosen to break a port -- and `owl check`
+and `Owl.js` must accept and reject the same files with the same messages,
+those and the one-rule files in `test/cases/`. CI runs it on every change to
+this folder or to the jar.
 
 The renderer follows the launcher's (`widgets/render/Render.kt` in
 omarchy-proot): Compose's Row and Column measure order and weights, its
@@ -80,7 +81,44 @@ Where it differs, because Android is not here:
 - **Terminal** is a terminal of its own -- a pseudo-terminal, its output as
   text, a line to type into -- not an embedded foot window, which only a
   compositor can do. Full-screen programs open in a real terminal.
-- **android.notifications** is an empty list; **androidApp()** and
-  **notification()** report that there is no Android.
+- **android.notifications**, **android.apps** and **android.recent** are empty
+  lists, **android.agents** has none installed and **android.drawer** no apps;
+  **androidApp()**, **notification()**, **open()**, **ask()**, **appAction()**
+  and **workApps()** report that there is no Android or launcher drawer, and
+  `shortcuts(...)` gives an empty list. A shell that has its own can override
+  `act()`.
+- **Apps, panels and key bars** (`app "…" { }`, `panel "…" { }`,
+  `keybar "…" { }`) are refused: there is no app drawer to open an app from, no
+  home screen or prompt bar to swipe a panel out of, and no soft keyboard for
+  the extra keys to sit over. `query` and `screenTop` are therefore unknown here
+  too, and `pressKey()`, `typeText()` and `latch()` report that there's no
+  on-screen keyboard; `android.modifiers` holds none.
+- **Secrets** (`state token = null secret`) are kept in
+  `<stateDir>/<file>.secrets.json`, a file only the user can read, beside the
+  `persist` values: a desktop has no keystore to encrypt them with, as the
+  launcher does. Like the launcher, it keeps each only while the widget sends it
+  to the same servers.
+- **settings()** reports that there are no Android settings panels;
+  **dnd()** switches mako's do-not-disturb mode, as Omarchy does, and
+  `android.modes` reads the radios from rfkill, the dark theme from GNOME's
+  setting and the brightness from brightnessctl. **torch()** does nothing, and
+  **volume()** has only the media stream. **android.sim** is a tablet's: no
+  mobile service. **android.network** counts every interface but loopback.
+- `gapsIn`, `gapsOut` and `borderWidth` are the OwlHost's, Omarchy's Hyprland
+  gaps and borders by default, and `tileOpacity` 1 and `tileFrost` 0.
+- **lazy** Columns and Grids scroll, but build every row: the launcher's lazy
+  lists save work this runtime doesn't need to. `reverse` still lists them from
+  the bottom and starts at the end.
+- **Faces** take the board's whole width and a window's height. There is no
+  status bar to hide and no navigation bar, so `statusBar` changes nothing and
+  `screenInset` is 0.
+- **frost** draws only the node's `background`: there is no launcher wallpaper
+  behind the widgets to blur, as in the launcher's own windows.
+- **Popup** is a menu over the window, not a window of its own.
+- **Time zones** by name are read from `/usr/share/zoneinfo` (QML's JavaScript
+  has no Intl), and day and month names in another language from `Qt.locale`.
+- **letterSpacing** in Canvas `text(...)` is left out: Context2D has none.
+- **sound()** plays through `mpv`, and images and sounds from the web are
+  fetched each time instead of kept for a day.
 - **`e` in `fmtTime`** counts from Monday: the jar declares it and leaves
   its meaning to the launcher, which is not published.

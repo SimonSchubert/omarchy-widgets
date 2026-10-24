@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 9 }
+  let l = shuffle([1, 2, 3])
+  Text { text: l }
+}

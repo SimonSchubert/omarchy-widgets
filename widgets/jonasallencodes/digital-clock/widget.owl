@@ -1,6 +1,4 @@
 widget "digital clock" {
-  page: 1
-  order: 3
   size: 3x1
   minSize: 2x1
   padding: [12, 2]

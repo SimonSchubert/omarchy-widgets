@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 13 }
+  Button { text: "x"; onTap: notification("clear", "k") }
+}
