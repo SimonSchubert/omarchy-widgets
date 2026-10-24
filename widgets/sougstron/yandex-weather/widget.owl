@@ -1,7 +1,7 @@
 widget "yandex weather" {
   size: 3x3
   minSize: 3x2
-  meta { description: "The date and the weather from Yandex Weather, where you are or in a city you pick. Tap it for 24 hours, 10 days, wind, UV, sun and moon"; version: "1.0.2"; license: "MIT"; category: "world"; owl: 6 }
+  meta { description: "Дата и погода от Яндекс Погоды там, где вы, или в выбранном городе. Нажмите: 24 часа, 10 дней, ветер, УФ, солнце и луна"; version: "1.1.0"; license: "MIT"; category: "world"; owl: 9 }
   requires { pacman: ["python"] }
 
   source now = clock every 1m
@@ -31,7 +31,7 @@ UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 
 
 def get(url, headers=None):
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "en", **(headers or {})})
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "ru", **(headers or {})})
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.read().decode("utf-8", "replace")
 
@@ -54,11 +54,11 @@ def deg(s):
 
 # Yandex's condition text -> the wttr.in weatherCode omarchy's weatherIcon() draws.
 CODES = [
-    ("thunder", 389), ("hail", 350), ("sleet", 317), ("wet snow", 317), ("snow and rain", 317),
-    ("heavy snow", 338), ("snowfall", 338), ("blizzard", 230), ("light snow", 326), ("snow", 332),
-    ("heavy rain", 308), ("downpour", 308), ("shower", 356), ("drizzle", 266), ("light rain", 296),
-    ("rain", 302), ("fog", 248), ("mist", 143), ("haze", 143), ("overcast", 122), ("mostly cloudy", 119),
-    ("cloudy with clear", 116), ("partly cloudy", 116), ("mostly clear", 116), ("cloudy", 119), ("clear", 113),
+    ("гроз", 389), ("град", 350), ("мокрый снег", 317), ("снег с дожд", 317), ("дождь со снег", 317),
+    ("сильный снег", 338), ("снегопад", 338), ("метель", 230), ("небольшой снег", 326), ("снег", 332),
+    ("сильный дождь", 308), ("ливен", 356), ("ливн", 356), ("морось", 266), ("небольшой дождь", 296),
+    ("дожд", 302), ("туман", 248), ("дымка", 143), ("мгла", 143), ("пасмурно", 122),
+    ("облачно с прояснениями", 116), ("малооблачно", 116), ("облачно", 119), ("ясно", 113),
 ]
 
 
@@ -78,11 +78,9 @@ def clock(s):
 
 
 def hour(s):
-    # '2 pm' -> '14', 'sunset 5:57 pm' -> '17:57'.
-    if ":" in s:
-        return clock(s)
-    m = re.search(r"(\d+)\s*([ap])", s, re.I)
-    return s if not m else f"{int(m.group(1)) % 12 + (12 if m.group(2).lower() == 'p' else 0):02d}"
+    # '09:00' -> '09'.
+    m = re.search(r"(\d+):\d+", s)
+    return s if not m else f"{int(m.group(1)):02d}"
 
 
 def flight(page):
@@ -93,7 +91,7 @@ def flight(page):
 
 def weather(lat=None, lon=None):
     q = f"?lat={lat}&lon={lon}" if lat is not None else ""
-    page = get("https://yandex.com/weather/en" + q)
+    page = get("https://yandex.com/weather/ru" + q)
     data = flight(page)
 
     m = re.search(r'"fact":(\{[^{}]*\})', data)
@@ -103,16 +101,19 @@ def weather(lat=None, lon=None):
     f = json.loads(m.group(1))
     m = re.search(r'"point":\{"lon":([-\d.]+),"lat":([-\d.]+)\}', data)
     point = {"lat": float(m.group(2)), "lon": float(m.group(1))} if m else {"lat": lat, "lon": lon}
-    m = re.search(r"<title>Weather in (.*?) —", page)
+    # The title says "Погода в Советском округе"; the data names it in the nominative too.
+    m = re.search(r"<title>Погода в (.*?) —", page)
     place = text(m.group(1)) if m else None
+    m = place and re.search(r'"nominative":"([^"]+)","preposition":"[^"]*","prepositional":"' + re.escape(place) + '"', data)
+    place = m.group(1) if m else place
 
     m = re.search(r'class="AppFact_warning[^"]*"[^>]*data-has-dot[^>]*>([^<]*)<', page)
     cond = text(m.group(1)) if m else (f.get("condition") or "").replace("_", " ").lower()
     m = re.search(r'class="AppFact_warning[^"]*" aria-hidden="true">([^<]*)<', page)
     note = text(m.group(1)) if m else None
-    m = re.search(r"Yesterday[^<]*?([-+−]?\d+)°", page)
+    m = re.search(r"Вчера[^<]*?([-+−]?\d+)°", page)
     yesterday = deg(m.group(1)) if m else None
-    m = re.search(r"m/s, ([A-Z]+)<", page)
+    m = re.search(r"м/с, ([А-ЯЁA-Z]+)<", page)
     wind_dir = m.group(1) if m else None
 
     # Hourly: the page renders the list twice (mobile and desktop); keep the first.
@@ -126,7 +127,7 @@ def weather(lat=None, lon=None):
             continue
         seen.add(t.group(1))
         desc = text(a11y.group(1))
-        rain = re.search(r"precipitation (\d+)%", desc)
+        rain = re.search(r"Вероятность осадков (\d+)%", desc)
         m = re.search(r"°, ([^,.]+)", desc)
         cond_h = m.group(1).strip() if m else ""
         hours.append({
@@ -158,7 +159,7 @@ def weather(lat=None, lon=None):
             return text(m.group(1)) if m else None
 
         parts = []
-        for p, label in (("m", "morning"), ("d", "day"), ("e", "evening"), ("n", "night")):
+        for p, label in (("m", "утро"), ("d", "день"), ("e", "вечер"), ("n", "ночь")):
             cond_p = area(p + "-text")
             parts.append({
                 "part": label,
@@ -177,7 +178,7 @@ def weather(lat=None, lon=None):
             for k, v in re.findall(r'AppForecastDayDuration_caption[^>]*>([^<]*)</div><div class="AppForecastDayDuration_value[^>]*>(.*?)</div></div>(?=<div class="AppForecastDayDuration_item|</div></div>)', card, re.S)
         )
         moon = re.search(r'media/([a-z-]+)\.[0-9a-f]+\.svg', card)
-        uv = info.get("uv index")
+        uv = info.get("уф-индекс")
         temps = [p["temp"] for p in parts if p["temp"] is not None]
         days.append({
             "title": text(title.group(1)) if title else did,
@@ -189,18 +190,19 @@ def weather(lat=None, lon=None):
             "sunrise": clock(dur[0]) if len(dur) > 0 else None,
             "daylight": dur[1] if len(dur) > 1 else None,
             "sunset": clock(dur[2]) if len(dur) > 2 else None,
-            "water": deg(info.get("water t°")),
+            "water": deg(info.get("t° воды")),
             "moon": moon.group(1).replace("-", " ") if moon else None,
+            "moonText": info.get("фаза луны"),
             "uv": deg(uv),
             "uvText": uv.split(",", 1)[1].strip() if uv and "," in uv else None,
-            "magnetic": info.get("magnetic field"),
+            "magnetic": info.get("магнитное поле"),
         })
 
     return {
         "place": place,
         "lat": point["lat"],
         "lon": point["lon"],
-        "url": "https://yandex.com/weather/en" + q,
+        "url": "https://yandex.ru/pogoda/ru" + q,
         "now": {
             "temp": f.get("temperature"),
             "feels": f.get("feelsLike"),
@@ -225,7 +227,7 @@ def weather(lat=None, lon=None):
 
 def search(query):
     url = "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode(
-        {"q": query, "format": "jsonv2", "limit": 6, "accept-language": "en", "addressdetails": 1})
+        {"q": query, "format": "jsonv2", "limit": 6, "accept-language": "ru", "addressdetails": 1})
     out = []
     for r in json.loads(get(url, {"User-Agent": "omalauncher-yandex-weather/1.0"})):
         a = r.get("address", {})
@@ -288,10 +290,10 @@ if __name__ == "__main__":
     }
   }
 
-  // "Wednesday, 14 October" -> "wed 14"; today and tomorrow keep their names.
-  component DayName(title, i) {
+  // "Среда, 28 октября" -> "ср 28"; today and tomorrow keep their names.
+  component DayName(title, i, t) {
     let name = lower(split(title, ",")[0])
-    Text { text: i < 2 ? name : "${sub(name, 0, 3)} ${words(trim(split(title, ",")[1]))[0]}"; style: body; maxLines: 1 }
+    Text { text: i < 2 ? name : "${lower(fmtTime(t, "EEE", null, "ru"))} ${words(trim(split(title, ",")[1]))[0]}"; style: body; maxLines: 1 }
   }
 
   Column {
@@ -302,8 +304,8 @@ if __name__ == "__main__":
         gap: 6
         align: center
         Text { text: fmtTime(now, "d"); fontSize: 20; width: 28; maxLines: 1 }
-        Text { text: lower(fmtTime(now, "EEEE")); style: label; color: accent; weight: 1; maxLines: 1 }
-        Text { text: lower(fmtTime(now, "MMMM")); style: small; color: muted; width: 76; align: end; maxLines: 1 }
+        Text { text: lower(fmtTime(now, "EEEE", null, "ru")); style: label; color: accent; weight: 1; maxLines: 1 }
+        Text { text: lower(fmtTime(now, "LLLL", null, "ru")); style: small; color: muted; width: 76; align: end; maxLines: 1 }
       }
     } else {
       Row {
@@ -313,8 +315,9 @@ if __name__ == "__main__":
         Column {
           gap: 0
           weight: 1
-          Text { text: lower(fmtTime(now, "EEEE")); style: label; color: accent; maxLines: 1 }
-          Text { text: lower(fmtTime(now, "MMMM yyyy")); style: small; color: muted; maxLines: 1 }
+          Text { text: fmtTime(now, "HH:mm"); style: title; maxLines: 1 }
+          Text { text: lower(fmtTime(now, "EEEE", null, "ru")); style: label; color: accent; maxLines: 1 }
+          Text { text: lower(fmtTime(now, "LLLL yyyy", null, "ru")); style: small; color: muted; maxLines: 1 }
         }
       }
     }
@@ -325,16 +328,16 @@ if __name__ == "__main__":
       Row {
         gap: 6
         align: bottom
-        Text { text: weatherIcon(cur.code, cur.night); font: icon; fontSize: 32; color: sky; width: 26; padding: [0, 0, 0, 3] }
-        Text { text: "${cur.temp}°"; fontSize: 28; color: cyan; width: 68; maxLines: 1 }
+        Text { text: weatherIcon(cur.code, cur.night); font: icon; fontSize: 32; color: sky; width: 34; padding: [0, 0, 0, 3] }
+        Text { text: "${cur.temp}°"; fontSize: 28; color: cyan; width: 52; maxLines: 1 }
         Column {
           gap: 0
           weight: 1
-          Text { text: lower(cur.cond); style: small; align: end; maxLines: 1 }
+          Text { text: lower(cur.cond); style: small; align: end; maxLines: 2 }
           Text { text: "↑${day.max}° ↓${day.min}°"; style: small; color: muted; align: end; maxLines: 1; padding: [0, 0, 0, 5] }
         }
       }
-      Text { text: "feels ${cur.feels}° · ${place}"; style: small; color: muted; maxLines: 1 }
+      Text { text: "ощущается ${cur.feels}° · ${place}"; style: small; color: muted; maxLines: 1 }
       Spacer { weight: 1 }
       Rule { }
       Spacer { height: 8 }
@@ -347,7 +350,7 @@ if __name__ == "__main__":
             gap: 0
             weight: 1
             align: center
-            Text { text: lower(fmtTime(now + 86400 * (i + 1), "EEE")); style: label; color: muted; align: center }
+            Text { text: lower(fmtTime(now + 86400 * (i + 1), "EEE", null, "ru")); style: label; color: muted; align: center }
             Text { text: weatherIcon(d.code, false); font: icon; fontSize: 18; align: center }
             Text { text: "${d.max}° ${d.min}°"; style: small; align: center; maxLines: 1 }
           }
@@ -370,12 +373,12 @@ if __name__ == "__main__":
         }
       }
     } else {
-      Text { text: wx == null ? "weather…" : "yandex weather offline"; style: small; color: muted }
+      Text { text: wx == null ? "погода…" : "яндекс погода недоступна"; style: small; color: muted }
     }
   }
 
   screen {
-    title: "yandex weather"
+    title: "яндекс погода"
     Column {
       scroll: true
       gap: 14
@@ -388,21 +391,21 @@ if __name__ == "__main__":
           gap: 0
           weight: 1
           Text { text: place == "" ? "…" : place; style: body; maxLines: 1 }
-          Text { text: loc.name == null ? "located by ip" : "picked · ${loc.lat}, ${loc.lon}"; style: label; color: muted; maxLines: 1 }
+          Text { text: loc.name == null ? "определено по ip" : "выбрано · ${loc.lat}, ${loc.lon}"; style: label; color: muted; maxLines: 1 }
         }
-        Button { text: picking ? "done" : "change"; color: accent; onTap: { picking = !picking; found = "" } }
+        Button { text: picking ? "готово" : "изменить"; color: accent; onTap: { picking = !picking; found = "" } }
       }
       if picking {
         Column {
           gap: 8
           Input {
-            placeholder: "search a city…"
+            placeholder: "найти город…"
             onSubmit: { found = "searching"; found = run("python3 -c ${sh(script)} --search ${sh(value)}") }
           }
           if found == "searching" {
-            Text { text: "searching…"; style: small; color: muted }
+            Text { text: "ищу…"; style: small; color: muted }
           } else if found != "" && len(results) == 0 {
-            Text { text: "nothing found"; style: small; color: muted }
+            Text { text: "ничего не найдено"; style: small; color: muted }
           }
           for r in results key "${r.lat},${r.lon}" {
             Row {
@@ -420,10 +423,10 @@ if __name__ == "__main__":
               }
             }
           }
-          Text { text: "quick picks"; style: label; color: accent }
+          Text { text: "быстрый выбор"; style: label; color: accent }
           Flow {
             gap: 8
-            Button { text: "◎ my location"; color: loc.name == null ? accent : muted; onTap: { loc = {}; picking = false; found = "" } }
+            Button { text: "◎ где я"; color: loc.name == null ? accent : muted; onTap: { loc = {}; picking = false; found = "" } }
             for r in recent key r.name {
               Button { text: lower(r.name); color: loc.name == r.name ? accent : muted; onTap: { loc = r; picking = false; found = "" } }
             }
@@ -432,7 +435,7 @@ if __name__ == "__main__":
       }
       Rule { }
       if cur == null {
-        Text { text: wx == null ? "weather…" : "yandex weather offline${wx.err ? ": " + last(lines(wx.err)) : ""}"; style: body; color: muted }
+        Text { text: wx == null ? "погода…" : "яндекс погода недоступна${wx.err ? ": " + last(lines(wx.err)) : ""}"; style: body; color: muted }
       } else {
         // Now.
         Row {
@@ -447,7 +450,7 @@ if __name__ == "__main__":
           }
         }
         Text {
-          text: "feels ${cur.feels}° · ↑${day.max}° ↓${day.min}°${cur.yesterday != null ? " · yesterday ${cur.yesterday}°" : ""}"
+          text: "ощущается ${cur.feels}° · ↑${day.max}° ↓${day.min}°${cur.yesterday != null ? " · вчера ${cur.yesterday}°" : ""}"
           style: small
           color: muted
         }
@@ -458,20 +461,20 @@ if __name__ == "__main__":
         Grid {
           columns: 2
           gap: 8
-          Stat { glyph: ""; label: "wind ${cur.windDir ?? ""}"; value: "${cur.wind} m/s · gusts ${cur.gust}"; tint: cyan }
-          Stat { glyph: ""; label: "humidity"; value: "${cur.humidity}%"; tint: blue }
-          Stat { glyph: ""; label: "rain next 12h"; value: "${rainSoon}%"; tint: blue }
-          Stat { glyph: ""; label: "uv index"; value: "${uv} ${day.uvText ?? ""}"; tint: uv >= 6 ? red : uv >= 3 ? yellow : green }
-          Stat { glyph: ""; label: "pressure"; value: "${cur.pressure} mmHg" }
+          Stat { glyph: ""; label: "ветер ${cur.windDir ?? ""}"; value: "${cur.wind} м/с · порывы ${cur.gust}"; tint: cyan }
+          Stat { glyph: ""; label: "влажность"; value: "${cur.humidity}%"; tint: blue }
+          Stat { glyph: ""; label: "осадки за 12 ч"; value: "${rainSoon}%"; tint: blue }
+          Stat { glyph: ""; label: "уф-индекс"; value: "${uv} ${day.uvText ?? ""}"; tint: uv >= 6 ? red : uv >= 3 ? yellow : green }
+          Stat { glyph: ""; label: "давление"; value: "${cur.pressure} мм рт. ст." }
           if cur.water != null {
-            Stat { glyph: ""; label: "water"; value: "${cur.water}°"; tint: cyan }
+            Stat { glyph: ""; label: "вода"; value: "${cur.water}°"; tint: cyan }
           } else {
-            Stat { glyph: ""; label: "visibility"; value: "${round(cur.visibility / 1000)} km" }
+            Stat { glyph: ""; label: "видимость"; value: "${round(cur.visibility / 1000)} км" }
           }
         }
         Rule { }
         // The next 24 hours: time, icon and rain chance per step, with the temperature curve under them.
-        Text { text: "next 24 hours"; style: label; color: accent }
+        Text { text: "ближайшие 24 часа"; style: label; color: accent }
         Column {
           gap: 4
           Row {
@@ -481,7 +484,7 @@ if __name__ == "__main__":
                 gap: 2
                 weight: 1
                 align: center
-                Text { text: i == 0 ? "now" : s.label; style: label; color: muted; align: center }
+                Text { text: i == 0 ? "сейчас" : s.label; style: label; color: muted; align: center }
                 Text { text: weatherIcon(s.code, num(s.label) < sunHours[0] || num(s.label) >= sunHours[1]); font: icon; fontSize: 20; align: center }
               }
             }
@@ -507,7 +510,7 @@ if __name__ == "__main__":
         }
         Rule { }
         // Ten days: icon and the day's low to high on a shared scale; tap one for morning to night.
-        Text { text: "10 days · tap a day for details"; style: label; color: accent }
+        Text { text: "10 дней · нажмите на день"; style: label; color: accent }
         for d, i in w.days key d.title {
           Column {
             gap: 6
@@ -515,7 +518,7 @@ if __name__ == "__main__":
             Row {
               gap: 8
               align: center
-              DayName { title: d.title; i: i; width: 72 }
+              DayName { title: d.title; i: i; t: now + 86400 * i; width: 80 }
               Text { text: weatherIcon(d.code, false); font: icon; fontSize: 20; width: 26; align: center }
               Text { text: "${d.min}°"; style: small; color: muted; width: 36; align: end; maxLines: 1 }
               Canvas {
@@ -543,15 +546,15 @@ if __name__ == "__main__":
                       weight: 1
                       align: center
                       Text { text: p.part; style: label; color: muted; align: center }
-                      Text { text: weatherIcon(p.code, p.part == "night"); font: icon; fontSize: 20; align: center }
+                      Text { text: weatherIcon(p.code, p.part == "ночь"); font: icon; fontSize: 20; align: center }
                       Text { text: "${p.temp}°"; style: body; align: center }
-                      Text { text: "feels ${p.feels}°"; style: label; color: muted; align: center; maxLines: 1 }
-                      Text { text: "${p.wind} m/s ${p.dir ?? ""}"; style: label; color: muted; align: center; maxLines: 1 }
+                      Text { text: "ощущ. ${p.feels}°"; style: label; color: muted; align: center; maxLines: 1 }
+                      Text { text: "${p.wind} м/с ${p.dir ?? ""}"; style: label; color: muted; align: center; maxLines: 1 }
                     }
                   }
                 }
                 Text {
-                  text: "${lower(d.cond)} · sun ${d.sunrise}–${d.sunset} · uv ${d.uv}${d.water != null ? " · water ${d.water}°" : ""}"
+                  text: "${lower(d.cond)} · солнце ${d.sunrise}–${d.sunset} · уф ${d.uv}${d.water != null ? " · вода ${d.water}°" : ""}"
                   style: small
                   color: muted
                 }
@@ -563,18 +566,18 @@ if __name__ == "__main__":
         // Sun and moon.
         Row {
           gap: 8
-          Stat { glyph: ""; label: "sunrise"; value: day.sunrise; tint: yellow; weight: 1 }
-          Stat { glyph: ""; label: "sunset"; value: day.sunset; tint: orange; weight: 1 }
+          Stat { glyph: ""; label: "восход"; value: day.sunrise; tint: yellow; weight: 1 }
+          Stat { glyph: ""; label: "закат"; value: day.sunset; tint: orange; weight: 1 }
         }
         Stat {
           glyph: get(moonIcons, day.moon, "")
-          label: "moon · day length ${day.daylight}"
-          value: day.moon ?? "…"
+          label: "луна · световой день ${day.daylight}"
+          value: day.moonText ?? day.moon ?? "…"
           tint: foreground
         }
         Row {
           justify: end
-          Button { text: "open yandex weather ↗"; color: muted; onTap: url(w.url) }
+          Button { text: "открыть яндекс погоду ↗"; color: muted; onTap: url(w.url) }
         }
       }
     }
