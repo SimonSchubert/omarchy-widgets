@@ -6,8 +6,10 @@ widget "jinja" {
   // so waves drift, ripples spread, rock foam blinks and gulls cross the sky.
   // Tap the tile: settings for playback, 24 fps, brightness, contrast, an RGB
   // tint, black replacement and hue.
-  meta { owl: 9; description: "A torii in the sunset sea as animated block glyphs, drawn by a shader. Tap for playback, fps, brightness, contrast, RGB tint, black-color and hue controls"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { owl: 9; description: "A torii in the sunset sea as animated block glyphs, drawn by a shader. Tap for playback, fps, brightness, contrast, RGB tint, black-color and hue controls"; version: "1.1"; license: "MIT"; category: "fun" }
   size: 4x4
+  source sys = android.system every 5s
+  let ja = startsWith(str(sys.locale ?? "en"), "ja")
   state fps24 = 0 persist
   state hue = 45 persist
   state play = 1 persist
@@ -296,7 +298,7 @@ half4 main(float2 p){
   }
 
   screen {
-    title: "Sea Torii Sunset · settings"
+    title: ja ? "Sea Torii Sunset · 設定" : "Sea Torii Sunset · settings"
     Column {
       scroll: true
       Shader {
@@ -574,35 +576,35 @@ half4 main(float2 p){
       }
       Row {
         padding: [0, 10, 10, 0]
-        Button { text: play > 0.5 ? "⏸ 停止" : "▶ 再生"; onTap: { if (play > 0.5) { tcap = time - t0; play = 0 } else { t0 = time - tcap; play = 1 } } }
+        Button { text: play > 0.5 ? (ja ? "⏸ 停止" : "⏸ Pause") : (ja ? "▶ 再生" : "▶ Play"); onTap: { if (play > 0.5) { tcap = time - t0; play = 0 } else { t0 = time - tcap; play = 1 } } }
       }
       Row {
         padding: [0, 0, 10, 0]
-        Text { text: "24 fps（間引き）"; weight: 1 }
+        Text { text: ja ? "24 fps（間引き）" : "24 fps throttle"; weight: 1 }
         Button { text: fps24 ? "on" : "off"; onTap: fps24 = 1 - fps24 }
       }
-      Text { text: "明るさ（100=標準）" }
+      Text { text: ja ? "明るさ（100=標準）" : "Brightness (100 = normal)" }
       Slider { value: brt; min: 0; max: 200; step: 1; live: true; onChange: brt = value }
-      Text { text: "コントラスト（100=標準）" }
+      Text { text: ja ? "コントラスト（100=標準）" : "Contrast (100 = normal)" }
       Slider { value: ctr; min: 0; max: 200; step: 1; live: true; onChange: ctr = value }
-      Text { text: "色味フィルター R（100=変更なし）" }
+      Text { text: ja ? "色味フィルター R（100=変更なし）" : "Tint filter R (100 = unchanged)" }
       Slider { value: fr; min: 0; max: 200; step: 1; live: true; onChange: fr = value }
-      Text { text: "色味フィルター G" }
+      Text { text: ja ? "色味フィルター G" : "Tint filter G" }
       Slider { value: fg; min: 0; max: 200; step: 1; live: true; onChange: fg = value }
-      Text { text: "色味フィルター B" }
+      Text { text: ja ? "色味フィルター B" : "Tint filter B" }
       Slider { value: fb; min: 0; max: 200; step: 1; live: true; onChange: fb = value }
-      Text { text: "黒部分置換・色相（0=赤,210=青）" }
+      Text { text: ja ? "黒部分置換・色相（0=赤,210=青）" : "Black replacement · hue (0=red, 210=blue)" }
       Slider { value: bkH; min: 0; max: 355; step: 5; live: true; onChange: bkH = value }
-      Text { text: "黒部分置換・強さ（0=なし）" }
+      Text { text: ja ? "黒部分置換・強さ（0=なし）" : "Black replacement · strength (0 = off)" }
       Slider { value: bkI; min: 0; max: 100; step: 5; live: true; onChange: bkI = value }
       Row {
         padding: [0, 8, 0, 0]
-        Button { text: "黒→青"; onTap: { bkH = 210; bkI = 70 } }
-        Button { text: "黒→緑"; onTap: { bkH = 130; bkI = 70 } }
-        Button { text: "黒→赤"; onTap: { bkH = 0; bkI = 70 } }
-        Button { text: "黒 切"; onTap: bkI = 0 }
+        Button { text: ja ? "黒→青" : "Black→Blue"; onTap: { bkH = 210; bkI = 70 } }
+        Button { text: ja ? "黒→緑" : "Black→Green"; onTap: { bkH = 130; bkI = 70 } }
+        Button { text: ja ? "黒→赤" : "Black→Red"; onTap: { bkH = 0; bkI = 70 } }
+        Button { text: ja ? "黒 切" : "Black off"; onTap: bkI = 0 }
       }
-      Text { text: "色相（hue）" }
+      Text { text: ja ? "色相（hue）" : "Hue" }
       Slider { value: hue; min: -180; max: 180; step: 5; live: true; onChange: hue = value }
       Row {
         padding: [0, 8, 0, 0]
@@ -614,7 +616,7 @@ half4 main(float2 p){
       }
       Row {
         padding: [0, 8, 0, 0]
-        Button { text: "初期値に戻す"; onTap: { hue = 45; brt = 149; ctr = 105; fr = 145; fg = 35; fb = 51; bkI = 0 } }
+        Button { text: ja ? "初期値に戻す" : "Reset to defaults"; onTap: { hue = 45; brt = 149; ctr = 105; fr = 145; fg = 35; fb = 51; bkI = 0 } }
       }
     }
   }

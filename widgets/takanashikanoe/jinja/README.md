@@ -18,9 +18,11 @@ Tapping the tile opens a settings screen:
 - brightness, contrast (0–200, 100 = neutral)
 - RGB color-tint filter (0–200 each, 100 = neutral)
 - black-color replacement: recolors near-black cells (the sky, silhouettes, deep sea)
-  to a chosen hue, with strength — plus one-tap presets (青 / 緑 / 赤 / 切)
+  to a chosen hue, with strength — plus one-tap presets (Black→Blue / Green / Red, Black off)
 - hue rotation of the whole palette
 - a reset button; every setting persists
+
+All labels follow the phone's locale: Japanese when it starts with `ja`, English otherwise.
 
 The shader draws each cell as the original generator does: a 2×2 averaged sample,
 nearest palette color, bottom-aligned block glyph fill — so thin structures stay solid.
