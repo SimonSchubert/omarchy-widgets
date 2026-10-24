@@ -53,8 +53,9 @@ MIT licensed:
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
 
-The full text is also kept unmodified in [`LICENSE`](LICENSE). The shader code in
-`widget.owl` is my own work and is offered under the same MIT terms.
+The full license text is quoted verbatim above (kept in this README, since the
+store widget folder holds only widget.owl, preview.png and README.md). The shader
+code in `widget.owl` is my own work and is offered under the same MIT terms.
 
 ## Notes
 
