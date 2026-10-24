@@ -3,181 +3,234 @@ widget "buddha-meditation" {
   minSize: 2x2
   padding: 0
   background: "#050810"
-  meta { owl: 6; description: "A serene pixel-art Buddha meditating on a lotus by a moonlit lake, with drifting stars and gently rippling water"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta {
+    description: "A serene Buddha meditating by a moonlit lake, with drifting stars, shooting stars and rippling reflections"
+    version: "1.1"
+    license: "MIT"
+    category: "fun"
+    owl: 6
+  }
+
+  requires { }
 
   let buddha = [
-    "..................hhhh..................",
-    ".................hhhhhh.................",
-    "................hhhhhhhh................",
-    "...............hhhhhhhhhh...............",
-    "..............hhhhhhhhhhhh..............",
-    ".............hhhhhhhhhhhhhh.............",
-    "............hhhhhhhhhhhhhhhh............",
-    "...........hSSSSSSSSSSSSSSSSh...........",
-    "...........hSSSSSSSSSSSSSSSSh...........",
-    "...........hSSSSSSSSSSSSSSSSh...........",
-    "...........hSSSSSSSSSSSSSSSSh...........",
-    "...........hSSSSSSSSSSSSSSSSh...........",
-    "...........hSeeeeeSSSSeeeeeSh...........",
-    "...........hSSSSSSSSSSSSSSSSh...........",
-    "...........hSSSSSSSssSSSSSSSh...........",
-    "...........hSSSSSkSSSSSkSSSSh...........",
-    "...........hSSSSSSSkkkSSSSSSh...........",
-    "............hSSSSSSSSSSSSSSh............",
-    "..............ssssssssssss..............",
-    "..............ssssssssssss..............",
-    ".........RRRRRRRRRRRRRRRRRRRRRR.........",
-    "........RRRRRRRRRRRRRRRRRRRRRRRR........",
-    ".......RRRRRRRRRRRRRRRRRRRRRRRRRR.......",
-    "......RRRRRrRRRRRRRRRRRRRRRRrRRRRR......",
-    "......RRRRRrRRRRRRRRRRRRRRRRrRRRRR......",
-    ".....RRRRRRrrRRRRRRRRRRRRRRrrRRRRRR.....",
-    ".....RRRRRRrrRRRRRRRRRRRRRRrrRRRRRR.....",
-    ".....RRRRRRrrRRRRSSSSSSRRRRrrRRRRRR.....",
-    ".....RRRRRRrrRRRSSSssSSSRRRrrRRRRRR.....",
-    ".....RRRRRRrrRRRSSSssSSSRRRrrRRRRRR.....",
-    "......RRRRRrrRRRRSSSSSSRRRRrrRRRRR......",
-    ".......RRRRrrRRRRRRRRRRRRRRrrRRRR.......",
-    "........RRRRRrrRRRRRRRRRRrrRRRRR........",
-    ".........RRRRRRrRRRRRRRRrRRRRRR.........",
-    "...........RRRRRRRRRRRRRRRRRR...........",
-    ".............RRRRRRRRRRRRRR.............",
+    "................................................................",
+    "................................................................",
+    "................................................................",
+    "................................................................",
+    "................................................................",
+    "...............................JJ...............................",
+    "..............................JJJJ..............................",
+    "...........................hHHHHHHHHh...........................",
+    "..........................HhHHHHHHHHhH..........................",
+    ".........................hhHHHHHHHHHHhh.........................",
+    "........................HhHHHHHHHHHHHHhH........................",
+    ".......................hhHHHHHHHHHHHHHHhh.......................",
+    "......................HhHHHHHHHHHHHHHHHHhH......................",
+    "......................hhHHHHHHHHHHHHHHHHhh......................",
+    "......................HhHHHHHHHHHHHHHHHHhH......................",
+    "......................hhHHHHHHHHHHHHHHHHhh......................",
+    "......................HhhSSSSSSSSSSSSSShhH......................",
+    "......................stSSSSSSGGGGSSSSSSts......................",
+    "......................stSkkkssSSSSsskkkSts......................",
+    "......................stSSSSSSSSSSSSSSSSts......................",
+    "......................stSsekksSSSSskkesSts......................",
+    "......................stSSSSSSSssSSSSSSSts......................",
+    ".......................tSSSSSSsttsSSSSSSt.......................",
+    ".......................tSSSSSSSSSSSSSSSSt.......................",
+    ".......................tSSSSSsLLLLsSSSSSt.......................",
+    "........................sSSSSSSSSSSSSSSs........................",
+    ".........................sSSSSSSSSSSSSs.........................",
+    "..........................sSSSSSSSSSSs..........................",
+    "...........................tsttssttst...........................",
+    "...........................sstSSSStss...........................",
+    ".......................sSSSSSSSSsRRRRRRRRs......................",
+    "......................WsSSSSSSSSsYRRRRRRRRs.....................",
+    "....................WWsSSSSSSSSSsYYrRRRRRRRs....................",
+    "...................WWsSSSSSSSSSSsYYrrRRRRRRRs...................",
+    "...................WsSSSSSSSSSSSsYYrrRRRRRRRs...................",
+    "...................sSSSSSSSSSSSSrrYYrrRRRRRRq...................",
+    "...................sSSSSSSSSSSStqrrYYrrRRRRRq...................",
+    "...................sSSSSSSSSSSqqqqrrYYrrRRRRq...................",
+    "...................sSSSSSSSSqqRRqqrrYYrrRRRRq...................",
+    "...................tSSSSSSSqqRRRqqrrYYrrRRRRq...................",
+    "...................tSSSSSSqqRRRRqqrrYYrrRRRRq...................",
+    "...................tSSSSSqqRRRRRqqrrYYrrRRRRq...................",
+    "...................tsSSSSqqRRRRRqqrrYYrrRRRRq...................",
+    "...................tsSSqqqRRRRRRqqrrYYrrRRRRq...................",
+    "..................qqrrRRRRRRRtWWWWtRRRRRRRrrqq..................",
+    "..................qqrrRRRRstWWtsstWWtsRRRRrrqq..................",
+    "..................qqrRRRRstWWSSssSSWWtsRRRRrqq..................",
+    "..................qqrRRRRsttSSSSSSSSsttRRRRrqq..................",
+    "..................qqrRRRRrssssssssssssRRRRrqqq..................",
+    "..................qqrRRRRRRRRRRRRRRRRRRRRRRrqq..................",
+    "..................rRRRRRRRRRRRRRRRRRRRRRRRRRRr..................",
+    ".................rYRRRRRRRRRRRRRRRRRRRRRRRRRRYr.................",
+    "................rYYRRRRRRRRRRRRRRRRRRRRRRRRRRYYr................",
+    "...............rYYRRRRRRRRRRRRRRRRRRRRRRRRRRRRYYr...............",
+    "...............rrYRRRRRRRRRRRRRRRRRRRRRRRRRRRRYrr...............",
+    "................qqrrRRRRRRRRRRRRRRRRRRRRRRRRrrqq................",
+    "..................qqrRRRRRRRRRRRRRRRRRRRRRRrqq..................",
+    "...................qqrrRRRRRRRRRRRRRRRRRRrrqq...................",
+    "....................qqrrrRRRRRRqqRRRRRRrrrqq....................",
+    ".....................qqqqrrrrrrqqrrrrrrqqqq.....................",
+    ".......................qqqqqqqqqqqqqqqqqq.......................",
+    "................................................................",
+    "................................................................",
+    "................................................................",
   ]
 
   Canvas {
-    // ---- responsive scaling: px adapts to the tile's shape ----
+    // ---- responsive scaling: px drives the scene, ps the sprite ----
     let px = max(2, floor(min(width * 0.86 / 40, height * 0.62 / 36)))
+    let ps = max(1, round(px * 0.625))
     let cx = floor(width / 2)
     let cx2 = cx - (cx % px) + (cx % px * 2 > px ? px : 0)
-    let bx = cx2 - 20 * px
-    let waterH = max(height * 0.18, 6 * px)
+    let waterH = max(height * 0.22, 7 * px)
     let wl = height - waterH
+    let reflF = clamp((waterH - 1.5 * px) / (64 * ps), 0.2, 0.85)
     let base = wl + 2 * px
-    let by = base - 39 * px
+    let sx2 = cx2 - 32 * ps
+    let sy2 = base - 3 * px - 64 * ps
+    let hx = cx2
+    let hy = sy2 + 20 * ps
     let ngx = floor(width / px) + 1
-    let ngy = max(2, floor(by / px))
+    let ngy = max(2, floor(sy2 / px))
 
-    // ---- sky ----
-    rect(0, -1, width, wl + 2, fill: linear(0, 0, 0, wl, ["#050810", "#0d142c", "#1b2750"]))
+    // ---- sky: deep cosmic night gradient ----
+    rect(0, -1, width, wl + 2, fill: linear(0, 0, 0, wl, ["#050810", "#0c152e", "#162348"]))
 
-    // ---- distant mountains along the horizon ----
-    for x in range(0, ngx + 1, 2) {
-      let mh = (1.0 + sin(x * 0.15) * 0.55 + sin(x * 0.06 + 1.7) * 0.35) * 6 * px
-      rect(x * px, wl - mh, 2 * px, mh + 1, fill: "#0f1c3a")
+    // ---- distant mountains: 3 layered ridges with atmospheric depth ----
+    // Layer 1: Distant soaring mountain peaks (soft misty indigo)
+    for x in range(0, ngx + 1, 6) {
+      let mh = (1.1 + sin(x * 0.12) * 0.60 + sin(x * 0.05 + 1.8) * 0.40) * 7 * px
+      rect(x * px, wl - mh, 6 * px, mh + 1, fill: "#0a142c")
     }
-    for x in range(0, ngx + 1, 2) {
-      let mh = (0.6 + sin(x * 0.23 + 2.4) * 0.5 + sin(x * 0.09 + 0.6) * 0.3) * 4 * px
-      rect(x * px, wl - mh, 2 * px, mh + 1, fill: "#0a1530")
+    // Layer 2: Mid-range rolling hills with moonlit ridge silhouettes
+    for x in range(0, ngx + 1, 6) {
+      let mh = (0.7 + sin(x * 0.20 + 2.3) * 0.45 + sin(x * 0.08 + 0.9) * 0.35) * 5 * px
+      rect(x * px, wl - mh, 6 * px, mh + 1, fill: "#0e1c3a")
+      rect(x * px, wl - mh, 6 * px, max(1, round(px * 0.6)), fill: alpha("#243d70", 0.4))
+    }
+    // Layer 3: Near shoreline rolling hills along the horizon
+    for x in range(0, ngx + 1, 8) {
+      let mh = (0.4 + sin(x * 0.31 + 4.1) * 0.30 + sin(x * 0.11 + 3.2) * 0.20) * 3.5 * px
+      rect(x * px, wl - mh, 8 * px, mh + 1, fill: "#132446")
     }
 
-    // ---- stars: scattered (hashed), very slow drift + soft twinkle ----
-    for i in range(38) {
+    // ---- stars: scattered, very slow drift + soft twinkle ----
+    for i in range(18) {
       let h1 = sin(i * 12.9898 + 4.1414) * 43758.5453
-      let h2 = sin(i * 78.2330 + 1.2345) * 12543.1237
       let r1 = h1 - floor(h1)
-      let r2 = h2 - floor(h2)
-      let spd = 0.012 + (r1 + r2) * 0.022
+      let spd = 0.012 + r1 * 0.03
       let sx = (floor(r1 * ngx) + floor(time * spd)) % ngx
-      let sy = floor(r2 * ngy)
+      let sy = floor(((sin(i * 78.233 + 1.23) * 12543.1) % 1 + 1) % 1 * ngy)
       let tw = 0.5 + 0.5 * sin(time * 0.7 + i * 1.7)
       rect(sx * px, sy * px, px, px, fill: alpha("#fbf6da", tw))
     }
 
-    // ---- moon ----
-    let mx = bx + 28 * px
-    let my = max(6 * px, by - 12 * px)
-    for g in range(2) {
-      circle(mx, my, (5 + g * 4) * px, fill: alpha("#f5e6a3", 0.06))
-    }
-    for dy in range(-4, 5) {
-      for dx in range(-4, 5) {
-        if dx * dx + dy * dy <= 11 {
-          rect(mx + dx * px, my + dy * px, px, px, fill: "#f5e6a3")
-        }
+    // ---- shooting stars: periodic streaks across the sky ----
+    let ss1 = (time + 3.0) % 17
+    if ss1 < 2.0 {
+      let p = ss1 / 2.0
+      let hdx = width * (0.94 - 0.55 * p)
+      let hdy = height * (0.05 + 0.10 * p)
+      for i in range(8) {
+        rect(hdx + i * 0.9 * px, hdy - i * 0.5 * px, px * 0.8, px * 0.8, fill: alpha("#fff6cf", 0.8 * (1 - i / 8)))
       }
+      circle(hdx, hdy, 1.4 * px, fill: alpha("#ffffff", 0.9))
     }
-
-    // ---- golden halo: soft glow, pixel ring, rays ----
-    let hx = cx2
-    let hy = by + 9 * px
-    for g in range(2) {
-      circle(hx, hy, (11 + g * 3) * px, fill: alpha("#f2c94c", 0.04))
-    }
-    for a in range(120) {
-      let ang = a * 3.14159265 / 60
-      rect(hx + round(cos(ang) * 13) * px, hy + round(sin(ang) * 13) * px, px, px, fill: alpha("#ffd76e", 0.8))
-    }
-    for a in range(12) {
-      let ang = a * 3.14159265 / 6
-      for rr in range(14, 18) {
-        let rx = 20 + round(cos(ang) * rr)
-        let ry = 9 + round(sin(ang) * rr)
-        rect(bx + rx * px, by + ry * px, px, px, fill: alpha("#ffd76e", rr < 16 ? 0.6 : 0.28))
+    let ss2 = (time + 12.0) % 27
+    if ss2 < 1.6 {
+      let p = ss2 / 1.6
+      let hdx = width * (0.35 + 0.5 * p)
+      let hdy = height * (0.03 + 0.09 * p)
+      for i in range(8) {
+        rect(hdx - i * 0.85 * px, hdy - i * 0.45 * px, px * 0.75, px * 0.75, fill: alpha("#fff6cf", 0.75 * (1 - i / 8)))
       }
+      circle(hdx, hdy, 1.2 * px, fill: alpha("#ffffff", 0.85))
     }
 
-    // ---- lake ----
-    rect(0, wl, width, height - wl + 1, fill: linear(0, wl, 0, height, ["#0a1730", "#13315f", "#1d4c8c"]))
+    // ---- moon: drifts across the sky in a slow loop ----
+    let moonT = (time / 600 + 0.45) % 1
+    let mx = -10 * px + moonT * (width + 20 * px)
+    let my = max(8 * px, hy - 25 * px - sin(moonT * 3.14159265) * 5 * px)
+    circle(mx, my, 12 * px, fill: alpha("#f5e6a3", 0.04))
+    circle(mx, my, 8 * px, fill: alpha("#f5e6a3", 0.08))
+    circle(mx, my, 5 * px, fill: alpha("#f5e6a3", 0.2))
+    circle(mx, my, 3.6 * px, fill: "#fdf4cb")
 
-    // moon shimmer on the water
-    for yy in range(0, 9) {
-      let ry = wl + (2 + yy * 2) * px
-      let w = (2 + (yy % 3)) * px
-      let wob = round(sin(time * 0.8 + yy * 0.9) * px)
-      rect(mx - w + wob, ry, w * 2, px, fill: alpha("#f5e6a3", 0.12 - yy * 0.01))
+    // ---- golden halo: soft sacred aura behind the Buddha ----
+    circle(hx, hy, 26 * ps, fill: alpha("#f2c94c", 0.03))
+    circle(hx, hy, 19 * ps, fill: alpha("#f2c94c", 0.06))
+    circle(hx, hy, 15.5 * ps, stroke: alpha("#ffd76e", 0.70), width: 1.5 * ps)
+    circle(hx, hy, 18.5 * ps, stroke: alpha("#ffd76e", 0.30), width: 1.0 * ps)
+    for a in range(8) {
+      let ang = a * 0.785398
+      let c = cos(ang)
+      let s = sin(ang)
+      line(hx + c * 19 * ps, hy + s * 19 * ps, hx + c * 23 * ps, hy + s * 23 * ps, stroke: alpha("#ffd76e", 0.5), width: 1.2 * ps)
     }
 
-    // reflection
-    layer(0.3) {
-      scale(1, -1, cx2, wl) {
-        sprite(buddha, bx, by, px, palette: {
-          h: "#101f3a", S: "#2b5a93", s: "#224d80", e: "#0e223d",
-          k: "#0e223d", R: "#1e4478", r: "#153058",
-        })
-      }
+    // ---- lake: tranquil deep night waters ----
+    rect(0, wl, width, height - wl + 1, fill: linear(0, wl, 0, height, ["#09152b", "#102347", "#19376d"]))
+
+    // horizon mist glow along the shoreline
+    rect(0, wl, width, max(1, round(px * 0.8)), fill: alpha("#8fbde8", 0.22))
+    for x in range(0, ngx, 8) {
+      let s = 0.5 + 0.5 * sin(x * 0.6 + time * 1.1)
+      rect(x * px, wl + px, 8 * px, px, fill: alpha("#a6d1fc", 0.08 + 0.10 * s))
     }
 
-    // ---- slow waves ----
-    for wave in range(3) {
-      for x in range(0, ngx) {
-        let s = sin(x * 0.45 + time * 0.6 + wave * 2.1)
-        if s > 0.3 {
-          let bob = sin(time * 0.5 + wave) * 0.4
-          let yy = wl + floor(1 + wave * 1.6 + s * 1.7 + bob) * px
-          if yy < height - px {
-            rect(x * px, yy, px, px, fill: s > 0.8 ? "#b6dcf7" : "#5b8fd0")
+    // moonlight trail on the water (shimmering lunar path)
+    for yy in range(0, 10) {
+      let ry = wl + (2 + yy * 2.2) * px
+      let w = (3 + yy * 1.2 + (yy % 3)) * px
+      let wob = round(sin(time * 0.8 + yy * 0.9) * px * 1.2)
+      rect(mx - w + wob, ry, w * 2, px, fill: alpha("#fdf4cb", 0.18 - yy * 0.014))
+    }
+
+    // ---- reflection of the Theravada Buddha in the lake ----
+    scale(1, -reflF, hx, wl) {
+      sprite(buddha, sx2, sy2, ps, palette: {
+        J: "#3a4a68",
+        H: "#0e1526", h: "#121b30",
+        W: "#38567c", S: "#2e486d", s: "#253b5c", t: "#1d2f4d",
+        G: "#526c8e", k: "#0d1628", L: "#3a2e4a",
+        Y: "#526478", R: "#354764", r: "#2b3b55", q: "#202e45",
+      })
+    }
+
+    // ---- ripples: layered rhythmic water with crests and glitter ----
+    for wave in range(4) {
+      let freq = 0.24 + wave * 0.05
+      let spd = 0.50 + wave * 0.11
+      let row0 = 2.0 + wave * 2.4
+      for x in range(0, ngx, 3) {
+        let s = sin(x * freq + time * spd + wave * 2.1)
+              + sin(x * freq * 1.9 - time * spd * 0.6 + wave) * 0.45
+              + sin(x * freq * 3.3 + time * spd * 1.4 + wave * 0.7) * 0.20
+        let yy = wl + (row0 + floor((s + 1.6) * 1.2)) * px
+        let wa = (0.62 - wave * 0.10) * clamp((s - 0.2) * 1.6, 0, 1)
+        if yy < height - px && wa > 0.03 {
+          let shade = s > 1.15 ? "#eef7ff" : s > 0.9 ? "#d3e9ff" : s > 0.55 ? "#8fbde8" : "#4a78b0"
+          rect(x * px, yy, 3 * px, px, fill: alpha(shade, wa))
+          // crest glint riding the top of a strong ripple
+          if s > 1.05 {
+            let gx = x + floor(abs(sin(x * 2.7 + time * 0.9)) * 3)
+            rect(gx * px, yy - px, px, px, fill: alpha("#f6fbff", wa))
           }
         }
       }
     }
 
-    // ---- buddha ----
-    sprite(buddha, bx, by, px, palette: {
-      h: "#3a2a1e", S: "#e8b87a", s: "#c8945a", e: "#3a2410",
-      k: "#3a2410", R: "#d9822b", r: "#a85a18",
+    // ---- Theravada Buddha (seated in meditation at water's edge) ----
+    sprite(buddha, sx2, sy2, ps, palette: {
+      J: "#ffd76e",
+      H: "#1a1622", h: "#2e2538",
+      W: "#fae8d4", S: "#f5cfab", s: "#dfb084", t: "#ba885a",
+      G: "#ffd76e", k: "#1f1208", L: "#cf6c66",
+      Y: "#fab839", R: "#ea7e18", r: "#c25f0e", q: "#8c3e06",
     })
-
-    // ---- lotus pedestal: petals fan at the surface, cradling the base ----
-    let petals = [
-      [9, "#f2a3c4"],
-      [13, "#e2679a"],
-      [16, "#d94f88"],
-      [12, "#b84471"],
-      [7, "#93355c"],
-    ]
-    for i in range(5) {
-      let half = petals[i][0]
-      let c = petals[i][1]
-      for dx in range(-half, half + 1) {
-        rect(hx + dx * px, wl - 2 * px + i * px, px, px, fill: c)
-      }
-    }
-    for i in range(2) {
-      let off = (12 + i) * px
-      rect(hx - off, wl - 4 * px, px, px, fill: "#f2a3c4")
-      rect(hx + off, wl - 4 * px, px, px, fill: "#f2a3c4")
-      rect(hx - off, wl - 5 * px, px, px, fill: "#e2679a")
-      rect(hx + off, wl - 5 * px, px, px, fill: "#e2679a")
-    }
   }
 }

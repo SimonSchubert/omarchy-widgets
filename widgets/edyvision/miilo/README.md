@@ -24,7 +24,9 @@ The checksum detects corrupted or mismatched assets; it is not an independent
 signature because the archive and checksum come from the same release account.
 Return and refresh after success. Ensure `~/.local/bin` is on the launcher PATH.
 The installer is pinned to the published
-[1.6.3 release](https://github.com/miilo-ai/miilo-owl-widgets/releases/tag/v1.6.3).
+[1.7.1 release](https://github.com/miilo-ai/miilo-owl-widgets/releases/tag/v1.7.1).
+The store installer embeds that archive's literal SHA-256 so a changed release
+asset fails verification.
 Missing release assets fail without installing anything.
 
 To remove the helper, delete `~/.local/bin/miilo-owl` after stopping its use.
