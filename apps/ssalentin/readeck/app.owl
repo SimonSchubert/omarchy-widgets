@@ -1,7 +1,7 @@
 app "readeck" {
   edge: true
 
-  meta { owl: 9; description: "A Readeck client for a server or an exported library: unread, favorites and archive, labels and search, a reader, notes and bulk changes, plus saving a link"; version: "1.2"; license: "MIT"; category: "news" }
+  meta { owl: 9; description: "A Readeck client for a server or an export: lists, labels, search, a reader, notes and bulk changes. Summary and tidy-up use Claude Code, which sends the text to Anthropic"; version: "1.3"; license: "MIT"; category: "news" }
 
   title: readId != "" ? item.title ?? "reading" : view == "setup" ? "connect" : view == "labels" ? "labels" : view == "search" ? "search" : label == "" ? view : label
   back: readId != "" || view == "labels" || view == "search" || view == "setup" || label != ""
@@ -36,20 +36,25 @@ app "readeck" {
   // owl-readeck-read turns an article's HTML into the text the reader draws. They are
   // in this file as plaintext, and are written to ~/.local/bin on first run, so the
   // app is one self-contained file. Nothing is downloaded, decoded or installed from
-  // anywhere else; the only network traffic is to the Readeck server the user names.
+  // anywhere else. The app's own traffic is to the Readeck server the user names; the
+  // summary and tidy buttons run Claude Code, which sends the article's text to Anthropic.
   source installer = cmd("""# Installs the app's own helpers from this file into ~/.local/bin, and only when
 # their version marker is missing: owl-readeck talks to the Readeck server, and
 # owl-readeck-read turns an article's HTML into the text the reader draws. Both are
 # plaintext in this file, written by cat with a quoted heredoc, so nothing is decoded
 # or fetched; they live beside the app's cache, not on a command line.
+# Each helper's second line is its marker, alone on the line, and a helper is written
+# again when that exact line isn't there. Bump a helper's marker whenever the helper
+# changes, or phones that have it keep the old one.
 set -uo pipefail
 umask 077
 bin="$HOME/.local/bin"
 mkdir -p "$bin" || exit 1
-if ! grep -qxF '# owl-readeck 1.0' "$bin/owl-readeck" 2>/dev/null; then
+if ! grep -qxF '# owl-readeck 1.1' "$bin/owl-readeck" 2>/dev/null; then
   cat > "$bin/owl-readeck" << 'READECK_LIB_END'
 #!/bin/bash
-# owl-readeck 1.0: the script side of the Readeck app (readeck.owl).
+# owl-readeck 1.1
+# The script side of the Readeck app (readeck.owl).
 # Fetches a Readeck server's bookmarks into the export the app reads, imports
 # a Readeck export without a server, and saves changes to bookmarks.
 set -u
@@ -103,25 +108,36 @@ normalise='
 command -v jq >/dev/null || die "jq is missing (pacman -S jq)"
 
 # A Readeck export (the zip its profile's export button makes: data.json and a
-# bookmarks/<id>/info.json each) to the app's list: one line per bookmark, only
-# what the app shows. A data.jsonl, from other exports, is read too.
+# bookmarks/<id>/info.json each), or that zip unzipped into a folder, to the app's
+# list: one line per bookmark, only what the app shows. A data.jsonl, one bookmark a
+# line, is read too. The zip's data.json is only its index (ids, no titles or links),
+# so a data.json on its own has nothing to import.
 import_from() {
-  [ -f "$1" ] || die "no such file: $1"
+  [ -e "$1" ] || die "no such file: $1"
   mkdir -p "$cache"
   work=$(mktemp -d "$cache/readeck-import.XXXXXX") || die "couldn't make a temporary folder"
   trap 'rm -rf "$work"' EXIT
 
-  case "$1" in
-    *.zip) unzip -q -o "$1" -d "$work" || die "couldn't open $1" ;;
-    *.jsonl) cp "$1" "$work/data.jsonl" || die "couldn't read $1" ;;
-    *) cp "$1" "$work/data.json" || die "couldn't read $1" ;;
-  esac
+  root="$work"
+  if [ -d "$1" ]; then
+    root="$1"
+  else
+    case "$1" in
+      *.zip) unzip -q -o "$1" -d "$work" || die "couldn't open $1" ;;
+      *.jsonl) cp "$1" "$work/data.jsonl" || die "couldn't read $1" ;;
+      *.json) die "$(basename "$1") is only the export's index; import the export zip" ;;
+      *) die "import the export zip, its unzipped folder, or a .jsonl" ;;
+    esac
+  fi
 
-  # Every bookmark's info.json (capitalised fields), or a data.jsonl (lower case).
-  files=$(find "$work" -name info.json; [ -f "$work/data.jsonl" ] && echo "$work/data.jsonl")
-  [ -n "$files" ] || die "no bookmarks in $1"
-  # shellcheck disable=SC2086
-  # shellcheck disable=SC2086
+  # Every bookmark's info.json (capitalised fields), and a data.jsonl (lower case), as
+  # one stream of objects.
+  { find "$root" -name info.json -type f -exec cat {} + 2>/dev/null
+    [ -f "$root/data.jsonl" ] && cat "$root/data.jsonl"; } > "$work/all.json"
+  if [ ! -s "$work/all.json" ]; then
+    [ -f "$root/data.json" ] && die "data.json is only the index; import the export zip"
+    die "no bookmarks in $1"
+  fi
   jq -c -s '
     [ .[] | select(type == "object") ]
     | map(select((.UID // .id) != null))
@@ -145,7 +161,8 @@ import_from() {
         has_article: ((.HasArticle // .has_article) == true or (.DocumentType // .document_type // "") == "article")
       })
     | '"$normalise"'
-' $files > "$out.tmp" 2>/dev/null || die "couldn't read the bookmarks in $1"
+' "$work/all.json" > "$out.tmp" 2>/dev/null || die "couldn't read the bookmarks in $1"
+  [ -s "$out.tmp" ] || { rm -f "$out.tmp"; die "no bookmarks in $1"; }
   mv "$out.tmp" "$out"
 
   # The articles' text and pictures too, so the export reads without the
@@ -153,7 +170,7 @@ import_from() {
   # names (img/icon.png, img/thumbnail.jpeg, ...), copied to img/<id>-<name>.
   mkdir -p "$img_dir" || die "couldn't make the pictures' folder"
   : > "$work/paths.tmp"
-  for info in "$work"/bookmarks/*/info.json; do
+  for info in "$root"/bookmarks/*/info.json; do
     [ -f "$info" ] || continue
     box=$(dirname "$info")
     id=$(basename "$box")
@@ -187,21 +204,19 @@ import_from() {
       && mv "$out.img" "$out" || true
   fi
 }
-# The local AI harness (Claude Code, from mise): a prompt in, text out, with no tools
-# and no session, so it only writes an answer. Finds it even when mise has no version
-# set for the shim, which is how it is on this phone.
+# The AI harness, Claude Code: a prompt in, text out, with no tools and no session, so
+# it only writes an answer. It is not local: Claude Code sends the prompt and the
+# article's text to Anthropic, on the user's own Claude account. Found in mise's installs
+# first (a mise shim fails when mise has no version set for it), then on the PATH.
 ai_bin() {
   if [ -n "${OWL_READECK_AI:-}" ] && [ -x "${OWL_READECK_AI}" ]; then
     echo "$OWL_READECK_AI"
     return 0
   fi
-  if command -v mise >/dev/null 2>&1; then
-    dir=$(mise where claude 2>/dev/null) && [ -x "$dir/claude" ] && { echo "$dir/claude"; return 0; }
-  fi
   for dir in "$HOME"/.local/share/mise/installs/claude/*/; do
     [ -x "$dir/claude" ] && { echo "${dir}claude"; return 0; }
   done
-  return 1
+  command -v claude
 }
 
 # ai "$PROMPT" < input: the harness's answer, or nothing when it isn't there.
@@ -265,13 +280,15 @@ change)
     "couldn't save the change"
   ;;
 bulk)
-  # bulk BASE TOKEN JSON ID...: the same change to several bookmarks, one after another.
+  # bulk BASE TOKEN JSON 'ID ID ...': the same change to several bookmarks, one after
+  # another. The ids come as one word, split on spaces here (Readeck's ids have none).
   # Prints how many worked, and stops keeping the count on the first failure.
-  [ $# -ge 5 ] || die "usage: $0 bulk BASE TOKEN JSON ID..."
+  [ $# -eq 5 ] || die "usage: $0 bulk BASE TOKEN JSON 'ID ID ...'"
   base="$2" token="$3" json="$4"
-  shift 4
+  read -ra ids <<< "$5"
+  [ "${#ids[@]}" -gt 0 ] || die "nothing picked"
   ok=0
-  for id in "$@"; do
+  for id in "${ids[@]}"; do
     http PATCH "$base/api/bookmarks/$(jq -rn --arg v "$id" '$v|@uri')" "$token" "$json" \
       "couldn't change $id" || exit 1
     ok=$((ok + 1))
@@ -285,9 +302,10 @@ delete)
     "couldn't delete the bookmark"
   ;;
 ai-check)
-  # ai-check: "ok" when the local AI harness can be used, "no" when it can't.
-  if bin=$(ai_bin); then
-    echo "ok $("$bin" --version 2>/dev/null | head -1)"
+  # ai-check: "ok" when Claude Code is there to use, "no" when it isn't. It only looks
+  # for the program, and starts nothing.
+  if ai_bin >/dev/null; then
+    echo ok
   else
     echo "no"
   fi
@@ -312,18 +330,15 @@ labels)
   # labels BASE TOKEN: the server's labels and their counts, one a line.
   [ $# -eq 3 ] || die "usage: $0 labels BASE TOKEN"
   curl -fsS --max-time 20 -H 'Accept: application/json' -H "Authorization: Bearer $3" \
-    "$2/api/labels" > "$cache/readeck-labels.json" || die "couldn't fetch the labels"
-  jq -r 'if type == "array" then .[] | "\(.name)\t\(.bookmark_count // .count // 0)" else empty end' \
+    "$2/api/bookmarks/labels" > "$cache/readeck-labels.json" || die "couldn't fetch the labels"
+  jq -r 'if type == "array" then .[] | "\(.name)\t\(.count // 0)" else empty end' \
     "$cache/readeck-labels.json" 2>/dev/null || true
   ;;
-labeladd | labelrm)
-  # labeladd BASE TOKEN NAME: make a label. labelrm ...: delete one.
-  [ $# -eq 4 ] || die "usage: $0 labeladd|labelrm BASE TOKEN NAME"
-  if [ "$mode" = labeladd ]; then
-    http POST "$2/api/labels" "$3" "$(jq -cn --arg n "$4" '{name: $n}')" "couldn't add the label"
-  else
-    http DELETE "$2/api/labels/$(jq -rn --arg v "$4" '$v|@uri')" "$3" "" "couldn't delete the label"
-  fi
+labelrm)
+  # labelrm BASE TOKEN NAME: take a label off every bookmark that has it (the bookmarks
+  # stay). Readeck has no empty labels: one comes with the first bookmark given it.
+  [ $# -eq 4 ] || die "usage: $0 labelrm BASE TOKEN NAME"
+  http DELETE "$2/api/bookmarks/labels?name=$(jq -rn --arg v "$4" '$v|@uri')" "$3" "" "couldn't delete the label"
   ;;
 status)
   # status BASE TOKEN: what the server says about the token, for "connect".
@@ -340,7 +355,8 @@ status)
   esac
   ;;
 summary)
-  # summary ID: a short summary of the article, from the local AI harness, kept in
+  # summary ID: a short summary of the article, from Claude Code (which sends the text
+  # to Anthropic), kept in
   # $cache/readeck-ai/<id>.summary so it's made once.
   [ $# -eq 2 ] || die "usage: $0 summary ID"
   id="$2"
@@ -359,7 +375,7 @@ summary)
   cat "$out_file"
   ;;
 pretty)
-  # pretty ID: the article's text tidied by the local AI harness — same words, same
+  # pretty ID: the article's text tidied by Claude Code (sent to Anthropic) — same words, same
   # paragraphs, cast to well-formed sentences — kept in $ai_dir/<id>.pretty as the
   # same JSON lines the reader draws.
   [ $# -eq 2 ] || die "usage: $0 pretty ID"
@@ -402,7 +418,8 @@ Reply with those JSON lines only, no code fence, no comment.') || return 1
   mv "$out_file.tmp" "$out_file"
   ;;
 import-file)
-  # import-file FILE: a data.jsonl from a Readeck export, no server needed.
+  # import-file FILE: a Readeck export zip, its unzipped folder or a data.jsonl, no
+  # server needed.
   [ $# -eq 2 ] || die "usage: $0 import-file FILE"
   import_from "$2"
   ;;
@@ -425,33 +442,40 @@ import)
   ;;
 fetch | reload)
   # fetch BASE TOKEN [PAGES]: the library as the server has it now. Each of the list
-  # tabs is asked for, PAGE (100) bookmarks at a time, up to PAGES pages (default 10),
-  # so a big library isn't cut off at the first 100.
+  # tabs is asked for 100 bookmarks at a time (the most Readeck gives at once), moving
+  # on by offset until a page comes back short or the server's Total-Count is reached,
+  # and at most PAGES pages a tab (default 50), so a big library isn't cut off at 100.
   [ $# -ge 3 ] || die "usage: $0 fetch|reload BASE TOKEN [PAGES]"
-  pages="${4:-10}"
+  pages="${4:-50}"
   case "$pages" in ''|*[!0-9]*) die "PAGES must be a number" ;; esac
   mkdir -p "$cache"
   tmp="$cache/readeck-fetch.jsonl"
+  hdr="$cache/readeck-fetch.hdr"
   : > "$tmp"
   # What each tab asks for. "all" is everything not archived (unread and read).
   for q in "is_archived=false&read_status=unread" \
            "is_marked=true&is_archived=false" \
            "is_archived=true" \
            "is_archived=false"; do
-    page=1
-    while [ "$page" -le "$pages" ]; do
-      body=$(curl -fsS --max-time 30 -H 'Accept: application/json' -H "Authorization: Bearer $3" \
-        "$2/api/bookmarks?$q&limit=100&page=$page&sort=-created") \
-        || { rm -f "$tmp"; die "couldn't reach the server"; }
+    page=0
+    offset=0
+    while [ "$page" -lt "$pages" ]; do
+      body=$(curl -fsS --max-time 30 -D "$hdr" -H 'Accept: application/json' -H "Authorization: Bearer $3" \
+        "$2/api/bookmarks?$q&limit=100&offset=$offset&sort=-created") \
+        || { rm -f "$tmp" "$hdr"; die "couldn't reach the server"; }
       n=$(printf '%s' "$body" | jq -r 'if type == "array" then length else 0 end' 2>/dev/null || echo 0)
       printf '%s' "$body" | jq -c 'if type == "array" then .[] else empty end' >> "$tmp" 2>/dev/null || true
-      [ "$n" -lt 100 ] && break
+      total=$(grep -i '^total-count:' "$hdr" 2>/dev/null | tr -dc 0-9)
       page=$((page + 1))
+      offset=$((offset + 100))
+      [ "$n" -lt 100 ] && break
+      [ -n "$total" ] && [ "$offset" -ge "$total" ] && break
     done
   done
+  rm -f "$hdr"
   # The server's labels, with their counts: not every label is on a fetched bookmark.
   labels=$(curl -fsS --max-time 20 -H 'Accept: application/json' -H "Authorization: Bearer $3" \
-    "$2/api/labels") || labels=""
+    "$2/api/bookmarks/labels") || labels=""
   printf '%s' "$labels" > "$cache/readeck-labels.json" 2>/dev/null || true
 
   jq -c -s "$normalise" "$tmp" > "$out.tmp" 2>/dev/null || { rm -f "$tmp"; die "couldn't merge the list"; }
@@ -461,16 +485,17 @@ fetch | reload)
 *)
   die "usage: $0 fetch|reload|import BASE TOKEN [PAGES] | read BASE TOKEN ID |
        import-file FILE | add BASE TOKEN URL | change BASE TOKEN ID JSON | delete BASE TOKEN ID |
-       labels BASE TOKEN | labeladd|labelrm BASE TOKEN NAME | status BASE TOKEN | find WORDS |
-       bulk BASE TOKEN JSON ID... | summary ID | pretty ID | ai-check"
+       labels BASE TOKEN | labelrm BASE TOKEN NAME | status BASE TOKEN | find WORDS |
+       bulk BASE TOKEN JSON 'ID ID ...' | summary ID | pretty ID | ai-check"
   ;;
 esac
 READECK_LIB_END
 fi
-if ! grep -qxF '# owl-readeck-read 1.0' "$bin/owl-readeck-read" 2>/dev/null; then
+if ! grep -qxF '# owl-readeck-read 1.1' "$bin/owl-readeck-read" 2>/dev/null; then
   cat > "$bin/owl-readeck-read" << 'READECK_READ_END'
 #!/usr/bin/env python3
-# owl-readeck-read 1.0: the reader side of the launcher's Readeck app (readeck.owl).
+# owl-readeck-read 1.1
+# The reader side of the launcher's Readeck app (readeck.owl).
 # Turns a Readeck article's HTML (its export's container/index.html, or the
 # server's /article endpoint) into the light text the app draws: one element a
 # line, "heading: ", "quote: " and "list: " marking what isn't a paragraph, so
@@ -624,8 +649,8 @@ echo ready""") every 1h
   state editing = false
   // Whether the article's text is on show under its details, and not only the page's link.
   state reading = false persist
-  // Whether the reader shows the tidied text and the summary (both made by the local AI
-  // harness, once each), and whether those are being made now.
+  // Whether the reader shows the tidied text and the summary (both made by Claude Code,
+  // which sends the text to Anthropic, once each), and whether those are being made now.
   state pretty = true persist
   state aiWant = ""
   state newUrl = ""
@@ -672,18 +697,18 @@ echo ready""") every 1h
   // For "3d" beside a date.
   source now = clock every 1m
 
-  // Fetches the server's list whenever `fetch` goes up, which is the tap that connects and
-  // any other (owl runs a command again as soon as what it reads changes). It also runs
-  // once when the file is saved, so a reconnect needs no tap at all.
-  source fetched = cmd(!helpers || server == "" || token == "" ? "echo waiting" : "owl-readeck fetch ${sh(server)} ${sh(token)} 10 >/dev/null 2>&1 && echo done || echo failed") every 1m
+  // Fetches the server's list every 15 minutes, and at once whenever `fetchN` goes up:
+  // "connect", "sync now" and a change that worked (it is in the command, and owl runs a
+  // command again as soon as what it reads changes). It also runs once when the app
+  // opens, so a reconnect needs no tap at all.
+  source fetched = cmd(!helpers || server == "" || token == "" ? "echo waiting" : "n=${int(fetchN)}; owl-readeck fetch ${sh(server)} ${sh(token)} 50 >/dev/null 2>&1 && echo done || echo failed") every 15m
   // Saves and changes go through the helper too: a tap sets todoMode, todoJson and
   // todoIds, and the source runs it (an empty todoMode does nothing).
   source ran = cmd(
     !helpers || todoMode == "" ? "echo idle"
     : todoMode == "change" ? "owl-readeck change ${sh(server)} ${sh(token)} ${sh(first(todoIds) ?? "")} ${sh(todoJson)} && echo ok || echo failed"
-    : todoMode == "bulk" ? "owl-readeck bulk ${sh(server)} ${sh(token)} ${sh(todoJson)} ${sh(join(todoIds.map(id => sh(id)), " "))} && echo ok || echo failed"
+    : todoMode == "bulk" ? "owl-readeck bulk ${sh(server)} ${sh(token)} ${sh(todoJson)} ${sh(join(todoIds, " "))} && echo ok || echo failed"
     : todoMode == "add" ? "owl-readeck add ${sh(server)} ${sh(token)} ${sh(first(todoIds) ?? "")} && echo ok || echo failed"
-    : todoMode == "labeladd" ? "owl-readeck labeladd ${sh(server)} ${sh(token)} ${sh(first(todoIds) ?? "")} && echo ok || echo failed"
     : todoMode == "labelrm" ? "owl-readeck labelrm ${sh(server)} ${sh(token)} ${sh(first(todoIds) ?? "")} && echo ok || echo failed"
     : "echo idle") every 1m
   // "test the token" on the setup page: the script asks the server what it makes of it.
@@ -709,12 +734,14 @@ echo ready""") every 1h
   source article = file("~/.cache/omalauncher/readeck-read/${readId}.jsonl")
   let plain = lines(article).map(l => parseJson(l)).filter(p => p != null)
 
-  // The local AI harness (Claude Code, on this system), for a summary and for tidying
-  // the text. Both are made once per article and kept, and neither is needed to read.
-  source aiCheck = cmd(!helpers ? "echo no" : "owl-readeck ai-check 2>/dev/null || echo no") every 1m
+  // Claude Code, when it's installed, for a summary and for tidying the text. It is not
+  // local: it sends the article's text to Anthropic, on the user's Claude account, and
+  // only when a button asks. Both are made once per article and kept, and neither is
+  // needed to read. The check only looks for the program.
+  source aiCheck = cmd(!helpers ? "echo no" : "owl-readeck ai-check 2>/dev/null || echo no") every 15m
   let aiOk = startsWith(aiCheck ?? "", "ok")
-  // The harness's name, for the buttons: "local AI" says enough, "2.1.302 (Claude Code)" doesn't.
-  let aiName = "local AI"
+  // The harness's name, for the buttons and the line saying where the text goes.
+  let aiName = "Claude Code"
   // What the harness made of this article: a summary, and the tidied text.
   source madeSummary = file("~/.cache/omalauncher/readeck-ai/${readId}.summary")
   source madePretty = file("~/.cache/omalauncher/readeck-ai/${readId}.pretty")
@@ -783,15 +810,14 @@ echo ready""") every 1h
   // sets `bulkFor` to the change, and this sends it to each pick, keeping the first error.
   on bulkFor first {
     if value != "" && picked != [] {
-      let what = value
-      let ids = join(picked, " ")
+      // The picks go into the change before the pick is cleared.
+      todoIds = picked
+      todoJson = value
+      todoMode = "bulk"
       bulkFor = ""
       picked = []
       picking = false
       changedId = ""
-      todoMode = "bulk"
-      todoJson = what
-      todoIds = picked
     }
   }
   // A change that worked brings the list up to date; one that failed says why, in the
@@ -890,8 +916,8 @@ echo ready""") every 1h
       // tap here never opens the bookmark. A picture in the row leaves no room for
       // the word, so there it is one glyph; the title keeps the width either way.
       Box {
-        width: b.thumb != "" ? 26 : 62
-        height: 26
+        width: b.thumb != "" ? 40 : 62
+        height: 40
         align: center
         radius: 6 * corners
         background: changedId == b.id && !picking ? alpha(accent, 0.18) : alpha(foreground, 0.06)
@@ -937,8 +963,8 @@ echo ready""") every 1h
             Text { text: "The app's library is empty. Fetch the list, or import an export of yours."; style: small; color: muted }
             Button { text: "fetch now"; color: muted; onTap: { fetchN = fetchN + 1; haptic() } }
           }
-          Text { text: "Import an export (its data.json, or the zip)"; style: label; color: muted }
-          Input { placeholder: "/path/to/data.json or .zip"; onSubmit: { imported = run("owl-readeck import-file ${sh(value)}") } }
+          Text { text: "Import an export: the zip, or the folder it unzips to"; style: label; color: muted }
+          Input { placeholder: "/path/to/readeck-export.zip"; onSubmit: { imported = run("owl-readeck import-file ${sh(value)}") } }
         }
       }
       if !loading && len(rows) == 0 {
@@ -984,7 +1010,7 @@ echo ready""") every 1h
           }
         }
         Text { text: "${item.authors}${item.authors != "" && item.mins != null ? " · " : ""}${item.mins != null ? "${item.mins} min" : ""}${item.words != null ? " · ${fmtNum(item.words)} words" : ""}${item.lang != "" ? " · ${upper(item.lang)}" : ""}"; style: label; color: muted; maxLines: 2; visible: item.authors != "" || item.mins != null || item.words != null }
-        // A summary by the phone's own AI: made once, kept beside the article.
+        // A summary by Claude Code (the text went to Anthropic): made once, kept beside the article.
         if summary != "" {
           Column {
             gap: 4
@@ -995,7 +1021,7 @@ echo ready""") every 1h
               gap: 6
               align: center
               Text { text: "summary"; style: label; color: accent; width: 80 }
-              Text { text: "made on this phone by ${aiName}"; style: label; color: muted; maxLines: 1 }
+              Text { text: "made by ${aiName} · text sent to Anthropic"; style: label; color: muted; maxLines: 1 }
             }
             Text { text: summary; style: body; fontSize: textSize }
           }
@@ -1005,15 +1031,16 @@ echo ready""") every 1h
         }
         // The AI's buttons: a summary if there isn't one, and the text tidied or plain.
         if aiOk && len(plain) > 0 {
+          Text { text: "${aiName} sends this article's text to Anthropic."; style: small; color: muted }
           Row {
             gap: 6
             wrap: true
             if summary == "" {
-              Button { text: aiWant == "summary " + item.id ? "summarising…" : "summarise"; color: accent; onTap: { aiWant = "summary " + item.id; haptic() } }
+              Button { text: aiWant == "summary " + item.id ? "summarising…" : "summarise (${aiName})"; color: accent; onTap: { aiWant = "summary " + item.id; haptic() } }
             }
             // Tidied (the AI's) or as it came (the page's own words).
             Button {
-              text: len(prettied) == 0 ? (aiWant == "pretty " + item.id ? "tidying…" : "tidy the text") : pretty ? "tidied text" : "tidy the text"
+              text: len(prettied) == 0 ? (aiWant == "pretty " + item.id ? "tidying…" : "tidy the text (${aiName})") : pretty ? "tidied text" : "tidy the text (${aiName})"
               color: pretty && len(prettied) > 0 ? foreground : muted
               onTap: {
                 if len(prettied) > 0 {
@@ -1029,7 +1056,7 @@ echo ready""") every 1h
             }
           }
           if aiWant == "pretty " + item.id {
-            Text { text: "tidying the text with ${aiName}…"; style: small; color: muted }
+            Text { text: "tidying the text with ${aiName} (sent to Anthropic)…"; style: small; color: muted }
           }
         }
         Text { text: "${item.url}"; style: small; color: muted; maxLines: 2 }
@@ -1172,8 +1199,9 @@ echo ready""") every 1h
             padding: [8, 8]
             gap: 2
             Text { text: "${len(labels)} labels"; style: label; color: muted; padding: [0, 4] }
-            // A label to make; the × deletes one (asks twice, since it's for good).
-            Input { placeholder: "new label…"; clear: true; onSubmit: { if value != "" { todoMode = "labeladd"; todoIds = [value] } } }
+            // Readeck has no empty labels: one comes with the first bookmark given it, in that
+            // bookmark's edit. The × takes a label off every bookmark (asks twice).
+            Text { text: "A label is added to a bookmark, in its edit."; style: small; color: muted; padding: [0, 4, 6, 4] }
             for l in labels key l.name {
               Row {
                 gap: 10
