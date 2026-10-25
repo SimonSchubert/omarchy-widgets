@@ -3,9 +3,9 @@ widget "wallswap" {
   order: 5
   size: 3x3
   minSize: 2x2
-  meta { owl: 13; description: "Keeps the wallpaper fresh: a new image from NASA APOD, Bing, Wikimedia Commons or Wallhaven once a day, cropped to the phone, with a preview, credits, previous and keep"; version: "1.2.0"; license: "MIT"; category: "media" }
+  meta { owl: 13; description: "Keeps the wallpaper fresh: a new image from NASA APOD, Bing, Wikimedia Commons or Wallhaven once a day, cropped to the phone, with a preview, credits, previous and keep"; version: "1.3.0"; license: "MIT"; category: "media" }
 
-  requires { pacman: ["curl", "jq", "file", "imagemagick"] }
+  requires { pacman: ["curl", "jq", "file", "imagemagick", "iproute2"] }
 
   // The whole wallswap script, run with bash -c: wallswap.sh in https://github.com/petrzpav/omalauncher-wallswap,
   // spliced in by build.sh. It fetches, crops the image to the screen into
@@ -24,7 +24,9 @@ widget "wallswap" {
 #
 # CFG is one JSON argument (all keys optional):
 #   {"sources": ["apod","bing","wikimedia","wallhaven","local"], "interval": 1440,
-#    "query": "", "screen": [1080, 2400], "theme": "tokyo-night", "localDir": "~/Pictures/Wallpapers"}
+#    "query": "", "screen": [1080, 2400], "theme": "tokyo-night", "localDir": "~/Pictures/Wallpapers",
+#    "wifiOnly": true}
+# With wifiOnly, automatic swaps wait for Wi-Fi; next always swaps.
 #
 # The wallpaper is set the way the launcher's Style menu sets it: the image goes into
 # ~/.config/omarchy/backgrounds/<theme>/ as wallswap-*.jpg, cropped to the screen, and
@@ -47,7 +49,7 @@ BG_ROOT=$HOME/.config/omarchy/backgrounds
 UA="wallswap/1.0 (omalauncher wallpaper widget)"
 ATTEMPTS=6
 KEEP=40
-RETRY=600 # after a failed swap, try again in 10 minutes
+RETRY=600 # after a failed swap, or without Wi-Fi, try again in 10 minutes
 
 log() { echo "wallswap: $*" >&2; }
 die() { log "$*"; printf '%s\n' "$*" | write_state error 2>/dev/null; exit 1; }
@@ -174,6 +176,15 @@ src_local() {
 }
 
 # --------------------------------------------------------------- helpers
+
+# Android keeps a default route per network it's connected to; a Wi-Fi one means Wi-Fi.
+# When the routes can't be read, don't hold swaps back.
+on_wifi() {
+  local routes
+  routes=$(ip -o route show table all 2>/dev/null) || return 0
+  [[ -n $routes ]] || return 0
+  grep -qE '^default .*dev (wlan|wifi)' <<< "$routes"
+}
 
 seen() { grep -qxF -- "$1" "$STATE_DIR/seen" 2>/dev/null; }
 
@@ -305,7 +316,7 @@ apply() { # meta.json [--no-history]
   jq --arg bg "$bg" '. + {bg: $bg}' "$1" | write_state current.json
   [[ $2 == --no-history ]] || append_state history "$1"
   date +%s | write_state last
-  rm -f -- "$STATE_DIR/error" "$STATE_DIR/failed"
+  rm -f -- "$STATE_DIR/error" "$STATE_DIR/failed" "$STATE_DIR/nowifi"
   log "set $(jq -r '"\(.title) — \(.credit)"' "$1")"
 }
 
@@ -354,22 +365,32 @@ cmd_toggle() { if [[ -f $STATE_DIR/paused ]]; then cmd_resume; else cmd_pause; f
 cmd_tick() {
   (( INTERVAL > 0 )) || return 0
   [[ -f $STATE_DIR/paused ]] && return 0
-  local last failed now
+  local last failed nowifi now
   last=$(cat "$STATE_DIR/last" 2>/dev/null || echo 0)
   failed=$(cat "$STATE_DIR/failed" 2>/dev/null || echo 0)
+  nowifi=$(cat "$STATE_DIR/nowifi" 2>/dev/null || echo 0)
   now=$(date +%s)
-  (( now - last >= INTERVAL * 60 && now - failed >= RETRY )) || return 0
+  (( now - last >= INTERVAL * 60 && now - failed >= RETRY && now - nowifi >= RETRY )) || return 0
+  if [[ $WIFI_ONLY == true ]] && ! on_wifi; then
+    log "not on Wi-Fi, waiting"
+    echo "$now" | write_state nowifi
+    return 0
+  fi
   cmd_next
 }
 
 # When the next automatic swap is due, as Unix seconds (0: none).
 next_at() {
   (( INTERVAL > 0 )) && [[ ! -f $STATE_DIR/paused ]] || { echo 0; return; }
-  local last failed
+  local last failed nowifi at
   last=$(cat "$STATE_DIR/last" 2>/dev/null || echo 0)
   failed=$(cat "$STATE_DIR/failed" 2>/dev/null || echo 0)
+  nowifi=$(cat "$STATE_DIR/nowifi" 2>/dev/null || echo 0)
   (( last > 0 )) || last=$(( $(date +%s) - INTERVAL * 60 ))
-  echo $(( last + INTERVAL * 60 > failed + RETRY ? last + INTERVAL * 60 : failed + RETRY ))
+  at=$(( last + INTERVAL * 60 ))
+  (( failed + RETRY > at )) && at=$(( failed + RETRY ))
+  (( nowifi + RETRY > at )) && at=$(( nowifi + RETRY ))
+  echo "$at"
 }
 
 cmd_info() {
@@ -380,10 +401,11 @@ cmd_info() {
   [[ -n $current && -f $current ]] || cur=$(jq -c 'del(.bg)' <<< "$cur" 2>/dev/null || echo '{}')
   jq -c --argjson next "$(next_at)" \
     --argjson paused "$([[ -f $STATE_DIR/paused ]] && echo true || echo false)" \
-    --argjson history "$(wc -l < "$STATE_DIR/history" 2>/dev/null || echo 0)" \
+    --argjson waitingWifi "$([[ $WIFI_ONLY == true && -f $STATE_DIR/nowifi ]] && echo true || echo false)" \
+    --argjson history "$(wc -l 2>/dev/null < "$STATE_DIR/history" || echo 0)" \
     --arg error "$(cat "$STATE_DIR/error" 2>/dev/null)" \
     --arg style "$(sed -n 's/^background[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$STYLE" 2>/dev/null | head -1)" \
-    '. + {nextAt: $next, paused: $paused, hasPrevious: ($history >= 2), error: $error,
+    '. + {nextAt: $next, paused: $paused, waitingWifi: $waitingWifi, hasPrevious: ($history >= 2), error: $error,
       shown: (.bg != null and ((.bg | split("/") | last) as $b | $style == $b or ("wallswap-" + $style) == $b))}' <<< "$cur"
 }
 
@@ -405,6 +427,7 @@ jq -e 'type == "object"' >/dev/null 2>&1 <<< "$cfg" || cfg='{}'
 mapfile -t SOURCES < <(jq -r '(.sources // ["apod","bing","wikimedia","wallhaven"])[] | select(test("^[a-z]+$"))' <<< "$cfg")
 INTERVAL=$(jq -r '.interval // 1440' <<< "$cfg")
 QUERY=$(jq -r '.query // ""' <<< "$cfg")
+WIFI_ONLY=$(jq -r 'if .wifiOnly == false then false else true end' <<< "$cfg")
 THEME=$(jq -r '.theme // ""' <<< "$cfg")
 LOCAL_DIR=$(jq -r '.localDir // "~/Pictures/Wallpapers"' <<< "$cfg"); LOCAL_DIR=${LOCAL_DIR/#\~/$HOME}
 read -r SCREEN_W SCREEN_H < <(jq -r '(.screen // [1080, 2400]) | map(tostring) | join(" ")' <<< "$cfg")
@@ -431,10 +454,11 @@ esac
   state sources = ["apod", "bing", "wikimedia", "wallhaven"] persist
   state interval = 1440 persist
   state query = "" persist
+  state wifiOnly = true persist
 
   source sys = android.system every 10m
   source now = clock every 30s
-  let cfg = toJson({sources: sources, interval: interval, query: query, screen: sys == null ? null : [sys.display.width, sys.display.height], theme: sys == null ? null : sys.theme})
+  let cfg = toJson({sources: sources, interval: interval, query: query, wifiOnly: wifiOnly, screen: sys == null ? null : [sys.display.width, sys.display.height], theme: sys == null ? null : sys.theme})
   source st = cmd("bash -c ${sh(ws)} wallswap info ${sh(cfg)}") every 1m json
 
   // The schedule: `at` runs even while the page is off screen, and a time missed while the launcher
@@ -456,9 +480,10 @@ esac
   let hasImg = st != null && st.bg != null
   let err = st == null ? "" : st.error ?? ""
   let paused = st != null && st.paused == true
+  let waitingWifi = st != null && st.waitingWifi == true
   let intervals = [15, 30, 60, 180, 360, 1440, 0]
   let everyLabel = interval <= 0 ? "only when you ask" : interval % 1440 == 0 ? "once a day" : interval % 60 == 0 ? (interval == 60 ? "every hour" : "every ${interval / 60} hours") : "every ${interval} minutes"
-  let statusText = busy ? "fetching a new wallpaper…" : err != "" ? err : paused ? "paused" : interval <= 0 ? "swaps only when you ask" : st == null || now == null || st.nextAt <= 0 ? "" : st.nextAt <= now ? "swapping soon" : "next swap ${fmtAgo(st.nextAt, now)}"
+  let statusText = busy ? "fetching a new wallpaper…" : err != "" ? err : paused ? "paused" : interval <= 0 ? "swaps only when you ask" : waitingWifi ? "waiting for Wi-Fi" : st == null || now == null || st.nextAt <= 0 ? "" : st.nextAt <= now ? "swapping soon" : "next swap ${fmtAgo(st.nextAt, now)}"
   let allSources = [
     {id: "apod", label: "NASA APOD", detail: "Astronomy Picture of the Day"},
     {id: "bing", label: "Bing", detail: "Image of the day, in the phone's size"},
@@ -596,6 +621,21 @@ esac
           Text { text: interval <= 0 ? "off: swaps only when you ask" : paused ? "paused" : everyLabel; style: small; color: muted }
         }
         Box { width: 44; height: 24; radius: 12; padding: 3; background: !paused && interval > 0 ? accent : alpha(muted, 0.35); align: !paused && interval > 0 ? "end" : "start"
+          Box { width: 18; height: 18; radius: 9; background: background }
+        }
+      }
+      Row {
+        gap: 12
+        align: center
+        padding: [0, 4]
+        onTap: { haptic(); wifiOnly = !wifiOnly }
+        Column {
+          gap: 0
+          weight: 1
+          Text { text: "Only on Wi-Fi" }
+          Text { text: wifiOnly ? "automatic swaps wait for Wi-Fi; next always swaps" : "on mobile data too"; style: small; color: muted }
+        }
+        Box { width: 44; height: 24; radius: 12; padding: 3; background: wifiOnly ? accent : alpha(muted, 0.35); align: wifiOnly ? "end" : "start"
           Box { width: 18; height: 18; radius: 9; background: background }
         }
       }
