@@ -1,6 +1,6 @@
 # wallswap
 
-Keeps the launcher's wallpaper fresh: every hour (or as often as you like) a new image from NASA APOD,
+Keeps the launcher's wallpaper fresh: once a day (or as often as you like) a new image from NASA APOD,
 Bing, Wikimedia Commons, Wallhaven or a folder of your own, cropped to the phone's screen. The tile is
 clear, a window onto the wallpaper with its title and a next button; tap it for previous, the source
 page, keep, pause, sources, the interval and a Wallhaven search.
