@@ -1,12 +1,12 @@
-// Minimal SSH server-stats strip: read-only probes over SSH; python3 must already be on the host.
+// Compact 6×1 SSH server-stats strip: read-only probes; the host needs python3 already.
 widget "minimal server stats" {
   size: 6x1
-  minSize: 4x1
+  minSize: 6x1
   padding: 8
   meta {
     owl: 10
     version: "1.0"
-    description: "CPU, GPU, RAM, storage, Docker and public IP from a remote host over SSH. Read-only; nothing is installed on the host."
+    description: "CPU, GPU, RAM, storage, Docker and optional public IP over SSH. Read-only; host needs python3."
     license: "MIT"
     category: "system"
   }
@@ -16,6 +16,8 @@ widget "minimal server stats" {
   state user = "" persist
   state port = "22" persist
   state identity = "~/.ssh/id_ed25519" persist
+  // Off by default: when on, the host curls a public-IP API during each probe.
+  state fetchIp = false persist
 
   let hostText = trim(host)
   let userText = trim(user)
@@ -60,16 +62,28 @@ def run(argv, timeout=4):
         return None
 
 def cpu_percent():
-    def snap():
-        line = (read("/proc/stat") or "").splitlines()[0]
-        parts = [int(x) for x in line.split()[1:]]
-        idle = parts[3] + (parts[4] if len(parts) > 4 else 0)
-        return idle, sum(parts)
-    i1, t1 = snap()
-    time.sleep(0.08)
-    i2, t2 = snap()
-    dt = t2 - t1
-    return round(max(0.0, min(100.0, (1 - (i2 - i1) / dt) * 100)), 1) if dt > 0 else None
+    try:
+        def snap():
+            lines = (read("/proc/stat") or "").splitlines()
+            if not lines:
+                return None
+            parts = [int(x) for x in lines[0].split()[1:]]
+            if len(parts) < 4:
+                return None
+            idle = parts[3] + (parts[4] if len(parts) > 4 else 0)
+            return idle, sum(parts)
+        s1 = snap()
+        if s1 is None:
+            return None
+        time.sleep(0.08)
+        s2 = snap()
+        if s2 is None:
+            return None
+        (i1, t1), (i2, t2) = s1, s2
+        dt = t2 - t1
+        return round(max(0.0, min(100.0, (1 - (i2 - i1) / dt) * 100)), 1) if dt > 0 else None
+    except (ValueError, IndexError, TypeError):
+        return None
 
 def memory():
     info = {}
@@ -89,18 +103,41 @@ def memory():
         "total_bytes": total,
     }
 
+def keep_mount(target):
+    if target == "/":
+        return True
+    for prefix in ("/mnt/", "/media/", "/home", "/data", "/srv"):
+        if target == prefix.rstrip("/") or target.startswith(prefix):
+            return True
+    return False
+
 def storage():
     disks, seen = [], set()
+    rows = []
     out = run(["df", "-B1", "--output=source,target,size,avail,pcent",
-               "-x", "tmpfs", "-x", "devtmpfs", "-x", "squashfs", "-x", "efivarfs"]) or ""
-    for line in out.splitlines()[1:]:
-        parts = line.split()
-        if len(parts) < 5:
-            continue
-        source, target, size_s, avail_s, pct_s = parts[0], parts[1], parts[2], parts[3], parts[4]
-        if source in seen or target.startswith("/var/") or target == "/boot":
-            continue
-        if target != "/" and not target.startswith("/mnt/"):
+               "-x", "tmpfs", "-x", "devtmpfs", "-x", "squashfs", "-x", "efivarfs", "-x", "overlay"]) or ""
+    if out.strip():
+        for line in out.splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 5:
+                rows.append(parts[:5])
+    else:
+        # Non-GNU df: Filesystem 1024-blocks Used Available Capacity Mounted on
+        out = run(["df", "-kP"]) or ""
+        for line in out.splitlines()[1:]:
+            parts = line.split()
+            if len(parts) < 6:
+                continue
+            source, size_k, avail_k, pct_s, target = parts[0], parts[1], parts[3], parts[4], parts[5]
+            if source in ("tmpfs", "devtmpfs", "overlay") or target.startswith(("/run", "/sys", "/dev")):
+                continue
+            try:
+                rows.append([source, target, str(int(size_k) * 1024), str(int(avail_k) * 1024), pct_s])
+            except ValueError:
+                continue
+    rows.sort(key=lambda r: (0 if r[1] == "/" else 1, r[1]))
+    for source, target, size_s, avail_s, pct_s in rows:
+        if source in seen or not keep_mount(target):
             continue
         seen.add(source)
         label = "root" if target == "/" else target.rsplit("/", 1)[-1] or target
@@ -110,7 +147,7 @@ def storage():
             "free_bytes": num(avail_s, 0, 2**63 - 1),
             "total_bytes": num(size_s, 1, 2**63 - 1),
         })
-        if len(disks) >= 3:
+        if len(disks) >= 4:
             break
     return disks
 
@@ -120,7 +157,8 @@ def gpu():
                "--format=csv,noheader,nounits"], timeout=3)
     if not out:
         return None
-    parts = [p.strip() for p in out.strip().splitlines()[0].split(",")]
+    line = out.strip().splitlines()[0]
+    parts = [p.strip() for p in line.rsplit(",", 4)]
     if len(parts) < 5:
         return None
     return {
@@ -144,7 +182,8 @@ def docker():
         if len(bits) < 3:
             continue
         name, status, state = bits[0][:40], bits[1], bits[2].lower()
-        bad = ("unhealthy" in status.lower()) or state in ("exited", "dead", "restarting")
+        # Stopped (exited) containers are normal; only flag sick or crashing ones.
+        bad = ("unhealthy" in status.lower()) or state in ("dead", "restarting", "oomkilled")
         if state == "running":
             running += 1
         if bad:
@@ -154,6 +193,8 @@ def docker():
     return {"ok": True, "total": len(containers), "running": running, "unhealthy": unhealthy, "containers": containers[:24]}
 
 def public_ip():
+    if os.environ.get("FETCH_IP") != "1":
+        return None
     def ipv4(text):
         parts = text.split(".")
         if len(parts) != 4:
@@ -190,7 +231,7 @@ print(json.dumps({
 }, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
 '''
 
-host, user, port_text, identity = sys.argv[1:5]
+host, user, port_text, identity, fetch_ip = sys.argv[1:6]
 if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}", host)
         or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,31}", user)
         or not port_text.isdigit() or not 1 <= int(port_text) <= 65535):
@@ -200,6 +241,7 @@ key = Path(os.path.expanduser(identity))
 if not key.is_file():
     print('{"schema":0,"error":"no_key"}')
     raise SystemExit(0)
+flag = "1" if fetch_ip == "1" else "0"
 cmd = [
     "ssh", "-T", "-F", "/dev/null", "-i", str(key), "-p", port_text,
     "-o", "BatchMode=yes", "-o", "ConnectTimeout=4",
@@ -208,7 +250,7 @@ cmd = [
     "-o", "UserKnownHostsFile=" + str(Path.home() / ".ssh" / "known_hosts"),
     "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no",
     "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes",
-    f"{user}@{host}", "python3", "-",
+    f"{user}@{host}", "env", "FETCH_IP=" + flag, "python3", "-",
 ]
 try:
     started = time.monotonic()
@@ -227,6 +269,8 @@ if result.returncode != 0:
         reason = "timeout"
     elif "connection refused" in err:
         reason = "refused"
+    elif "python3" in err and ("not found" in err or "no such file" in err):
+        reason = "no_python"
     else:
         reason = "unreachable"
     print(json.dumps({"schema": 0, "error": reason}, separators=(",", ":")))
@@ -244,7 +288,7 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
 """
 
   source pulse = cmd(targetOk
-    ? "printf '%s' ${sh(sshClient)} | python -I - ${sh(hostText)} ${sh(userText)} ${sh(str(int(portNumber)))} ${sh(idPath)}"
+    ? "printf '%s' ${sh(sshClient)} | python -I - ${sh(hostText)} ${sh(userText)} ${sh(str(int(portNumber)))} ${sh(idPath)} ${sh(fetchIp ? "1" : "0")}"
     : "printf '%s' '{\"schema\":0,\"error\":\"invalid_target\"}'") every 20s timeout 16s json
   source now = clock every 30s
 
@@ -265,7 +309,18 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
   let fresh = ok && age != null && age <= 90
   let alert = fresh && (cpu > 90 || mem > 90 || diskPct > 90 || gpuUtil > 95 || dockerBad > 0)
   let statusColor = !ok ? red : alert ? red : fresh ? green : muted
-
+  let err = pulse.error ?? ""
+  let errText = err == "" ? "down"
+    : err == "invalid_target" ? "set host & user"
+    : err == "no_key" ? "key missing"
+    : err == "auth" ? "auth failed"
+    : err == "host_key" ? "accept host key"
+    : err == "timeout" ? "timed out"
+    : err == "refused" ? "refused"
+    : err == "no_python" ? "needs python3"
+    : err == "format" ? "bad reply"
+    : err == "unreachable" ? "unreachable"
+    : err
   let dockerPct = dockerTotal > 0 ? dockerRunning / dockerTotal * 100 : 0
 
   component Gauge(label, value, pct, tint = accent, warn = false) {
@@ -314,7 +369,7 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
       gap: 1
       Text { text: pulse.hostname ?? "HOST"; font: mono; fontSize: 11; color: foreground; maxLines: 1 }
       Text {
-        text: !ok ? (pulse.error ?? "down") : alert ? "alert" : fresh ? "online" : "stale"
+        text: !ok ? errText : alert ? "alert" : fresh ? "online" : "stale"
         font: mono
         fontSize: 9
         color: statusColor
@@ -359,11 +414,35 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
       Text {
         text: ok
           ? "RTT ${round(pulse.rtt_ms ?? 0)} ms · checked ${pulse.checked_at == null ? "—" : fmtTime(pulse.checked_at, "HH:mm:ss")} · up ${pulse.uptime_seconds == null ? "—" : fmtDuration(pulse.uptime_seconds)}"
-          : "SSH ${pulse.error ?? "failed"} · ${userText}@${hostText}:${port}"
+          : "SSH: ${errText} · ${userText}@${hostText}:${port}"
         font: mono
         style: small
         color: muted
         maxLines: 2
+      }
+      if !ok && err == "host_key" {
+        Text {
+          text: "SSH to the host once from a terminal so its key is in ~/.ssh/known_hosts, then refresh."
+          style: small
+          color: muted
+          maxLines: 3
+        }
+      }
+      if !ok && err == "no_key" {
+        Text {
+          text: "Identity file not found. Set IDENTITY FILE below (default ~/.ssh/id_ed25519)."
+          style: small
+          color: muted
+          maxLines: 3
+        }
+      }
+      if !ok && err == "no_python" {
+        Text {
+          text: "The remote needs python3 on PATH. Install it on the host, then refresh."
+          style: small
+          color: muted
+          maxLines: 3
+        }
       }
 
       Text { text: "RESOURCES"; font: mono; style: label; color: accent }
@@ -415,8 +494,13 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
           background: surface
           radius: 6 * corners
           Text { text: "PUBLIC IP"; style: small; color: muted }
-          Text { text: ip; font: mono; fontSize: 18; color: foreground; maxLines: 1 }
-          Text { text: "from the host via ifconfig.me"; style: small; color: muted }
+          Text { text: !fetchIp ? "off" : ip; font: mono; fontSize: 18; color: foreground; maxLines: 1 }
+          Text {
+            text: fetchIp ? "host curls ifconfig.me / ipify / icanhazip" : "enable below to look up from the host"
+            style: small
+            color: muted
+            maxLines: 2
+          }
         }
       }
 
@@ -459,7 +543,7 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
         Text { text: "Docker not available for this SSH user"; style: small; color: muted; maxLines: 2 }
       } else {
         Text {
-          text: "${dockerRunning} running / ${dockerTotal} total" + (dockerBad > 0 ? " · ${dockerBad} unhealthy or down" : "")
+          text: "${dockerRunning} running / ${dockerTotal} total" + (dockerBad > 0 ? " · ${dockerBad} unhealthy or crashing" : "")
           style: small
           color: dockerBad > 0 ? red : muted
           maxLines: 2
@@ -476,7 +560,12 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
       }
 
       Text { text: "CONNECTION"; font: mono; style: label; color: accent }
-      Text { text: "Uses your existing SSH key. Nothing is installed on the host."; style: small; color: muted; maxLines: 2 }
+      Text {
+        text: "Uses your SSH key (BatchMode). Host needs python3; optional curl (public IP), nvidia-smi, docker."
+        style: small
+        color: muted
+        maxLines: 3
+      }
       Text { text: "HOST"; style: small; color: muted }
       Input { text: host; onChange: host = value }
       Text { text: "USER"; style: small; color: muted }
@@ -485,6 +574,24 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
       Input { text: port; onChange: port = value }
       Text { text: "IDENTITY FILE"; style: small; color: muted }
       Input { text: identity; onChange: identity = value }
+      Row {
+        align: center
+        gap: 8
+        Text { text: "PUBLIC IP LOOKUP"; style: small; color: muted; weight: 1; maxLines: 1 }
+        Button {
+          text: fetchIp ? "ON" : "OFF"
+          color: fetchIp ? accent : muted
+          onTap: fetchIp = !fetchIp
+        }
+      }
+      if fetchIp {
+        Text {
+          text: "When on, each probe asks the host to curl a public-IP API (ifconfig.me, then ipify, then icanhazip)."
+          style: small
+          color: muted
+          maxLines: 3
+        }
+      }
       Button { text: "CHECK NOW"; onTap: refresh() }
     }
   }
