@@ -2083,8 +2083,10 @@ python3 "$H/tvremote.py" stop >/dev/null 2>&1
           path([[cx - d * 0.16 * dir, cy - d * 0.17], [cx + d * 0.1 * dir, cy], [cx - d * 0.16 * dir, cy + d * 0.17]], closed: true, fill: ink)
           rect(dir > 0 ? cx + d * 0.14 : cx - d * 0.22, cy - d * 0.17, d * 0.08, d * 0.34, radius: d * 0.03, fill: ink)
         } else if g == "power" {
-          arc(cx, cy, d * 0.19, 330, 300, stroke: ink, width: d * 0.07, cap: round)
-          rect(cx - d * 0.035, cy - d * 0.26, d * 0.07, d * 0.18, radius: d * 0.03, fill: ink)
+          // The gap has to clear the stem by more than it looks like it needs to: a round cap eats
+          // into it on either side, and a stem that only just misses the arc reads as crossing it.
+          arc(cx, cy, d * 0.19, 310, 260, stroke: ink, width: d * 0.07, cap: round)
+          rect(cx - d * 0.038, cy - d * 0.3, d * 0.076, d * 0.2, radius: d * 0.038, fill: ink)
         } else {
           text(g, cx, cy, size: size * (big ? 0.29 : 0.24), align: center, color: ink, bold: hot)
         }
