@@ -124,10 +124,11 @@ app "Cassette" {
       align: center
       onTap: {
         if likePendingId == "" {
+          let likedBefore = currentLiked
           haptic()
           likePendingId = str(current.id)
-          likePendingAdd = !currentLiked
-          if currentLiked { mutation = post("https://api.music.yandex.net/users/${enc(uid)}/likes/tracks/remove", "track-ids=${enc(current.id)}", {Authorization: "OAuth ${token}", "Content-Type": "application/x-www-form-urlencoded"}) }
+          likePendingAdd = !likedBefore
+          if likedBefore { mutation = post("https://api.music.yandex.net/users/${enc(uid)}/likes/tracks/remove", "track-ids=${enc(current.id)}", {Authorization: "OAuth ${token}", "Content-Type": "application/x-www-form-urlencoded"}) }
           else { mutation = post("https://api.music.yandex.net/users/${enc(uid)}/likes/tracks/add-multiple", "track-ids=${enc(current.id)}", {Authorization: "OAuth ${token}", "Content-Type": "application/x-www-form-urlencoded"}) }
         }
       }
