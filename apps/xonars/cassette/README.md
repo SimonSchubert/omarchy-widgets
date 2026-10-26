@@ -71,12 +71,14 @@ Tested on a physical Android phone running a debug build of omalauncher with OWL
   MediaSession callbacks, then changed mpv's real pause property. Android playing
   state was read again and matched mpv. Commands also worked after the publishing
   probe's live polling ended.
+- The user separately confirmed that play and pause work on the phone's lock
+  screen. Next/previous are not shown because Cassette does not advertise them.
 - Python backend regression tests: six passed, covering signing, URL restrictions,
   local path confinement, metadata defaults, JSON state and explicit controls.
 - Store review passes with the OWL 16 checker. Current released store tooling does
   not yet support OWL 16; this PR must remain a draft until that dependency lands.
 
-Physical headset buttons, the lock-screen UI, the output switcher, Android seek and
+Physical headset buttons, the output switcher, Android seek and
 stop callbacks have not been manually exercised. Their wiring is implemented,
 but these interactions are not claimed as device-tested.
 
