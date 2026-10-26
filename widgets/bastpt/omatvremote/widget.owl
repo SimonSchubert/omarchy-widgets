@@ -2083,9 +2083,13 @@ python3 "$H/tvremote.py" stop >/dev/null 2>&1
           path([[cx - d * 0.16 * dir, cy - d * 0.17], [cx + d * 0.1 * dir, cy], [cx - d * 0.16 * dir, cy + d * 0.17]], closed: true, fill: ink)
           rect(dir > 0 ? cx + d * 0.14 : cx - d * 0.22, cy - d * 0.17, d * 0.08, d * 0.34, radius: d * 0.03, fill: ink)
         } else if g == "power" {
-          // The gap has to clear the stem by more than it looks like it needs to: a round cap eats
-          // into it on either side, and a stem that only just misses the arc reads as crossing it.
-          arc(cx, cy, d * 0.19, 310, 260, stroke: ink, width: d * 0.07, cap: round)
+          // The ring drawn from its own points rather than arc(): arc's sweep reads opposite on the
+          // phone to how it renders here, and a ring whose ends are named in coordinates cannot be
+          // read either way. Angles are clockwise from 12 o'clock, and the gap is the 100 degrees
+          // around it, wide enough that the stem never comes near the stroke.
+          let r = d * 0.19
+          let pts = map(range(27), i => [cx + r * sin(rad(50 + i * 10)), cy - r * cos(rad(50 + i * 10))])
+          path(pts, stroke: ink, width: d * 0.07, cap: round)
           rect(cx - d * 0.038, cy - d * 0.3, d * 0.076, d * 0.2, radius: d * 0.038, fill: ink)
         } else {
           text(g, cx, cy, size: size * (big ? 0.29 : 0.24), align: center, color: ink, bold: hot)
