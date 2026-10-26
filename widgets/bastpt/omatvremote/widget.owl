@@ -53,7 +53,7 @@ widget "omatv remote" {
   source st = cmd("""
 H=$HOME/.local/share/omatvremote
 mkdir -p "$H"
-[ "$(cat "$H/tag" 2>/dev/null)" = "95af0b8896ed" ] || { echo need; exit; }
+[ "$(cat "$H/tag" 2>/dev/null)" = "a92a40d9d5cf" ] || { echo need; exit; }
 now=$(date +%s)
 pf=$H/pairing
 if [ -f "$pf" ]; then
@@ -286,6 +286,7 @@ async def do_daemon(host):
     tv = remote(host)
     await tv.async_generate_cert_if_missing()
     loop = asyncio.get_running_loop()
+    HOLD = 0.6  # how long a held key stays down before it is let go
 
     def status():
         if tv.is_on is None:
@@ -303,11 +304,23 @@ async def do_daemon(host):
             data = os.read(fd, 4096)
         except BlockingIOError:
             return
+
+        def end_long(key):
+            try:
+                tv.send_key_command(key, "END_LONG")
+            except Exception as err:
+                note("long %r: %s" % (key, err))
+
         for line in data.decode(errors="replace").splitlines():
             cmd, _, arg = line.partition(" ")
             try:
                 if cmd == "key":
                     tv.send_key_command(arg)
+                elif cmd == "long":
+                    # A long press on a real remote is the key held down and let go, and a TV
+                    # reads that as its context menu where the same key tapped opens nothing.
+                    tv.send_key_command(arg, "START_LONG")
+                    loop.call_later(HOLD, end_long, arg)
                 elif cmd == "text":
                     tv.send_text(arg)
                 note(shown(cmd, arg))
@@ -1967,7 +1980,7 @@ with wave.open(sys.argv[1], "wb") as out:
     out.setframerate(rate)
     out.writeframes(bytes(frames))
 OMATV_TICK_PY
-printf 95af0b8896ed > "$H/tag"
+printf a92a40d9d5cf > "$H/tag"
 python3 "$H/tvremote.py" stop >/dev/null 2>&1
     """)
   }
@@ -2025,9 +2038,10 @@ python3 "$H/tvremote.py" stop >/dev/null 2>&1
 
   // One key: press is the TV's key name, g says what to draw, obeys is false for the keys a TV
   // only answers when the screen in front asks for them, size is the key's edge in dp, ring
-  // outlines a key that has no other reason to be outlined, and flip turns the play key's own
-  // symbol over with the tap that asks the TV to change what it plays.
-  component Key(press, g = "", big = false, hot = false, obeys = true, size = u, ring = 0, flip = false) {
+  // outlines a key that has no other reason to be outlined, flip turns the play key's own symbol
+  // over with the tap that asks the TV to change what it plays, and hold sends the same key held
+  // down when it is pressed long, which is how a TV opens the menu an app keeps off the tap.
+  component Key(press, g = "", big = false, hot = false, obeys = true, size = u, ring = 0, flip = false, hold = false) {
     Box {
       size: big ? size * 1.28 : size
       radius: size * 0.3 * corners
@@ -2040,6 +2054,12 @@ python3 "$H/tvremote.py" stop >/dev/null 2>&1
         if click { sound("~/.local/share/omatvremote/tick.wav") }
         if flip { play = !play }
         run("sh ~/.local/share/omatvremote/tvkey.sh " + sh("key " + press))
+      }
+      onLongPress: {
+        if hold {
+          if feel { haptic() }
+          run("sh ~/.local/share/omatvremote/tvkey.sh " + sh("long " + press))
+        }
       }
       Canvas {
         let cx = width / 2
@@ -2256,7 +2276,7 @@ python3 "$H/tvremote.py" stop >/dev/null 2>&1
               gap: u * 0.09
               align: center
               Key { press: "DPAD_LEFT"; g: "left" }
-              Key { press: "DPAD_CENTER"; g: "ok"; big: true; hot: true }
+              Key { press: "DPAD_CENTER"; g: "ok"; big: true; hot: true; hold: true }
               Key { press: "DPAD_RIGHT"; g: "right" }
             }
             Key { press: "DPAD_DOWN"; g: "down" }
@@ -2282,7 +2302,7 @@ python3 "$H/tvremote.py" stop >/dev/null 2>&1
               gap: u * 0.09
               align: center
               Key { press: "DPAD_LEFT"; g: "left" }
-              Key { press: "DPAD_CENTER"; g: "ok"; big: true; hot: true }
+              Key { press: "DPAD_CENTER"; g: "ok"; big: true; hot: true; hold: true }
               Key { press: "DPAD_RIGHT"; g: "right" }
             }
             Key { press: "DPAD_DOWN"; g: "down" }
@@ -2338,7 +2358,8 @@ python3 "$H/tvremote.py" stop >/dev/null 2>&1
         fill: width
         gap: 12
         align: center
-        Text { text: short == "" ? "the outlined keys depend on the app in front" : short + " ignores the outlined keys"; style: small; color: muted; weight: 1; maxLines: 1 }
+        Text { text: "hold ok for a menu"; style: small; color: muted; maxLines: 1 }
+        Text { text: short == "" ? "outlined keys depend on the app" : short + " ignores the outlined keys"; style: small; color: muted; weight: 1; maxLines: 1 }
         Text { text: feel ? "" : "buzz needs the phone's own touch feedback on"; style: small; color: muted; weight: 0; maxLines: 1 }
       }
     }

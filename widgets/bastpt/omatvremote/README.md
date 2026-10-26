@@ -14,6 +14,8 @@ uses. No ADB, no developer options, no account, and nothing on the TV to install
 - The play/pause key turns itself over as you tap it. The TV does not report playback
   over this service, so the symbol is what you last asked for, and goes back to play
   when the TV moves to another app or wakes.
+- Holding the centre key sends it as a long press rather than a tap, which is how a TV
+  opens the menu an app keeps behind it.
 - Two layouts, `simple` and `full`, and volume by either thumb, so the remote fits the
   hand holding the phone. Keys a TV only answers in some apps draw outlined, and the
   line at the bottom names what the app in front ignores.
