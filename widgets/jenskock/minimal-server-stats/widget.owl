@@ -1,12 +1,12 @@
-// Minimal SSH server-stats strip: read-only probes, nothing installed on the server.
+// Minimal SSH server-stats strip: read-only probes over SSH; python3 must already be on the host.
 widget "minimal server stats" {
   size: 6x1
   minSize: 4x1
   padding: 8
   meta {
     owl: 10
-    version: "1.0.0"
-    description: "CPU, GPU, RAM, storage, Docker and public IP from a remote host over SSH — nothing installed there."
+    version: "1.0"
+    description: "CPU, GPU, RAM, storage, Docker and public IP from a remote host over SSH. Read-only; nothing is installed on the host."
     license: "MIT"
     category: "system"
   }
@@ -25,7 +25,7 @@ widget "minimal server stats" {
       && match(userText, "^[A-Za-z_][A-Za-z0-9_.-]{0,31}$") != null
       && portNumber >= 1 && portNumber <= 65535
 
-  // Local client SSHes a one-shot Python probe on stdin to the server (nothing installed there).
+  // Local client pipes a one-shot Python probe to `python3 -` on the host over SSH.
   let sshClient = """
 import json, os, re, subprocess, sys, time
 from pathlib import Path
@@ -246,20 +246,20 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
   source pulse = cmd(targetOk
     ? "printf '%s' ${sh(sshClient)} | python -I - ${sh(hostText)} ${sh(userText)} ${sh(str(int(portNumber)))} ${sh(idPath)}"
     : "printf '%s' '{\"schema\":0,\"error\":\"invalid_target\"}'") every 20s timeout 16s json
-  source now = clock every 1s
+  source now = clock every 30s
 
-  let ok = pulse.schema == 1
+  let ok = pulse != null && pulse.schema == 1
   let cpu = num(pulse.cpu_percent, -1)
-  let mem = num(pulse.memory.used_percent, -1)
-  let gpuUtil = num(pulse.gpu.util_percent, -1)
-  let gpuMemUsed = num(pulse.gpu.mem_used_mib, -1)
-  let gpuMemTotal = num(pulse.gpu.mem_total_mib, -1)
-  let gpuMemPct = gpuMemTotal > 0 && gpuMemUsed >= 0 ? gpuMemUsed / gpuMemTotal * 100 : -1
-  let rootDisk = (pulse.storage ?? []).filter(d => d.path == "/")[0]
-  let diskPct = num(rootDisk.used_percent, -1)
-  let dockerRunning = num(pulse.docker.running, 0)
-  let dockerTotal = num(pulse.docker.total, 0)
-  let dockerBad = num(pulse.docker.unhealthy, 0)
+  let mem = num(get(pulse.memory, "used_percent", null), -1)
+  let gpuUtil = num(get(pulse.gpu, "util_percent", null), -1)
+  let gpuMemUsed = num(get(pulse.gpu, "mem_used_mib", null), -1)
+  let gpuMemTotal = num(get(pulse.gpu, "mem_total_mib", null), -1)
+  let rootDisk = (pulse.storage ?? []).find(d => d.path == "/")
+  let diskPct = num(get(rootDisk, "used_percent", null), -1)
+  let dockerOk = get(pulse.docker, "ok", false) == true
+  let dockerRunning = num(get(pulse.docker, "running", 0), 0)
+  let dockerTotal = num(get(pulse.docker, "total", 0), 0)
+  let dockerBad = num(get(pulse.docker, "unhealthy", 0), 0)
   let ip = pulse.public_ip ?? "—"
   let age = ok && pulse.checked_at != null ? max(0, now - pulse.checked_at) : null
   let fresh = ok && age != null && age <= 90
@@ -327,8 +327,8 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
     Gauge { label: "DISK"; value: diskPct < 0 ? "—" : "${round(diskPct)}"; pct: diskPct; warn: diskPct > 90; tint: accent }
     Gauge {
       label: "DOCKER"
-      value: !ok || pulse.docker.ok == false ? "—" : dockerBad > 0 ? "${dockerRunning}/${dockerTotal}!" : "${dockerRunning}/${dockerTotal}"
-      pct: !ok || pulse.docker.ok == false ? -1 : dockerPct
+      value: !ok || !dockerOk ? "—" : dockerBad > 0 ? "${dockerRunning}/${dockerTotal}!" : "${dockerRunning}/${dockerTotal}"
+      pct: !ok || !dockerOk ? -1 : dockerPct
       warn: dockerBad > 0
       tint: green
     }
@@ -403,7 +403,7 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
           Text { text: "RAM"; style: small; color: muted }
           Text { text: mem < 0 ? "—" : "${round(mem)}%"; font: mono; fontSize: 22; color: mem > 90 ? red : foreground }
           Text {
-            text: pulse.memory.total_bytes == null ? "—" : "${fmtBytes(pulse.memory.used_bytes)} / ${fmtBytes(pulse.memory.total_bytes)}"
+            text: get(pulse.memory, "total_bytes", null) == null ? "—" : "${fmtBytes(pulse.memory.used_bytes)} / ${fmtBytes(pulse.memory.total_bytes)}"
             style: small
             color: muted
           }
@@ -421,46 +421,57 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=Fal
       }
 
       Text { text: "STORAGE"; font: mono; style: label; color: accent }
-      for disk in (pulse.storage ?? []) {
-        Column {
-          gap: 4
-          padding: 10
-          background: surface
-          radius: 6 * corners
-          Row {
-            Text { text: disk.label; font: mono; weight: 1; maxLines: 1 }
-            Text {
-              text: disk.used_percent == null ? "—" : "${round(disk.used_percent)}%"
-              font: mono
-              color: disk.used_percent > 90 ? red : foreground
+      if ok {
+        for disk in (pulse.storage ?? []) {
+          Column {
+            gap: 4
+            padding: 10
+            background: surface
+            radius: 6 * corners
+            Row {
+              Text { text: disk.label; font: mono; weight: 1; maxLines: 1 }
+              Text {
+                text: disk.used_percent == null ? "—" : "${round(disk.used_percent)}%"
+                font: mono
+                color: disk.used_percent > 90 ? red : foreground
+              }
             }
+            Text {
+              text: disk.free_bytes == null ? disk.path : "${fmtBytes(disk.free_bytes)} free · ${disk.path}"
+              style: small
+              color: muted
+              maxLines: 1
+            }
+            Progress { value: max(0, num(disk.used_percent, 0)); max: 100; height: 3; color: disk.used_percent > 90 ? red : accent }
           }
-          Text {
-            text: disk.free_bytes == null ? disk.path : "${fmtBytes(disk.free_bytes)} free · ${disk.path}"
-            style: small
-            color: muted
-            maxLines: 1
-          }
-          Progress { value: max(0, num(disk.used_percent, 0)); max: 100; height: 3; color: disk.used_percent > 90 ? red : accent }
         }
+        if len(pulse.storage ?? []) == 0 {
+          Text { text: "no disks reported"; style: small; color: muted }
+        }
+      } else {
+        Text { text: "connect to see disks"; style: small; color: muted }
       }
 
       Text { text: "DOCKER"; font: mono; style: label; color: accent }
-      Text {
-        text: pulse.docker.ok == false
-          ? "Docker not available for this SSH user"
-          : "${dockerRunning} running / ${dockerTotal} total" + (dockerBad > 0 ? " · ${dockerBad} unhealthy or down" : "")
-        style: small
-        color: dockerBad > 0 ? red : muted
-        maxLines: 2
-      }
-      for c in (pulse.docker.containers ?? []) {
-        Row {
-          padding: [8, 10]
-          background: surface
-          radius: 4 * corners
-          Text { text: c.name; font: mono; weight: 1; maxLines: 1; color: c.bad ? red : foreground }
-          Text { text: c.status; style: small; color: c.bad ? red : muted; width: 160; align: end; maxLines: 1 }
+      if !ok {
+        Text { text: "connect to see containers"; style: small; color: muted }
+      } else if !dockerOk {
+        Text { text: "Docker not available for this SSH user"; style: small; color: muted; maxLines: 2 }
+      } else {
+        Text {
+          text: "${dockerRunning} running / ${dockerTotal} total" + (dockerBad > 0 ? " · ${dockerBad} unhealthy or down" : "")
+          style: small
+          color: dockerBad > 0 ? red : muted
+          maxLines: 2
+        }
+        for c in (pulse.docker.containers ?? []) {
+          Row {
+            padding: [8, 10]
+            background: surface
+            radius: 4 * corners
+            Text { text: c.name; font: mono; weight: 1; maxLines: 1; color: c.bad ? red : foreground }
+            Text { text: c.status; style: small; color: c.bad ? red : muted; width: 160; align: end; maxLines: 1 }
+          }
         }
       }
 
