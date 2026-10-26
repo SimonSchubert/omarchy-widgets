@@ -1,10 +1,10 @@
 face "news" {
-  // Left of page 1: a Google News–style reader for your RSS and Atom feeds.
+  // A Google News–style reader for your RSS and Atom feeds.
   page: 0
 
   meta {
     owl: 13
-    description: "A news face: your RSS and Atom feeds merged into one scrollable feed, filterable by source. Tap a story to open it; tap Feeds to edit ~/.config/omalauncher/feeds"
+    description: "A news face: your RSS and Atom feeds merged into one scrollable feed, filterable by source. Tap a story to open it; tap Feeds to edit ~/.config/omarchy-proot/feeds"
     version: "1.0"
     license: "MIT"
     category: "news"
@@ -12,27 +12,26 @@ face "news" {
 
   requires { pacman: ["python"] }
 
-  // One feed URL per line (# comments ok). Fetched in parallel, merged newest first.
+  // One feed URL per line (# comments ok). Same list as the feeds widget. Fetched in parallel, merged newest first.
   source items = cmd("""
-    # news face feed merge
-    f=~/.config/omalauncher/feeds
+    f=~/.config/omarchy-proot/feeds
     mkdir -p "${f%/*}"
     [ -f "$f" ] || printf '%s\n' \
       'https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en' \
       'https://feeds.bbci.co.uk/news/world/rss.xml' \
       'https://feeds.npr.org/1001/rss.xml' \
-      'https://www.theguardian.com/world/rss' \
-      'https://archlinux.org/feeds/news/' > "$f"
+      'https://www.theguardian.com/world/rss' > "$f"
     grep -v '^#' "$f" | grep . | python3 -c '
 import html, json, re, sys, urllib.request, xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from urllib.parse import urljoin
 
 A = "{http://www.w3.org/2005/Atom}"
 M = "{http://search.yahoo.com/mrss/}"
 C = "{http://purl.org/rss/1.0/modules/content/}"
-UA = "omalauncher-news/1.0"
+UA = "omarchy-proot-news/1.0"
 
 def when(s):
     if not s:
@@ -69,32 +68,44 @@ def short_feed(s):
         return "NPR"
     elif low.startswith("bbc"):
         return "BBC"
-    elif low.startswith("arch linux"):
-        return "Arch Linux"
     return s[:28]
 
-def first_img(s):
+def web(u, base=""):
+    u = (u or "").strip()
+    if not u:
+        return ""
+    try:
+        u = urljoin(base, u)
+    except Exception:
+        return ""
+    return u if u.lower().startswith(("http://", "https://")) else ""
+
+def first_img(s, base):
     m = re.search("(?is)<img[^>]+src=\"([^\"]+)\"", s or "")
     if m:
-        return m.group(1)
+        return web(m.group(1), base)
     a = chr(39)
     m = re.search("(?is)<img[^>]+src=" + a + "([^" + a + "]+)" + a, s or "")
-    return m.group(1) if m else ""
+    return web(m.group(1), base) if m else ""
 
-def image(e, raw_desc=""):
+def image(e, raw_desc, base):
     for tag in (M + "content", M + "thumbnail"):
         for n in e.findall(tag):
             url = n.get("url") or ""
             typ = (n.get("type") or "").lower()
             if url and (not typ or typ.startswith("image") or n.get("medium") == "image"):
-                return url
+                got = web(url, base)
+                if got:
+                    return got
     enc = e.find("enclosure")
     if enc is not None:
         url = enc.get("url") or ""
         typ = (enc.get("type") or "").lower()
         if url and typ.startswith("image"):
-            return url
-    return first_img(raw_desc)
+            got = web(url, base)
+            if got:
+                return got
+    return first_img(raw_desc, base)
 
 def fetch(url):
     try:
@@ -103,9 +114,11 @@ def fetch(url):
     except Exception:
         return []
     out = []
+    base = url
     ch = root.find("channel")
     if ch is not None:
         feed = short_feed(text(ch, "title") or url)
+        link_base = web(text(ch, "link")) or base
         for i in ch.findall("item"):
             raw = ""
             for t in ("description", C + "encoded"):
@@ -115,11 +128,11 @@ def fetch(url):
                     if not raw:
                         raw = "".join(n.itertext())
                     break
-            link = text(i, "link")
+            link = web(text(i, "link"), link_base)
             title = text(i, "title")
-            if not title:
+            if not title or not link:
                 continue
-            comments = text(i, "comments")
+            comments = web(text(i, "comments"), link_base)
             summary = clean(raw)[:280]
             # Official HN RSS description is only a Comments link; keep the URL, clear the summary.
             if comments and summary.lower() == "comments":
@@ -131,7 +144,7 @@ def fetch(url):
                 "feed": feed,
                 "summary": summary,
                 "comments": comments,
-                "image": image(i, raw),
+                "image": image(i, raw, link_base),
             })
     else:
         feed = short_feed(text(root, A + "title") or url)
@@ -139,7 +152,7 @@ def fetch(url):
             link = e.find(A + "link[@rel=\"alternate\"]")
             if link is None:
                 link = e.find(A + "link")
-            href = link.get("href") if link is not None else ""
+            href = web(link.get("href") if link is not None else "", base)
             raw = ""
             for t in (A + "summary", A + "content"):
                 n = e.find(t)
@@ -147,7 +160,7 @@ def fetch(url):
                     raw = "".join(n.itertext())
                     break
             title = text(e, A + "title")
-            if not title:
+            if not title or not href:
                 continue
             out.append({
                 "title": title,
@@ -156,7 +169,7 @@ def fetch(url):
                 "feed": feed,
                 "summary": clean(raw)[:280],
                 "comments": "",
-                "image": image(e, raw),
+                "image": image(e, raw, href or base),
             })
     return out
 
@@ -179,7 +192,7 @@ for ps in by.values():
         uniq.append(p)
 uniq.sort(key=lambda p: (-p["at"], p["title"]))
 print(json.dumps(uniq[:80]))
-'
+' || echo '[]'
   """) every 20m json timeout 45s
 
   source now = clock every 1m
@@ -188,8 +201,10 @@ print(json.dumps(uniq[:80]))
   state chipsOpen = false persist
 
   let feeds = unique((items ?? []).map(p => p.feed)).sort()
+  // Drop a persisted topic if that feed is gone from the merge.
+  let active = topic == "All" || indexOf(feeds, topic) >= 0 ? topic : "All"
   let topics = flatten([["All"], feeds])
-  let shown = items == null ? null : topic == "All" ? items : items.filter(p => p.feed == topic)
+  let shown = items == null ? null : active == "All" ? items : items.filter(p => p.feed == active)
   let hero = shown != null && len(shown) > 0 ? shown[0] : null
   let rest = shown != null ? shown.drop(1) : []
   let wide = (tileWidth ?? 0) > (tileHeight ?? 1)
@@ -203,11 +218,11 @@ print(json.dumps(uniq[:80]))
     Text {
       text: label
       style: small
-      color: topic == label ? background : foreground
+      color: active == label ? background : foreground
       maxLines: 1
       padding: [14, 8]
-      background: topic == label ? accent : chip
-      frost: topic == label ? 0 : tileFrost
+      background: active == label ? accent : chip
+      frost: active == label ? 0 : tileFrost
       radius: 16 * corners
       onTap: { topic = label; chipsOpen = false }
     }
@@ -232,24 +247,27 @@ print(json.dumps(uniq[:80]))
   component Hero(p) {
     Column {
       gap: 10
-      padding: 14
-      frost: tileFrost
-      background: glass
-      radius: 18 * corners
-      onTap: url(p.url)
-      if p.image != "" {
-        Box {
-          height: wide ? 180 : 160
-          fill: width
-          radius: 12 * corners
-          clip: true
-          Image { src: p.image; fit: cover; fill: true }
+      Column {
+        gap: 10
+        padding: 14
+        frost: tileFrost
+        background: glass
+        radius: 18 * corners
+        onTap: url(p.url)
+        if p.image != "" {
+          Box {
+            height: wide ? 180 : 160
+            fill: width
+            radius: 12 * corners
+            clip: true
+            Image { src: p.image; fit: cover; fill: true }
+          }
         }
-      }
-      Meta { p: p }
-      Text { text: p.title; fontSize: 22; fontWeight: 600; maxLines: 3 }
-      if p.summary != "" {
-        Text { text: p.summary; style: body; color: muted; maxLines: 3 }
+        Meta { p: p }
+        Text { text: p.title; fontSize: 22; fontWeight: 600; maxLines: 3 }
+        if p.summary != "" {
+          Text { text: p.summary; style: body; color: muted; maxLines: 3 }
+        }
       }
       if p.comments != "" {
         Text {
@@ -257,6 +275,7 @@ print(json.dumps(uniq[:80]))
           style: small
           color: accent
           maxLines: 1
+          padding: [14, 0]
           onTap: url(p.comments)
         }
       }
@@ -264,38 +283,42 @@ print(json.dumps(uniq[:80]))
   }
 
   component Story(p) {
-    Row {
-      gap: 12
-      align: top
-      padding: 12
-      frost: tileFrost
-      background: glass
-      radius: 14 * corners
-      onTap: url(p.url)
-      Column {
-        gap: 4
-        weight: 1
-        Meta { p: p }
-        Text { text: p.title; bold: true; maxLines: 3 }
-        if p.summary != "" {
-          Text { text: p.summary; style: small; color: muted; maxLines: 2 }
+    Column {
+      gap: 6
+      Row {
+        gap: 12
+        align: top
+        padding: 12
+        frost: tileFrost
+        background: glass
+        radius: 14 * corners
+        onTap: url(p.url)
+        Column {
+          gap: 4
+          weight: 1
+          Meta { p: p }
+          Text { text: p.title; bold: true; maxLines: 3 }
+          if p.summary != "" {
+            Text { text: p.summary; style: small; color: muted; maxLines: 2 }
+          }
         }
-        if p.comments != "" {
-          Text {
-            text: "Comments"
-            style: small
-            color: accent
-            maxLines: 1
-            onTap: url(p.comments)
+        if p.image != "" {
+          Box {
+            size: 76
+            radius: 10 * corners
+            clip: true
+            Image { src: p.image; fit: cover; fill: true }
           }
         }
       }
-      if p.image != "" {
-        Box {
-          size: 76
-          radius: 10 * corners
-          clip: true
-          Image { src: p.image; fit: cover; fill: true }
+      if p.comments != "" {
+        Text {
+          text: "Comments"
+          style: small
+          color: accent
+          maxLines: 1
+          padding: [12, 0]
+          onTap: url(p.comments)
         }
       }
     }
@@ -330,7 +353,7 @@ print(json.dumps(uniq[:80]))
         background: chip
         frost: tileFrost
         radius: 14 * corners
-        onTap: terminal("$EDITOR ~/.config/omalauncher/feeds", "feeds")
+        onTap: terminal('$EDITOR ~/.config/omarchy-proot/feeds', "feeds")
       }
     }
 
@@ -340,7 +363,7 @@ print(json.dumps(uniq[:80]))
         gap: 8
         align: center
         Text {
-          text: chipsOpen ? "Sources ▴" : "${topic} ▾"
+          text: chipsOpen ? "Sources ▴" : "${active} ▾"
           style: small
           color: chipsOpen ? muted : background
           maxLines: 1
@@ -350,7 +373,7 @@ print(json.dumps(uniq[:80]))
           radius: 16 * corners
           onTap: chipsOpen = !chipsOpen
         }
-        if !chipsOpen && topic != "All" {
+        if !chipsOpen && active != "All" {
           Text {
             text: "All"
             style: small
@@ -397,7 +420,7 @@ print(json.dumps(uniq[:80]))
           background: chip
           frost: tileFrost
           radius: 14 * corners
-          onTap: terminal("$EDITOR ~/.config/omalauncher/feeds", "feeds")
+          onTap: terminal('$EDITOR ~/.config/omarchy-proot/feeds', "feeds")
         }
       }
     } else {
