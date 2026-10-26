@@ -73,6 +73,10 @@ Tested on a physical Android phone running a debug build of omalauncher with OWL
   probe's live polling ended.
 - The user separately confirmed that play and pause work on the phone's lock
   screen. Next/previous are not shown because Cassette does not advertise them.
+- After the final APK update, a silent-track regression check published position
+  once and exercised Android play/pause without republishing metadata. Android's
+  paused position advanced 9 → 15 → 19 seconds; mpv ended at 19.60 seconds, paused.
+  `mediaSession(null)` also removed the session from a fresh Android media read.
 - Python backend regression tests: six passed, covering signing, URL restrictions,
   local path confinement, metadata defaults, JSON state and explicit controls.
 - Store review passes with the OWL 16 checker. Current released store tooling does
