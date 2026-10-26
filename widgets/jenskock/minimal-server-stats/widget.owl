@@ -1,0 +1,480 @@
+// Minimal SSH server-stats strip: read-only probes, nothing installed on the server.
+widget "minimal server stats" {
+  size: 6x1
+  minSize: 4x1
+  padding: 8
+  meta {
+    owl: 10
+    version: "1.0.0"
+    description: "CPU, GPU, RAM, storage, Docker and public IP from a remote host over SSH — nothing installed there."
+    license: "MIT"
+    category: "system"
+  }
+  requires { pacman: ["openssh", "python"] }
+
+  state host = "" persist
+  state user = "" persist
+  state port = "22" persist
+  state identity = "~/.ssh/id_ed25519" persist
+
+  let hostText = trim(host)
+  let userText = trim(user)
+  let portNumber = num(port, 0)
+  let idPath = trim(identity) == "" ? "~/.ssh/id_ed25519" : trim(identity)
+  let targetOk = match(hostText, "^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$") != null
+      && match(userText, "^[A-Za-z_][A-Za-z0-9_.-]{0,31}$") != null
+      && portNumber >= 1 && portNumber <= 65535
+
+  // Local client SSHes a one-shot Python probe on stdin to the server (nothing installed there).
+  let sshClient = """
+import json, os, re, subprocess, sys, time
+from pathlib import Path
+
+REMOTE = r'''
+import json, os, subprocess, time
+
+def read(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+def num(v, lo, hi):
+    try:
+        if isinstance(v, bool):
+            return None
+        x = float(v)
+        if x != x or x < lo or x > hi:
+            return None
+        return x
+    except (TypeError, ValueError):
+        return None
+
+def run(argv, timeout=4):
+    try:
+        r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=timeout, check=False, text=True)
+        return r.stdout if r.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+def cpu_percent():
+    def snap():
+        line = (read("/proc/stat") or "").splitlines()[0]
+        parts = [int(x) for x in line.split()[1:]]
+        idle = parts[3] + (parts[4] if len(parts) > 4 else 0)
+        return idle, sum(parts)
+    i1, t1 = snap()
+    time.sleep(0.08)
+    i2, t2 = snap()
+    dt = t2 - t1
+    return round(max(0.0, min(100.0, (1 - (i2 - i1) / dt) * 100)), 1) if dt > 0 else None
+
+def memory():
+    info = {}
+    for line in (read("/proc/meminfo") or "").splitlines():
+        if ":" not in line:
+            continue
+        key, rest = line.split(":", 1)
+        parts = rest.split()
+        if parts and parts[0].isdigit():
+            info[key.strip()] = int(parts[0]) * 1024
+    total, avail = info.get("MemTotal"), info.get("MemAvailable")
+    if not total or avail is None:
+        return {"used_percent": None, "used_bytes": None, "total_bytes": None}
+    return {
+        "used_percent": round((total - avail) / total * 100, 1),
+        "used_bytes": total - avail,
+        "total_bytes": total,
+    }
+
+def storage():
+    disks, seen = [], set()
+    out = run(["df", "-B1", "--output=source,target,size,avail,pcent",
+               "-x", "tmpfs", "-x", "devtmpfs", "-x", "squashfs", "-x", "efivarfs"]) or ""
+    for line in out.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        source, target, size_s, avail_s, pct_s = parts[0], parts[1], parts[2], parts[3], parts[4]
+        if source in seen or target.startswith("/var/") or target == "/boot":
+            continue
+        if target != "/" and not target.startswith("/mnt/"):
+            continue
+        seen.add(source)
+        label = "root" if target == "/" else target.rsplit("/", 1)[-1] or target
+        disks.append({
+            "label": label[:24], "path": target,
+            "used_percent": num(pct_s.rstrip("%"), 0, 100),
+            "free_bytes": num(avail_s, 0, 2**63 - 1),
+            "total_bytes": num(size_s, 1, 2**63 - 1),
+        })
+        if len(disks) >= 3:
+            break
+    return disks
+
+def gpu():
+    out = run(["nvidia-smi",
+               "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu",
+               "--format=csv,noheader,nounits"], timeout=3)
+    if not out:
+        return None
+    parts = [p.strip() for p in out.strip().splitlines()[0].split(",")]
+    if len(parts) < 5:
+        return None
+    return {
+        "name": parts[0][:40],
+        "util_percent": num(parts[1], 0, 100),
+        "mem_used_mib": num(parts[2], 0, 1_000_000),
+        "mem_total_mib": num(parts[3], 1, 1_000_000),
+        "temp_c": num(parts[4], -20, 130),
+    }
+
+def docker():
+    sep = "|"
+    out = run(["docker", "ps", "-a", "--format", "{{.Names}}" + sep + "{{.Status}}" + sep + "{{.State}}"], timeout=5)
+    if out is None:
+        return {"ok": False, "total": 0, "running": 0, "unhealthy": 0, "containers": []}
+    containers, running, unhealthy = [], 0, 0
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        bits = line.split(sep)
+        if len(bits) < 3:
+            continue
+        name, status, state = bits[0][:40], bits[1], bits[2].lower()
+        bad = ("unhealthy" in status.lower()) or state in ("exited", "dead", "restarting")
+        if state == "running":
+            running += 1
+        if bad:
+            unhealthy += 1
+        containers.append({"name": name, "status": status[:48], "state": state, "bad": bad})
+    containers.sort(key=lambda c: (not c["bad"], c["name"]))
+    return {"ok": True, "total": len(containers), "running": running, "unhealthy": unhealthy, "containers": containers[:24]}
+
+def public_ip():
+    def ipv4(text):
+        parts = text.split(".")
+        if len(parts) != 4:
+            return None
+        try:
+            nums = [int(p) for p in parts]
+        except ValueError:
+            return None
+        if all(0 <= n <= 255 for n in nums):
+            return text
+        return None
+    for url in ("https://ifconfig.me/ip", "https://api.ipify.org", "https://icanhazip.com"):
+        out = run(["curl", "-4", "-sf", "--max-time", "3", url], timeout=4)
+        if out:
+            ip = ipv4(out.strip().split()[0])
+            if ip:
+                return ip
+    return None
+
+uptime = num((read("/proc/uptime") or "0").split()[0], 0, 2**53)
+load = num((read("/proc/loadavg") or "0").split()[0], 0, 1_000_000)
+print(json.dumps({
+    "schema": 1,
+    "checked_at": int(time.time()),
+    "hostname": (read("/etc/hostname") or "").strip() or None,
+    "uptime_seconds": uptime,
+    "load_1m": load,
+    "cpu_percent": cpu_percent(),
+    "memory": memory(),
+    "storage": storage(),
+    "gpu": gpu(),
+    "docker": docker(),
+    "public_ip": public_ip(),
+}, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+'''
+
+host, user, port_text, identity = sys.argv[1:5]
+if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}", host)
+        or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,31}", user)
+        or not port_text.isdigit() or not 1 <= int(port_text) <= 65535):
+    print('{"schema":0,"error":"invalid_target"}')
+    raise SystemExit(0)
+key = Path(os.path.expanduser(identity))
+if not key.is_file():
+    print('{"schema":0,"error":"no_key"}')
+    raise SystemExit(0)
+cmd = [
+    "ssh", "-T", "-F", "/dev/null", "-i", str(key), "-p", port_text,
+    "-o", "BatchMode=yes", "-o", "ConnectTimeout=4",
+    "-o", "PreferredAuthentications=publickey", "-o", "PasswordAuthentication=no",
+    "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes",
+    "-o", "UserKnownHostsFile=" + str(Path.home() / ".ssh" / "known_hosts"),
+    "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no",
+    "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes",
+    f"{user}@{host}", "python3", "-",
+]
+try:
+    started = time.monotonic()
+    result = subprocess.run(cmd, input=REMOTE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            timeout=12, check=False, text=True)
+except subprocess.TimeoutExpired:
+    print('{"schema":0,"error":"timeout"}')
+    raise SystemExit(0)
+if result.returncode != 0:
+    err = (result.stderr or "").lower()
+    if "permission denied" in err:
+        reason = "auth"
+    elif "host key verification failed" in err or "remote host identification has changed" in err:
+        reason = "host_key"
+    elif "timed out" in err:
+        reason = "timeout"
+    elif "connection refused" in err:
+        reason = "refused"
+    else:
+        reason = "unreachable"
+    print(json.dumps({"schema": 0, "error": reason}, separators=(",", ":")))
+    raise SystemExit(0)
+try:
+    value = json.loads(result.stdout)
+except json.JSONDecodeError:
+    print('{"schema":0,"error":"format"}')
+    raise SystemExit(0)
+if not isinstance(value, dict) or value.get("schema") != 1:
+    print('{"schema":0,"error":"format"}')
+    raise SystemExit(0)
+value["rtt_ms"] = round((time.monotonic() - started) * 1000, 1)
+print(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+"""
+
+  source pulse = cmd(targetOk
+    ? "printf '%s' ${sh(sshClient)} | python -I - ${sh(hostText)} ${sh(userText)} ${sh(str(int(portNumber)))} ${sh(idPath)}"
+    : "printf '%s' '{\"schema\":0,\"error\":\"invalid_target\"}'") every 20s timeout 16s json
+  source now = clock every 1s
+
+  let ok = pulse.schema == 1
+  let cpu = num(pulse.cpu_percent, -1)
+  let mem = num(pulse.memory.used_percent, -1)
+  let gpuUtil = num(pulse.gpu.util_percent, -1)
+  let gpuMemUsed = num(pulse.gpu.mem_used_mib, -1)
+  let gpuMemTotal = num(pulse.gpu.mem_total_mib, -1)
+  let gpuMemPct = gpuMemTotal > 0 && gpuMemUsed >= 0 ? gpuMemUsed / gpuMemTotal * 100 : -1
+  let rootDisk = (pulse.storage ?? []).filter(d => d.path == "/")[0]
+  let diskPct = num(rootDisk.used_percent, -1)
+  let dockerRunning = num(pulse.docker.running, 0)
+  let dockerTotal = num(pulse.docker.total, 0)
+  let dockerBad = num(pulse.docker.unhealthy, 0)
+  let ip = pulse.public_ip ?? "—"
+  let age = ok && pulse.checked_at != null ? max(0, now - pulse.checked_at) : null
+  let fresh = ok && age != null && age <= 90
+  let alert = fresh && (cpu > 90 || mem > 90 || diskPct > 90 || gpuUtil > 95 || dockerBad > 0)
+  let statusColor = !ok ? red : alert ? red : fresh ? green : muted
+
+  let dockerPct = dockerTotal > 0 ? dockerRunning / dockerTotal * 100 : 0
+
+  component Gauge(label, value, pct, tint = accent, warn = false) {
+    let ink = warn ? red : (!fresh || pct < 0 ? muted : tint)
+    Column {
+      weight: 1
+      gap: 2
+      align: center
+      Text { text: label; font: mono; fontSize: 8; color: muted; align: center; maxLines: 1 }
+      Box {
+        width: 52
+        height: 52
+        align: center
+        Ring {
+          value: max(0, pct)
+          max: 100
+          size: 52
+          thickness: 4
+          start: 225
+          sweep: 270
+          color: ink
+          track: alpha(ink, 0.15)
+          animate value: tween(500ms, "out")
+        }
+        Text {
+          text: value
+          font: mono
+          fontSize: len(str(value)) > 4 ? 9 : 11
+          color: ink
+          align: center
+          maxLines: 1
+        }
+      }
+    }
+  }
+
+  onTap: screen()
+
+  // One-row strip: host + gauged metrics across the full width.
+  Row {
+    gap: 6
+    align: center
+    fill: true
+    Column {
+      width: 64
+      gap: 1
+      Text { text: pulse.hostname ?? "HOST"; font: mono; fontSize: 11; color: foreground; maxLines: 1 }
+      Text {
+        text: !ok ? (pulse.error ?? "down") : alert ? "alert" : fresh ? "online" : "stale"
+        font: mono
+        fontSize: 9
+        color: statusColor
+        maxLines: 1
+      }
+    }
+    Gauge { label: "CPU"; value: cpu < 0 ? "—" : "${round(cpu)}"; pct: cpu; warn: cpu > 90; tint: accent }
+    Gauge { label: "GPU"; value: gpuUtil < 0 ? "—" : "${round(gpuUtil)}"; pct: gpuUtil; warn: gpuUtil > 95; tint: cyan }
+    Gauge { label: "RAM"; value: mem < 0 ? "—" : "${round(mem)}"; pct: mem; warn: mem > 90; tint: blue }
+    Gauge { label: "DISK"; value: diskPct < 0 ? "—" : "${round(diskPct)}"; pct: diskPct; warn: diskPct > 90; tint: accent }
+    Gauge {
+      label: "DOCKER"
+      value: !ok || pulse.docker.ok == false ? "—" : dockerBad > 0 ? "${dockerRunning}/${dockerTotal}!" : "${dockerRunning}/${dockerTotal}"
+      pct: !ok || pulse.docker.ok == false ? -1 : dockerPct
+      warn: dockerBad > 0
+      tint: green
+    }
+  }
+
+  screen {
+    title: pulse.hostname ?? "the host"
+    Column {
+      gap: 12
+      padding: 14
+      scroll: true
+      fill: true
+
+      Row {
+        align: center
+        Text {
+          text: !ok ? "OFFLINE" : alert ? "ATTENTION" : "ONLINE"
+          font: mono
+          fontSize: 18
+          color: statusColor
+          weight: 1
+        }
+        Button {
+          text: "REFRESH"
+          onTap: refresh()
+        }
+      }
+      Text {
+        text: ok
+          ? "RTT ${round(pulse.rtt_ms ?? 0)} ms · checked ${pulse.checked_at == null ? "—" : fmtTime(pulse.checked_at, "HH:mm:ss")} · up ${pulse.uptime_seconds == null ? "—" : fmtDuration(pulse.uptime_seconds)}"
+          : "SSH ${pulse.error ?? "failed"} · ${userText}@${hostText}:${port}"
+        font: mono
+        style: small
+        color: muted
+        maxLines: 2
+      }
+
+      Text { text: "RESOURCES"; font: mono; style: label; color: accent }
+      Grid {
+        columns: 2
+        gap: 8
+        Column {
+          gap: 4
+          padding: 10
+          background: surface
+          radius: 6 * corners
+          Text { text: "CPU"; style: small; color: muted }
+          Text { text: cpu < 0 ? "—" : "${round(cpu)}%"; font: mono; fontSize: 22; color: cpu > 90 ? red : foreground }
+          Text { text: pulse.load_1m == null ? "load —" : "load ${pulse.load_1m}"; style: small; color: muted }
+          Progress { value: max(0, cpu); max: 100; height: 3; color: cpu > 90 ? red : accent }
+        }
+        Column {
+          gap: 4
+          padding: 10
+          background: surface
+          radius: 6 * corners
+          Text { text: "GPU"; style: small; color: muted }
+          Text { text: gpuUtil < 0 ? "—" : "${round(gpuUtil)}%"; font: mono; fontSize: 22; color: gpuUtil > 95 ? red : foreground }
+          Text {
+            text: pulse.gpu == null ? "no NVIDIA" : "${pulse.gpu.name ?? "GPU"} · ${gpuMemUsed < 0 ? "—" : round(gpuMemUsed)}/${gpuMemTotal < 0 ? "—" : round(gpuMemTotal)} MiB · ${pulse.gpu.temp_c == null ? "—" : pulse.gpu.temp_c + "°C"}"
+            style: small
+            color: muted
+            maxLines: 2
+          }
+          Progress { value: max(0, gpuUtil); max: 100; height: 3; color: cyan }
+        }
+        Column {
+          gap: 4
+          padding: 10
+          background: surface
+          radius: 6 * corners
+          Text { text: "RAM"; style: small; color: muted }
+          Text { text: mem < 0 ? "—" : "${round(mem)}%"; font: mono; fontSize: 22; color: mem > 90 ? red : foreground }
+          Text {
+            text: pulse.memory.total_bytes == null ? "—" : "${fmtBytes(pulse.memory.used_bytes)} / ${fmtBytes(pulse.memory.total_bytes)}"
+            style: small
+            color: muted
+          }
+          Progress { value: max(0, mem); max: 100; height: 3; color: blue }
+        }
+        Column {
+          gap: 4
+          padding: 10
+          background: surface
+          radius: 6 * corners
+          Text { text: "PUBLIC IP"; style: small; color: muted }
+          Text { text: ip; font: mono; fontSize: 18; color: foreground; maxLines: 1 }
+          Text { text: "from the host via ifconfig.me"; style: small; color: muted }
+        }
+      }
+
+      Text { text: "STORAGE"; font: mono; style: label; color: accent }
+      for disk in (pulse.storage ?? []) {
+        Column {
+          gap: 4
+          padding: 10
+          background: surface
+          radius: 6 * corners
+          Row {
+            Text { text: disk.label; font: mono; weight: 1; maxLines: 1 }
+            Text {
+              text: disk.used_percent == null ? "—" : "${round(disk.used_percent)}%"
+              font: mono
+              color: disk.used_percent > 90 ? red : foreground
+            }
+          }
+          Text {
+            text: disk.free_bytes == null ? disk.path : "${fmtBytes(disk.free_bytes)} free · ${disk.path}"
+            style: small
+            color: muted
+            maxLines: 1
+          }
+          Progress { value: max(0, num(disk.used_percent, 0)); max: 100; height: 3; color: disk.used_percent > 90 ? red : accent }
+        }
+      }
+
+      Text { text: "DOCKER"; font: mono; style: label; color: accent }
+      Text {
+        text: pulse.docker.ok == false
+          ? "Docker not available for this SSH user"
+          : "${dockerRunning} running / ${dockerTotal} total" + (dockerBad > 0 ? " · ${dockerBad} unhealthy or down" : "")
+        style: small
+        color: dockerBad > 0 ? red : muted
+        maxLines: 2
+      }
+      for c in (pulse.docker.containers ?? []) {
+        Row {
+          padding: [8, 10]
+          background: surface
+          radius: 4 * corners
+          Text { text: c.name; font: mono; weight: 1; maxLines: 1; color: c.bad ? red : foreground }
+          Text { text: c.status; style: small; color: c.bad ? red : muted; width: 160; align: end; maxLines: 1 }
+        }
+      }
+
+      Text { text: "CONNECTION"; font: mono; style: label; color: accent }
+      Text { text: "Uses your existing SSH key. Nothing is installed on the host."; style: small; color: muted; maxLines: 2 }
+      Text { text: "HOST"; style: small; color: muted }
+      Input { text: host; onChange: host = value }
+      Text { text: "USER"; style: small; color: muted }
+      Input { text: user; onChange: user = value }
+      Text { text: "PORT"; style: small; color: muted }
+      Input { text: port; onChange: port = value }
+      Text { text: "IDENTITY FILE"; style: small; color: muted }
+      Input { text: identity; onChange: identity = value }
+      Button { text: "CHECK NOW"; onTap: refresh() }
+    }
+  }
+}
