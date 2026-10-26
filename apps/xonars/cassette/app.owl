@@ -1,6 +1,240 @@
 app "Cassette" {
   meta { owl: 16; description: "Yandex Music client with search, library, downloads and Android media controls. English and Russian UI."; version: "1.8"; license: "MIT"; category: "media" }
-  let backend = "#!/usr/bin/env python3\n\"\"\"Token-free mpv IPC bridge for Cassette OWL.\"\"\"\nimport hashlib\nimport fcntl\nimport json\nimport os\nfrom pathlib import Path\nimport socket\nimport subprocess\nimport sys\nimport time\nimport urllib.parse\nimport urllib.request\nimport xml.etree.ElementTree as ET\n\nCACHE = Path.home() / '.cache/cassette-owl'\nCACHE.mkdir(mode=0o700, parents=True, exist_ok=True)\nSOCKET = str(CACHE / 'mpv.sock')\nERROR = CACHE / 'error.json'\nNOW_PLAYING = CACHE / 'now-playing.json'\nLOCK = CACHE / 'player.lock'\nMUSIC = (Path.home() / 'Music/Cassette').resolve()\nEMPTY_STATE = {'connected': False, 'idle': True, 'paused': False,\n               'position': 0, 'duration': 0, 'volume': 100}\n\ndef write_json(path, value):\n    \"\"\"Atomically replace a small state file so readers never see half JSON.\"\"\"\n    temp = path.with_suffix(path.suffix + '.tmp')\n    temp.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')\n    os.chmod(temp, 0o600)\n    temp.replace(path)\n\ndef read_json(path, fallback):\n    try:\n        return json.loads(path.read_text(encoding='utf-8'))\n    except (OSError, ValueError, json.JSONDecodeError):\n        return fallback\n\ndef metadata(args, start=2, local=False):\n    values = list(args[start:start + 4]) + ['', '', '', '']\n    return {'id': values[0], 'title': values[1], 'artist': values[2],\n            'cover': values[3], 'local': local}\n\ndef local_path(value):\n    \"\"\"Return a media path only when it is a direct child of our download folder.\"\"\"\n    path = Path(value).expanduser().resolve()\n    if path.parent != MUSIC or path.suffix.lower() not in ('.mp3', '.m4a', '.ogg', '.opus', '.flac', '.wav'):\n        raise ValueError('Недопустимый локальный файл')\n    return path\n\ndef local_tracks():\n    MUSIC.mkdir(mode=0o700, parents=True, exist_ok=True)\n    tracks = []\n    for path in sorted(MUSIC.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):\n        if not path.is_file() or path.suffix.lower() not in ('.mp3', '.m4a', '.ogg', '.opus', '.flac', '.wav'):\n            continue\n        stem = path.stem\n        artist, title = (stem.split(' - ', 1) + [''])[:2] if ' - ' in stem else ('', stem)\n        try:\n            probe = subprocess.run(\n                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',\n                 '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],\n                capture_output=True, text=True, timeout=5, check=False)\n            duration_ms = round(float(probe.stdout.strip() or 0) * 1000)\n        except (ValueError, subprocess.SubprocessError):\n            duration_ms = 0\n        tracks.append({\n            'id': 'local:' + path.name,\n            'local': True,\n            'path': str(path),\n            'title': title or stem,\n            'artists': [{'name': artist or 'Локальный файл'}],\n            'durationMs': duration_ms,\n        })\n    return tracks\n\ndef ipc(command):\n    with socket.socket(socket.AF_UNIX) as sock:\n        sock.settimeout(2)\n        sock.connect(SOCKET)\n        sock.sendall((json.dumps({'command': command}) + '\\n').encode())\n        data = b''\n        while b'\\n' not in data:\n            part = sock.recv(65536)\n            if not part:\n                raise RuntimeError('Плеер отключился')\n            data += part\n        for line in data.splitlines():\n            reply = json.loads(line)\n            if 'error' in reply:\n                if reply['error'] != 'success':\n                    return None\n                return reply.get('data')\n\ndef ensure_player():\n    try:\n        ipc(['get_property', 'idle-active'])\n        return\n    except (OSError, RuntimeError):\n        pass\n    # Several OWL actions can arrive together. Only one may start the daemon.\n    with LOCK.open('w') as lock:\n        fcntl.flock(lock, fcntl.LOCK_EX)\n        try:\n            ipc(['get_property', 'idle-active'])\n            return\n        except (OSError, RuntimeError):\n            pass\n        Path(SOCKET).unlink(missing_ok=True)\n        subprocess.Popen(['mpv', '--idle=yes', '--no-video', '--no-terminal',\n            '--audio-display=no', '--input-ipc-server=' + SOCKET],\n            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,\n            start_new_session=True)\n        for _ in range(50):\n            time.sleep(.1)\n            try:\n                ipc(['get_property', 'idle-active'])\n                return\n            except (OSError, RuntimeError):\n                pass\n    raise RuntimeError('Не удалось запустить mpv')\n\ndef trusted_url(url):\n    p = urllib.parse.urlsplit(url)\n    if p.scheme != 'https' or p.username or p.password or p.port not in (None, 443):\n        raise ValueError('Недопустимый адрес аудио')\n    host = (p.hostname or '').lower()\n    if not any(host == d or host.endswith('.' + d) for d in ('yandex.net', 'yandex.ru', 'yandex.com')):\n        raise ValueError('Адрес аудио не принадлежит Яндексу')\n    return url\n\nclass YandexRedirect(urllib.request.HTTPRedirectHandler):\n    def redirect_request(self, req, fp, code, msg, headers, newurl):\n        return super().redirect_request(req, fp, code, msg, headers, trusted_url(newurl))\n\ndef resolve(url):\n    opener = urllib.request.build_opener(YandexRedirect())\n    with opener.open(trusted_url(url), timeout=20) as response:\n        xml = response.read(65537)\n    if len(xml) > 65536:\n        raise ValueError('Слишком большой ответ download-info')\n    root = ET.fromstring(xml)\n    host, path, ts, salt = [root.findtext(k) for k in ('host', 'path', 'ts', 's')]\n    if not all((host, path, ts, salt)):\n        raise ValueError('Не удалось получить ссылку на аудио')\n    digest = hashlib.md5(('XGRlBW9FXlekgbPrRHuSiA' + path.lstrip('/') + salt).encode()).hexdigest()\n    return trusted_url(f'https://{host}/get-mp3/{digest}/{ts}/{path.lstrip(\"/\")}')\n\ndef main(args):\n    if not args:\n        raise ValueError('Не указана команда')\n    action = args[0]\n    if action == 'library':\n        print(json.dumps(local_tracks(), ensure_ascii=False))\n        return\n    if action == 'status':\n        try:\n            state = {k: ipc(['get_property', prop]) for k, prop in\n                [('idle', 'idle-active'), ('paused', 'pause'), ('position', 'time-pos'),\n                 ('duration', 'duration'), ('volume', 'volume'), ('path', 'path')]}\n            state.pop('path', None)\n            state['connected'] = True\n        except (OSError, RuntimeError, ValueError, json.JSONDecodeError):\n            state = dict(EMPTY_STATE)\n        state.update(read_json(NOW_PLAYING, {}))\n        state['error'] = read_json(ERROR, {}).get('error', '')\n        print(json.dumps(state, ensure_ascii=False))\n        return\n    if action == 'resolve':\n        if len(args) < 2:\n            raise ValueError('Не указан адрес аудио')\n        print(resolve(args[1]))\n        return\n    ensure_player()\n    if action == 'play':\n        if len(args) < 2:\n            raise ValueError('Не указан адрес аудио')\n        url = resolve(args[1])\n        ipc(['loadfile', url, 'replace'])\n        ipc(['set_property', 'pause', False])\n        write_json(NOW_PLAYING, metadata(args))\n    elif action == 'play-local':\n        if len(args) < 2:\n            raise ValueError('Не указан локальный файл')\n        ipc(['loadfile', str(local_path(args[1])), 'replace'])\n        ipc(['set_property', 'pause', False])\n        write_json(NOW_PLAYING, metadata(args, local=True))\n    elif action == 'toggle':\n        ipc(['cycle', 'pause'])\n    elif action == 'play-control':\n        ipc(['set_property', 'pause', False])\n    elif action == 'pause-control':\n        ipc(['set_property', 'pause', True])\n    elif action == 'seek':\n        if len(args) < 2:\n            raise ValueError('Не указана позиция')\n        ipc(['seek', float(args[1]), 'absolute'])\n    elif action == 'volume':\n        if len(args) < 2:\n            raise ValueError('Не указана громкость')\n        ipc(['set_property', 'volume', max(0, min(100, float(args[1])))])\n    elif action == 'stop':\n        ipc(['stop'])\n        NOW_PLAYING.unlink(missing_ok=True)\n    elif action == 'download':\n        url = resolve(args[1])\n        target = Path.home() / 'Music/Cassette'\n        target.mkdir(parents=True, exist_ok=True)\n        name = ''.join(c for c in args[2] if c.isalnum() or c in ' ._-')[:150].strip('.') or 'track'\n        dest = target / (name + '.mp3')\n        temp = dest.with_name(f'.{dest.name}.{os.getpid()}.part')\n        opener = urllib.request.build_opener(YandexRedirect())\n        try:\n            with opener.open(url, timeout=30) as response, temp.open('wb') as out:\n                while chunk := response.read(131072):\n                    out.write(chunk)\n            temp.replace(dest)\n        finally:\n            temp.unlink(missing_ok=True)\n        print('Сохранено: ' + str(dest))\n    else:\n        raise ValueError('Неизвестная команда')\n    ERROR.unlink(missing_ok=True)\n\nif __name__ == '__main__':\n    try:\n        main(sys.argv[1:])\n    except Exception as exc:\n        # Never expose signed media URLs in UI or logs.\n        message = 'Ошибка аудио: ' + (str(exc) if isinstance(exc, ValueError) else type(exc).__name__)\n        write_json(ERROR, {'error': message})\n        print(message, file=sys.stderr)\n        raise SystemExit(1)\n"
+  let backend = """
+#!/usr/bin/env python3
+'''Token-free mpv IPC bridge for Cassette OWL.'''
+import hashlib
+import fcntl
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import time
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+
+CACHE = Path.home() / '.cache/cassette-owl'
+CACHE.mkdir(mode=0o700, parents=True, exist_ok=True)
+SOCKET = str(CACHE / 'mpv.sock')
+ERROR = CACHE / 'error.json'
+NOW_PLAYING = CACHE / 'now-playing.json'
+LOCK = CACHE / 'player.lock'
+MUSIC = (Path.home() / 'Music/Cassette').resolve()
+EMPTY_STATE = {'connected': False, 'idle': True, 'paused': False,
+               'position': 0, 'duration': 0, 'volume': 100}
+
+def write_json(path, value):
+    '''Atomically replace a small state file so readers never see half JSON.'''
+    temp = path.with_suffix(path.suffix + '.tmp')
+    temp.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
+    os.chmod(temp, 0o600)
+    temp.replace(path)
+
+def read_json(path, fallback):
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return fallback
+
+def metadata(args, start=2, local=False):
+    values = list(args[start:start + 4]) + ['', '', '', '']
+    return {'id': values[0], 'title': values[1], 'artist': values[2],
+            'cover': values[3], 'local': local}
+
+def local_path(value):
+    '''Return a media path only when it is a direct child of our download folder.'''
+    path = Path(value).expanduser().resolve()
+    if path.parent != MUSIC or path.suffix.lower() not in ('.mp3', '.m4a', '.ogg', '.opus', '.flac', '.wav'):
+        raise ValueError('Недопустимый локальный файл')
+    return path
+
+def local_tracks():
+    MUSIC.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tracks = []
+    for path in sorted(MUSIC.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not path.is_file() or path.suffix.lower() not in ('.mp3', '.m4a', '.ogg', '.opus', '.flac', '.wav'):
+            continue
+        stem = path.stem
+        artist, title = (stem.split(' - ', 1) + [''])[:2] if ' - ' in stem else ('', stem)
+        try:
+            probe = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                 '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
+                capture_output=True, text=True, timeout=5, check=False)
+            duration_ms = round(float(probe.stdout.strip() or 0) * 1000)
+        except (ValueError, subprocess.SubprocessError):
+            duration_ms = 0
+        tracks.append({
+            'id': 'local:' + path.name,
+            'local': True,
+            'path': str(path),
+            'title': title or stem,
+            'artists': [{'name': artist or 'Локальный файл'}],
+            'durationMs': duration_ms,
+        })
+    return tracks
+
+def ipc(command):
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.settimeout(2)
+        sock.connect(SOCKET)
+        sock.sendall((json.dumps({'command': command}) + '\n').encode())
+        data = b''
+        while b'\n' not in data:
+            part = sock.recv(65536)
+            if not part:
+                raise RuntimeError('Плеер отключился')
+            data += part
+        for line in data.splitlines():
+            reply = json.loads(line)
+            if 'error' in reply:
+                if reply['error'] != 'success':
+                    return None
+                return reply.get('data')
+
+def ensure_player():
+    try:
+        ipc(['get_property', 'idle-active'])
+        return
+    except (OSError, RuntimeError):
+        pass
+    # Several OWL actions can arrive together. Only one may start the daemon.
+    with LOCK.open('w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            ipc(['get_property', 'idle-active'])
+            return
+        except (OSError, RuntimeError):
+            pass
+        Path(SOCKET).unlink(missing_ok=True)
+        subprocess.Popen(['mpv', '--idle=yes', '--no-video', '--no-terminal',
+            '--audio-display=no', '--input-ipc-server=' + SOCKET],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        for _ in range(50):
+            time.sleep(.1)
+            try:
+                ipc(['get_property', 'idle-active'])
+                return
+            except (OSError, RuntimeError):
+                pass
+    raise RuntimeError('Не удалось запустить mpv')
+
+def trusted_url(url):
+    p = urllib.parse.urlsplit(url)
+    if p.scheme != 'https' or p.username or p.password or p.port not in (None, 443):
+        raise ValueError('Недопустимый адрес аудио')
+    host = (p.hostname or '').lower()
+    if not any(host == d or host.endswith('.' + d) for d in ('yandex.net', 'yandex.ru', 'yandex.com')):
+        raise ValueError('Адрес аудио не принадлежит Яндексу')
+    return url
+
+class YandexRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return super().redirect_request(req, fp, code, msg, headers, trusted_url(newurl))
+
+def resolve(url):
+    opener = urllib.request.build_opener(YandexRedirect())
+    with opener.open(trusted_url(url), timeout=20) as response:
+        xml = response.read(65537)
+    if len(xml) > 65536:
+        raise ValueError('Слишком большой ответ download-info')
+    root = ET.fromstring(xml)
+    host, path, ts, salt = [root.findtext(k) for k in ('host', 'path', 'ts', 's')]
+    if not all((host, path, ts, salt)):
+        raise ValueError('Не удалось получить ссылку на аудио')
+    digest = hashlib.md5(('XGRlBW9FXlekgbPrRHuSiA' + path.lstrip('/') + salt).encode()).hexdigest()
+    return trusted_url(f'https://{host}/get-mp3/{digest}/{ts}/{path.lstrip("/")}')
+
+def main(args):
+    if not args:
+        raise ValueError('Не указана команда')
+    action = args[0]
+    if action == 'library':
+        print(json.dumps(local_tracks(), ensure_ascii=False))
+        return
+    if action == 'status':
+        try:
+            state = {k: ipc(['get_property', prop]) for k, prop in
+                [('idle', 'idle-active'), ('paused', 'pause'), ('position', 'time-pos'),
+                 ('duration', 'duration'), ('volume', 'volume'), ('path', 'path')]}
+            state.pop('path', None)
+            state['connected'] = True
+        except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+            state = dict(EMPTY_STATE)
+        state.update(read_json(NOW_PLAYING, {}))
+        state['error'] = read_json(ERROR, {}).get('error', '')
+        print(json.dumps(state, ensure_ascii=False))
+        return
+    if action == 'resolve':
+        if len(args) < 2:
+            raise ValueError('Не указан адрес аудио')
+        print(resolve(args[1]))
+        return
+    ensure_player()
+    if action == 'play':
+        if len(args) < 2:
+            raise ValueError('Не указан адрес аудио')
+        url = resolve(args[1])
+        ipc(['loadfile', url, 'replace'])
+        ipc(['set_property', 'pause', False])
+        write_json(NOW_PLAYING, metadata(args))
+    elif action == 'play-local':
+        if len(args) < 2:
+            raise ValueError('Не указан локальный файл')
+        ipc(['loadfile', str(local_path(args[1])), 'replace'])
+        ipc(['set_property', 'pause', False])
+        write_json(NOW_PLAYING, metadata(args, local=True))
+    elif action == 'toggle':
+        ipc(['cycle', 'pause'])
+    elif action == 'play-control':
+        ipc(['set_property', 'pause', False])
+    elif action == 'pause-control':
+        ipc(['set_property', 'pause', True])
+    elif action == 'seek':
+        if len(args) < 2:
+            raise ValueError('Не указана позиция')
+        ipc(['seek', float(args[1]), 'absolute'])
+    elif action == 'volume':
+        if len(args) < 2:
+            raise ValueError('Не указана громкость')
+        ipc(['set_property', 'volume', max(0, min(100, float(args[1])))])
+    elif action == 'stop':
+        ipc(['stop'])
+        NOW_PLAYING.unlink(missing_ok=True)
+    elif action == 'download':
+        url = resolve(args[1])
+        target = Path.home() / 'Music/Cassette'
+        target.mkdir(parents=True, exist_ok=True)
+        name = ''.join(c for c in args[2] if c.isalnum() or c in ' ._-')[:150].strip('.') or 'track'
+        dest = target / (name + '.mp3')
+        temp = dest.with_name(f'.{dest.name}.{os.getpid()}.part')
+        opener = urllib.request.build_opener(YandexRedirect())
+        try:
+            with opener.open(url, timeout=30) as response, temp.open('wb') as out:
+                while chunk := response.read(131072):
+                    out.write(chunk)
+            temp.replace(dest)
+        finally:
+            temp.unlink(missing_ok=True)
+        print('Сохранено: ' + str(dest))
+    else:
+        raise ValueError('Неизвестная команда')
+    ERROR.unlink(missing_ok=True)
+
+if __name__ == '__main__':
+    try:
+        main(sys.argv[1:])
+    except Exception as exc:
+        # Never expose signed media URLs in UI or logs.
+        message = 'Ошибка аудио: ' + (str(exc) if isinstance(exc, ValueError) else type(exc).__name__)
+        write_json(ERROR, {'error': message})
+        print(message, file=sys.stderr)
+        raise SystemExit(1)
+"""
   requires { pacman: ["python", "mpv", "ffmpeg"] }
   title: ""
   icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="42" height="30" rx="4"/><circle cx="15" cy="22" r="5"/><circle cx="33" cy="22" r="5"/><path d="M20 22h8M11 39l4-9h18l4 9"/></svg>"""
