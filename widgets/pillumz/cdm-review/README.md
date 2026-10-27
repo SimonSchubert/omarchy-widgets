@@ -18,10 +18,13 @@ The deployment origin is the single `let api = "https://ai.cdm.space"` declarati
 `widget.owl`. Edit it only for another trusted AI Ops deployment. OWL deliberately invalidates
 secrets when their written HTTPS origin changes, so pair again afterward.
 
-Successful explicit re-pairing clears this artifact's local cached content and unsent local drafts
-(the UI warns first); server-side drafts remain. Ordinary network loss or credential expiry leaves
-cached reading and local editing intact while writes are paused. Cached content is bound to the
-verified `/api/native/me` account.
+A new grant is held behind `/api/native/me` verification before old content or any write is
+exposed. Previously seen device IDs are treated as stale replies. Same-account recovery preserves
+drafts, reading state and pending attempts; a different verified account hides old presentation
+and quarantines old dispatch slots without submitting or deleting their history. Queue responses
+must match the verified account AND device grant before they count or enable writes. Ordinary
+network loss or credential expiry leaves cached reading and local editing intact while writes are
+paused.
 
 ## Review behavior
 
@@ -31,8 +34,9 @@ verified `/api/native/me` account.
   page is native; a non-null `next_cursor` is called out with a full-app path for later pages.
 - Exact gate/ask and operator-state reads supply status, complete plain body/signature text,
   subject/recipients, question/options, drafts and parking. Receipt gates additionally present
-  the complete canonical input and stored `/receipt` context as literal plaintext (record,
-  source, references and warnings); a missing legacy snapshot disables native decisions and
+  readable supplier/organization/warehouse/date/total fields and goods/services cards using the
+  canonical input and stored `/receipt` reference names; unresolved IDs are explicit, and raw
+  JSON is only an optional Copy action. A missing legacy snapshot disables native decisions and
   requires the full app. Mail HTML, inline images and attachment bytes are not cached. At most
   six plaintext detail presentations are kept locally; durable per-item drafts are not evicted.
 - Approve/reject/answer/skip advance immediately. Four fixed dispatch slots retain exact item and
@@ -54,8 +58,9 @@ verified `/api/native/me` account.
 
 `java -jar /home/explify/Projects/omalauncher/owl/build/cli/owl.jar check widget.owl` and the store
 `owl review` pass. A temporary stock-`Host` fixture also exercised the compiled handlers for
-optimistic slots, restored no-resend, pairing polls, ask/skip writes, CAS conflicts and receipt
-readiness without network or a device. No device install, production request, decision, send,
+optimistic slots, restored no-resend, pairing polls, ask/skip writes, CAS conflicts, same-account
+re-pair recovery, different-account stale-response isolation and readable receipt rendering
+without network or a device. No device install, production request, decision, send,
 launcher/default change, rendering, or on-device runtime verification was performed. On-device acceptance must cover pairing,
 full-length mail, concurrent optimistic actions, restored requests, CAS conflicts, offline state,
 attachment login return, accessibility, and weak connectivity.

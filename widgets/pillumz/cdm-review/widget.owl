@@ -1,5 +1,5 @@
 widget "cdm-review" {
-  meta { owl: 12; description: "Native CDM gate and question review with bounded offline text and browser-approved pairing"; version: "1.0"; license: "MIT"; category: "productivity" }
+  meta { owl: 12; description: "Native CDM gate and question review with bounded offline text and browser-approved pairing"; version: "1.1"; license: "MIT"; category: "productivity" }
   size: 6x4
   minSize: 3x3
 
@@ -10,6 +10,10 @@ widget "cdm-review" {
   state token = null secret
   state pairToken = null secret
   state account = null persist
+  state deviceId = null persist
+  state retiredDeviceIds = [] persist
+  state authGeneration = 0 persist
+  state authPending = false persist
   state pairStart = null
   state pairPoll = null
   state pairPollTarget = null
@@ -79,8 +83,10 @@ widget "cdm-review" {
   state d3receiptDone = false
   state d3stateDone = false
 
-  source me = http(token == null ? null : "${api}/api/native/me", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source q = http(token == null || account == null ? null : "${api}/api/native/review-queue?limit=50", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 30s json status
+  // Secret headers are not source inputs. Generation in the URL forces a new read after re-pair;
+  // /native/me's previously unseen device id distinguishes the new grant from an old in-flight reply.
+  source me = http(token == null ? null : "${api}/api/native/me?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
+  source q = http(token == null || account == null || authPending ? null : "${api}/api/native/review-queue?limit=50&native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 30s json status
 
   source e0 = http(token == null || !d0active ? null : d0.key.kind == "gate" ? "${api}/api/swarms/${enc(d0.key.pack)}/gates/${enc(d0.key.id)}" : "${api}/api/swarms/${enc(d0.key.pack)}/asks/${enc(d0.key.id)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
   source r0 = http(token == null || !d0active || d0.key.kind != "gate" ? null : "${api}/api/swarms/${enc(d0.key.pack)}/gates/${enc(d0.key.id)}/review", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
@@ -103,7 +109,9 @@ widget "cdm-review" {
   source o3 = http(token == null || !d3active ? null : "${api}/api/swarms/${enc(d3.key.pack)}/operator-state/${enc(d3.key.kind)}/${enc(d3.key.id)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
 
   let blank = {text: "", picks: [], reason: "", postmortem: false, mode: "normal"}
-  let queue = q != null && q.ok ? q.out : lastQueue
+  let queueValid = q != null && q.ok && q.out.account == account && q.out.device_id == deviceId
+  let cachedQueue = lastQueue != null && lastQueue.account == account ? lastQueue : null
+  let queue = queueValid ? q.out : cachedQueue
   let qItems = (queue ?? {}).items ?? []
   let visibleItems = qItems.filter(item => !hidden.any(k => k == item.key))
   let targets = [tgt0, tgt1, tgt2, tgt3]
@@ -111,7 +119,8 @@ widget "cdm-review" {
   let lives = [live0, live1, live2, live3]
   let detailActive = [d0active, d1active, d2active, d3active]
   let poolFree = targets.any(t => t == null)
-  let activityCount = len(targets.filter(t => t != null))
+  let activityCount = len(targets.filter(t => t != null && t.account == account))
+  let retiredCount = len(targets.filter(t => t != null && t.account != account))
   let currentId = current == null || account == null ? "" : toJson({account: account, key: current.key})
   let currentIndex = current == null ? -1 : indexOf(visibleItems.map(item => toJson(item.key)), toJson(current.key))
   let nextItem = current == null ? null : currentIndex >= 0 && currentIndex + 1 < len(visibleItems) ? visibleItems[currentIndex + 1] : null
@@ -128,8 +137,8 @@ widget "cdm-review" {
   let selected = join(draft.picks.map(i => options[i].label), ", ")
   let answerText = selected != "" && trim(draft.text) != "" ? "${selected}\n\n${trim(draft.text)}" : selected != "" ? selected : trim(draft.text)
   let currentLoaded = current != null && entry != null && currentDetailSlot >= 0 && !detailActive[currentDetailSlot]
-  let currentBusy = current != null && targets.any(t => t != null && t.item.key == current.key)
-  let currentAvailable = current != null && q != null && q.ok && !contains(q.out.unavailable_packs ?? [], current.key.pack)
+  let currentBusy = current != null && targets.any(t => t != null && t.account == account && t.item.key == current.key)
+  let currentAvailable = current != null && !authPending && queueValid && !contains(q.out.unavailable_packs ?? [], current.key.pack)
   let canWrite = token != null && currentAvailable && currentLoaded && !currentBusy && get(loadErrors, currentId, null) == null
   let gateReady = canWrite && exact.status == "pending" && review.review_state == "ready" && (mail == null || trim(mail.body_plain ?? "") != "") && (!isReceipt || (exact.input != null && receipt != null))
   let askReady = canWrite && exact.status == "pending" && trim(exact.question ?? "") != ""
@@ -171,21 +180,15 @@ widget "cdm-review" {
     pairPoll = null
     if pairing && pairRequest != null && target == pairRequest.request_id {
       if result.ok && result.out.status == "authorized" {
-        // Successful explicit re-pairing is also an account/cache boundary. Server drafts remain.
-        account = null
-        lastQueue = null
-        current = null
-        hidden = []
-        drafts = {}
-        details = []
-        conflicts = {}
-        itemErrors = {}
-        loadErrors = {}
+        // Keep the old account's reading/drafts/attempts through verification. Only /native/me
+        // can prove whether this is the same account; writes and queue acceptance pause meanwhile.
+        authPending = true
+        authGeneration = authGeneration + 1
         token = result.out.device_token
         pairToken = null
         pairRequest = null
         pairing = false
-        pairStatus = ""
+        pairStatus = "Verifying the new device grant…"
       } else if result.ok && result.out.status == "pending" {
         pairStatus = "Waiting for browser confirmation…"
       } else if result.code == -1 || result.code == 429 || result.code >= 500 {
@@ -200,36 +203,53 @@ widget "cdm-review" {
   }
 
   on me first {
-    if me.ok && account == null {
-      account = me.out.user.id
-    } else if me.ok && account != me.out.user.id {
-      // Fail closed if a credential ever changes outside the normal re-pair boundary.
-      account = me.out.user.id
-      lastQueue = null
-      current = null
-      hidden = []
-      drafts = {}
-      details = []
-      conflicts = {}
-      itemErrors = {}
-      loadErrors = {}
+    if me.ok {
+      let newId = me.out.device.id
+      // A grant creates a new device id. Previously seen ids are stale HTTP responses, not proof
+      // of the new credential. This remains true across process restart and repeated re-pairing.
+      let fresh = newId != null && newId != deviceId && !contains(retiredDeviceIds, newId)
+      if fresh {
+        retiredDeviceIds = deviceId == null ? retiredDeviceIds : unique(retiredDeviceIds + [deviceId])
+        if account == null {
+          account = me.out.user.id
+          deviceId = newId
+          authPending = false
+        } else if me.out.user.id == account {
+          // SAME account: preserve drafts, details, reading position and every pending slot.
+          deviceId = newId
+          authPending = false
+        } else {
+          // Different account: isolate old data and quarantine old slots; never expose/submit it.
+          account = me.out.user.id
+          deviceId = newId
+          authPending = false
+          lastQueue = null
+          current = null
+          hidden = []
+          currentDetailSlot = -1
+          openRequest = null
+          startupOpen = true
+          tab = "review"
+        }
+        pairStatus = ""
+      }
     }
   }
 
   on q first {
-    if q.ok {
+    if !authPending && q.ok && q.out.account == account && q.out.device_id == deviceId {
       lastQueue = q.out
       // A pack missing from a partial response is not proof that its hidden item resolved.
       hidden = hidden.filter(k => q.out.next_cursor != null || contains(q.out.unavailable_packs ?? [], k.pack) || q.out.items.any(item => item.key == k))
     }
   }
 
-  when startupOpen && current != null && token != null {
+  when startupOpen && current != null && token != null && !pairing && !authPending {
     startupOpen = false
     openRequest = current
   }
 
-  when openRequest != null {
+  when openRequest != null && !pairing && !authPending {
     let item = openRequest
     let key = toJson({account: account, key: item.key})
     openRequest = null
@@ -237,7 +257,7 @@ widget "cdm-review" {
     detailPoolFull = false
     loadErrors = remove(loadErrors, key)
     if !d0active {
-      d0 = item
+      d0 = merge(item, {account: account, generation: authGeneration})
       d0exactDone = false
       d0reviewDone = false
       d0receiptDone = false
@@ -246,7 +266,7 @@ widget "cdm-review" {
       currentDetailSlot = 0
     }
     else if !d1active {
-      d1 = item
+      d1 = merge(item, {account: account, generation: authGeneration})
       d1exactDone = false
       d1reviewDone = false
       d1receiptDone = false
@@ -255,7 +275,7 @@ widget "cdm-review" {
       currentDetailSlot = 1
     }
     else if !d2active {
-      d2 = item
+      d2 = merge(item, {account: account, generation: authGeneration})
       d2exactDone = false
       d2reviewDone = false
       d2receiptDone = false
@@ -264,7 +284,7 @@ widget "cdm-review" {
       currentDetailSlot = 2
     }
     else if !d3active {
-      d3 = item
+      d3 = merge(item, {account: account, generation: authGeneration})
       d3exactDone = false
       d3reviewDone = false
       d3receiptDone = false
@@ -280,10 +300,10 @@ widget "cdm-review" {
   on c0 { if d0active { d0receiptDone = true } }
   on o0 { if d0active { d0stateDone = true } }
   when d0active && d0exactDone && d0stateDone && (d0.key.kind == "ask" || (d0reviewDone && ((d0.tool_name != "onec_receipt_create" && d0.tool_name != "onec_receipt_update" && d0.tool_name != "onec_receipt_update_edited") || d0receiptDone))) {
-    let key = toJson({account: account, key: d0.key})
+    let key = toJson({account: d0.account, key: d0.key})
     let receiptGate = d0.key.kind == "gate" && (d0.tool_name == "onec_receipt_create" || d0.tool_name == "onec_receipt_update" || d0.tool_name == "onec_receipt_update_edited")
     let bound = e0.out.id == d0.key.id && e0.out.pack == d0.key.pack && o0.out.kind == d0.key.kind && o0.out.item_id == d0.key.id && (d0.key.kind == "ask" || r0.out.gate_id == d0.key.id) && (!receiptGate || !c0.ok || c0.out.gate_id == d0.key.id)
-    if e0.ok && o0.ok && (d0.key.kind == "ask" || r0.ok) && (!receiptGate || c0.ok || c0.code == 404) && bound {
+    if d0.account == account && d0.generation == authGeneration && e0.ok && o0.ok && (d0.key.kind == "ask" || r0.ok) && (!receiptGate || c0.ok || c0.code == 404) && bound {
       let rawMail = d0.key.kind == "gate" ? r0.out.mail : null
       let mailProjection = rawMail == null ? null : {subject: rawMail.subject, to: rawMail.to, cc: rawMail.cc, bcc: rawMail.bcc, body_plain: rawMail.body_plain, attachments: (rawMail.attachments ?? []).map(a => {filename: a.filename, content_type: a.content_type, size: a.size})}
       let exactProjection = d0.key.kind == "gate" ? {id: e0.out.id, pack: e0.out.pack, status: e0.out.status, preview_gfm: e0.out.preview_gfm, tool_name: e0.out.tool_name, submitted_at: e0.out.submitted_at, input: receiptGate ? e0.out.input : null} : {id: e0.out.id, pack: e0.out.pack, status: e0.out.status, header: e0.out.header, question: e0.out.question, options: (e0.out.options ?? []).map(o => {label: o.label, description: o.description}), multi: e0.out.multi, kind: e0.out.kind, created_at: e0.out.created_at}
@@ -303,10 +323,10 @@ widget "cdm-review" {
   on c1 { if d1active { d1receiptDone = true } }
   on o1 { if d1active { d1stateDone = true } }
   when d1active && d1exactDone && d1stateDone && (d1.key.kind == "ask" || (d1reviewDone && ((d1.tool_name != "onec_receipt_create" && d1.tool_name != "onec_receipt_update" && d1.tool_name != "onec_receipt_update_edited") || d1receiptDone))) {
-    let key = toJson({account: account, key: d1.key})
+    let key = toJson({account: d1.account, key: d1.key})
     let receiptGate = d1.key.kind == "gate" && (d1.tool_name == "onec_receipt_create" || d1.tool_name == "onec_receipt_update" || d1.tool_name == "onec_receipt_update_edited")
     let bound = e1.out.id == d1.key.id && e1.out.pack == d1.key.pack && o1.out.kind == d1.key.kind && o1.out.item_id == d1.key.id && (d1.key.kind == "ask" || r1.out.gate_id == d1.key.id) && (!receiptGate || !c1.ok || c1.out.gate_id == d1.key.id)
-    if e1.ok && o1.ok && (d1.key.kind == "ask" || r1.ok) && (!receiptGate || c1.ok || c1.code == 404) && bound {
+    if d1.account == account && d1.generation == authGeneration && e1.ok && o1.ok && (d1.key.kind == "ask" || r1.ok) && (!receiptGate || c1.ok || c1.code == 404) && bound {
       let rawMail = d1.key.kind == "gate" ? r1.out.mail : null
       let mailProjection = rawMail == null ? null : {subject: rawMail.subject, to: rawMail.to, cc: rawMail.cc, bcc: rawMail.bcc, body_plain: rawMail.body_plain, attachments: (rawMail.attachments ?? []).map(a => {filename: a.filename, content_type: a.content_type, size: a.size})}
       let exactProjection = d1.key.kind == "gate" ? {id: e1.out.id, pack: e1.out.pack, status: e1.out.status, preview_gfm: e1.out.preview_gfm, tool_name: e1.out.tool_name, submitted_at: e1.out.submitted_at, input: receiptGate ? e1.out.input : null} : {id: e1.out.id, pack: e1.out.pack, status: e1.out.status, header: e1.out.header, question: e1.out.question, options: (e1.out.options ?? []).map(o => {label: o.label, description: o.description}), multi: e1.out.multi, kind: e1.out.kind, created_at: e1.out.created_at}
@@ -326,10 +346,10 @@ widget "cdm-review" {
   on c2 { if d2active { d2receiptDone = true } }
   on o2 { if d2active { d2stateDone = true } }
   when d2active && d2exactDone && d2stateDone && (d2.key.kind == "ask" || (d2reviewDone && ((d2.tool_name != "onec_receipt_create" && d2.tool_name != "onec_receipt_update" && d2.tool_name != "onec_receipt_update_edited") || d2receiptDone))) {
-    let key = toJson({account: account, key: d2.key})
+    let key = toJson({account: d2.account, key: d2.key})
     let receiptGate = d2.key.kind == "gate" && (d2.tool_name == "onec_receipt_create" || d2.tool_name == "onec_receipt_update" || d2.tool_name == "onec_receipt_update_edited")
     let bound = e2.out.id == d2.key.id && e2.out.pack == d2.key.pack && o2.out.kind == d2.key.kind && o2.out.item_id == d2.key.id && (d2.key.kind == "ask" || r2.out.gate_id == d2.key.id) && (!receiptGate || !c2.ok || c2.out.gate_id == d2.key.id)
-    if e2.ok && o2.ok && (d2.key.kind == "ask" || r2.ok) && (!receiptGate || c2.ok || c2.code == 404) && bound {
+    if d2.account == account && d2.generation == authGeneration && e2.ok && o2.ok && (d2.key.kind == "ask" || r2.ok) && (!receiptGate || c2.ok || c2.code == 404) && bound {
       let rawMail = d2.key.kind == "gate" ? r2.out.mail : null
       let mailProjection = rawMail == null ? null : {subject: rawMail.subject, to: rawMail.to, cc: rawMail.cc, bcc: rawMail.bcc, body_plain: rawMail.body_plain, attachments: (rawMail.attachments ?? []).map(a => {filename: a.filename, content_type: a.content_type, size: a.size})}
       let exactProjection = d2.key.kind == "gate" ? {id: e2.out.id, pack: e2.out.pack, status: e2.out.status, preview_gfm: e2.out.preview_gfm, tool_name: e2.out.tool_name, submitted_at: e2.out.submitted_at, input: receiptGate ? e2.out.input : null} : {id: e2.out.id, pack: e2.out.pack, status: e2.out.status, header: e2.out.header, question: e2.out.question, options: (e2.out.options ?? []).map(o => {label: o.label, description: o.description}), multi: e2.out.multi, kind: e2.out.kind, created_at: e2.out.created_at}
@@ -349,10 +369,10 @@ widget "cdm-review" {
   on c3 { if d3active { d3receiptDone = true } }
   on o3 { if d3active { d3stateDone = true } }
   when d3active && d3exactDone && d3stateDone && (d3.key.kind == "ask" || (d3reviewDone && ((d3.tool_name != "onec_receipt_create" && d3.tool_name != "onec_receipt_update" && d3.tool_name != "onec_receipt_update_edited") || d3receiptDone))) {
-    let key = toJson({account: account, key: d3.key})
+    let key = toJson({account: d3.account, key: d3.key})
     let receiptGate = d3.key.kind == "gate" && (d3.tool_name == "onec_receipt_create" || d3.tool_name == "onec_receipt_update" || d3.tool_name == "onec_receipt_update_edited")
     let bound = e3.out.id == d3.key.id && e3.out.pack == d3.key.pack && o3.out.kind == d3.key.kind && o3.out.item_id == d3.key.id && (d3.key.kind == "ask" || r3.out.gate_id == d3.key.id) && (!receiptGate || !c3.ok || c3.out.gate_id == d3.key.id)
-    if e3.ok && o3.ok && (d3.key.kind == "ask" || r3.ok) && (!receiptGate || c3.ok || c3.code == 404) && bound {
+    if d3.account == account && d3.generation == authGeneration && e3.ok && o3.ok && (d3.key.kind == "ask" || r3.ok) && (!receiptGate || c3.ok || c3.code == 404) && bound {
       let rawMail = d3.key.kind == "gate" ? r3.out.mail : null
       let mailProjection = rawMail == null ? null : {subject: rawMail.subject, to: rawMail.to, cc: rawMail.cc, bcc: rawMail.bcc, body_plain: rawMail.body_plain, attachments: (rawMail.attachments ?? []).map(a => {filename: a.filename, content_type: a.content_type, size: a.size})}
       let exactProjection = d3.key.kind == "gate" ? {id: e3.out.id, pack: e3.out.pack, status: e3.out.status, preview_gfm: e3.out.preview_gfm, tool_name: e3.out.tool_name, submitted_at: e3.out.submitted_at, input: receiptGate ? e3.out.input : null} : {id: e3.out.id, pack: e3.out.pack, status: e3.out.status, header: e3.out.header, question: e3.out.question, options: (e3.out.options ?? []).map(o => {label: o.label, description: o.description}), multi: e3.out.multi, kind: e3.out.kind, created_at: e3.out.created_at}
@@ -556,11 +576,11 @@ widget "cdm-review" {
       text: label
       color: enabled && poolFree ? accent : muted
       onTap: {
-        if enabled && poolFree {
+        if enabled && poolFree && !pairing && !authPending {
           let slot = tgt0 == null ? 0 : tgt1 == null ? 1 : tgt2 == null ? 2 : 3
           let next = nextItem
           let expected = action == "save" || action == "skip" ? serverState.revision : null
-          let target = {id: toJson({account: account, key: item.key}), item: item, action: action, draft: action == "skip" || action == "prepare" ? blank : draft, answer: action == "answer" ? answerText : "", expected: expected}
+          let target = {id: toJson({account: account, key: item.key}), account: account, generation: authGeneration, item: item, action: action, draft: action == "skip" || action == "prepare" ? blank : draft, answer: action == "answer" ? answerText : "", expected: expected}
           if slot == 0 { tgt0 = target; live0 = true; res0 = null }
           else if slot == 1 { tgt1 = target; live1 = true; res1 = null }
           else if slot == 2 { tgt2 = target; live2 = true; res2 = null }
@@ -615,12 +635,197 @@ widget "cdm-review" {
   component QueueStatus() {
     Column {
       gap: 2
-      if q == null && lastQueue == null { Text { text: "Loading queue…"; color: muted } }
-      if q != null && !q.ok { Text { text: lastQueue == null ? "Queue unavailable — not empty." : "Offline/stale copy — actions paused."; color: red } }
-      if q != null && q.ok && !q.out.complete { Text { text: "Partial queue: ${join(q.out.unavailable_packs, ", ")} unavailable. Counts are lower bounds — not done."; color: yellow } }
+      if q == null && cachedQueue == null { Text { text: "Loading queue…"; color: muted } }
+      if q != null && !q.ok { Text { text: cachedQueue == null ? "Queue unavailable — not empty." : "Offline/stale copy — actions paused."; color: red } }
+      if q != null && q.ok && !queueValid { Text { text: "Waiting for a queue response from the verified device grant…"; color: yellow } }
+      if queueValid && !q.out.complete { Text { text: "Partial queue: ${join(q.out.unavailable_packs, ", ")} unavailable. Counts are lower bounds — not done."; color: yellow } }
       if queue != null && queue.next_cursor != null { Text { text: "This native page is bounded; ${queue.total} known reviews. More pages remain in the full app."; color: muted } }
       if detailPoolFull { Text { text: "All detail slots are still loading. Reopen/check an item or wait; nothing was dropped."; color: yellow } }
       if !poolFree { Text { text: "All four action slots need reconciliation. New actions pause visibly; no tap is silently dropped."; color: yellow } }
+    }
+  }
+
+  component ReceiptField(label, value) {
+    Column {
+      gap: 0
+      Text { text: label; style: small; color: muted }
+      Text { text: value }
+    }
+  }
+
+  component RefView(type, value, absentText = "not provided", details = false) {
+    Column {
+      gap: 0
+      let text = trim("${value}")
+      let id = lower(text)
+      let refs = receipt.references ?? {}
+      let saved = get(refs, "Справочник.${type}/${id}", get(refs, "${type}/${id}", get(refs, "Справочник.${type}/${text}", get(refs, "${type}/${text}", null))))
+      if value == null || text == "" {
+        Text { text: absentText; color: muted }
+      } else if saved != null && trim(saved.name ?? "") != "" {
+        Text { text: saved.name }
+        if details && (saved.inn != null || saved.kpp != null) {
+          Text { text: "${saved.inn != null ? "INN ${saved.inn}" : ""}${saved.inn != null && saved.kpp != null ? " · " : ""}${saved.kpp != null ? "KPP ${saved.kpp}" : ""}"; style: small; color: muted }
+        }
+        if details && (saved.number != null || saved.date != null) {
+          Text { text: "${saved.number != null ? "№ ${saved.number}" : ""}${saved.number != null && saved.date != null ? " · " : ""}${saved.date ?? ""}"; style: small; color: muted }
+        }
+      } else if match(text, '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') != null {
+        Text { text: "Unresolved: ${text}"; color: yellow }
+      } else {
+        Text { text: text }
+      }
+    }
+  }
+
+  component RefField(label, type, value, absentText = "not provided", details = false) {
+    Column {
+      gap: 0
+      Text { text: label; style: small; color: muted }
+      RefView { type: type; value: value; absentText: absentText; details: details }
+    }
+  }
+
+  component UnitView(unit, nomenclature, service = false) {
+    Column {
+      gap: 0
+      let text = trim("${unit}")
+      let id = lower(text)
+      let refs = receipt.references ?? {}
+      let saved = get(refs, "Справочник.КлассификаторЕдиницИзмерения/${id}", get(refs, "КлассификаторЕдиницИзмерения/${id}", get(refs, "Справочник.КлассификаторЕдиницИзмерения/${text}", get(refs, "КлассификаторЕдиницИзмерения/${text}", null))))
+      let cardId = lower(trim("${nomenclature}"))
+      let card = get(refs, "Справочник.Номенклатура/${cardId}", get(refs, "Номенклатура/${cardId}", get(refs, "Справочник.Номенклатура/${trim("${nomenclature}")}", get(refs, "Номенклатура/${trim("${nomenclature}")}", null))))
+      let matches = entries(refs).filter(e => (startsWith(e.key, "Справочник.КлассификаторЕдиницИзмерения/") || startsWith(e.key, "КлассификаторЕдиницИзмерения/")) && e.value.code == text && trim(e.value.name ?? "") != "")
+      if unit == null || text == "" {
+        Text { text: service ? "Unit: not specified" : card != null && trim(card.default_unit.name ?? "") != "" ? "Unit: ${card.default_unit.name} (card)" : "Unit: card default (unresolved)"; color: service || card == null ? muted : foreground }
+      } else if saved != null && trim(saved.name ?? "") != "" {
+        Text { text: "Unit: ${saved.name}${saved.code != null ? " (ОКЕИ ${saved.code})" : ""}" }
+      } else if match(text, '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') != null {
+        Text { text: "Unit unresolved: ${text}"; color: yellow }
+      } else if match(text, '^[0-9]{3}$') != null {
+        if len(matches) == 1 {
+          Text { text: "Unit: ${matches[0].value.name} (ОКЕИ ${text})" }
+        } else {
+          Text { text: "Unit unresolved ОКЕИ ${text} (${len(matches)} matches)"; color: yellow }
+        }
+      } else {
+        Text { text: "Unit: ${text}" }
+      }
+    }
+  }
+
+  component ReceiptLine(line, service = false) {
+    Column {
+      gap: 5
+      padding: 10
+      background: surface
+      let meta = service ? [
+        line.account != null ? "acct ${line.account}" : null,
+        line.vat_account != null ? "VAT acct ${line.vat_account}" : null,
+        line.cost_item != null ? "cost item ${line.cost_item}" : null,
+        line.nomenclature_group != null ? "group ${line.nomenclature_group}" : null,
+        line.subdivision != null ? "subdivision ${line.subdivision}" : null
+      ] : [
+        line.account != null ? "acct ${line.account}" : null,
+        line.vat_account != null ? "VAT acct ${line.vat_account}" : null,
+        line.country != null ? "country ${line.country}" : null,
+        line.customs_number != null ? "РНПТ ${line.customs_number}" : null
+      ]
+      if line.nomenclature != null {
+        RefView { type: "Номенклатура"; value: line.nomenclature; absentText: "not provided" }
+      } else {
+        Text { text: "Line without a nomenclature reference"; color: muted }
+      }
+      if service && trim(line.content ?? "") != "" { Text { text: line.content } }
+      Row {
+        gap: 12
+        Text { text: "Qty: ${line.quantity ?? "—"}"; weight: 1 }
+        UnitView { unit: line.unit; nomenclature: line.nomenclature; service: service }
+      }
+      Text { text: "Amount w/o VAT: ${line.amount ?? "—"}" }
+      Text { text: "VAT rate: ${line.vat_rate ?? "—"} · VAT amount: ${line.vat_amount ?? "—"}" }
+      if contains(keys(line), "price") { Text { text: "Price: ${line.price}" } }
+      if len(meta.filter(x => x != null && trim("${x}") != "")) > 0 {
+        Text { text: join(meta.filter(x => x != null && trim("${x}") != ""), " · "); style: small; color: muted }
+      }
+    }
+  }
+
+  component ReceiptProposal() {
+    Column {
+      gap: 10
+      let input = exact.input
+      let payload = (input ?? {}).payload ?? {}
+      let updating = exact.tool_name == "onec_receipt_update" || exact.tool_name == "onec_receipt_update_edited"
+      let goods = payload.goods ?? []
+      let services = payload.services ?? []
+      let totals = payload.totals
+      let updateId = updating ? (input.guid ?? payload.receipt_guid) : null
+      let omitted = updating ? "unchanged (keeps the draft's value)" : "not provided"
+      if input == null || receipt == null {
+        Text { text: input == null ? "Canonical input unavailable. Native approval is disabled; use the full app." : "Receipt comparison unavailable (no stored snapshot). Native approval is disabled; open the full app."; color: yellow }
+      } else {
+        Text { text: updating ? "Proposed receipt draft edit" : "Proposed new receipt draft"; style: title; color: accent }
+        if input.base != null { ReceiptField { label: "Base"; value: "${input.base}" } }
+        if updateId != null { ReceiptField { label: "Receipt draft to rewrite"; value: "${updateId}" } }
+        if payload.is_upd == true { ReceiptField { label: "УПД status"; value: "${payload.upd_status ?? "provided"}" } }
+        RefField { label: "Supplier"; type: "Контрагенты"; value: payload.counterparty; details: true }
+        RefField { label: "Contract"; type: "ДоговорыКонтрагентов"; value: payload.contract; absentText: omitted; details: true }
+        RefField { label: "Organization"; type: "Организации"; value: payload.organization; absentText: "Connector default (identity not verified)" }
+        RefField { label: "Warehouse"; type: "Склады"; value: payload.warehouse; absentText: len(goods) > 0 ? "Connector default (identity not verified)" : omitted }
+        if contains(keys(payload), "supplier_agent") {
+          if payload.supplier_agent == null {
+            ReceiptField { label: "Supplier agent"; value: "cleared (no agent payment)" }
+          } else {
+            Text { text: "Supplier agent"; style: small; color: muted }
+            RefView { type: "Контрагенты"; value: payload.supplier_agent.counterparty }
+            RefView { type: "ДоговорыКонтрагентов"; value: payload.supplier_agent.contract; details: true }
+          }
+        }
+        ReceiptField { label: "Supplier number"; value: payload.incoming_number == null ? omitted : "${payload.incoming_number}" }
+        ReceiptField { label: "Supplier date"; value: payload.incoming_date == null ? "Receipt accounting date (default)" : "${payload.incoming_date}" }
+        ReceiptField { label: "Accounting date"; value: payload.date == null ? omitted : "${payload.date}" }
+        if payload.sf_date != null || updating || payload.register_sf == true {
+          ReceiptField { label: "СФ accounting date"; value: payload.sf_date != null ? "${payload.sf_date}" : updating ? "Existing СФ retained; new СФ uses supplier/receipt date" : "Supplier date, or receipt date if omitted (default)" }
+        }
+        Text { text: "Goods"; style: title }
+        if len(goods) == 0 {
+          Text { text: updating && len(services) > 0 ? "No goods rows — existing goods will be cleared on approval." : updating ? "No goods rows." : "No goods rows."; color: updating ? yellow : muted }
+        }
+        for line in goods { ReceiptLine { line: line; service: false } }
+        Text { text: "Services"; style: title }
+        if len(services) == 0 {
+          Text { text: updating && len(goods) > 0 ? "No service rows — existing services will be cleared on approval." : "No service rows."; color: updating && len(goods) > 0 ? yellow : muted }
+        }
+        for line in services { ReceiptLine { line: line; service: true } }
+        if updating && len(goods) == 0 && len(services) == 0 {
+          Text { text: "The connector rejects an update without goods or service lines; nothing will be cleared."; color: yellow }
+        }
+        if totals != null {
+          ReceiptField { label: "Total w/o VAT"; value: "${totals.amount_without_vat ?? "—"}" }
+          ReceiptField { label: "VAT"; value: "${totals.vat ?? "—"}" }
+          ReceiptField { label: "Total with VAT"; value: "${totals.amount_with_vat ?? "—"}" }
+        }
+        Text { text: "Effect of approval"; style: title }
+        Text { text: updating ? "Approving rewrites the UNPOSTED receipt. Omitted date, contract, supplier number and agent are retained; other connector defaults may replace header values." : "Approving creates an UNPOSTED receipt draft (no posting, no deduction)." }
+        Text { text: payload.remove_sf == true ? "The attached unposted СФ will be detached and marked for deletion." : payload.register_sf == true ? "An unposted СФ will be registered only if none exists." : "No new СФ will be created." }
+        ReceiptField { label: "Advance offset"; value: "${payload.advance_offset ?? "auto (default)"}" }
+        ReceiptField { label: "Settlement / advance accounts"; value: "${payload.settlement_account ?? "60.01"} / ${payload.advance_account ?? "60.02"}" }
+        ReceiptField { label: "VAT deduction"; value: payload.reflect_vat_deduction == null ? "not claimed (default)" : payload.reflect_vat_deduction == true ? "claimed" : "not claimed" }
+        if trim(payload.comment ?? "") != "" { ReceiptField { label: "Comment"; value: payload.comment } }
+        Text { text: "Original from supplier"; style: title }
+        if receipt.record != null { ReceiptField { label: "Record"; value: "${receipt.record.title} · ${receipt.record.short_id}" } }
+        ReceiptField { label: "Captured at"; value: receipt.captured_at }
+        ReceiptField { label: "Source"; value: "${receipt.source.status}${receipt.source.filename != null ? " · ${receipt.source.filename}" : ""}${receipt.source.size != null ? " · ${fmtBytes(receipt.source.size)}" : ""}" }
+        if receipt.source.sha256 != null { ReceiptField { label: "Source SHA-256"; value: receipt.source.sha256 } }
+        if receipt.source.message != null { Text { text: receipt.source.message; color: yellow } }
+        for warning in receipt.warnings ?? [] { Text { text: "⚠ ${warning}"; color: yellow } }
+        Row {
+          Button { text: "Original document (browser)"; color: muted; onTap: url("${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}/receipt/source") }
+          Button { text: "Copy raw proposal"; color: muted; onTap: copy(toJson(input)) }
+          Button { text: "Copy raw context"; color: muted; onTap: copy(toJson(receipt)) }
+        }
+      }
     }
   }
 
@@ -629,7 +834,14 @@ widget "cdm-review" {
       fill: width
       weight: 1
       gap: 10
-      if token == null || pairing {
+      if authPending {
+        Column {
+          gap: 10
+          weight: 1
+          Text { text: "Verifying new device grant…"; style: title; color: accent }
+          Text { text: "Old content and all writes stay closed until /native/me proves the account. Same-account drafts, reading state and pending requests are preserved."; color: muted }
+        }
+      } else if token == null || pairing {
         Pairing { }
       } else {
         Row {
@@ -639,12 +851,12 @@ widget "cdm-review" {
         Text { text: queue == null ? "Count unknown" : "${queue.total} reviews · ${queue.problem_count} problems · ${activityCount} requests"; color: muted }
         QueueStatus { }
         if q != null && q.code == 401 {
-          Text { text: "Device authorization expired or was revoked. Successful re-pairing clears this surface's local cache and unsent drafts; server drafts remain." ; color: yellow }
+          Text { text: "Device authorization expired or was revoked. Re-pairing preserves same-account drafts and pending requests; a different verified account is isolated." ; color: yellow }
           Button {
-            text: activityCount > 0 || detailActive.any(a => a) ? "Reconcile outstanding reads/writes before re-pairing" : "Re-pair / reset local copy"
-            color: activityCount > 0 || detailActive.any(a => a) ? muted : accent
+            text: detailActive.any(a => a) ? "Wait for the current detail read before re-pairing" : "Re-pair / verify account"
+            color: detailActive.any(a => a) ? muted : accent
             onTap: {
-              if activityCount == 0 && !detailActive.any(a => a) && !pairStarting {
+              if !authPending && !pairing && !detailActive.any(a => a) && !pairStarting {
                 pairing = true
                 pairStarting = true
                 pairStatus = "Starting a five-minute browser challenge…"
@@ -664,7 +876,7 @@ widget "cdm-review" {
             scroll: true
             weight: 1
             gap: 8
-            if queue == null || len((queue.problems ?? [])) == 0 { Text { text: q != null && q.ok && q.out.complete ? "No known preparation problems." : "Problem state unknown while the queue is unavailable."; color: muted } }
+            if queue == null || len((queue.problems ?? [])) == 0 { Text { text: queueValid && q.out.complete ? "No known preparation problems." : "Problem state unknown while the queue is unavailable."; color: muted } }
             for p in (queue ?? {}).problems ?? [] key toJson(p.key) {
               Column {
                 gap: 5
@@ -674,7 +886,7 @@ widget "cdm-review" {
                 Text { text: "${p.review_state}: ${p.review_error.message}"; color: yellow }
                 Text { text: "Approval stays unavailable until the exact review is ready."; style: small; color: muted }
                 Flow {
-                  if p.retry_prepare { ActionButton { item: p; label: "Retry preparation"; action: "prepare"; enabled: q != null && q.ok && contains(q.out.unavailable_packs ?? [], p.key.pack) == false && !targets.any(t => t != null && t.item.key == p.key) } }
+                  if p.retry_prepare { ActionButton { item: p; label: "Retry preparation"; action: "prepare"; enabled: queueValid && !authPending && contains(q.out.unavailable_packs ?? [], p.key.pack) == false && !targets.any(t => t != null && t.account == account && t.item.key == p.key) } }
                   Button { text: "Open full app"; onTap: url("${api}/#/${enc(p.key.kind)}/${enc(p.key.pack)}/${enc(p.key.id)}") }
                 }
               }
@@ -685,9 +897,10 @@ widget "cdm-review" {
             scroll: true
             weight: 1
             gap: 8
-            if activityCount == 0 { Text { text: "No outstanding or unreconciled requests."; color: muted } }
+            if activityCount == 0 && retiredCount == 0 { Text { text: "No outstanding or unreconciled requests."; color: muted } }
+            if retiredCount > 0 { Text { text: "${retiredCount} previous-account slot(s) remain isolated and count toward the four-slot guard."; color: yellow } }
             for r, i in results {
-              if targets[i] != null {
+              if targets[i] != null && targets[i].account == account {
                 Column {
                   gap: 5
                   padding: 10
@@ -724,6 +937,24 @@ widget "cdm-review" {
                   }
                 }
               }
+              if targets[i] != null && targets[i].account != account {
+                Column {
+                  gap: 5
+                  padding: 10
+                  background: surface
+                  Text { text: "Previous-account request retained. Item identity/content is hidden; it cannot be reopened, checked or submitted here."; color: yellow }
+                  Button {
+                    text: "Discard retained slot"
+                    color: muted
+                    onTap: {
+              if i == 0 { res0 = null; tgt0 = null; live0 = false }
+              else if i == 1 { res1 = null; tgt1 = null; live1 = false }
+              else if i == 2 { res2 = null; tgt2 = null; live2 = false }
+              else if i == 3 { res3 = null; tgt3 = null; live3 = false }
+                    }
+                  }
+                }
+              }
             }
           }
         } else {
@@ -732,7 +963,7 @@ widget "cdm-review" {
               weight: 1
               gap: 10
               Text {
-                text: activityCount > 0 ? "Queue advanced. Requests still need confirmation/check; this is not a background-delivery claim." : q != null && q.ok && !q.out.complete ? "Some packs are unavailable. The visible page is empty, not the fleet." : queue != null && queue.next_cursor != null ? "This page is complete; more reviews remain in the full app." : "No visible ready reviews."
+                text: activityCount > 0 ? "Queue advanced. Requests still need confirmation/check; this is not a background-delivery claim." : queueValid && !q.out.complete ? "Some packs are unavailable. The visible page is empty, not the fleet." : queue != null && queue.next_cursor != null ? "This page is complete; more reviews remain in the full app." : "No visible ready reviews."
                 style: title
               }
               if len(visibleItems) > 0 {
@@ -748,6 +979,7 @@ widget "cdm-review" {
             }
             Column {
               scroll: true
+              lazy: true
               weight: 1
               gap: 10
               Text { text: current.title; style: title; fontWeight: 600 }
@@ -759,29 +991,7 @@ widget "cdm-review" {
               if entry != null {
                 if current.key.kind == "gate" {
                   if isReceipt {
-                    Text { text: "Receipt proposal — complete canonical input"; style: small; color: muted }
-                    if exact.input == null {
-                      Text { text: "Canonical input unavailable. Native approval is disabled; use the full app."; color: yellow }
-                    } else {
-                      Text { text: toJson(exact.input) }
-                      Row { Button { text: "Copy complete proposal"; color: muted; onTap: copy(toJson(exact.input)) } }
-                    }
-                    if receipt == null {
-                      Text { text: "Receipt comparison unavailable (no stored snapshot). Native approval is disabled; open the full app."; color: yellow }
-                    } else {
-                      Text { text: "Stored receipt context · ${receipt.captured_at}"; style: small; color: muted }
-                      if receipt.record != null { Text { text: "${receipt.record.title} · ${receipt.record.short_id}\n${receipt.record.id}" } }
-                      Text { text: "Source: ${receipt.source.status}${receipt.source.filename != null ? " · ${receipt.source.filename}" : ""}${receipt.source.size != null ? " · ${fmtBytes(receipt.source.size)}" : ""}${receipt.source.sha256 != null ? "\nSHA-256 ${receipt.source.sha256}" : ""}${receipt.source.message != null ? "\n${receipt.source.message}" : ""}" }
-                      Text { text: "Verified references (${len(keys(receipt.references ?? {}))})"; style: small; color: muted }
-                      for ref in keys(receipt.references ?? {}) {
-                        Text { text: "${ref}\n${toJson(receipt.references[ref])}" }
-                      }
-                      for warning in receipt.warnings ?? [] { Text { text: "⚠ ${warning}"; color: yellow } }
-                      Row {
-                        Button { text: "Copy receipt context"; color: muted; onTap: copy(toJson(receipt)) }
-                        Button { text: "Original document (browser)"; color: muted; onTap: url("${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}/receipt/source") }
-                      }
-                    }
+                    ReceiptProposal { }
                   } else if mail != null {
                     Text { text: "Subject: ${mail.subject}"; fontWeight: 600 }
                     Text { text: "To: ${recipients}" }
@@ -884,13 +1094,15 @@ widget "cdm-review" {
   Column {
     gap: 8
     Text { text: "CDM review"; style: title; color: accent }
-    if token == null {
+    if authPending {
+      Text { text: "Verifying new grant; drafts and requests preserved"; color: yellow }
+    } else if token == null {
       Text { text: pairing ? "Browser pairing in progress" : "Tap to pair and open native review"; color: muted }
       if pairRequest != null { Text { text: "Code: ${pairRequest.user_code}"; color: accent } }
     } else {
       Text { text: queue == null ? "Counts unknown — not empty" : "${queue.total} ready · ${queue.problem_count} problems"; style: title }
       if q != null && !q.ok { Text { text: "Offline/stale — actions pause inside"; color: red } }
-      if q != null && q.ok && !q.out.complete { Text { text: "Partial: ${join(q.out.unavailable_packs, ", ")} unavailable"; color: yellow } }
+      if queueValid && !q.out.complete { Text { text: "Partial: ${join(q.out.unavailable_packs, ", ")} unavailable"; color: yellow } }
       if activityCount > 0 { Text { text: "${activityCount} requests to confirm/check"; color: yellow } }
       for p in ((queue ?? {}).problems ?? []).take(2) key toJson(p.key) {
         Text { text: "⚠ ${p.title}"; maxLines: 2; color: yellow }
