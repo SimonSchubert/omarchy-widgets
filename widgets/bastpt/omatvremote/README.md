@@ -38,9 +38,18 @@ is installed with pip, and each file the installer writes is mode 600.
 
 Keys go through a small daemon that keeps one connection open, so a tap costs a write
 to a pipe rather than a TLS handshake. It starts itself when the widget first asks for
-the TV's state, reconnects with backoff while the TV sleeps, and writes one line per
-command to `~/.local/share/omatvremote/log`, kept under 32 KB. `tvremote.py stop` ends
-it, and the widget starts it again when it needs it.
+the TV's state, or when a tap finds it gone, and reconnects with backoff while the TV is
+out of reach. A tap that arrives before the TV has been reached is held for a few
+seconds and sent as soon as it has, or given up on and reported rather than lost
+quietly. Once the tile stops asking — its page put away, or the phone asleep — the
+daemon lets go of the TV and ends, so it holds no connection nobody is using; pairing a
+second TV ends it the same way, whose keys must not keep going to the first.
+`tvremote.py stop` ends it by hand, and every command leaves one line in
+`~/.local/share/omatvremote/log`, kept under 32 KB.
+
+While the TV is asleep or out of reach the keys dim and answer nothing, since a TV that
+isn't listening would swallow every one. Only power stays lit, and the line at the
+bottom of the view says which of the three the remote is in.
 
 ## Privacy
 
