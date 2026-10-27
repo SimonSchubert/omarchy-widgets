@@ -56,7 +56,7 @@ widget "omatv remote" {
 H=$HOME/.local/share/omatvremote
 mkdir -p "$H"
 touch "$H/beat"  # the daemon watches this and lets go of the TV once the tile stops asking
-[ "$(cat "$H/tag" 2>/dev/null)" = "7129deb16f9c" ] || { echo need; exit; }
+[ "$(cat "$H/tag" 2>/dev/null)" = "34f32acf6f97" ] || { echo need; exit; }
 now=$(date +%s)
 pf=$H/pairing
 if [ -f "$pf" ]; then
@@ -280,10 +280,10 @@ def shown(cmd, arg):
 
 def nobody_home(err):
     '''True when nothing at that address is home. A box that is asleep still has its network up and
-    refuses the port outright, which means we could reach it the moment its service wakes; a box
-    that is switched off, or off this network, answers nobody and waits for the network's own long
-    timeout to say so. Telling those apart is the difference between a remote that can wake the
-    television and one that should say plainly that it cannot.'''
+    refuses the port outright, which means its service can come back and take us again without
+    anyone touching the phone; a box that is switched off, or off this network, answers nobody and
+    waits for the network's own long timeout to say so. Telling those apart is the difference
+    between a remote that says wait and one that says look at the box.'''
     cause = err.__cause__ or err
     return not isinstance(cause, ConnectionRefusedError)
 
@@ -2100,7 +2100,7 @@ with wave.open(sys.argv[1], "wb") as out:
     out.setframerate(rate)
     out.writeframes(bytes(frames))
 OMATV_TICK_PY
-printf 7129deb16f9c > "$H/tag"
+printf 34f32acf6f97 > "$H/tag"
 python3 "$H/tvremote.py" stop >/dev/null 2>&1
     """)
   }
@@ -2134,8 +2134,8 @@ python3 "$H/tvremote.py" stop >/dev/null 2>&1
   let paired = mode == "on" || mode == "off" || mode == "asleep" || mode == "gone" || mode == "waiting"
   // Whether the TV is there to be driven at all. A key only lands on a TV we hold a session open
   // with, and standby is such a TV: it answers on the network and serves us a session, so power
-  // wakes the panel. Asleep-without-a-session and gone are not — there is nothing here to send to,
-  // and a remote that kept its power key lit over them would only be promising a thing it cannot do.
+  // wakes the panel. Asleep and gone are not — there is nothing here to send to, and a remote that
+  // kept its power key lit over them would only be promising a thing it cannot do.
   let live = mode == "on" || mode == "off"
   let parts = split(app, ".")
   let last = count(parts) > 0 ? parts[count(parts) - 1] : app
