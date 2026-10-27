@@ -62,18 +62,26 @@ face "cdm-review" {
   state tgt3 = null persist
   state live3 = false
 
-  // Generation in every URL forces a new read after re-pair; binding checks below reject a reply
-  // for another account, device or item.
+  let snapshotReceiptTools = ["onec_receipt_create", "onec_receipt_update", "onec_receipt_update_edited"]
+  let generationLabel = "${int(authGeneration)}"
+
+  // Generation in every URL forces a new read after re-pair; the response envelope must prove
+  // that same generation plus the verified account/device and exact item before any application.
   source me = http(token == null ? null : "${api}/api/native/me?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
   source q = http(token == null || account == null || authPending ? null : "${api}/api/native/review-queue?limit=50&native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 30s json status
 
   source e = http(token == null || authPending || current == null ? null : current.key.kind == "gate" ? "${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}?native_generation=${int(authGeneration)}" : "${api}/api/swarms/${enc(current.key.pack)}/asks/${enc(current.key.id)}?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
   source r = http(token == null || authPending || current == null || current.key.kind != "gate" ? null : "${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}/review?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source c = http(token == null || authPending || current == null || current.key.kind != "gate" || !startsWith(current.tool_name ?? "", "onec_receipt_") ? null : "${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}/receipt?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
+  source c = http(token == null || authPending || current == null || current.key.kind != "gate" || !contains(snapshotReceiptTools, current.tool_name ?? "") ? null : "${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}/receipt?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
   source o = http(token == null || authPending || current == null ? null : "${api}/api/swarms/${enc(current.key.pack)}/operator-state/${enc(current.key.kind)}/${enc(current.key.id)}?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
 
   let blank = {text: "", picks: [], reason: "", postmortem: false, mode: "normal"}
-  let queueValid = q != null && q.ok && account != null && q.out.account == account && q.out.device_id == deviceId
+  let meBinding = me != null && me.out != null ? me.out.phone_binding : null
+  let meBound = me != null && meBinding != null && meBinding.generation == generationLabel && meBinding.account != null && meBinding.device_id != null && (authPending || (meBinding.account == account && meBinding.device_id == deviceId)) && (!me.ok || (me.out.user != null && me.out.device != null && me.out.user.id == meBinding.account && me.out.device.id == meBinding.device_id))
+  let queueBinding = q != null && q.out != null ? q.out.phone_binding : null
+  let queueBound = q != null && queueBinding != null && queueBinding.generation == generationLabel && queueBinding.account == account && queueBinding.device_id == deviceId
+  let currentQueueReply = queueBound ? q : null
+  let queueValid = q != null && q.ok && q.out != null && account != null && q.out.phone_binding != null && q.out.phone_binding.generation == generationLabel && q.out.phone_binding.account == account && q.out.phone_binding.device_id == deviceId && q.out.account == account && q.out.device_id == deviceId
   let cachedQueue = lastQueue != null && lastQueue.account == account ? lastQueue : null
   let queue = queueValid ? q.out : cachedQueue
   let qItems = (queue ?? {}).items ?? []
@@ -96,7 +104,7 @@ face "cdm-review" {
   let serverState = (entry ?? {}).state
   let mail = (review ?? {}).mail
   let isMail = exact != null && exact.tool_name == "mail_send_draft"
-  let isReceipt = current != null && current.key.kind == "gate" && exact != null && startsWith(exact.tool_name ?? "", "onec_receipt_")
+  let isReceipt = current != null && current.key.kind == "gate" && exact != null && contains(snapshotReceiptTools, exact.tool_name ?? "")
   let htmlOnly = isMail && mail != null && trim(mail.body_plain ?? "") == ""
   let localDraft = get(drafts, currentId, null)
   let draft = localDraft != null ? merge(blank, localDraft) : serverState != null && serverState.draft != null ? merge(blank, serverState.draft) : blank
@@ -112,7 +120,10 @@ face "cdm-review" {
   let currentInQueue = queueValid && current != null && qItems.any(item => item.key == current.key)
   let currentAvailable = current != null && !authPending && queueValid && !contains(q.out.unavailable_packs ?? [], current.key.pack) && (currentInQueue || queue.next_cursor != null)
   let canWrite = token != null && currentAvailable && loaded && !currentBusy
-  let gateReady = canWrite && exact != null && exact.status == "pending" && review != null && review.review_state == "ready" && (!isMail || (mail != null && trim(mail.body_plain ?? "") != "")) && (!isReceipt || (exact.input != null && receipt != null))
+  let canonicalPayload = exact == null || exact.input == null ? null : exact.input.payload
+  let canonicalPayloadReady = canonicalPayload != null && len(keys(canonicalPayload)) > 0
+  let receiptContextReady = receipt != null && len(keys(receipt)) > 0
+  let gateReady = canWrite && exact != null && exact.status == "pending" && review != null && review.review_state == "ready" && (!isMail || (mail != null && trim(mail.body_plain ?? "") != "")) && (!isReceipt || (canonicalPayloadReady && receiptContextReady))
   let askReady = canWrite && exact != null && exact.status == "pending" && trim(exact.question ?? "") != ""
   let currentError = get(itemErrors, currentId, null)
   let currentConflict = get(conflicts, currentId, null)
@@ -187,7 +198,7 @@ face "cdm-review" {
   }
 
   on me first {
-    if me != null && me.ok && me.out.user.id != null && me.out.device.id != null {
+    if meBound && me.ok && me.out.user.id != null && me.out.device.id != null {
       let newId = me.out.device.id
       // A grant creates a new device id. A previously seen id is a stale HTTP reply, not proof of
       // the new credential. Only /native/me can prove the account; old content stays closed until it does.
@@ -221,7 +232,7 @@ face "cdm-review" {
       } else if authPending {
         verifyChecks = verifyChecks + 1
       }
-    } else if me != null && !me.ok && (me.code == 401 || me.code == 403) {
+    } else if meBound && !me.ok && (me.code == 401 || me.code == 403) {
       // Do not auto-clear a token on one 401: an old-generation /native/me reply can arrive after a
       // newer grant was installed. Surface the recovery path and let the user retry, re-pair or
       // cancel verification; drafts stay. A normal expired session is already actionable via the
@@ -234,7 +245,7 @@ face "cdm-review" {
   }
 
   on [account, deviceId, q] first {
-    if !authPending && q != null && q.ok && q.out.account == account && q.out.device_id == deviceId {
+    if !authPending && queueValid {
       lastQueue = q.out
       // A pack missing from a partial response is not proof that its hidden item resolved.
       hidden = hidden.filter(k => q.out.next_cursor != null || contains(q.out.unavailable_packs ?? [], k.pack) || q.out.items.any(item => item.key == k))
@@ -248,13 +259,21 @@ face "cdm-review" {
       let id = current.key.id
       let pack = current.key.pack
       let prev = details.find(d => d.key == key)
-      let exactOk = e != null && e.ok && e.out.id == id && e.out.pack == pack
-      let stateOk = o != null && o.ok && o.out.kind == kind && o.out.item_id == id
-      let reviewOk = kind == "ask" || (r != null && r.ok && r.out.gate_id == id)
+      let exactBinding = e != null && e.out != null ? e.out.phone_binding : null
+      let stateBinding = o != null && o.out != null ? o.out.phone_binding : null
+      let reviewBinding = r != null && r.out != null ? r.out.phone_binding : null
+      let receiptBinding = c != null && c.out != null ? c.out.phone_binding : null
+      let exactBound = exactBinding != null && exactBinding.generation == generationLabel && exactBinding.account == account && exactBinding.device_id == deviceId && exactBinding.item == current.key
+      let stateBound = stateBinding != null && stateBinding.generation == generationLabel && stateBinding.account == account && stateBinding.device_id == deviceId && stateBinding.item == current.key
+      let reviewBound = reviewBinding != null && reviewBinding.generation == generationLabel && reviewBinding.account == account && reviewBinding.device_id == deviceId && reviewBinding.item == current.key
+      let receiptBound = receiptBinding != null && receiptBinding.generation == generationLabel && receiptBinding.account == account && receiptBinding.device_id == deviceId && receiptBinding.item == current.key
+      let exactOk = exactBound && e.ok && e.out.id == id && e.out.pack == pack
+      let stateOk = stateBound && o.ok && o.out.kind == kind && o.out.item_id == id
+      let reviewOk = kind == "ask" || (reviewBound && r.ok && r.out.gate_id == id)
       let tool = exactOk ? e.out.tool_name : prev != null && prev.exact != null ? prev.exact.tool_name : current.tool_name
-      let receiptGate = kind == "gate" && startsWith(tool ?? "", "onec_receipt_")
-      let receiptOk = !receiptGate || (c != null && (c.ok && c.out.gate_id == id || c.code == 404))
-      if exactOk || stateOk || (kind == "gate" && reviewOk) || (receiptGate && c != null) {
+      let receiptGate = kind == "gate" && contains(snapshotReceiptTools, tool ?? "")
+      let receiptOk = !receiptGate || (receiptBound && (c.ok && c.out.gate_id == id || c.code == 404))
+      if exactOk || stateOk || (kind == "gate" && reviewOk) || (receiptGate && receiptBound) {
         let prevEntry = prev ?? {key: key, exact: null, review: null, receipt: null, receiptError: null, state: null, loaded: false}
         let rawMail = kind == "gate" && reviewOk ? r.out.mail : null
         let oldMail = prevEntry.review != null ? prevEntry.review.mail : null
@@ -262,8 +281,8 @@ face "cdm-review" {
         let exactProj = exactOk ? (kind == "gate" ? {id: e.out.id, pack: e.out.pack, status: e.out.status, preview_gfm: e.out.preview_gfm, tool_name: e.out.tool_name, submitted_at: e.out.submitted_at, input: receiptGate ? e.out.input : null} : {id: e.out.id, pack: e.out.pack, status: e.out.status, header: e.out.header, question: e.out.question, options: (e.out.options ?? []).map(o => {label: o.label, description: o.description}), multi: e.out.multi, kind: e.out.kind, created_at: e.out.created_at}) : prevEntry.exact
         let reviewProj = kind == "gate" && reviewOk ? {review_state: r.out.review_state, review_error: r.out.review_error, mail: mailProj} : prevEntry.review
         let stateProj = stateOk ? {revision: o.out.revision, draft: o.out.draft, parked: o.out.parked} : prevEntry.state
-        let receiptProj = !receiptGate ? null : c != null && c.ok && c.out.gate_id == id ? c.out.review_context : c != null && c.code == 404 ? null : prevEntry.receipt
-        let receiptErr = !receiptGate ? null : c != null && c.ok && c.out.gate_id == id ? null : c != null && c.code == 404 ? "no_review_snapshot" : prevEntry.receiptError
+        let receiptProj = !receiptGate ? null : receiptBound && c.ok && c.out.gate_id == id ? c.out.review_context : receiptBound && c.code == 404 ? null : prevEntry.receipt
+        let receiptErr = !receiptGate ? null : receiptBound && c.ok && c.out.gate_id == id ? null : receiptBound && c.code == 404 ? "no_review_snapshot" : prevEntry.receiptError
         let complete = prevEntry.loaded == true || (exactOk && stateOk && reviewOk && receiptOk)
         details = ([merge(prevEntry, {exact: exactProj, review: reviewProj, receipt: receiptProj, receiptError: receiptErr, state: stateProj, loaded: complete})] + details.filter(d => d.key != key)).take(6)
       }
@@ -762,9 +781,9 @@ face "cdm-review" {
   component QueueStatus() {
     Column {
       gap: 2
-      if q == null && cachedQueue == null { Text { text: "Loading queue…"; color: muted } }
-      if q != null && !q.ok { Text { text: cachedQueue == null ? "Queue unavailable — not empty." : "Offline/stale copy — actions paused."; color: red } }
-      if q != null && q.ok && !queueValid { Text { text: "Waiting for a queue response from the verified device grant…"; color: yellow } }
+      if currentQueueReply == null && cachedQueue == null { Text { text: "Loading queue…"; color: muted } }
+      if currentQueueReply != null && !currentQueueReply.ok { Text { text: cachedQueue == null ? "Queue unavailable — not empty." : "Offline/stale copy — actions paused."; color: red } }
+      if currentQueueReply != null && currentQueueReply.ok && !queueValid { Text { text: "Waiting for a queue response from the verified device grant…"; color: yellow } }
       if queueValid && !q.out.complete { Text { text: "Partial queue: ${join(q.out.unavailable_packs, ", ")} unavailable. Counts are lower bounds — not done."; color: yellow } }
       if cachedQueue != null && cachedQueue.complete == false && !(queueValid && q.out.complete) { Text { text: "The cached copy was partial; its counts are lower bounds."; color: yellow } }
       if queue != null && queue.next_cursor != null { Text { text: "This native page is bounded; ${queue.total} known reviews. More pages remain in the full app."; color: muted } }
@@ -892,8 +911,8 @@ face "cdm-review" {
       let totals = payload.totals
       let updateId = updating ? (input.guid ?? payload.receipt_guid) : null
       let omitted = updating ? "unchanged (keeps the draft's value)" : "not provided"
-      if input == null || receipt == null {
-        Text { text: input == null ? "Canonical input unavailable. Native approval is disabled; use the full app." : "No saved receipt comparison text (legacy request). Resubmit or review it in the full app; native approval is disabled here."; color: yellow }
+      if len(keys(payload)) == 0 || receipt == null || len(keys(receipt)) == 0 {
+        Text { text: len(keys(payload)) == 0 ? "Canonical payload unavailable or empty. Native approval is disabled; use the full app." : "No saved receipt comparison text (legacy request). Resubmit or review it in the full app; native approval is disabled here."; color: yellow }
       } else {
         Text { text: updating ? "Proposed receipt draft edit" : "Proposed new receipt draft"; style: title; color: accent }
         if input.base != null { ReceiptField { label: "Base"; value: "${input.base}" } }
@@ -1050,7 +1069,7 @@ face "cdm-review" {
         }
         Text { text: queue == null ? "Count unknown" : "${queue.total} reviews · ${queue.problem_count} problems · ${activityCount + retiredCount} requests"; color: muted }
         QueueStatus { }
-        if q != null && q.code == 401 {
+        if currentQueueReply != null && currentQueueReply.code == 401 {
           Text { text: "Device authorization expired or was revoked. Re-pairing preserves same-account drafts and pending requests; a different verified account stays isolated."; color: yellow }
           Button {
             text: pairBusy ? "Finishing the previous check…" : "Re-pair / verify account"

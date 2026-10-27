@@ -16,9 +16,10 @@ let api = "https://ai.cdm.space"
 Changing that trusted deployment origin deliberately invalidates OWL's origin-bound encrypted
 secret and requires pairing again. Never paste tokens or cookies into either artifact.
 
-Stock `owl.jar check` and the store reviewer pass for both artifacts. The same isolated
+Stock `owl.jar check` and the store reviewer pass for both artifacts. The same isolated 28-case
 stock-`WidgetInstance`/Compose runtime fixture runs this face with a local fake HTTP server: pairing
-poll semantics, exact detail loading, repeated equal action replies, optimistic/restored slots, CAS
-and receipt rendering. No on-device or emulator rendering was performed, so no preview is included;
+poll semantics, bound exact detail loading, repeated equal action replies, optimistic/restored
+slots, CAS, late-response isolation, and receipt rendering. No on-device or emulator rendering was
+performed, so no preview is included;
 compilation is not runtime acceptance. No installation, production request/decision,
 notification/default change, or launcher modification was made.
