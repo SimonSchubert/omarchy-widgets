@@ -69,7 +69,7 @@ face "cdm-review" {
 
   source e = http(token == null || authPending || current == null ? null : current.key.kind == "gate" ? "${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}?native_generation=${int(authGeneration)}" : "${api}/api/swarms/${enc(current.key.pack)}/asks/${enc(current.key.id)}?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
   source r = http(token == null || authPending || current == null || current.key.kind != "gate" ? null : "${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}/review?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source c = http(token == null || authPending || current == null || current.key.kind != "gate" || (current.tool_name != "onec_receipt_create" && current.tool_name != "onec_receipt_update" && current.tool_name != "onec_receipt_update_edited") ? null : "${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}/receipt?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
+  source c = http(token == null || authPending || current == null || current.key.kind != "gate" || !startsWith(current.tool_name ?? "", "onec_receipt_") ? null : "${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}/receipt?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
   source o = http(token == null || authPending || current == null ? null : "${api}/api/swarms/${enc(current.key.pack)}/operator-state/${enc(current.key.kind)}/${enc(current.key.id)}?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
 
   let blank = {text: "", picks: [], reason: "", postmortem: false, mode: "normal"}
@@ -96,7 +96,7 @@ face "cdm-review" {
   let serverState = (entry ?? {}).state
   let mail = (review ?? {}).mail
   let isMail = exact != null && exact.tool_name == "mail_send_draft"
-  let isReceipt = current != null && current.key.kind == "gate" && exact != null && (exact.tool_name == "onec_receipt_create" || exact.tool_name == "onec_receipt_update" || exact.tool_name == "onec_receipt_update_edited")
+  let isReceipt = current != null && current.key.kind == "gate" && exact != null && startsWith(exact.tool_name ?? "", "onec_receipt_")
   let htmlOnly = isMail && mail != null && trim(mail.body_plain ?? "") == ""
   let localDraft = get(drafts, currentId, null)
   let draft = localDraft != null ? merge(blank, localDraft) : serverState != null && serverState.draft != null ? merge(blank, serverState.draft) : blank
@@ -252,7 +252,7 @@ face "cdm-review" {
       let stateOk = o != null && o.ok && o.out.kind == kind && o.out.item_id == id
       let reviewOk = kind == "ask" || (r != null && r.ok && r.out.gate_id == id)
       let tool = exactOk ? e.out.tool_name : prev != null && prev.exact != null ? prev.exact.tool_name : current.tool_name
-      let receiptGate = kind == "gate" && (tool == "onec_receipt_create" || tool == "onec_receipt_update" || tool == "onec_receipt_update_edited")
+      let receiptGate = kind == "gate" && startsWith(tool ?? "", "onec_receipt_")
       let receiptOk = !receiptGate || (c != null && (c.ok && c.out.gate_id == id || c.code == 404))
       if exactOk || stateOk || (kind == "gate" && reviewOk) || (receiptGate && c != null) {
         let prevEntry = prev ?? {key: key, exact: null, review: null, receipt: null, receiptError: null, state: null, loaded: false}
