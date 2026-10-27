@@ -895,7 +895,7 @@ widget "cdm-review" {
       let updateId = updating ? (input.guid ?? payload.receipt_guid) : null
       let omitted = updating ? "unchanged (keeps the draft's value)" : "not provided"
       if input == null || receipt == null {
-        Text { text: input == null ? "Canonical input unavailable. Native approval is disabled; use the full app." : "Receipt comparison unavailable (no stored snapshot). Native approval is disabled; open the full app."; color: yellow }
+        Text { text: input == null ? "Canonical input unavailable. Native approval is disabled; use the full app." : "No saved receipt comparison text (legacy request). Resubmit or review it in the full app; native approval is disabled here."; color: yellow }
       } else {
         Text { text: updating ? "Proposed receipt draft edit" : "Proposed new receipt draft"; style: title; color: accent }
         if input.base != null { ReceiptField { label: "Base"; value: "${input.base}" } }

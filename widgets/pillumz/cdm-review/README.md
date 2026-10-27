@@ -39,9 +39,12 @@ paused.
   subject/recipients, question/options, drafts and parking. Receipt gates additionally present
   readable supplier/organization/warehouse/date/total fields and goods/services cards using the
   canonical input and stored `/receipt` reference names; unresolved IDs are explicit, and raw
-  JSON is only an optional Copy action. A missing legacy snapshot disables native decisions and
-  requires the full app. Mail HTML, inline images and attachment bytes are not cached. At most
-  six plaintext detail presentations are kept locally; durable per-item drafts are not evicted.
+  JSON is only an optional Copy action. Native receipt approval requires both the canonical
+  payload and the saved receipt comparison text: a legacy request without that text is disabled
+  here and must be resubmitted/reviewed in the full app. Missing or failing source attachment
+  bytes are shown as context but never block native approval. Mail HTML, inline images and
+  attachment bytes are not cached. At most six plaintext detail presentations are kept locally;
+  durable per-item drafts are not evicted.
 - Approve/reject/answer/skip advance immediately. Four fixed dispatch slots retain exact item and
   input identities for late errors. A full pool visibly pauses new actions. After process restore,
   an unknown request is **check only** and is never resent automatically. Server
