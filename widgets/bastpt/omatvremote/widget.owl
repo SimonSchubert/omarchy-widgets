@@ -24,7 +24,7 @@ widget "omatv remote" {
   // reaches it without stretching. The layout switch picks how much remote shows at all: simple
   // is the pad over a row of back, home and mute and two rows of transport and volume keys; full
   // is everything.
-  meta { owl: 11; description: "A remote for an Android TV or Google TV box over the TV's own remote-control service: pair once, then drive it from the tile"; version: "1.0"; license: "Apache-2.0"; category: "media" }
+  meta { owl: 11; description: "A remote for an Android TV or Google TV box over the TV's own remote-control service: pair once, then drive it from the tile"; version: "1.1"; license: "Apache-2.0"; category: "media" }
 
   size: 6x3
   minSize: 4x3
