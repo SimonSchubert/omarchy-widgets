@@ -78,9 +78,6 @@ face "cdm-review" {
   let blank = {text: "", picks: [], reason: "", postmortem: false, mode: "normal"}
   let meBinding = me != null && me.out != null ? me.out.phone_binding : null
   let meBound = me != null && meBinding != null && meBinding.generation == generationLabel && meBinding.account != null && meBinding.device_id != null && (authPending || (meBinding.account == account && meBinding.device_id == deviceId)) && (!me.ok || (me.out.user != null && me.out.device != null && me.out.user.id == meBinding.account && me.out.device.id == meBinding.device_id))
-  let queueBinding = q != null && q.out != null ? q.out.phone_binding : null
-  let queueBound = q != null && queueBinding != null && queueBinding.generation == generationLabel && queueBinding.account == account && queueBinding.device_id == deviceId
-  let currentQueueReply = queueBound ? q : null
   let queueValid = q != null && q.ok && q.out != null && account != null && q.out.phone_binding != null && q.out.phone_binding.generation == generationLabel && q.out.phone_binding.account == account && q.out.phone_binding.device_id == deviceId && q.out.account == account && q.out.device_id == deviceId
   let cachedQueue = lastQueue != null && lastQueue.account == account ? lastQueue : null
   let queue = queueValid ? q.out : cachedQueue
@@ -781,9 +778,8 @@ face "cdm-review" {
   component QueueStatus() {
     Column {
       gap: 2
-      if currentQueueReply == null && cachedQueue == null { Text { text: "Loading queue…"; color: muted } }
-      if currentQueueReply != null && !currentQueueReply.ok { Text { text: cachedQueue == null ? "Queue unavailable — not empty." : "Offline/stale copy — actions paused."; color: red } }
-      if currentQueueReply != null && currentQueueReply.ok && !queueValid { Text { text: "Waiting for a queue response from the verified device grant…"; color: yellow } }
+      if q == null && cachedQueue == null { Text { text: "Loading queue…"; color: muted } }
+      if q != null && !queueValid { Text { text: cachedQueue == null ? "Fresh queue unavailable — not empty. Re-pair or verify to recover." : "Offline/stale copy — actions paused."; color: red } }
       if queueValid && !q.out.complete { Text { text: "Partial queue: ${join(q.out.unavailable_packs, ", ")} unavailable. Counts are lower bounds — not done."; color: yellow } }
       if cachedQueue != null && cachedQueue.complete == false && !(queueValid && q.out.complete) { Text { text: "The cached copy was partial; its counts are lower bounds."; color: yellow } }
       if queue != null && queue.next_cursor != null { Text { text: "This native page is bounded; ${queue.total} known reviews. More pages remain in the full app."; color: muted } }
@@ -1069,8 +1065,8 @@ face "cdm-review" {
         }
         Text { text: queue == null ? "Count unknown" : "${queue.total} reviews · ${queue.problem_count} problems · ${activityCount + retiredCount} requests"; color: muted }
         QueueStatus { }
-        if currentQueueReply != null && currentQueueReply.code == 401 {
-          Text { text: "Device authorization expired or was revoked. Re-pairing preserves same-account drafts and pending requests; a different verified account stays isolated."; color: yellow }
+        if q != null && !queueValid && !authPending {
+          Text { text: "A fresh queue is unavailable. Re-pair or verify the account if this persists; same-account drafts and pending requests are preserved, and a different verified account stays isolated."; color: yellow }
           Button {
             text: pairBusy ? "Finishing the previous check…" : "Re-pair / verify account"
             color: pairBusy ? muted : accent

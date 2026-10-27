@@ -27,9 +27,12 @@ drafts, reading state and pending attempts; a different verified account hides o
 and quarantines old dispatch slots without submitting or deleting their history. `/me`, queue,
 and exact-detail JSON responses must carry the current request generation and verified
 account/device binding; detail responses must also name the complete current `{kind,pack,id}`.
-This applies before successful data or JSON errors can affect cache, state, or UI. Unbound, late,
-wrong-account/device, or wrong-item replies are ignored rather than relabelled. Ordinary network
-loss or credential expiry leaves cached reading and local editing intact while writes are paused.
+Response payloads and error details are applied only after those checks; unbound, late,
+wrong-account/device, or wrong-item content is never relabelled. Availability is reported
+independently: a completed queue attempt that is not fresh leaves cached reading visibly stale and
+offers explicit **Re-pair / verify account** recovery without interpreting an unbound 401 as proof
+of current-auth state or automatically clearing the credential/drafts. Ordinary network loss or
+credential expiry leaves cached reading and local editing intact while writes are paused.
 
 ## Review behavior
 
@@ -66,7 +69,7 @@ loss or credential expiry leaves cached reading and local editing intact while w
 
 ## Verification
 
-`owl check` and the store `owl review` pass for both artifacts. An isolated 28-case JVM fixture
+`owl check` and the store `owl review` pass for both artifacts. An isolated 30-case JVM fixture
 runs this exact file on the stock `WidgetInstance`/Compose trigger and source scheduler at
 Omalauncher 57fe9af, with a local fake HTTP server only. It covers the first pairing reply,
 repeated identical pending polls, first and identical detail reads, same-item reopen, repeated
@@ -74,8 +77,9 @@ equal action replies, optimistic failure and skip/save CAS, the live-slot clear 
 restored check-only slots with no replay, HTML-only mail, RNPT vs ДТ, incomplete problem lists,
 full-app local-draft wording, the auth-pending recovery path, and the face artifact. Late-response
 cases cover same-account re-pair, different-account read/write contamination, target switch and
-reopen across exact/review/receipt/operator-state reads, old `/me` and queue auth failures, and
-preservation of legitimate caches/drafts. Generic receipt actions load and approve without a
+reopen across exact/review/receipt/operator-state reads, old `/me` and queue auth failures, unknown
+credentials and transport failure with visible stale recovery, and preservation of legitimate
+caches/drafts. Generic receipt actions load and approve without a
 `/receipt` read; named snapshot writers still require saved comparison text, and an empty canonical
 payload remains disabled even when saved context exists.
 
