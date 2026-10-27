@@ -779,7 +779,7 @@ face "cdm-review" {
     Column {
       gap: 2
       if q == null && cachedQueue == null { Text { text: "Loading queue…"; color: muted } }
-      if q != null && !queueValid { Text { text: cachedQueue == null ? "Fresh queue unavailable — not empty. Re-pair or verify to recover." : "Offline/stale copy — actions paused."; color: red } }
+      if !queueValid && (q != null || cachedQueue != null) { Text { text: cachedQueue == null ? "Fresh queue unavailable — not empty. Re-pair or verify to recover." : "Offline/stale copy — actions paused."; color: red } }
       if queueValid && !q.out.complete { Text { text: "Partial queue: ${join(q.out.unavailable_packs, ", ")} unavailable. Counts are lower bounds — not done."; color: yellow } }
       if cachedQueue != null && cachedQueue.complete == false && !(queueValid && q.out.complete) { Text { text: "The cached copy was partial; its counts are lower bounds."; color: yellow } }
       if queue != null && queue.next_cursor != null { Text { text: "This native page is bounded; ${queue.total} known reviews. More pages remain in the full app."; color: muted } }

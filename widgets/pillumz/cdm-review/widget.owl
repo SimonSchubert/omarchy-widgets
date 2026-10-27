@@ -781,7 +781,7 @@ widget "cdm-review" {
     Column {
       gap: 2
       if q == null && cachedQueue == null { Text { text: "Loading queue…"; color: muted } }
-      if q != null && !queueValid { Text { text: cachedQueue == null ? "Fresh queue unavailable — not empty. Re-pair or verify to recover." : "Offline/stale copy — actions paused."; color: red } }
+      if !queueValid && (q != null || cachedQueue != null) { Text { text: cachedQueue == null ? "Fresh queue unavailable — not empty. Re-pair or verify to recover." : "Offline/stale copy — actions paused."; color: red } }
       if queueValid && !q.out.complete { Text { text: "Partial queue: ${join(q.out.unavailable_packs, ", ")} unavailable. Counts are lower bounds — not done."; color: yellow } }
       if cachedQueue != null && cachedQueue.complete == false && !(queueValid && q.out.complete) { Text { text: "The cached copy was partial; its counts are lower bounds."; color: yellow } }
       if queue != null && queue.next_cursor != null { Text { text: "This native page is bounded; ${queue.total} known reviews. More pages remain in the full app."; color: muted } }
@@ -1380,7 +1380,7 @@ widget "cdm-review" {
       if authNotice != "" { Text { text: authNotice; maxLines: 2; color: yellow } }
     } else {
       Text { text: queue == null ? "Counts unknown — not empty" : "${queue.total} ready · ${queue.problem_count} problems"; style: title }
-      if q != null && !queueValid { Text { text: "Offline/stale — actions pause inside"; color: red } }
+      if !queueValid && (q != null || cachedQueue != null) { Text { text: "Offline/stale — actions pause inside"; color: red } }
       if queueValid && !q.out.complete { Text { text: "Partial: ${join(q.out.unavailable_packs, ", ")} unavailable"; color: yellow } }
       if cachedQueue != null && !queueValid && cachedQueue.complete == false { Text { text: "Cached copy partial — counts are lower bounds"; color: yellow } }
       if activityCount + retiredCount > 0 { Text { text: "${activityCount + retiredCount} requests to confirm/check"; color: yellow } }
