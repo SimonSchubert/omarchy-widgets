@@ -39,13 +39,20 @@ is installed with pip, and each file the installer writes is mode 600.
 Keys go through a small daemon that keeps one connection open, so a tap costs a write
 to a pipe rather than a TLS handshake. It starts itself when the widget first asks for
 the TV's state, or when a tap finds it gone, and reconnects with backoff while the TV is
-out of reach. A tap that arrives before the TV has been reached is held for a few
-seconds and sent as soon as it has, or given up on and reported rather than lost
-quietly. Once the tile stops asking — its page put away, or the phone asleep — the
+out of reach. Once the tile stops asking — its page put away, or the phone asleep — the
 daemon lets go of the TV and ends, so it holds no connection nobody is using; pairing a
 second TV ends it the same way, whose keys must not keep going to the first.
 `tvremote.py stop` ends it by hand, and every command leaves one line in
 `~/.local/share/omatvremote/log`, kept under 32 KB.
+
+A TV switched off with its own remote is the hard case: it stops answering but leaves
+the connection behind, so a key written to it goes nowhere and nothing on the phone says
+so. The service on the TV sends a keep-alive every few seconds and the client drops a
+connection that has gone quiet for 16 of them, which is what tells the daemon the TV is
+gone; a connect that is accepted but never opened as a remote session gives up after 10
+seconds rather than waiting forever. From then on the widget says so, and a tap that
+arrives while the TV is missed is held for 20 seconds in case the connection comes back,
+then reported as never answered rather than counted as sent.
 
 While the TV is asleep or out of reach the keys dim and answer nothing, since a TV that
 isn't listening would swallow every one. Only power stays lit, and the line at the
@@ -72,6 +79,7 @@ The `requires` packages are what the protocol library imports and the helpers ca
 
 `androidtvremote2` is vendored inside the widget file so that the whole thing ships as
 one `.owl`. It is Copyright Joseph Wynn, licensed under the Apache License 2.0
-(<https://github.com/JosephWynn/python-androidtvremote2>); the only change is that its
-`"""` docstrings are written `'''`, which the widget language cannot hold inside a
-command.
+(<https://github.com/JosephWynn/python-androidtvremote2>). Two changes are made to it:
+its `"""` docstrings are written `'''`, which the widget language cannot hold inside a
+command, and `Remote.async_connect` gives up on a TV that takes the connection but never
+opens a remote session over it, where upstream waits on it forever.

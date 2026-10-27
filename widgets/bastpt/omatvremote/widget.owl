@@ -54,7 +54,7 @@ widget "omatv remote" {
 H=$HOME/.local/share/omatvremote
 mkdir -p "$H"
 touch "$H/beat"  # the daemon watches this and lets go of the TV once the tile stops asking
-[ "$(cat "$H/tag" 2>/dev/null)" = "cd085cb454d9" ] || { echo need; exit; }
+[ "$(cat "$H/tag" 2>/dev/null)" = "f52ca6c94368" ] || { echo need; exit; }
 now=$(date +%s)
 pf=$H/pairing
 if [ -f "$pf" ]; then
@@ -67,6 +67,7 @@ fi
 if [ ! -f "$H/host" ]; then echo nopair; exit; fi
 s=$(head -1 "$H/state" 2>/dev/null)
 case "$s" in unpaired*) echo "$s"; exit;; esac
+if [ -n "$s" ] && [ $(( now - $(stat -c %Y "$H/state") )) -gt 20 ]; then s=""; fi  # an hour-old answer is not the TV's state now
 pgrep -f "[t]vremote.py daemon" >/dev/null || (setsid python3 "$H/tvremote.py" daemon >/dev/null 2>&1 &)
 echo "${s:-waiting}"
   """) every 5s optional
@@ -308,14 +309,28 @@ async def do_daemon(host):
     CONNECT = 6.0  # how long to wait for the TV to answer before calling it out of reach
     open(BEAT, "a").close()  # this run's own touch, whatever an older one left behind
 
+    answered = [True]  # whether the connection we hold still reaches a TV that listens
+
     def status():
-        if tv.is_on is None:
+        if not answered[0] or tv.is_on is None:
             write_state("asleep|")
         else:
             write_state("%s|%s" % ("on" if tv.is_on else "off", tv.current_app or ""))
 
+    def availability(live):
+        '''The library says False the moment the connection is lost, and True again once it has made
+        a new one. A TV switched off with its own remote is the case that needs this: the socket it
+        leaves behind stays open, so a key written to it goes nowhere and nothing else would say so.'''
+        answered[0] = bool(live)
+        if live:
+            drain(True)
+        else:
+            note("the TV stopped answering")
+        status()
+
     tv.add_is_on_updated_callback(lambda _v: status())
     tv.add_current_app_updated_callback(lambda _v: status())
+    tv.add_is_available_updated_callback(availability)
 
     fd = os.open(CTL, os.O_RDWR | os.O_NONBLOCK)
     pending = []  # what was tapped before the TV was reachable
@@ -363,11 +378,12 @@ async def do_daemon(host):
             return
         for line in data.decode(errors="replace").splitlines():
             cmd, _, arg = line.partition(" ")
-            if started:
+            if started and answered[0]:
                 send(cmd, arg)
             else:
-                # The tap that starts this daemon lands before the TV has been reached. Hold it
-                # and send it as soon as the connection is up, rather than lose the key.
+                # The tap that starts this daemon lands before the TV has been reached, and one
+                # after the TV stopped answering lands behind the same wall. Hold both and send
+                # them as soon as the connection is live, rather than lose the key.
                 pending.append((time.time(), cmd, arg))
 
     loop.add_reader(fd, on_ctl)
@@ -424,6 +440,8 @@ async def do_daemon(host):
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 15.0)  # keep trying often enough that a tap isn't held long
             else:
+                if not answered[0]:
+                    drain()  # a tap left behind by a dead connection is reported, not kept
                 if tv.is_on is None:
                     started = False  # keep_reconnecting is back off; let the loop retry too
                 await asyncio.sleep(2)
@@ -438,7 +456,9 @@ async def do_send(host, work):
     tv = remote(host)
     try:
         await tv.async_connect()
-    except CannotConnect:
+    except (CannotConnect, ConnectionClosed):
+        # ConnectionClosed is a TV that took the connection and then never opened a remote
+        # session for us, which from here is the same silence as one that does not answer.
         print("no answer from %s — it is off or asleep" % host)
         return 1
     except InvalidAuth:
@@ -580,7 +600,7 @@ from .certificate_generator import generate_selfsigned_cert
 from .const import LOGGER
 from .exceptions import CannotConnect, ConnectionClosed, InvalidAuth
 from .pairing import PairingProtocol
-from .remote import VOICE_SESSION_TIMEOUT, RemoteProtocol
+from .remote import REMOTE_START_TIMEOUT, VOICE_SESSION_TIMEOUT, RemoteProtocol
 from .remotemessage_pb2 import RemoteDirection
 from .voice_stream import VoiceStream
 
@@ -836,7 +856,16 @@ class AndroidTVRemote:
                 raise InvalidAuth("Need to pair") from exc
             raise CannotConnect(f"Couldn't connect to {self.host}:{self._api_port}") from exc
 
-        await asyncio.wait((on_con_lost, on_remote_started), return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait(
+            (on_con_lost, on_remote_started), return_when=asyncio.FIRST_COMPLETED, timeout=REMOTE_START_TIMEOUT
+        )
+        if not done:
+            # A TV switched off with its own remote still answers on the network but not in its
+            # remote service, so it takes the connection and then says nothing at all. Without a
+            # bound this await never returns, and whoever is waiting on it — including a widget
+            # reporting the TV as awake and every key as sent — would never learn the difference.
+            self._transport.close()
+            raise ConnectionClosed(f"{self.host}:{self._api_port} took the connection but never opened a remote session")
         if on_con_lost.done():
             con_lost_exc = on_con_lost.result()
             LOGGER.debug(
@@ -1518,6 +1547,11 @@ ERROR_SUGGESTION_MSG = (
 KEYCODE_PREFIX = "KEYCODE_"
 TEXT_PREFIX = "text:"
 
+# Timeout in seconds for a TV to open a remote session after taking the connection. A TV switched
+# off with its own remote keeps answering on the network while its remote service sleeps, so a
+# connect to it can sit forever without this; see Remote.async_connect.
+REMOTE_START_TIMEOUT = 10.0
+
 # Timeout in seconds to wait for `remote_voice_begin` after sending KEYCODE_SEARCH.
 VOICE_SESSION_TIMEOUT = 2.0
 # Voice data chunk size in bytes for the `remote_voice_payload` message.
@@ -2051,7 +2085,7 @@ with wave.open(sys.argv[1], "wb") as out:
     out.setframerate(rate)
     out.writeframes(bytes(frames))
 OMATV_TICK_PY
-printf cd085cb454d9 > "$H/tag"
+printf f52ca6c94368 > "$H/tag"
 python3 "$H/tvremote.py" stop >/dev/null 2>&1
     """)
   }
