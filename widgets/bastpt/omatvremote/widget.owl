@@ -54,7 +54,7 @@ widget "omatv remote" {
 H=$HOME/.local/share/omatvremote
 mkdir -p "$H"
 touch "$H/beat"  # the daemon watches this and lets go of the TV once the tile stops asking
-[ "$(cat "$H/tag" 2>/dev/null)" = "aeed61f12c1c" ] || { echo need; exit; }
+[ "$(cat "$H/tag" 2>/dev/null)" = "cd085cb454d9" ] || { echo need; exit; }
 now=$(date +%s)
 pf=$H/pairing
 if [ -f "$pf" ]; then
@@ -396,10 +396,10 @@ async def do_daemon(host):
     try:
         while True:
             if idle():
-                note("the tile stopped asking; letting go of the TV")
+                note("disconnected — left unused for a while")
                 return 0
             if moved():
-                note("the address changed; the next one wants a fresh daemon")
+                note("disconnected — a different TV was paired")
                 return 0
             if not started:
                 try:
@@ -2051,7 +2051,7 @@ with wave.open(sys.argv[1], "wb") as out:
     out.setframerate(rate)
     out.writeframes(bytes(frames))
 OMATV_TICK_PY
-printf aeed61f12c1c > "$H/tag"
+printf cd085cb454d9 > "$H/tag"
 python3 "$H/tvremote.py" stop >/dev/null 2>&1
     """)
   }
