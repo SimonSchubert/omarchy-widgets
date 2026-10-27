@@ -13,6 +13,9 @@ Tap **Pair this device**. The artifact starts the existing `/auth/native/start` 
 its public matching code, and opens the returned normal-browser consent URL. Confirm that code for
 the intended CDM operator account in the browser. Polling returns an opaque `dt_` credential into
 OWL's encrypted, origin-bound `secret` state. Never paste a token or browser cookie into the file.
+The challenge id and poll secret survive a process restart. After a restart the face shows the
+pending public code and a **Resume waiting** action; polling starts only when you resume it, so a
+lost app does not silently poll in the background. Cancelling clears the challenge and its secrets.
 
 The deployment origin is the single `let api = "https://ai.cdm.space"` declaration near the top of
 `widget.owl`. Edit it only for another trusted AI Ops deployment. OWL deliberately invalidates
@@ -56,11 +59,17 @@ paused.
 
 ## Verification
 
-`java -jar /home/explify/Projects/omalauncher/owl/build/cli/owl.jar check widget.owl` and the store
-`owl review` pass. A temporary stock-`Host` fixture also exercised the compiled handlers for
-optimistic slots, restored no-resend, pairing polls, ask/skip writes, CAS conflicts, same-account
-re-pair recovery, different-account stale-response isolation and readable receipt rendering
-without network or a device. No device install, production request, decision, send,
-launcher/default change, rendering, or on-device runtime verification was performed. On-device acceptance must cover pairing,
-full-length mail, concurrent optimistic actions, restored requests, CAS conflicts, offline state,
-attachment login return, accessibility, and weak connectivity.
+`owl check` and the store `owl review` pass for both artifacts. An isolated JVM fixture runs this
+exact file on the stock `WidgetInstance`/Compose trigger and source scheduler at Omalauncher
+57fe9af, with a local fake HTTP server only. It covers the first pairing reply, repeated identical
+pending polls, first and identical detail reads, same-item reopen, repeated equal action replies,
+optimistic failure and skip/save CAS, the live-slot clear prohibition, account/re-pair stale replies,
+restored check-only slots with no replay, HTML-only mail, RNPT vs ДТ, incomplete problem lists,
+full-app local-draft wording, the auth-pending recovery path, and the face artifact.
+
+No production request, decision, send, install, notification/default/launcher change, device or
+emulator rendering was performed. The JVM harness has no Recomposer frame loop, so it injects one
+frame-like snapshot to settle source/trigger observers; this is fixture scheduling, not artifact
+behavior. On-device GrapheneOS/Omalauncher acceptance must still cover pairing, full-length mail,
+touch/scroll/font scaling, screen-off notification landing, concurrent optimistic actions, restored
+requests, CAS conflicts, offline state, attachment browser login return, and weak connectivity.

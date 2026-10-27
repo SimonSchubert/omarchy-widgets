@@ -1,5 +1,5 @@
 widget "cdm-review" {
-  meta { owl: 12; description: "Native CDM gate and question review with bounded offline text and browser-approved pairing"; version: "1.1"; license: "MIT"; category: "productivity" }
+  meta { owl: 12; description: "Native CDM gate and question review with bounded offline text and browser-approved pairing"; version: "1.2"; license: "MIT"; category: "productivity" }
   size: 6x4
   minSize: 3x3
 
@@ -14,11 +14,17 @@ widget "cdm-review" {
   state retiredDeviceIds = [] persist
   state authGeneration = 0 persist
   state authPending = false persist
+  state verifyChecks = 0
+  state authNotice = ""
+  state pairAttempt = 0
   state pairStart = null
+  state pairStartAttempt = -1
+  state pairStartSeq = 0
   state pairPoll = null
-  state pairPollTarget = null
+  state pairPollAttempt = -1
+  state pairPollSeq = 0
   state pairRequest = null persist
-  state pairing = false persist
+  state pairing = false
   state pairStarting = false
   state pairPolling = false
   state pairStatus = ""
@@ -26,98 +32,57 @@ widget "cdm-review" {
   state lastQueue = null persist
   state hidden = [] persist
   state drafts = {} persist
+  state draftBases = {} persist
   // At most six plaintext presentation snapshots. HTML/images/bytes are never copied here.
   state details = [] persist
   state conflicts = {} persist
   state itemErrors = {} persist
-  state loadErrors = {} persist
   state current = null persist
-  state openRequest = null
-  state currentDetailSlot = -1
-  state detailPoolFull = false
-  state startupOpen = true
   state tab = "review"
-  state dispatch = -1
 
+  // Each action slot keeps one frozen request until its response (or the 30 s post timeout) is
+  // consumed. A unique sequence value makes the completion observable even when two responses
+  // are structurally equal, and even if Compose coalesces a reset with its completion.
+  state seq0 = 0
   state res0 = null
   state tgt0 = null persist
   state live0 = false
 
+  state seq1 = 0
   state res1 = null
   state tgt1 = null persist
   state live1 = false
 
+  state seq2 = 0
   state res2 = null
   state tgt2 = null persist
   state live2 = false
 
+  state seq3 = 0
   state res3 = null
   state tgt3 = null persist
   state live3 = false
 
-  state d0 = null
-  state d0active = false
-  state d0exactDone = false
-  state d0reviewDone = false
-  state d0receiptDone = false
-  state d0stateDone = false
-
-  state d1 = null
-  state d1active = false
-  state d1exactDone = false
-  state d1reviewDone = false
-  state d1receiptDone = false
-  state d1stateDone = false
-
-  state d2 = null
-  state d2active = false
-  state d2exactDone = false
-  state d2reviewDone = false
-  state d2receiptDone = false
-  state d2stateDone = false
-
-  state d3 = null
-  state d3active = false
-  state d3exactDone = false
-  state d3reviewDone = false
-  state d3receiptDone = false
-  state d3stateDone = false
-
-  // Secret headers are not source inputs. Generation in the URL forces a new read after re-pair;
-  // /native/me's previously unseen device id distinguishes the new grant from an old in-flight reply.
+  // Generation in every URL forces a new read after re-pair; binding checks below reject a reply
+  // for another account, device or item.
   source me = http(token == null ? null : "${api}/api/native/me?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
   source q = http(token == null || account == null || authPending ? null : "${api}/api/native/review-queue?limit=50&native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 30s json status
 
-  source e0 = http(token == null || !d0active ? null : d0.key.kind == "gate" ? "${api}/api/swarms/${enc(d0.key.pack)}/gates/${enc(d0.key.id)}" : "${api}/api/swarms/${enc(d0.key.pack)}/asks/${enc(d0.key.id)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source r0 = http(token == null || !d0active || d0.key.kind != "gate" ? null : "${api}/api/swarms/${enc(d0.key.pack)}/gates/${enc(d0.key.id)}/review", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source c0 = http(token == null || !d0active || d0.key.kind != "gate" || (d0.tool_name != "onec_receipt_create" && d0.tool_name != "onec_receipt_update" && d0.tool_name != "onec_receipt_update_edited") ? null : "${api}/api/swarms/${enc(d0.key.pack)}/gates/${enc(d0.key.id)}/receipt", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source o0 = http(token == null || !d0active ? null : "${api}/api/swarms/${enc(d0.key.pack)}/operator-state/${enc(d0.key.kind)}/${enc(d0.key.id)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-
-  source e1 = http(token == null || !d1active ? null : d1.key.kind == "gate" ? "${api}/api/swarms/${enc(d1.key.pack)}/gates/${enc(d1.key.id)}" : "${api}/api/swarms/${enc(d1.key.pack)}/asks/${enc(d1.key.id)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source r1 = http(token == null || !d1active || d1.key.kind != "gate" ? null : "${api}/api/swarms/${enc(d1.key.pack)}/gates/${enc(d1.key.id)}/review", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source c1 = http(token == null || !d1active || d1.key.kind != "gate" || (d1.tool_name != "onec_receipt_create" && d1.tool_name != "onec_receipt_update" && d1.tool_name != "onec_receipt_update_edited") ? null : "${api}/api/swarms/${enc(d1.key.pack)}/gates/${enc(d1.key.id)}/receipt", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source o1 = http(token == null || !d1active ? null : "${api}/api/swarms/${enc(d1.key.pack)}/operator-state/${enc(d1.key.kind)}/${enc(d1.key.id)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-
-  source e2 = http(token == null || !d2active ? null : d2.key.kind == "gate" ? "${api}/api/swarms/${enc(d2.key.pack)}/gates/${enc(d2.key.id)}" : "${api}/api/swarms/${enc(d2.key.pack)}/asks/${enc(d2.key.id)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source r2 = http(token == null || !d2active || d2.key.kind != "gate" ? null : "${api}/api/swarms/${enc(d2.key.pack)}/gates/${enc(d2.key.id)}/review", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source c2 = http(token == null || !d2active || d2.key.kind != "gate" || (d2.tool_name != "onec_receipt_create" && d2.tool_name != "onec_receipt_update" && d2.tool_name != "onec_receipt_update_edited") ? null : "${api}/api/swarms/${enc(d2.key.pack)}/gates/${enc(d2.key.id)}/receipt", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source o2 = http(token == null || !d2active ? null : "${api}/api/swarms/${enc(d2.key.pack)}/operator-state/${enc(d2.key.kind)}/${enc(d2.key.id)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-
-  source e3 = http(token == null || !d3active ? null : d3.key.kind == "gate" ? "${api}/api/swarms/${enc(d3.key.pack)}/gates/${enc(d3.key.id)}" : "${api}/api/swarms/${enc(d3.key.pack)}/asks/${enc(d3.key.id)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source r3 = http(token == null || !d3active || d3.key.kind != "gate" ? null : "${api}/api/swarms/${enc(d3.key.pack)}/gates/${enc(d3.key.id)}/review", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source c3 = http(token == null || !d3active || d3.key.kind != "gate" || (d3.tool_name != "onec_receipt_create" && d3.tool_name != "onec_receipt_update" && d3.tool_name != "onec_receipt_update_edited") ? null : "${api}/api/swarms/${enc(d3.key.pack)}/gates/${enc(d3.key.id)}/receipt", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
-  source o3 = http(token == null || !d3active ? null : "${api}/api/swarms/${enc(d3.key.pack)}/operator-state/${enc(d3.key.kind)}/${enc(d3.key.id)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
+  source e = http(token == null || authPending || current == null ? null : current.key.kind == "gate" ? "${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}?native_generation=${int(authGeneration)}" : "${api}/api/swarms/${enc(current.key.pack)}/asks/${enc(current.key.id)}?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
+  source r = http(token == null || authPending || current == null || current.key.kind != "gate" ? null : "${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}/review?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
+  source c = http(token == null || authPending || current == null || current.key.kind != "gate" || (current.tool_name != "onec_receipt_create" && current.tool_name != "onec_receipt_update" && current.tool_name != "onec_receipt_update_edited") ? null : "${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}/receipt?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
+  source o = http(token == null || authPending || current == null ? null : "${api}/api/swarms/${enc(current.key.pack)}/operator-state/${enc(current.key.kind)}/${enc(current.key.id)}?native_generation=${int(authGeneration)}", {Authorization: "Bearer ${token}", Accept: "application/json"}) every 15s timeout 20s json status
 
   let blank = {text: "", picks: [], reason: "", postmortem: false, mode: "normal"}
-  let queueValid = q != null && q.ok && q.out.account == account && q.out.device_id == deviceId
+  let queueValid = q != null && q.ok && account != null && q.out.account == account && q.out.device_id == deviceId
   let cachedQueue = lastQueue != null && lastQueue.account == account ? lastQueue : null
   let queue = queueValid ? q.out : cachedQueue
   let qItems = (queue ?? {}).items ?? []
+  let problems = (queue ?? {}).problems ?? []
   let visibleItems = qItems.filter(item => !hidden.any(k => k == item.key))
   let targets = [tgt0, tgt1, tgt2, tgt3]
   let results = [res0, res1, res2, res3]
   let lives = [live0, live1, live2, live3]
-  let detailActive = [d0active, d1active, d2active, d3active]
   let poolFree = targets.any(t => t == null)
   let activityCount = len(targets.filter(t => t != null && t.account == account))
   let retiredCount = len(targets.filter(t => t != null && t.account != account))
@@ -125,450 +90,525 @@ widget "cdm-review" {
   let currentIndex = current == null ? -1 : indexOf(visibleItems.map(item => toJson(item.key)), toJson(current.key))
   let nextItem = current == null ? null : currentIndex >= 0 && currentIndex + 1 < len(visibleItems) ? visibleItems[currentIndex + 1] : null
   let entry = current == null ? null : details.find(d => d.key == currentId)
+  let loaded = entry != null && entry.loaded == true
   let exact = (entry ?? {}).exact
   let review = (entry ?? {}).review
   let receipt = (entry ?? {}).receipt
   let serverState = (entry ?? {}).state
   let mail = (review ?? {}).mail
-  let isReceipt = current != null && current.key.kind == "gate" && (exact.tool_name == "onec_receipt_create" || exact.tool_name == "onec_receipt_update" || exact.tool_name == "onec_receipt_update_edited")
+  let isMail = exact != null && exact.tool_name == "mail_send_draft"
+  let isReceipt = current != null && current.key.kind == "gate" && exact != null && (exact.tool_name == "onec_receipt_create" || exact.tool_name == "onec_receipt_update" || exact.tool_name == "onec_receipt_update_edited")
+  let htmlOnly = isMail && mail != null && trim(mail.body_plain ?? "") == ""
   let localDraft = get(drafts, currentId, null)
   let draft = localDraft != null ? merge(blank, localDraft) : serverState != null && serverState.draft != null ? merge(blank, serverState.draft) : blank
+  let draftTooLong = len(draft.text) > 16000 || len(draft.reason) > 4000
+  let handoffPending = localDraft != null && (serverState == null || serverState.draft == null || merge(blank, localDraft) != merge(blank, serverState.draft))
+  let draftBase = get(draftBases, currentId, null)
+  let serverRevision = serverState == null || serverState.revision == null ? "none" : serverState.revision
+  let serverMoved = current != null && localDraft != null && draftBase != null && serverRevision != draftBase
   let options = (exact ?? {}).options ?? []
   let selected = join(draft.picks.map(i => options[i].label), ", ")
   let answerText = selected != "" && trim(draft.text) != "" ? "${selected}\n\n${trim(draft.text)}" : selected != "" ? selected : trim(draft.text)
-  let currentLoaded = current != null && entry != null && currentDetailSlot >= 0 && !detailActive[currentDetailSlot]
   let currentBusy = current != null && targets.any(t => t != null && t.account == account && t.item.key == current.key)
-  let currentAvailable = current != null && !authPending && queueValid && !contains(q.out.unavailable_packs ?? [], current.key.pack)
-  let canWrite = token != null && currentAvailable && currentLoaded && !currentBusy && get(loadErrors, currentId, null) == null
-  let gateReady = canWrite && exact.status == "pending" && review.review_state == "ready" && (mail == null || trim(mail.body_plain ?? "") != "") && (!isReceipt || (exact.input != null && receipt != null))
-  let askReady = canWrite && exact.status == "pending" && trim(exact.question ?? "") != ""
+  let currentInQueue = queueValid && current != null && qItems.any(item => item.key == current.key)
+  let currentAvailable = current != null && !authPending && queueValid && !contains(q.out.unavailable_packs ?? [], current.key.pack) && (currentInQueue || queue.next_cursor != null)
+  let canWrite = token != null && currentAvailable && loaded && !currentBusy
+  let gateReady = canWrite && exact != null && exact.status == "pending" && review != null && review.review_state == "ready" && (!isMail || (mail != null && trim(mail.body_plain ?? "") != "")) && (!isReceipt || (exact.input != null && receipt != null))
+  let askReady = canWrite && exact != null && exact.status == "pending" && trim(exact.question ?? "") != ""
   let currentError = get(itemErrors, currentId, null)
   let currentConflict = get(conflicts, currentId, null)
-  let currentLoadError = get(loadErrors, currentId, null)
   let recipients = mail == null ? "" : join((mail.to ?? []).map(a => a.name != "" ? "${a.name} <${a.address}>" : a.address), ", ")
   let cc = mail == null ? "" : join((mail.cc ?? []).map(a => a.name != "" ? "${a.name} <${a.address}>" : a.address), ", ")
   let bcc = mail == null ? "" : join((mail.bcc ?? []).map(a => a.name != "" ? "${a.name} <${a.address}>" : a.address), ", ")
-
-  on pairStart {
-    if pairStarting {
-      pairStarting = false
-      if pairing && pairStart.ok {
-        pairRequest = {request_id: pairStart.out.request_id, user_code: pairStart.out.user_code, verification_uri: pairStart.out.verification_uri, expires_in: pairStart.out.expires_in, interval: pairStart.out.interval}
-        pairToken = pairStart.out.poll_token
-        pairStatus = "Confirm the matching code in your normal browser."
-      } else {
-        pairing = false
-        pairStatus = "Could not start pairing. Check the connection and try again."
-      }
-    }
-  }
+  let verifyStalled = authPending && verifyChecks >= 3
+  let pairBusy = pairStarting || pairPolling
 
   every 5s {
-    if pairing && pairRequest != null && pairToken != null && !pairPolling {
+    if pairing && pairRequest != null && pairToken != null && !pairPolling && !pairStarting {
       pairPolling = true
-      pairPollTarget = pairRequest.request_id
+      pairPollAttempt = pairAttempt
+      pairPollSeq = pairPollSeq + 1
       pairPoll = post("${api}/auth/native/poll", {request_id: pairRequest.request_id}, {Authorization: "Bearer ${pairToken}", Accept: "application/json"})
     }
   }
 
-  on pairPoll {
-    let result = value
-    let target = pairPollTarget
-    pairPolling = false
-    pairPollTarget = null
-    // Clear the slot: another identical pending response is still a new poll completion.
-    pairPoll = null
-    if pairing && pairRequest != null && target == pairRequest.request_id {
-      if result.ok && result.out.status == "authorized" {
-        // Keep the old account's reading/drafts/attempts through verification. Only /native/me
-        // can prove whether this is the same account; writes and queue acceptance pause meanwhile.
-        authPending = true
-        authGeneration = authGeneration + 1
-        token = result.out.device_token
-        pairToken = null
-        pairRequest = null
-        pairing = false
-        pairStatus = "Verifying the new device grant…"
-      } else if result.ok && result.out.status == "pending" {
-        pairStatus = "Waiting for browser confirmation…"
-      } else if result.code == -1 || result.code == 429 || result.code >= 500 {
-        // Keep the same challenge/poll bearer: a lost authorized response replays the same grant.
-        pairStatus = "Polling unavailable; retrying this challenge while it remains valid…"
-      } else {
-        pairing = false
-        pairToken = null
-        pairStatus = "Pairing expired or was denied. Start a new challenge."
+  every 15s { if authPending { verifyChecks = verifyChecks + 1 } }
+
+  on [pairStartSeq, pairStart] first {
+    if pairStart != null {
+      let result = pairStart
+      let attempt = pairStartAttempt
+      // Clear the reply at once: it holds the public challenge and its poll token.
+      pairStart = null
+      if pairStarting {
+        pairStarting = false
+        if attempt == pairAttempt && pairing && result.ok && result.out.request_id != null && result.out.poll_token != null {
+          pairRequest = {request_id: result.out.request_id, user_code: result.out.user_code, verification_uri: result.out.verification_uri, expires_in: result.out.expires_in, interval: result.out.interval}
+          pairToken = result.out.poll_token
+          pairStatus = "Confirm the matching code in your normal browser."
+        } else if attempt == pairAttempt && pairing {
+          pairing = false
+          pairStatus = "Could not start pairing. Check the connection and try again."
+        }
+      }
+    }
+  }
+
+  on [pairPollSeq, pairPoll] first {
+    if pairPoll != null {
+      let result = pairPoll
+      let attempt = pairPollAttempt
+      // Clear the reply at once: an authorized one holds the device token.
+      pairPoll = null
+      pairPolling = false
+      if pairing && pairRequest != null && attempt == pairAttempt {
+        if result.ok && result.out.status == "authorized" && result.out.device_token != null {
+          authPending = true
+          authGeneration = authGeneration + 1
+          token = result.out.device_token
+          pairToken = null
+          pairRequest = null
+          pairing = false
+          verifyChecks = 0
+          pairStatus = "Verifying the new device grant…"
+        } else if result.ok && result.out.status == "pending" {
+          pairStatus = "Waiting for browser confirmation…"
+        } else if !result.ok && (result.code == -1 || result.code == 429 || result.code >= 500) {
+          // Keep the same challenge and poll bearer: a lost authorized reply replays the same grant
+          // while the five-minute challenge is still valid.
+          pairStatus = "Polling unavailable; retrying this challenge while it remains valid…"
+        } else {
+          pairing = false
+          pairToken = null
+          pairRequest = null
+          pairStatus = result.ok && result.out.status == "denied" ? "Pairing was denied in the browser." : result.ok && result.out.status == "expired" ? "Pairing expired. Start a new challenge." : "Pairing expired or could not be confirmed. Start a new challenge."
+        }
       }
     }
   }
 
   on me first {
-    if me.ok {
+    if me != null && me.ok && me.out.user.id != null && me.out.device.id != null {
       let newId = me.out.device.id
-      // A grant creates a new device id. Previously seen ids are stale HTTP responses, not proof
-      // of the new credential. This remains true across process restart and repeated re-pairing.
-      let fresh = newId != null && newId != deviceId && !contains(retiredDeviceIds, newId)
+      // A grant creates a new device id. A previously seen id is a stale HTTP reply, not proof of
+      // the new credential. Only /native/me can prove the account; old content stays closed until it does.
+      let fresh = newId != deviceId && !contains(retiredDeviceIds, newId)
       if fresh {
         retiredDeviceIds = deviceId == null ? retiredDeviceIds : unique(retiredDeviceIds + [deviceId])
         if account == null {
           account = me.out.user.id
           deviceId = newId
           authPending = false
+          authNotice = ""
+          pairStatus = ""
         } else if me.out.user.id == account {
           // SAME account: preserve drafts, details, reading position and every pending slot.
           deviceId = newId
           authPending = false
+          authNotice = ""
+          pairStatus = ""
         } else {
-          // Different account: isolate old data and quarantine old slots; never expose/submit it.
+          // Different account: hide old presentation and quarantine old slots; never render or write it.
           account = me.out.user.id
           deviceId = newId
           authPending = false
           lastQueue = null
           current = null
           hidden = []
-          currentDetailSlot = -1
-          openRequest = null
-          startupOpen = true
           tab = "review"
+          authNotice = "A different CDM account was verified. The previous account's drafts and requests stay quarantined here."
         }
-        pairStatus = ""
+        verifyChecks = 0
+      } else if authPending {
+        verifyChecks = verifyChecks + 1
+      }
+    } else if me != null && !me.ok && (me.code == 401 || me.code == 403) {
+      // Do not auto-clear a token on one 401: an old-generation /native/me reply can arrive after a
+      // newer grant was installed. Surface the recovery path and let the user retry, re-pair or
+      // cancel verification; drafts stay. A normal expired session is already actionable via the
+      // queue's 401 re-pair block.
+      if authPending || pairing {
+        authNotice = "The device grant was rejected or revoked. Retry verification, pair again, or cancel verification; same-account drafts are kept."
+        verifyChecks = verifyChecks + 1
       }
     }
   }
 
-  on q first {
-    if !authPending && q.ok && q.out.account == account && q.out.device_id == deviceId {
+  on [account, deviceId, q] first {
+    if !authPending && q != null && q.ok && q.out.account == account && q.out.device_id == deviceId {
       lastQueue = q.out
       // A pack missing from a partial response is not proof that its hidden item resolved.
       hidden = hidden.filter(k => q.out.next_cursor != null || contains(q.out.unavailable_packs ?? [], k.pack) || q.out.items.any(item => item.key == k))
     }
   }
 
-  when startupOpen && current != null && token != null && !pairing && !authPending {
-    startupOpen = false
-    openRequest = current
+  on [e, r, c, o] first {
+    if !authPending && current != null && account != null {
+      let key = currentId
+      let kind = current.key.kind
+      let id = current.key.id
+      let pack = current.key.pack
+      let prev = details.find(d => d.key == key)
+      let exactOk = e != null && e.ok && e.out.id == id && e.out.pack == pack
+      let stateOk = o != null && o.ok && o.out.kind == kind && o.out.item_id == id
+      let reviewOk = kind == "ask" || (r != null && r.ok && r.out.gate_id == id)
+      let tool = exactOk ? e.out.tool_name : prev != null && prev.exact != null ? prev.exact.tool_name : current.tool_name
+      let receiptGate = kind == "gate" && (tool == "onec_receipt_create" || tool == "onec_receipt_update" || tool == "onec_receipt_update_edited")
+      let receiptOk = !receiptGate || (c != null && (c.ok && c.out.gate_id == id || c.code == 404))
+      if exactOk || stateOk || (kind == "gate" && reviewOk) || (receiptGate && c != null) {
+        let prevEntry = prev ?? {key: key, exact: null, review: null, receipt: null, receiptError: null, state: null, loaded: false}
+        let rawMail = kind == "gate" && reviewOk ? r.out.mail : null
+        let oldMail = prevEntry.review != null ? prevEntry.review.mail : null
+        let mailProj = !reviewOk ? oldMail : rawMail == null ? null : {subject: rawMail.subject, to: rawMail.to, cc: rawMail.cc, bcc: rawMail.bcc, body_plain: rawMail.body_plain, attachments: (rawMail.attachments ?? []).map(a => {filename: a.filename, content_type: a.content_type, size: a.size})}
+        let exactProj = exactOk ? (kind == "gate" ? {id: e.out.id, pack: e.out.pack, status: e.out.status, preview_gfm: e.out.preview_gfm, tool_name: e.out.tool_name, submitted_at: e.out.submitted_at, input: receiptGate ? e.out.input : null} : {id: e.out.id, pack: e.out.pack, status: e.out.status, header: e.out.header, question: e.out.question, options: (e.out.options ?? []).map(o => {label: o.label, description: o.description}), multi: e.out.multi, kind: e.out.kind, created_at: e.out.created_at}) : prevEntry.exact
+        let reviewProj = kind == "gate" && reviewOk ? {review_state: r.out.review_state, review_error: r.out.review_error, mail: mailProj} : prevEntry.review
+        let stateProj = stateOk ? {revision: o.out.revision, draft: o.out.draft, parked: o.out.parked} : prevEntry.state
+        let receiptProj = !receiptGate ? null : c != null && c.ok && c.out.gate_id == id ? c.out.review_context : c != null && c.code == 404 ? null : prevEntry.receipt
+        let receiptErr = !receiptGate ? null : c != null && c.ok && c.out.gate_id == id ? null : c != null && c.code == 404 ? "no_review_snapshot" : prevEntry.receiptError
+        let complete = prevEntry.loaded == true || (exactOk && stateOk && reviewOk && receiptOk)
+        details = ([merge(prevEntry, {exact: exactProj, review: reviewProj, receipt: receiptProj, receiptError: receiptErr, state: stateProj, loaded: complete})] + details.filter(d => d.key != key)).take(6)
+      }
+    }
   }
 
-  when openRequest != null && !pairing && !authPending {
-    let item = openRequest
-    let key = toJson({account: account, key: item.key})
-    openRequest = null
-    currentDetailSlot = -1
-    detailPoolFull = false
-    loadErrors = remove(loadErrors, key)
-    if !d0active {
-      d0 = merge(item, {account: account, generation: authGeneration})
-      d0exactDone = false
-      d0reviewDone = false
-      d0receiptDone = false
-      d0stateDone = false
-      d0active = true
-      currentDetailSlot = 0
-    }
-    else if !d1active {
-      d1 = merge(item, {account: account, generation: authGeneration})
-      d1exactDone = false
-      d1reviewDone = false
-      d1receiptDone = false
-      d1stateDone = false
-      d1active = true
-      currentDetailSlot = 1
-    }
-    else if !d2active {
-      d2 = merge(item, {account: account, generation: authGeneration})
-      d2exactDone = false
-      d2reviewDone = false
-      d2receiptDone = false
-      d2stateDone = false
-      d2active = true
-      currentDetailSlot = 2
-    }
-    else if !d3active {
-      d3 = merge(item, {account: account, generation: authGeneration})
-      d3exactDone = false
-      d3reviewDone = false
-      d3receiptDone = false
-      d3stateDone = false
-      d3active = true
-      currentDetailSlot = 3
-    }
-    else { detailPoolFull = true }
-  }
-
-  on e0 { if d0active { d0exactDone = true } }
-  on r0 { if d0active { d0reviewDone = true } }
-  on c0 { if d0active { d0receiptDone = true } }
-  on o0 { if d0active { d0stateDone = true } }
-  when d0active && d0exactDone && d0stateDone && (d0.key.kind == "ask" || (d0reviewDone && ((d0.tool_name != "onec_receipt_create" && d0.tool_name != "onec_receipt_update" && d0.tool_name != "onec_receipt_update_edited") || d0receiptDone))) {
-    let key = toJson({account: d0.account, key: d0.key})
-    let receiptGate = d0.key.kind == "gate" && (d0.tool_name == "onec_receipt_create" || d0.tool_name == "onec_receipt_update" || d0.tool_name == "onec_receipt_update_edited")
-    let bound = e0.out.id == d0.key.id && e0.out.pack == d0.key.pack && o0.out.kind == d0.key.kind && o0.out.item_id == d0.key.id && (d0.key.kind == "ask" || r0.out.gate_id == d0.key.id) && (!receiptGate || !c0.ok || c0.out.gate_id == d0.key.id)
-    if d0.account == account && d0.generation == authGeneration && e0.ok && o0.ok && (d0.key.kind == "ask" || r0.ok) && (!receiptGate || c0.ok || c0.code == 404) && bound {
-      let rawMail = d0.key.kind == "gate" ? r0.out.mail : null
-      let mailProjection = rawMail == null ? null : {subject: rawMail.subject, to: rawMail.to, cc: rawMail.cc, bcc: rawMail.bcc, body_plain: rawMail.body_plain, attachments: (rawMail.attachments ?? []).map(a => {filename: a.filename, content_type: a.content_type, size: a.size})}
-      let exactProjection = d0.key.kind == "gate" ? {id: e0.out.id, pack: e0.out.pack, status: e0.out.status, preview_gfm: e0.out.preview_gfm, tool_name: e0.out.tool_name, submitted_at: e0.out.submitted_at, input: receiptGate ? e0.out.input : null} : {id: e0.out.id, pack: e0.out.pack, status: e0.out.status, header: e0.out.header, question: e0.out.question, options: (e0.out.options ?? []).map(o => {label: o.label, description: o.description}), multi: e0.out.multi, kind: e0.out.kind, created_at: e0.out.created_at}
-      let reviewProjection = d0.key.kind == "gate" ? {review_state: r0.out.review_state, review_error: r0.out.review_error, mail: mailProjection} : null
-      let stateProjection = {revision: o0.out.revision, draft: o0.out.draft, parked: o0.out.parked}
-      let loaded = {key: key, exact: exactProjection, review: reviewProjection, receipt: receiptGate && c0.ok ? c0.out.review_context : null, receiptError: receiptGate && !c0.ok ? "no_review_snapshot" : null, state: stateProjection}
-      details = ([loaded] + details.filter(d => d.key != key)).take(6)
-      loadErrors = remove(loadErrors, key)
-    } else {
-      loadErrors = set(loadErrors, key, "Refresh failed; showing the last complete copy when one exists.")
-    }
-    d0active = false
-  }
-
-  on e1 { if d1active { d1exactDone = true } }
-  on r1 { if d1active { d1reviewDone = true } }
-  on c1 { if d1active { d1receiptDone = true } }
-  on o1 { if d1active { d1stateDone = true } }
-  when d1active && d1exactDone && d1stateDone && (d1.key.kind == "ask" || (d1reviewDone && ((d1.tool_name != "onec_receipt_create" && d1.tool_name != "onec_receipt_update" && d1.tool_name != "onec_receipt_update_edited") || d1receiptDone))) {
-    let key = toJson({account: d1.account, key: d1.key})
-    let receiptGate = d1.key.kind == "gate" && (d1.tool_name == "onec_receipt_create" || d1.tool_name == "onec_receipt_update" || d1.tool_name == "onec_receipt_update_edited")
-    let bound = e1.out.id == d1.key.id && e1.out.pack == d1.key.pack && o1.out.kind == d1.key.kind && o1.out.item_id == d1.key.id && (d1.key.kind == "ask" || r1.out.gate_id == d1.key.id) && (!receiptGate || !c1.ok || c1.out.gate_id == d1.key.id)
-    if d1.account == account && d1.generation == authGeneration && e1.ok && o1.ok && (d1.key.kind == "ask" || r1.ok) && (!receiptGate || c1.ok || c1.code == 404) && bound {
-      let rawMail = d1.key.kind == "gate" ? r1.out.mail : null
-      let mailProjection = rawMail == null ? null : {subject: rawMail.subject, to: rawMail.to, cc: rawMail.cc, bcc: rawMail.bcc, body_plain: rawMail.body_plain, attachments: (rawMail.attachments ?? []).map(a => {filename: a.filename, content_type: a.content_type, size: a.size})}
-      let exactProjection = d1.key.kind == "gate" ? {id: e1.out.id, pack: e1.out.pack, status: e1.out.status, preview_gfm: e1.out.preview_gfm, tool_name: e1.out.tool_name, submitted_at: e1.out.submitted_at, input: receiptGate ? e1.out.input : null} : {id: e1.out.id, pack: e1.out.pack, status: e1.out.status, header: e1.out.header, question: e1.out.question, options: (e1.out.options ?? []).map(o => {label: o.label, description: o.description}), multi: e1.out.multi, kind: e1.out.kind, created_at: e1.out.created_at}
-      let reviewProjection = d1.key.kind == "gate" ? {review_state: r1.out.review_state, review_error: r1.out.review_error, mail: mailProjection} : null
-      let stateProjection = {revision: o1.out.revision, draft: o1.out.draft, parked: o1.out.parked}
-      let loaded = {key: key, exact: exactProjection, review: reviewProjection, receipt: receiptGate && c1.ok ? c1.out.review_context : null, receiptError: receiptGate && !c1.ok ? "no_review_snapshot" : null, state: stateProjection}
-      details = ([loaded] + details.filter(d => d.key != key)).take(6)
-      loadErrors = remove(loadErrors, key)
-    } else {
-      loadErrors = set(loadErrors, key, "Refresh failed; showing the last complete copy when one exists.")
-    }
-    d1active = false
-  }
-
-  on e2 { if d2active { d2exactDone = true } }
-  on r2 { if d2active { d2reviewDone = true } }
-  on c2 { if d2active { d2receiptDone = true } }
-  on o2 { if d2active { d2stateDone = true } }
-  when d2active && d2exactDone && d2stateDone && (d2.key.kind == "ask" || (d2reviewDone && ((d2.tool_name != "onec_receipt_create" && d2.tool_name != "onec_receipt_update" && d2.tool_name != "onec_receipt_update_edited") || d2receiptDone))) {
-    let key = toJson({account: d2.account, key: d2.key})
-    let receiptGate = d2.key.kind == "gate" && (d2.tool_name == "onec_receipt_create" || d2.tool_name == "onec_receipt_update" || d2.tool_name == "onec_receipt_update_edited")
-    let bound = e2.out.id == d2.key.id && e2.out.pack == d2.key.pack && o2.out.kind == d2.key.kind && o2.out.item_id == d2.key.id && (d2.key.kind == "ask" || r2.out.gate_id == d2.key.id) && (!receiptGate || !c2.ok || c2.out.gate_id == d2.key.id)
-    if d2.account == account && d2.generation == authGeneration && e2.ok && o2.ok && (d2.key.kind == "ask" || r2.ok) && (!receiptGate || c2.ok || c2.code == 404) && bound {
-      let rawMail = d2.key.kind == "gate" ? r2.out.mail : null
-      let mailProjection = rawMail == null ? null : {subject: rawMail.subject, to: rawMail.to, cc: rawMail.cc, bcc: rawMail.bcc, body_plain: rawMail.body_plain, attachments: (rawMail.attachments ?? []).map(a => {filename: a.filename, content_type: a.content_type, size: a.size})}
-      let exactProjection = d2.key.kind == "gate" ? {id: e2.out.id, pack: e2.out.pack, status: e2.out.status, preview_gfm: e2.out.preview_gfm, tool_name: e2.out.tool_name, submitted_at: e2.out.submitted_at, input: receiptGate ? e2.out.input : null} : {id: e2.out.id, pack: e2.out.pack, status: e2.out.status, header: e2.out.header, question: e2.out.question, options: (e2.out.options ?? []).map(o => {label: o.label, description: o.description}), multi: e2.out.multi, kind: e2.out.kind, created_at: e2.out.created_at}
-      let reviewProjection = d2.key.kind == "gate" ? {review_state: r2.out.review_state, review_error: r2.out.review_error, mail: mailProjection} : null
-      let stateProjection = {revision: o2.out.revision, draft: o2.out.draft, parked: o2.out.parked}
-      let loaded = {key: key, exact: exactProjection, review: reviewProjection, receipt: receiptGate && c2.ok ? c2.out.review_context : null, receiptError: receiptGate && !c2.ok ? "no_review_snapshot" : null, state: stateProjection}
-      details = ([loaded] + details.filter(d => d.key != key)).take(6)
-      loadErrors = remove(loadErrors, key)
-    } else {
-      loadErrors = set(loadErrors, key, "Refresh failed; showing the last complete copy when one exists.")
-    }
-    d2active = false
-  }
-
-  on e3 { if d3active { d3exactDone = true } }
-  on r3 { if d3active { d3reviewDone = true } }
-  on c3 { if d3active { d3receiptDone = true } }
-  on o3 { if d3active { d3stateDone = true } }
-  when d3active && d3exactDone && d3stateDone && (d3.key.kind == "ask" || (d3reviewDone && ((d3.tool_name != "onec_receipt_create" && d3.tool_name != "onec_receipt_update" && d3.tool_name != "onec_receipt_update_edited") || d3receiptDone))) {
-    let key = toJson({account: d3.account, key: d3.key})
-    let receiptGate = d3.key.kind == "gate" && (d3.tool_name == "onec_receipt_create" || d3.tool_name == "onec_receipt_update" || d3.tool_name == "onec_receipt_update_edited")
-    let bound = e3.out.id == d3.key.id && e3.out.pack == d3.key.pack && o3.out.kind == d3.key.kind && o3.out.item_id == d3.key.id && (d3.key.kind == "ask" || r3.out.gate_id == d3.key.id) && (!receiptGate || !c3.ok || c3.out.gate_id == d3.key.id)
-    if d3.account == account && d3.generation == authGeneration && e3.ok && o3.ok && (d3.key.kind == "ask" || r3.ok) && (!receiptGate || c3.ok || c3.code == 404) && bound {
-      let rawMail = d3.key.kind == "gate" ? r3.out.mail : null
-      let mailProjection = rawMail == null ? null : {subject: rawMail.subject, to: rawMail.to, cc: rawMail.cc, bcc: rawMail.bcc, body_plain: rawMail.body_plain, attachments: (rawMail.attachments ?? []).map(a => {filename: a.filename, content_type: a.content_type, size: a.size})}
-      let exactProjection = d3.key.kind == "gate" ? {id: e3.out.id, pack: e3.out.pack, status: e3.out.status, preview_gfm: e3.out.preview_gfm, tool_name: e3.out.tool_name, submitted_at: e3.out.submitted_at, input: receiptGate ? e3.out.input : null} : {id: e3.out.id, pack: e3.out.pack, status: e3.out.status, header: e3.out.header, question: e3.out.question, options: (e3.out.options ?? []).map(o => {label: o.label, description: o.description}), multi: e3.out.multi, kind: e3.out.kind, created_at: e3.out.created_at}
-      let reviewProjection = d3.key.kind == "gate" ? {review_state: r3.out.review_state, review_error: r3.out.review_error, mail: mailProjection} : null
-      let stateProjection = {revision: o3.out.revision, draft: o3.out.draft, parked: o3.out.parked}
-      let loaded = {key: key, exact: exactProjection, review: reviewProjection, receipt: receiptGate && c3.ok ? c3.out.review_context : null, receiptError: receiptGate && !c3.ok ? "no_review_snapshot" : null, state: stateProjection}
-      details = ([loaded] + details.filter(d => d.key != key)).take(6)
-      loadErrors = remove(loadErrors, key)
-    } else {
-      loadErrors = set(loadErrors, key, "Refresh failed; showing the last complete copy when one exists.")
-    }
-    d3active = false
-  }
-
-  when dispatch >= 0 {
-    if dispatch == 0 {
+  on [seq0, res0] first {
+    if live0 && tgt0 != null && res0 != null {
       let t = tgt0
-      if t.action == "allow" || t.action == "deny" {
-        res0 = post("${api}/api/swarms/${enc(t.item.key.pack)}/gates/${enc(t.item.key.id)}/decide", {verdict: t.action, reasoning: t.action == "deny" ? t.draft.reason : null}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      } else if t.action == "answer" {
-        res0 = post("${api}/api/swarms/${enc(t.item.key.pack)}/asks/${enc(t.item.key.id)}/answer", {answer: t.answer}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      } else if t.action == "save" {
-        res0 = post("${api}/api/swarms/${enc(t.item.key.pack)}/operator-state/${enc(t.item.key.kind)}/${enc(t.item.key.id)}", {expected_revision: t.expected, draft: t.draft}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
-      } else if t.action == "skip" {
-        res0 = post("${api}/api/swarms/${enc(t.item.key.pack)}/operator-state/${enc(t.item.key.kind)}/${enc(t.item.key.id)}", {expected_revision: t.expected, parked: true}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
-      } else if t.action == "prepare" {
-        res0 = post("${api}/api/swarms/${enc(t.item.key.pack)}/gates/${enc(t.item.key.id)}/review/prepare", {}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      }
-    }
-    else if dispatch == 1 {
-      let t = tgt1
-      if t.action == "allow" || t.action == "deny" {
-        res1 = post("${api}/api/swarms/${enc(t.item.key.pack)}/gates/${enc(t.item.key.id)}/decide", {verdict: t.action, reasoning: t.action == "deny" ? t.draft.reason : null}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      } else if t.action == "answer" {
-        res1 = post("${api}/api/swarms/${enc(t.item.key.pack)}/asks/${enc(t.item.key.id)}/answer", {answer: t.answer}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      } else if t.action == "save" {
-        res1 = post("${api}/api/swarms/${enc(t.item.key.pack)}/operator-state/${enc(t.item.key.kind)}/${enc(t.item.key.id)}", {expected_revision: t.expected, draft: t.draft}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
-      } else if t.action == "skip" {
-        res1 = post("${api}/api/swarms/${enc(t.item.key.pack)}/operator-state/${enc(t.item.key.kind)}/${enc(t.item.key.id)}", {expected_revision: t.expected, parked: true}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
-      } else if t.action == "prepare" {
-        res1 = post("${api}/api/swarms/${enc(t.item.key.pack)}/gates/${enc(t.item.key.id)}/review/prepare", {}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      }
-    }
-    else if dispatch == 2 {
-      let t = tgt2
-      if t.action == "allow" || t.action == "deny" {
-        res2 = post("${api}/api/swarms/${enc(t.item.key.pack)}/gates/${enc(t.item.key.id)}/decide", {verdict: t.action, reasoning: t.action == "deny" ? t.draft.reason : null}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      } else if t.action == "answer" {
-        res2 = post("${api}/api/swarms/${enc(t.item.key.pack)}/asks/${enc(t.item.key.id)}/answer", {answer: t.answer}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      } else if t.action == "save" {
-        res2 = post("${api}/api/swarms/${enc(t.item.key.pack)}/operator-state/${enc(t.item.key.kind)}/${enc(t.item.key.id)}", {expected_revision: t.expected, draft: t.draft}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
-      } else if t.action == "skip" {
-        res2 = post("${api}/api/swarms/${enc(t.item.key.pack)}/operator-state/${enc(t.item.key.kind)}/${enc(t.item.key.id)}", {expected_revision: t.expected, parked: true}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
-      } else if t.action == "prepare" {
-        res2 = post("${api}/api/swarms/${enc(t.item.key.pack)}/gates/${enc(t.item.key.id)}/review/prepare", {}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      }
-    }
-    else if dispatch == 3 {
-      let t = tgt3
-      if t.action == "allow" || t.action == "deny" {
-        res3 = post("${api}/api/swarms/${enc(t.item.key.pack)}/gates/${enc(t.item.key.id)}/decide", {verdict: t.action, reasoning: t.action == "deny" ? t.draft.reason : null}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      } else if t.action == "answer" {
-        res3 = post("${api}/api/swarms/${enc(t.item.key.pack)}/asks/${enc(t.item.key.id)}/answer", {answer: t.answer}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      } else if t.action == "save" {
-        res3 = post("${api}/api/swarms/${enc(t.item.key.pack)}/operator-state/${enc(t.item.key.kind)}/${enc(t.item.key.id)}", {expected_revision: t.expected, draft: t.draft}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
-      } else if t.action == "skip" {
-        res3 = post("${api}/api/swarms/${enc(t.item.key.pack)}/operator-state/${enc(t.item.key.kind)}/${enc(t.item.key.id)}", {expected_revision: t.expected, parked: true}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
-      } else if t.action == "prepare" {
-        res3 = post("${api}/api/swarms/${enc(t.item.key.pack)}/gates/${enc(t.item.key.id)}/review/prepare", {}, {Authorization: "Bearer ${token}", Accept: "application/json"})
-      }
-    }
-    dispatch = -1
-  }
-
-  on res0 {
-    let t = tgt0
-    if t != null && live0 {
-      let key = t.id
-      if res0.ok {
-        if t.action == "save" {
-          details = details.map(d => d.key == key ? merge(d, {state: {revision: res0.out.revision, draft: res0.out.draft, parked: res0.out.parked}}) : d)
-        }
-        if t.action == "allow" || t.action == "deny" || t.action == "answer" {
-          if get(drafts, key, null) == t.draft { drafts = remove(drafts, key) }
-        }
-        conflicts = remove(conflicts, key)
-        itemErrors = remove(itemErrors, key)
-        res0 = null
-        tgt0 = null
+      let reply = res0
+      if t.account != account {
+        // The verified account changed while this request was out. Never apply or render its reply.
         live0 = false
+        res0 = null
       } else {
-        itemErrors = set(itemErrors, key, {action: t.action, code: res0.code, message: res0.code == -1 ? "No response; outcome unknown. Check before any new decision." : res0.code == 409 ? "Changed elsewhere; your local draft is retained." : "Request failed. Reopen and check the exact item."})
-        if res0.code == 409 {
-          if t.action == "save" {
-            let server = res0.out.detail.current
-            conflicts = set(conflicts, key, {server: server, local: t.draft})
-            if server != null { details = details.map(d => d.key == key ? merge(d, {state: server}) : d) }
-          } else {
-            conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+        let key = t.id
+        let match = reply.out.kind == t.item.key.kind && reply.out.item_id == t.item.key.id
+        let gateMatch = reply.out.id == t.item.key.id && reply.out.pack == t.item.key.pack
+        let matched = t.action == "allow" || t.action == "deny" ? gateMatch : t.action == "save" || t.action == "skip" ? match : true
+        if reply.ok && matched {
+          if t.action == "save" || t.action == "skip" {
+            details = details.map(d => d.key == key ? merge(d, {state: {revision: reply.out.revision, draft: reply.out.draft, parked: reply.out.parked}}) : d)
+            draftBases = set(draftBases, key, reply.out.revision ?? "none")
           }
+          if t.action == "allow" || t.action == "deny" {
+            details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.status, preview_gfm: reply.out.preview_gfm ?? d.exact.preview_gfm})}) : d)
+          }
+          if t.action == "answer" {
+            details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: "answered"})}) : d)
+          }
+          if t.action == "allow" || t.action == "deny" || t.action == "answer" {
+            if get(drafts, key, null) == t.draft { drafts = remove(drafts, key) }
+            draftBases = remove(draftBases, key)
+          }
+          conflicts = remove(conflicts, key)
+          itemErrors = remove(itemErrors, key)
+          live0 = false
+          res0 = null
+          tgt0 = null
+        } else if reply.ok {
+          itemErrors = set(itemErrors, key, {action: t.action, code: reply.code, message: "The server answered for a different item. Reopen and check the exact item before another action."})
+          if t.action != "save" && t.action != "prepare" { hidden = hidden.filter(k => k != t.item.key) }
+          live0 = false
+          refresh()
+        } else {
+          let code = reply.code
+          let msg = code == -1 ? "No response; outcome unknown. Reopen and check the exact item before another action." : code == 401 || code == 403 ? "Authorization rejected; pair again, then check the exact item." : code == 409 ? "Changed elsewhere; both copies are retained." : "Request failed (${code}); reopen and check the exact item."
+          itemErrors = set(itemErrors, key, {action: t.action, code: code, message: msg})
+          if t.action == "allow" || t.action == "deny" || t.action == "answer" || t.action == "skip" {
+            hidden = hidden.filter(k => k != t.item.key)
+          }
+          if code == 409 {
+            if t.action == "save" || t.action == "skip" {
+              if reply.out.detail != null && reply.out.detail.current != null && reply.out.detail.current.kind == t.item.key.kind && reply.out.detail.current.item_id == t.item.key.id {
+                conflicts = set(conflicts, key, {server: reply.out.detail.current, local: t.action == "skip" ? get(drafts, key, blank) : t.draft})
+                details = details.map(d => d.key == key ? merge(d, {state: reply.out.detail.current}) : d)
+                if t.action == "skip" { itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Skip was not applied: the parking revision changed elsewhere. The item is still pending; both copies are retained."}) }
+              } else {
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Conflict response did not name this item. Reopen and check."})
+              }
+            } else if t.action == "allow" || t.action == "deny" {
+              if reply.out.gate != null && reply.out.gate.id == t.item.key.id {
+                details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.gate.status, preview_gfm: reply.out.gate.preview_gfm ?? d.exact.preview_gfm})}) : d)
+                conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+                itemErrors = remove(itemErrors, key)
+              } else {
+                hidden = hidden.filter(k => k != t.item.key)
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Changed elsewhere, but the reply did not name this item. Reopen and check."})
+              }
+            } else if t.action == "answer" {
+              if reply.out.ask != null && reply.out.ask.id == t.item.key.id {
+                details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.ask.status})}) : d)
+                conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+                itemErrors = remove(itemErrors, key)
+              } else {
+                hidden = hidden.filter(k => k != t.item.key)
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Changed elsewhere, but the reply did not name this item. Reopen and check."})
+              }
+            }
+          }
+          live0 = false
+          refresh()
         }
       }
     }
   }
 
-  on res1 {
-    let t = tgt1
-    if t != null && live1 {
-      let key = t.id
-      if res1.ok {
-        if t.action == "save" {
-          details = details.map(d => d.key == key ? merge(d, {state: {revision: res1.out.revision, draft: res1.out.draft, parked: res1.out.parked}}) : d)
-        }
-        if t.action == "allow" || t.action == "deny" || t.action == "answer" {
-          if get(drafts, key, null) == t.draft { drafts = remove(drafts, key) }
-        }
-        conflicts = remove(conflicts, key)
-        itemErrors = remove(itemErrors, key)
-        res1 = null
-        tgt1 = null
+  on [seq1, res1] first {
+    if live1 && tgt1 != null && res1 != null {
+      let t = tgt1
+      let reply = res1
+      if t.account != account {
         live1 = false
+        res1 = null
       } else {
-        itemErrors = set(itemErrors, key, {action: t.action, code: res1.code, message: res1.code == -1 ? "No response; outcome unknown. Check before any new decision." : res1.code == 409 ? "Changed elsewhere; your local draft is retained." : "Request failed. Reopen and check the exact item."})
-        if res1.code == 409 {
-          if t.action == "save" {
-            let server = res1.out.detail.current
-            conflicts = set(conflicts, key, {server: server, local: t.draft})
-            if server != null { details = details.map(d => d.key == key ? merge(d, {state: server}) : d) }
-          } else {
-            conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+        let key = t.id
+        let match = reply.out.kind == t.item.key.kind && reply.out.item_id == t.item.key.id
+        let gateMatch = reply.out.id == t.item.key.id && reply.out.pack == t.item.key.pack
+        let matched = t.action == "allow" || t.action == "deny" ? gateMatch : t.action == "save" || t.action == "skip" ? match : true
+        if reply.ok && matched {
+          if t.action == "save" || t.action == "skip" {
+            details = details.map(d => d.key == key ? merge(d, {state: {revision: reply.out.revision, draft: reply.out.draft, parked: reply.out.parked}}) : d)
+            draftBases = set(draftBases, key, reply.out.revision ?? "none")
           }
+          if t.action == "allow" || t.action == "deny" {
+            details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.status, preview_gfm: reply.out.preview_gfm ?? d.exact.preview_gfm})}) : d)
+          }
+          if t.action == "answer" {
+            details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: "answered"})}) : d)
+          }
+          if t.action == "allow" || t.action == "deny" || t.action == "answer" {
+            if get(drafts, key, null) == t.draft { drafts = remove(drafts, key) }
+            draftBases = remove(draftBases, key)
+          }
+          conflicts = remove(conflicts, key)
+          itemErrors = remove(itemErrors, key)
+          live1 = false
+          res1 = null
+          tgt1 = null
+        } else if reply.ok {
+          itemErrors = set(itemErrors, key, {action: t.action, code: reply.code, message: "The server answered for a different item. Reopen and check the exact item before another action."})
+          if t.action != "save" && t.action != "prepare" { hidden = hidden.filter(k => k != t.item.key) }
+          live1 = false
+          refresh()
+        } else {
+          let code = reply.code
+          let msg = code == -1 ? "No response; outcome unknown. Reopen and check the exact item before another action." : code == 401 || code == 403 ? "Authorization rejected; pair again, then check the exact item." : code == 409 ? "Changed elsewhere; both copies are retained." : "Request failed (${code}); reopen and check the exact item."
+          itemErrors = set(itemErrors, key, {action: t.action, code: code, message: msg})
+          if t.action == "allow" || t.action == "deny" || t.action == "answer" || t.action == "skip" {
+            hidden = hidden.filter(k => k != t.item.key)
+          }
+          if code == 409 {
+            if t.action == "save" || t.action == "skip" {
+              if reply.out.detail != null && reply.out.detail.current != null && reply.out.detail.current.kind == t.item.key.kind && reply.out.detail.current.item_id == t.item.key.id {
+                conflicts = set(conflicts, key, {server: reply.out.detail.current, local: t.action == "skip" ? get(drafts, key, blank) : t.draft})
+                details = details.map(d => d.key == key ? merge(d, {state: reply.out.detail.current}) : d)
+                if t.action == "skip" { itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Skip was not applied: the parking revision changed elsewhere. The item is still pending; both copies are retained."}) }
+              } else {
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Conflict response did not name this item. Reopen and check."})
+              }
+            } else if t.action == "allow" || t.action == "deny" {
+              if reply.out.gate != null && reply.out.gate.id == t.item.key.id {
+                details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.gate.status, preview_gfm: reply.out.gate.preview_gfm ?? d.exact.preview_gfm})}) : d)
+                conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+                itemErrors = remove(itemErrors, key)
+              } else {
+                hidden = hidden.filter(k => k != t.item.key)
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Changed elsewhere, but the reply did not name this item. Reopen and check."})
+              }
+            } else if t.action == "answer" {
+              if reply.out.ask != null && reply.out.ask.id == t.item.key.id {
+                details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.ask.status})}) : d)
+                conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+                itemErrors = remove(itemErrors, key)
+              } else {
+                hidden = hidden.filter(k => k != t.item.key)
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Changed elsewhere, but the reply did not name this item. Reopen and check."})
+              }
+            }
+          }
+          live1 = false
+          refresh()
         }
       }
     }
   }
 
-  on res2 {
-    let t = tgt2
-    if t != null && live2 {
-      let key = t.id
-      if res2.ok {
-        if t.action == "save" {
-          details = details.map(d => d.key == key ? merge(d, {state: {revision: res2.out.revision, draft: res2.out.draft, parked: res2.out.parked}}) : d)
-        }
-        if t.action == "allow" || t.action == "deny" || t.action == "answer" {
-          if get(drafts, key, null) == t.draft { drafts = remove(drafts, key) }
-        }
-        conflicts = remove(conflicts, key)
-        itemErrors = remove(itemErrors, key)
-        res2 = null
-        tgt2 = null
+  on [seq2, res2] first {
+    if live2 && tgt2 != null && res2 != null {
+      let t = tgt2
+      let reply = res2
+      if t.account != account {
         live2 = false
+        res2 = null
       } else {
-        itemErrors = set(itemErrors, key, {action: t.action, code: res2.code, message: res2.code == -1 ? "No response; outcome unknown. Check before any new decision." : res2.code == 409 ? "Changed elsewhere; your local draft is retained." : "Request failed. Reopen and check the exact item."})
-        if res2.code == 409 {
-          if t.action == "save" {
-            let server = res2.out.detail.current
-            conflicts = set(conflicts, key, {server: server, local: t.draft})
-            if server != null { details = details.map(d => d.key == key ? merge(d, {state: server}) : d) }
-          } else {
-            conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+        let key = t.id
+        let match = reply.out.kind == t.item.key.kind && reply.out.item_id == t.item.key.id
+        let gateMatch = reply.out.id == t.item.key.id && reply.out.pack == t.item.key.pack
+        let matched = t.action == "allow" || t.action == "deny" ? gateMatch : t.action == "save" || t.action == "skip" ? match : true
+        if reply.ok && matched {
+          if t.action == "save" || t.action == "skip" {
+            details = details.map(d => d.key == key ? merge(d, {state: {revision: reply.out.revision, draft: reply.out.draft, parked: reply.out.parked}}) : d)
+            draftBases = set(draftBases, key, reply.out.revision ?? "none")
           }
+          if t.action == "allow" || t.action == "deny" {
+            details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.status, preview_gfm: reply.out.preview_gfm ?? d.exact.preview_gfm})}) : d)
+          }
+          if t.action == "answer" {
+            details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: "answered"})}) : d)
+          }
+          if t.action == "allow" || t.action == "deny" || t.action == "answer" {
+            if get(drafts, key, null) == t.draft { drafts = remove(drafts, key) }
+            draftBases = remove(draftBases, key)
+          }
+          conflicts = remove(conflicts, key)
+          itemErrors = remove(itemErrors, key)
+          live2 = false
+          res2 = null
+          tgt2 = null
+        } else if reply.ok {
+          itemErrors = set(itemErrors, key, {action: t.action, code: reply.code, message: "The server answered for a different item. Reopen and check the exact item before another action."})
+          if t.action != "save" && t.action != "prepare" { hidden = hidden.filter(k => k != t.item.key) }
+          live2 = false
+          refresh()
+        } else {
+          let code = reply.code
+          let msg = code == -1 ? "No response; outcome unknown. Reopen and check the exact item before another action." : code == 401 || code == 403 ? "Authorization rejected; pair again, then check the exact item." : code == 409 ? "Changed elsewhere; both copies are retained." : "Request failed (${code}); reopen and check the exact item."
+          itemErrors = set(itemErrors, key, {action: t.action, code: code, message: msg})
+          if t.action == "allow" || t.action == "deny" || t.action == "answer" || t.action == "skip" {
+            hidden = hidden.filter(k => k != t.item.key)
+          }
+          if code == 409 {
+            if t.action == "save" || t.action == "skip" {
+              if reply.out.detail != null && reply.out.detail.current != null && reply.out.detail.current.kind == t.item.key.kind && reply.out.detail.current.item_id == t.item.key.id {
+                conflicts = set(conflicts, key, {server: reply.out.detail.current, local: t.action == "skip" ? get(drafts, key, blank) : t.draft})
+                details = details.map(d => d.key == key ? merge(d, {state: reply.out.detail.current}) : d)
+                if t.action == "skip" { itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Skip was not applied: the parking revision changed elsewhere. The item is still pending; both copies are retained."}) }
+              } else {
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Conflict response did not name this item. Reopen and check."})
+              }
+            } else if t.action == "allow" || t.action == "deny" {
+              if reply.out.gate != null && reply.out.gate.id == t.item.key.id {
+                details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.gate.status, preview_gfm: reply.out.gate.preview_gfm ?? d.exact.preview_gfm})}) : d)
+                conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+                itemErrors = remove(itemErrors, key)
+              } else {
+                hidden = hidden.filter(k => k != t.item.key)
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Changed elsewhere, but the reply did not name this item. Reopen and check."})
+              }
+            } else if t.action == "answer" {
+              if reply.out.ask != null && reply.out.ask.id == t.item.key.id {
+                details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.ask.status})}) : d)
+                conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+                itemErrors = remove(itemErrors, key)
+              } else {
+                hidden = hidden.filter(k => k != t.item.key)
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Changed elsewhere, but the reply did not name this item. Reopen and check."})
+              }
+            }
+          }
+          live2 = false
+          refresh()
         }
       }
     }
   }
 
-  on res3 {
-    let t = tgt3
-    if t != null && live3 {
-      let key = t.id
-      if res3.ok {
-        if t.action == "save" {
-          details = details.map(d => d.key == key ? merge(d, {state: {revision: res3.out.revision, draft: res3.out.draft, parked: res3.out.parked}}) : d)
-        }
-        if t.action == "allow" || t.action == "deny" || t.action == "answer" {
-          if get(drafts, key, null) == t.draft { drafts = remove(drafts, key) }
-        }
-        conflicts = remove(conflicts, key)
-        itemErrors = remove(itemErrors, key)
-        res3 = null
-        tgt3 = null
+  on [seq3, res3] first {
+    if live3 && tgt3 != null && res3 != null {
+      let t = tgt3
+      let reply = res3
+      if t.account != account {
         live3 = false
+        res3 = null
       } else {
-        itemErrors = set(itemErrors, key, {action: t.action, code: res3.code, message: res3.code == -1 ? "No response; outcome unknown. Check before any new decision." : res3.code == 409 ? "Changed elsewhere; your local draft is retained." : "Request failed. Reopen and check the exact item."})
-        if res3.code == 409 {
-          if t.action == "save" {
-            let server = res3.out.detail.current
-            conflicts = set(conflicts, key, {server: server, local: t.draft})
-            if server != null { details = details.map(d => d.key == key ? merge(d, {state: server}) : d) }
-          } else {
-            conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+        let key = t.id
+        let match = reply.out.kind == t.item.key.kind && reply.out.item_id == t.item.key.id
+        let gateMatch = reply.out.id == t.item.key.id && reply.out.pack == t.item.key.pack
+        let matched = t.action == "allow" || t.action == "deny" ? gateMatch : t.action == "save" || t.action == "skip" ? match : true
+        if reply.ok && matched {
+          if t.action == "save" || t.action == "skip" {
+            details = details.map(d => d.key == key ? merge(d, {state: {revision: reply.out.revision, draft: reply.out.draft, parked: reply.out.parked}}) : d)
+            draftBases = set(draftBases, key, reply.out.revision ?? "none")
           }
+          if t.action == "allow" || t.action == "deny" {
+            details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.status, preview_gfm: reply.out.preview_gfm ?? d.exact.preview_gfm})}) : d)
+          }
+          if t.action == "answer" {
+            details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: "answered"})}) : d)
+          }
+          if t.action == "allow" || t.action == "deny" || t.action == "answer" {
+            if get(drafts, key, null) == t.draft { drafts = remove(drafts, key) }
+            draftBases = remove(draftBases, key)
+          }
+          conflicts = remove(conflicts, key)
+          itemErrors = remove(itemErrors, key)
+          live3 = false
+          res3 = null
+          tgt3 = null
+        } else if reply.ok {
+          itemErrors = set(itemErrors, key, {action: t.action, code: reply.code, message: "The server answered for a different item. Reopen and check the exact item before another action."})
+          if t.action != "save" && t.action != "prepare" { hidden = hidden.filter(k => k != t.item.key) }
+          live3 = false
+          refresh()
+        } else {
+          let code = reply.code
+          let msg = code == -1 ? "No response; outcome unknown. Reopen and check the exact item before another action." : code == 401 || code == 403 ? "Authorization rejected; pair again, then check the exact item." : code == 409 ? "Changed elsewhere; both copies are retained." : "Request failed (${code}); reopen and check the exact item."
+          itemErrors = set(itemErrors, key, {action: t.action, code: code, message: msg})
+          if t.action == "allow" || t.action == "deny" || t.action == "answer" || t.action == "skip" {
+            hidden = hidden.filter(k => k != t.item.key)
+          }
+          if code == 409 {
+            if t.action == "save" || t.action == "skip" {
+              if reply.out.detail != null && reply.out.detail.current != null && reply.out.detail.current.kind == t.item.key.kind && reply.out.detail.current.item_id == t.item.key.id {
+                conflicts = set(conflicts, key, {server: reply.out.detail.current, local: t.action == "skip" ? get(drafts, key, blank) : t.draft})
+                details = details.map(d => d.key == key ? merge(d, {state: reply.out.detail.current}) : d)
+                if t.action == "skip" { itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Skip was not applied: the parking revision changed elsewhere. The item is still pending; both copies are retained."}) }
+              } else {
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Conflict response did not name this item. Reopen and check."})
+              }
+            } else if t.action == "allow" || t.action == "deny" {
+              if reply.out.gate != null && reply.out.gate.id == t.item.key.id {
+                details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.gate.status, preview_gfm: reply.out.gate.preview_gfm ?? d.exact.preview_gfm})}) : d)
+                conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+                itemErrors = remove(itemErrors, key)
+              } else {
+                hidden = hidden.filter(k => k != t.item.key)
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Changed elsewhere, but the reply did not name this item. Reopen and check."})
+              }
+            } else if t.action == "answer" {
+              if reply.out.ask != null && reply.out.ask.id == t.item.key.id {
+                details = details.map(d => d.key == key ? merge(d, {exact: merge(d.exact, {status: reply.out.ask.status})}) : d)
+                conflicts = set(conflicts, key, {resolved: true, local: t.draft})
+                itemErrors = remove(itemErrors, key)
+              } else {
+                hidden = hidden.filter(k => k != t.item.key)
+                itemErrors = set(itemErrors, key, {action: t.action, code: code, message: "Changed elsewhere, but the reply did not name this item. Reopen and check."})
+              }
+            }
+          }
+          live3 = false
+          refresh()
         }
       }
     }
+  }
+
+  when token == null && authPending && !pairing {
+    authPending = false
+    verifyChecks = 0
+    pairToken = null
+    pairRequest = null
+    authNotice = "This surface is no longer paired. Pair again; same-account drafts are kept."
+  }
+
+  when !pairing && pairRequest == null && pairToken != null {
+    pairToken = null
+  }
+
+  when !pairing && !pairStarting && !pairPolling && pairRequest != null && pairToken == null {
+    // A persisted challenge lost its polling credential (origin change or cleared secret): it can
+    // no longer be resumed, so start a new one rather than showing a dead code.
+    pairRequest = null
+    pairStatus = ""
   }
 
   component ActionButton(item, label, action, advance = false, enabled = true) {
@@ -576,24 +616,82 @@ widget "cdm-review" {
       text: label
       color: enabled && poolFree ? accent : muted
       onTap: {
-        if enabled && poolFree && !pairing && !authPending {
+        if enabled && poolFree && !pairing && !authPending && !targets.any(t => t != null && t.account == account && t.item.key == item.key) {
           let slot = tgt0 == null ? 0 : tgt1 == null ? 1 : tgt2 == null ? 2 : 3
           let next = nextItem
           let expected = action == "save" || action == "skip" ? serverState.revision : null
           let target = {id: toJson({account: account, key: item.key}), account: account, generation: authGeneration, item: item, action: action, draft: action == "skip" || action == "prepare" ? blank : draft, answer: action == "answer" ? answerText : "", expected: expected}
-          if slot == 0 { tgt0 = target; live0 = true; res0 = null }
-          else if slot == 1 { tgt1 = target; live1 = true; res1 = null }
-          else if slot == 2 { tgt2 = target; live2 = true; res2 = null }
-          else { tgt3 = target; live3 = true; res3 = null }
-          dispatch = slot
           itemErrors = remove(itemErrors, target.id)
+          if slot == 0 {
+            seq0 = seq0 + 1
+            tgt0 = target
+            live0 = true
+            res0 = null
+            if action == "allow" || action == "deny" {
+              res0 = post("${api}/api/swarms/${enc(item.key.pack)}/gates/${enc(item.key.id)}/decide", {verdict: action, reasoning: action == "deny" ? draft.reason : null}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            } else if action == "answer" {
+              res0 = post("${api}/api/swarms/${enc(item.key.pack)}/asks/${enc(item.key.id)}/answer", {answer: answerText}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            } else if action == "save" {
+              res0 = post("${api}/api/swarms/${enc(item.key.pack)}/operator-state/${enc(item.key.kind)}/${enc(item.key.id)}", {expected_revision: expected, draft: draft}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
+            } else if action == "skip" {
+              res0 = post("${api}/api/swarms/${enc(item.key.pack)}/operator-state/${enc(item.key.kind)}/${enc(item.key.id)}", {expected_revision: expected, parked: true}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
+            } else if action == "prepare" {
+              res0 = post("${api}/api/swarms/${enc(item.key.pack)}/gates/${enc(item.key.id)}/review/prepare", {}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            }
+          } else if slot == 1 {
+            seq1 = seq1 + 1
+            tgt1 = target
+            live1 = true
+            res1 = null
+            if action == "allow" || action == "deny" {
+              res1 = post("${api}/api/swarms/${enc(item.key.pack)}/gates/${enc(item.key.id)}/decide", {verdict: action, reasoning: action == "deny" ? draft.reason : null}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            } else if action == "answer" {
+              res1 = post("${api}/api/swarms/${enc(item.key.pack)}/asks/${enc(item.key.id)}/answer", {answer: answerText}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            } else if action == "save" {
+              res1 = post("${api}/api/swarms/${enc(item.key.pack)}/operator-state/${enc(item.key.kind)}/${enc(item.key.id)}", {expected_revision: expected, draft: draft}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
+            } else if action == "skip" {
+              res1 = post("${api}/api/swarms/${enc(item.key.pack)}/operator-state/${enc(item.key.kind)}/${enc(item.key.id)}", {expected_revision: expected, parked: true}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
+            } else if action == "prepare" {
+              res1 = post("${api}/api/swarms/${enc(item.key.pack)}/gates/${enc(item.key.id)}/review/prepare", {}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            }
+          } else if slot == 2 {
+            seq2 = seq2 + 1
+            tgt2 = target
+            live2 = true
+            res2 = null
+            if action == "allow" || action == "deny" {
+              res2 = post("${api}/api/swarms/${enc(item.key.pack)}/gates/${enc(item.key.id)}/decide", {verdict: action, reasoning: action == "deny" ? draft.reason : null}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            } else if action == "answer" {
+              res2 = post("${api}/api/swarms/${enc(item.key.pack)}/asks/${enc(item.key.id)}/answer", {answer: answerText}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            } else if action == "save" {
+              res2 = post("${api}/api/swarms/${enc(item.key.pack)}/operator-state/${enc(item.key.kind)}/${enc(item.key.id)}", {expected_revision: expected, draft: draft}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
+            } else if action == "skip" {
+              res2 = post("${api}/api/swarms/${enc(item.key.pack)}/operator-state/${enc(item.key.kind)}/${enc(item.key.id)}", {expected_revision: expected, parked: true}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
+            } else if action == "prepare" {
+              res2 = post("${api}/api/swarms/${enc(item.key.pack)}/gates/${enc(item.key.id)}/review/prepare", {}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            }
+          } else {
+            seq3 = seq3 + 1
+            tgt3 = target
+            live3 = true
+            res3 = null
+            if action == "allow" || action == "deny" {
+              res3 = post("${api}/api/swarms/${enc(item.key.pack)}/gates/${enc(item.key.id)}/decide", {verdict: action, reasoning: action == "deny" ? draft.reason : null}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            } else if action == "answer" {
+              res3 = post("${api}/api/swarms/${enc(item.key.pack)}/asks/${enc(item.key.id)}/answer", {answer: answerText}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            } else if action == "save" {
+              res3 = post("${api}/api/swarms/${enc(item.key.pack)}/operator-state/${enc(item.key.kind)}/${enc(item.key.id)}", {expected_revision: expected, draft: draft}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
+            } else if action == "skip" {
+              res3 = post("${api}/api/swarms/${enc(item.key.pack)}/operator-state/${enc(item.key.kind)}/${enc(item.key.id)}", {expected_revision: expected, parked: true}, {Authorization: "Bearer ${token}", Accept: "application/json"}, method: "PATCH")
+            } else if action == "prepare" {
+              res3 = post("${api}/api/swarms/${enc(item.key.pack)}/gates/${enc(item.key.id)}/review/prepare", {}, {Authorization: "Bearer ${token}", Accept: "application/json"})
+            }
+          }
           if advance {
             hidden = unique(hidden + [item.key])
             current = next
-            currentDetailSlot = -1
-            startupOpen = false
-            openRequest = next
             tab = "review"
+            if next == null { close() } // last item: optimistic close
           }
         }
       }
@@ -606,16 +704,37 @@ widget "cdm-review" {
       weight: 1
       Text { text: "CDM review"; style: title; color: accent }
       Text { text: "Native gate and question review. Pair this surface with your CDM account in your normal browser; no token or cookie is copied."; color: muted }
+      if authNotice != "" { Text { text: authNotice; color: yellow } }
       if !pairing {
-        Button {
-          text: pairStarting ? "Starting…" : "Pair this device"
-          color: pairStarting ? muted : accent
-          onTap: {
-            if !pairStarting {
-              pairing = true
-              pairStarting = true
-              pairStatus = "Starting a five-minute browser challenge…"
-              pairStart = post("${api}/auth/native/start", {device_kind: "phone", device_name: "CDM review face"}, {Accept: "application/json"})
+        if pairRequest != null && pairToken != null {
+          Text { text: "A pairing challenge is still waiting. Resume polling it before its five-minute deadline, or cancel and start again."; color: yellow }
+          Text { text: "Matching code"; style: muted }
+          Text { text: pairRequest.user_code; style: huge; color: accent }
+          Button { text: "Open browser consent"; onTap: url(pairRequest.verification_uri) }
+          Text { text: pairStatus; color: muted }
+          Flow {
+            gap: 8
+            Button { text: "Resume waiting"; color: accent; onTap: { pairing = true; pairStatus = "Waiting for browser confirmation…" } }
+            Button { text: "Cancel pairing"; color: muted; onTap: { pairing = false; pairRequest = null; pairToken = null; pairAttempt = pairAttempt + 1; pairStatus = "" } }
+          }
+        } else {
+          Button {
+            text: pairBusy ? "Finishing the previous check…" : "Pair this device"
+            color: pairBusy ? muted : accent
+            onTap: {
+              if !pairBusy {
+                authNotice = ""
+                pairStatus = "Starting a five-minute browser challenge…"
+                pairRequest = null
+                pairToken = null
+                pairing = true
+                pairStarting = true
+                pairAttempt = pairAttempt + 1
+                pairStartAttempt = pairAttempt
+                pairStartSeq = pairStartSeq + 1
+                pairStart = null
+                pairStart = post("${api}/auth/native/start", {device_kind: "phone", device_name: "CDM review face"}, {Accept: "application/json"})
+              }
             }
           }
         }
@@ -627,7 +746,17 @@ widget "cdm-review" {
           Button { text: "Open browser consent"; onTap: url(pairRequest.verification_uri) }
         }
         Text { text: pairStatus; color: muted }
-        Button { text: "Cancel pairing"; color: muted; onTap: { pairing = false; pairToken = null; pairRequest = null; pairStatus = "" } }
+        Button {
+          text: pairBusy ? "Cancelling… (finishing the current check)" : "Cancel pairing"
+          color: muted
+          onTap: {
+            pairing = false
+            pairRequest = null
+            pairToken = null
+            pairAttempt = pairAttempt + 1
+            pairStatus = pairBusy ? "Stopping the current challenge check…" : ""
+          }
+        }
       }
     }
   }
@@ -639,9 +768,9 @@ widget "cdm-review" {
       if q != null && !q.ok { Text { text: cachedQueue == null ? "Queue unavailable — not empty." : "Offline/stale copy — actions paused."; color: red } }
       if q != null && q.ok && !queueValid { Text { text: "Waiting for a queue response from the verified device grant…"; color: yellow } }
       if queueValid && !q.out.complete { Text { text: "Partial queue: ${join(q.out.unavailable_packs, ", ")} unavailable. Counts are lower bounds — not done."; color: yellow } }
+      if cachedQueue != null && cachedQueue.complete == false && !(queueValid && q.out.complete) { Text { text: "The cached copy was partial; its counts are lower bounds."; color: yellow } }
       if queue != null && queue.next_cursor != null { Text { text: "This native page is bounded; ${queue.total} known reviews. More pages remain in the full app."; color: muted } }
-      if detailPoolFull { Text { text: "All detail slots are still loading. Reopen/check an item or wait; nothing was dropped."; color: yellow } }
-      if !poolFree { Text { text: "All four action slots need reconciliation. New actions pause visibly; no tap is silently dropped."; color: yellow } }
+      if !poolFree { Text { text: "All four action slots need an outcome checked. New actions pause visibly; no tap is silently dropped."; color: yellow } }
     }
   }
 
@@ -729,7 +858,7 @@ widget "cdm-review" {
         line.account != null ? "acct ${line.account}" : null,
         line.vat_account != null ? "VAT acct ${line.vat_account}" : null,
         line.country != null ? "country ${line.country}" : null,
-        line.customs_number != null ? "РНПТ ${line.customs_number}" : null
+        line.customs_number != null ? "ДТ ${line.customs_number}" : null
       ]
       if line.nomenclature != null {
         RefView { type: "Номенклатура"; value: line.nomenclature; absentText: "not provided" }
@@ -747,6 +876,9 @@ widget "cdm-review" {
       if contains(keys(line), "price") { Text { text: "Price: ${line.price}" } }
       if len(meta.filter(x => x != null && trim("${x}") != "")) > 0 {
         Text { text: join(meta.filter(x => x != null && trim("${x}") != ""), " · "); style: small; color: muted }
+      }
+      if line.rnpt != null {
+        Text { text: "РНПТ: ${line.rnpt.number ?? "—"}${line.rnpt.quantity != null ? " · qty ${line.rnpt.quantity}" : ""}"; style: small; color: muted }
       }
     }
   }
@@ -829,37 +961,114 @@ widget "cdm-review" {
     }
   }
 
+  component ServerCopy(server) {
+    Column {
+      gap: 4
+      if server != null {
+        Text { text: "Server copy"; style: small; color: muted }
+        Text { text: "Revision: ${server.revision}" }
+        if server.draft == null {
+          Text { text: "No server draft." }
+        } else {
+          Text { text: "Text: ${server.draft.text == "" ? "(empty)" : server.draft.text}" }
+          Text { text: "Reason: ${server.draft.reason == "" ? "(none)" : server.draft.reason}" }
+          Text { text: "Picks: ${len(server.draft.picks ?? []) == 0 ? "(none)" : join((server.draft.picks ?? []).map(p => (options[p] ?? {}).label ?? "#${p}"), ", ")}" }
+          if server.draft.mode != null { Text { text: "Mode: ${server.draft.mode}"; style: small; color: muted } }
+        }
+        Text { text: "Parked on server: ${server.parked == true ? "yes" : "no"}"; style: small; color: muted }
+        Button {
+          text: "Use server copy (discard mine)"
+          color: muted
+          onTap: {
+            drafts = server.draft == null ? remove(drafts, currentId) : set(drafts, currentId, merge(blank, server.draft))
+            details = details.map(d => d.key == currentId ? merge(d, {state: server}) : d)
+            conflicts = remove(conflicts, currentId)
+            draftBases = set(draftBases, currentId, server.revision == null ? "none" : server.revision)
+          }
+        }
+      }
+    }
+  }
+
   component ReviewScreen() {
     Column {
       fill: width
       weight: 1
       gap: 10
-      if authPending {
+      if pairing || (pairRequest != null && pairToken != null) {
+        Pairing { }
+      } else if authPending {
         Column {
           gap: 10
           weight: 1
           Text { text: "Verifying new device grant…"; style: title; color: accent }
           Text { text: "Old content and all writes stay closed until /native/me proves the account. Same-account drafts, reading state and pending requests are preserved."; color: muted }
+          if authNotice != "" { Text { text: authNotice; color: yellow } }
+          if verifyStalled { Text { text: "Verification has not completed. The grant may be invalid or the network unavailable. Retry, pair again, or cancel verification; your drafts are kept."; color: yellow } }
+          Flow {
+            gap: 8
+            Button { text: "Retry verification"; color: muted; onTap: refresh() }
+            Button {
+              text: pairBusy ? "Finishing the current check…" : "Pair again"
+              color: pairBusy ? muted : accent
+              onTap: {
+                if !pairBusy {
+                  authNotice = ""
+                  pairStatus = "Starting a five-minute browser challenge…"
+                  pairRequest = null
+                  pairToken = null
+                  pairing = true
+                  pairStarting = true
+                  pairAttempt = pairAttempt + 1
+                  pairStartAttempt = pairAttempt
+                  pairStartSeq = pairStartSeq + 1
+                  pairStart = null
+                  pairStart = post("${api}/auth/native/start", {device_kind: "phone", device_name: "CDM review face"}, {Accept: "application/json"})
+                }
+              }
+            }
+            Button {
+              text: "Cancel verification"
+              color: muted
+              onTap: {
+                authPending = false
+                token = null
+                pairing = false
+                pairRequest = null
+                pairToken = null
+                pairStatus = ""
+                authNotice = "Verification cancelled. Pair again to review; same-account drafts are kept."
+                verifyChecks = 0
+              }
+            }
+          }
         }
-      } else if token == null || pairing {
+      } else if token == null {
         Pairing { }
       } else {
         Row {
           Text { text: "CDM review"; style: title; color: accent; weight: 1 }
           Text { text: "↻"; style: title; color: accent; padding: [8, 4]; onTap: refresh() }
         }
-        Text { text: queue == null ? "Count unknown" : "${queue.total} reviews · ${queue.problem_count} problems · ${activityCount} requests"; color: muted }
+        Text { text: queue == null ? "Count unknown" : "${queue.total} reviews · ${queue.problem_count} problems · ${activityCount + retiredCount} requests"; color: muted }
         QueueStatus { }
         if q != null && q.code == 401 {
-          Text { text: "Device authorization expired or was revoked. Re-pairing preserves same-account drafts and pending requests; a different verified account is isolated." ; color: yellow }
+          Text { text: "Device authorization expired or was revoked. Re-pairing preserves same-account drafts and pending requests; a different verified account stays isolated."; color: yellow }
           Button {
-            text: detailActive.any(a => a) ? "Wait for the current detail read before re-pairing" : "Re-pair / verify account"
-            color: detailActive.any(a => a) ? muted : accent
+            text: pairBusy ? "Finishing the previous check…" : "Re-pair / verify account"
+            color: pairBusy ? muted : accent
             onTap: {
-              if !authPending && !pairing && !detailActive.any(a => a) && !pairStarting {
+              if !pairBusy && !authPending {
+                authNotice = ""
+                pairStatus = "Starting a five-minute browser challenge…"
+                pairRequest = null
+                pairToken = null
                 pairing = true
                 pairStarting = true
-                pairStatus = "Starting a five-minute browser challenge…"
+                pairAttempt = pairAttempt + 1
+                pairStartAttempt = pairAttempt
+                pairStartSeq = pairStartSeq + 1
+                pairStart = null
                 pairStart = post("${api}/auth/native/start", {device_kind: "phone", device_name: "CDM review face"}, {Accept: "application/json"})
               }
             }
@@ -868,16 +1077,24 @@ widget "cdm-review" {
         Flow {
           gap: 8
           Text { text: "Review"; padding: [4, 10]; background: tab == "review" ? accent : surface; color: tab == "review" ? background : foreground; onTap: tab = "review" }
-          Text { text: "Problems ${(queue ?? {}).problem_count ?? 0}"; padding: [4, 10]; background: tab == "problems" ? accent : surface; color: tab == "problems" ? background : foreground; onTap: tab = "problems" }
-          Text { text: "Requests ${activityCount}"; padding: [4, 10]; background: tab == "activity" ? accent : surface; color: tab == "activity" ? background : foreground; onTap: tab = "activity" }
+          Text { text: queue == null ? "Problems" : "Problems ${queue.problem_count}"; padding: [4, 10]; background: tab == "problems" ? accent : surface; color: tab == "problems" ? background : foreground; onTap: tab = "problems" }
+          Text { text: "Requests ${activityCount + retiredCount}"; padding: [4, 10]; background: tab == "activity" ? accent : surface; color: tab == "activity" ? background : foreground; onTap: tab = "activity" }
         }
         if tab == "problems" {
           Column {
             scroll: true
             weight: 1
             gap: 8
-            if queue == null || len((queue.problems ?? [])) == 0 { Text { text: queueValid && q.out.complete ? "No known preparation problems." : "Problem state unknown while the queue is unavailable."; color: muted } }
-            for p in (queue ?? {}).problems ?? [] key toJson(p.key) {
+            if queue == null || len(problems) == 0 {
+              Text { text: queueValid && q.out.complete && (q.out.problem_count ?? 0) == 0 ? "No known preparation problems." : "Problem state unknown or incomplete while the queue is unavailable or partial."; color: muted }
+            }
+            if queueValid && q.out.problems_complete == false {
+              Text { text: "Only the first ${len(problems)} of ${q.out.problem_count} preparation problems are listed here; open the full app for all of them."; color: yellow }
+            }
+            if cachedQueue != null && !queueValid && cachedQueue.problems_complete == false {
+              Text { text: "The cached problem list was incomplete; its count is a lower bound."; color: yellow }
+            }
+            for p in problems key toJson(p.key) {
               Column {
                 gap: 5
                 padding: 10
@@ -885,7 +1102,11 @@ widget "cdm-review" {
                 Text { text: p.title; fontWeight: 600 }
                 Text { text: "${p.review_state}: ${p.review_error.message}"; color: yellow }
                 Text { text: "Approval stays unavailable until the exact review is ready."; style: small; color: muted }
+                if get(itemErrors, toJson({account: account, key: p.key}), null) != null {
+                  Text { text: get(itemErrors, toJson({account: account, key: p.key}), {}).message; color: red }
+                }
                 Flow {
+                  gap: 8
                   if p.retry_prepare { ActionButton { item: p; label: "Retry preparation"; action: "prepare"; enabled: queueValid && !authPending && contains(q.out.unavailable_packs ?? [], p.key.pack) == false && !targets.any(t => t != null && t.account == account && t.item.key == p.key) } }
                   Button { text: "Open full app"; onTap: url("${api}/#/${enc(p.key.kind)}/${enc(p.key.pack)}/${enc(p.key.id)}") }
                 }
@@ -900,57 +1121,67 @@ widget "cdm-review" {
             if activityCount == 0 && retiredCount == 0 { Text { text: "No outstanding or unreconciled requests."; color: muted } }
             if retiredCount > 0 { Text { text: "${retiredCount} previous-account slot(s) remain isolated and count toward the four-slot guard."; color: yellow } }
             for r, i in results {
-              if targets[i] != null && targets[i].account == account {
+              let t = targets[i]
+              let live = lives[i]
+              let err = t == null ? null : get(itemErrors, t.id, null)
+              let conflict = t == null ? null : get(conflicts, t.id, null)
+              if t != null && t.account == account {
                 Column {
                   gap: 5
                   padding: 10
                   background: surface
-                  Text { text: "${targets[i].item.title} · ${targets[i].action}"; fontWeight: 600 }
+                  Text { text: "${t.item.title} · ${t.action}"; fontWeight: 600 }
                   Text {
-                    text: r == null ? lives[i] ? "Request outstanding; the queue advanced optimistically." : "Restored request: outcome unknown. CHECK ONLY — it will never be resent automatically." : r.ok ? "Confirmed" : "Late failure: ${get(itemErrors, targets[i].id, {}).message ?? "reopen and check"}"
-                    color: r != null && !r.ok ? red : r == null && !lives[i] ? yellow : muted
+                    text: r == null ? (live ? "Request outstanding; the queue advanced optimistically." : "Restored request: outcome unknown. CHECK ONLY — it will never be resent automatically.") : r.ok ? "Confirmed" : r.code == 409 && conflict != null && conflict.resolved == true ? "Resolved elsewhere; check the exact item." : "Late failure: ${err != null ? err.message : "reopen and check"}"
+                    color: r != null && !r.ok && conflict != null && conflict.resolved == true ? yellow : r != null && !r.ok ? red : r == null && !live ? yellow : muted
                   }
+                  if live { Text { text: "This request is still in flight. It cannot be cleared or reused until its response or the 30 s timeout is consumed."; style: small; color: muted } }
                   Flow {
+                    gap: 8
                     Button {
-                      text: r == null && !lives[i] ? "Reopen / check only" : "Reopen / check"
+                      text: r == null && !live ? "Reopen / check only" : "Reopen / check"
                       onTap: {
-                        current = targets[i].item
-                        currentDetailSlot = -1
-                        startupOpen = false
-                        openRequest = targets[i].item
-                        hidden = hidden.filter(k => k != targets[i].item.key)
+                        current = t.item
+                        hidden = hidden.filter(k => k != t.item.key)
                         tab = "review"
                       }
                     }
-                    Button { text: "Full app"; onTap: url("${api}/#/review/${enc(targets[i].item.key.kind)}/${enc(targets[i].item.key.pack)}/${enc(targets[i].item.key.id)}") }
-                    Button {
-                      text: "Clear after check"
-                      color: muted
-                      onTap: {
-                        hidden = hidden.filter(k => k != targets[i].item.key)
-              if i == 0 { res0 = null; tgt0 = null; live0 = false }
-              else if i == 1 { res1 = null; tgt1 = null; live1 = false }
-              else if i == 2 { res2 = null; tgt2 = null; live2 = false }
-              else if i == 3 { res3 = null; tgt3 = null; live3 = false }
+                    Button { text: "Full app"; onTap: url("${api}/#/review/${enc(t.item.key.kind)}/${enc(t.item.key.pack)}/${enc(t.item.key.id)}") }
+                    if !live {
+                      Button {
+                        text: "Clear after check"
+                        color: muted
+                        onTap: {
+                          hidden = hidden.filter(k => k != t.item.key)
+                          itemErrors = remove(itemErrors, t.id)
+                          if i == 0 { res0 = null; tgt0 = null; live0 = false }
+                          else if i == 1 { res1 = null; tgt1 = null; live1 = false }
+                          else if i == 2 { res2 = null; tgt2 = null; live2 = false }
+                          else { res3 = null; tgt3 = null; live3 = false }
+                        }
                       }
                     }
                   }
                 }
               }
-              if targets[i] != null && targets[i].account != account {
+              if t != null && t.account != account {
                 Column {
                   gap: 5
                   padding: 10
                   background: surface
                   Text { text: "Previous-account request retained. Item identity/content is hidden; it cannot be reopened, checked or submitted here."; color: yellow }
-                  Button {
-                    text: "Discard retained slot"
-                    color: muted
-                    onTap: {
-              if i == 0 { res0 = null; tgt0 = null; live0 = false }
-              else if i == 1 { res1 = null; tgt1 = null; live1 = false }
-              else if i == 2 { res2 = null; tgt2 = null; live2 = false }
-              else if i == 3 { res3 = null; tgt3 = null; live3 = false }
+                  if live {
+                    Text { text: "Still in flight; wait for its response or timeout before discarding."; style: small; color: muted }
+                  } else {
+                    Button {
+                      text: "Discard retained slot"
+                      color: muted
+                      onTap: {
+                        if i == 0 { res0 = null; tgt0 = null; live0 = false }
+                        else if i == 1 { res1 = null; tgt1 = null; live1 = false }
+                        else if i == 2 { res2 = null; tgt2 = null; live2 = false }
+                        else { res3 = null; tgt3 = null; live3 = false }
+                      }
                     }
                   }
                 }
@@ -963,14 +1194,15 @@ widget "cdm-review" {
               weight: 1
               gap: 10
               Text {
-                text: activityCount > 0 ? "Queue advanced. Requests still need confirmation/check; this is not a background-delivery claim." : queueValid && !q.out.complete ? "Some packs are unavailable. The visible page is empty, not the fleet." : queue != null && queue.next_cursor != null ? "This page is complete; more reviews remain in the full app." : "No visible ready reviews."
+                text: activityCount > 0 ? "Queue advanced. Requests still need confirmation or checking; this is not a background-delivery claim." : queue == null ? "The queue is not loaded. This is unknown, not empty." : !queueValid ? "Showing the cached queue. It is useful for reading but is not a fleet claim, and writes stay paused." : !q.out.complete ? "Some packs are unavailable. The visible page is empty, not the fleet." : queue.next_cursor != null ? "This page is complete; more reviews remain in the full app." : "No visible ready reviews."
                 style: title
               }
               if len(visibleItems) > 0 {
-                Button { text: "Review next (${len(visibleItems)} on this page)"; onTap: { current = visibleItems[0]; currentDetailSlot = -1; startupOpen = false; openRequest = visibleItems[0] } }
+                Button { text: "Review next (${len(visibleItems)} on this page)"; onTap: { current = visibleItems[0]; tab = "review" } }
               }
               Button { text: "Open full app"; onTap: url(api) }
               Button { text: "Requests / problems"; color: muted; onTap: tab = activityCount > 0 ? "activity" : "problems" }
+              Button { text: "Close"; color: muted; onTap: close() } // the screen's own close
             }
           } else {
             Row {
@@ -979,16 +1211,33 @@ widget "cdm-review" {
             }
             Column {
               scroll: true
-              lazy: true
               weight: 1
               gap: 10
               Text { text: current.title; style: title; fontWeight: 600 }
               if currentError != null { Text { text: currentError.message; color: red } }
-              if currentLoadError != null { Text { text: currentLoadError; color: yellow } }
-              if entry == null || currentDetailSlot < 0 || detailActive[currentDetailSlot] {
-                Text { text: entry == null ? "Loading exact review…" : "Refreshing exact review; cached copy remains read-only until loaded."; color: muted }
+              if currentBusy {
+                Column {
+                  gap: 4
+                  Text { text: "A request for this item is outstanding or needs checking. Actions pause so no tap is dropped."; color: yellow }
+                  Button { text: "Open requests"; color: muted; onTap: tab = "activity" }
+                }
               }
-              if entry != null {
+              if queueValid && current != null && !currentInQueue && queue.next_cursor == null && !contains(q.out.unavailable_packs ?? [], current.key.pack) {
+                Text { text: "This item is no longer in the fresh queue. It was probably resolved elsewhere; open the full app or refresh before another action."; color: yellow }
+              }
+              if !loaded {
+                Column {
+                  gap: 6
+                  Text { text: entry == null ? "Loading exact review…" : "Loading the complete exact review; actions stay disabled until every required part has loaded."; color: muted }
+                  Text { text: "If this does not finish, the pack may be unavailable. Retry, or open the full app for the exact item."; style: small; color: muted }
+                  Flow {
+                    gap: 8
+                    Button { text: "Retry exact read"; color: muted; onTap: refresh() }
+                    Button { text: "Open full app"; color: muted; onTap: url("${api}/#/${enc(current.key.kind)}/${enc(current.key.pack)}/${enc(current.key.id)}") }
+                  }
+                }
+              }
+              if entry != null && loaded {
                 if current.key.kind == "gate" {
                   if isReceipt {
                     ReceiptProposal { }
@@ -997,10 +1246,12 @@ widget "cdm-review" {
                     Text { text: "To: ${recipients}" }
                     if cc != "" { Text { text: "Cc: ${cc}" } }
                     if bcc != "" { Text { text: "Bcc: ${bcc}" } }
-                    Text { text: "Complete body + signature text"; style: small; color: muted }
-                    Text { text: mail.body_plain ?? "" }
-                    Row {
-                      Button { text: "Copy complete text"; color: muted; onTap: copy(mail.body_plain ?? "") }
+                    if htmlOnly {
+                      Text { text: "This review has no plain-text body. The native face cannot show its HTML body, so approval and rejection are disabled here. Open the full app to read the formatted message and decide."; color: yellow }
+                    } else {
+                      Text { text: "Complete body + signature text"; style: small; color: muted }
+                      Text { text: mail.body_plain ?? "" }
+                      Row { Button { text: "Copy complete text"; color: muted; onTap: copy(mail.body_plain ?? "") } }
                     }
                     for a, i in mail.attachments ?? [] {
                       Button {
@@ -1009,17 +1260,23 @@ widget "cdm-review" {
                         onTap: url("${api}/api/swarms/${enc(current.key.pack)}/gates/${enc(current.key.id)}/draft/attachments/${int(i)}")
                       }
                     }
+                  } else if isMail {
+                    Text { text: "The exact mail body is unavailable, so native approval is disabled. Open the full app for the exact item."; color: yellow }
                   } else {
                     Text { text: "Gate proposal"; style: small; color: muted }
                     Text { text: exact.preview_gfm ?? current.title }
                   }
                   if exact.status != "pending" { Text { text: "Resolved elsewhere (${exact.status}). Your unsent draft is retained."; color: yellow } }
-                  if review.review_state != "ready" { Text { text: "Review is not ready; approval and rejection stay disabled."; color: yellow } }
+                  if review == null || review.review_state != "ready" { Text { text: "Review is not ready; approval and rejection stay disabled."; color: yellow } }
                   Input {
                     text: draft.reason
                     placeholder: "Rejection reason (required to reject)"
-                    onChange: drafts = set(drafts, currentId, merge(draft, {reason: value, mode: trim(value) != "" ? "deny" : "normal"}))
+                    onChange: {
+                      if get(draftBases, currentId, null) == null { draftBases = set(draftBases, currentId, serverState == null || serverState.revision == null ? "none" : serverState.revision) }
+                      drafts = set(drafts, currentId, merge(draft, {reason: value, mode: trim(value) != "" ? "deny" : "normal"}))
+                    }
                   }
+                  if len(draft.reason) > 4000 { Text { text: "Rejection reason exceeds 4000 characters; shorten it before rejecting."; color: red } }
                 } else {
                   Text { text: exact.header ?? "Question"; fontWeight: 600 }
                   Text { text: exact.question ?? "" }
@@ -1028,16 +1285,23 @@ widget "cdm-review" {
                     Button {
                       text: "${contains(draft.picks, i) ? "✓" : "○"} ${option.label}${option.description != null ? " — ${option.description}" : ""}"
                       color: contains(draft.picks, i) ? accent : muted
-                      onTap: drafts = set(drafts, currentId, merge(draft, {picks: exact.multi ? (contains(draft.picks, i) ? draft.picks.filter(p => p != i) : (draft.picks + [i]).sort()) : [i]}))
+                      onTap: {
+                        if get(draftBases, currentId, null) == null { draftBases = set(draftBases, currentId, serverState == null || serverState.revision == null ? "none" : serverState.revision) }
+                        drafts = set(drafts, currentId, merge(draft, {picks: exact.multi ? (contains(draft.picks, i) ? draft.picks.filter(p => p != i) : (draft.picks + [i]).sort()) : [i]}))
+                      }
                     }
                   }
                   Input {
                     text: draft.text
                     placeholder: "Answer / additional detail"
-                    onChange: drafts = set(drafts, currentId, merge(draft, {text: value}))
+                    onChange: {
+                      if get(draftBases, currentId, null) == null { draftBases = set(draftBases, currentId, serverState == null || serverState.revision == null ? "none" : serverState.revision) }
+                      drafts = set(drafts, currentId, merge(draft, {text: value}))
+                    }
                   }
                   if len(answerText) > 4000 { Text { text: "Answer exceeds 4000 characters; shorten it before sending."; color: red } }
                 }
+                if draftTooLong { Text { text: "Draft exceeds the server limits (16000 text / 4000 reason characters); shorten it before saving."; color: red } }
                 if currentConflict != null {
                   Column {
                     gap: 5
@@ -1045,49 +1309,48 @@ widget "cdm-review" {
                     background: surface
                     Text { text: currentConflict.resolved == true ? "Resolved elsewhere. Your local unsent copy is still below." : "Server draft changed elsewhere. Both copies are retained; choose explicitly."; color: yellow }
                     if currentConflict.server != null {
-                      Button {
-                        text: "Use server copy (discard mine)"
-                        color: muted
-                        onTap: {
-                          drafts = currentConflict.server.draft == null ? remove(drafts, currentId) : set(drafts, currentId, merge(blank, currentConflict.server.draft))
-                          details = details.map(d => d.key == currentId ? merge(d, {state: currentConflict.server}) : d)
-                          conflicts = remove(conflicts, currentId)
-                        }
-                      }
+                      ServerCopy { server: currentConflict.server }
+                      Text { text: "Your local copy stays in the inputs above until you choose. Parking is separate from the draft."; style: small; color: muted }
                     }
                   }
+                }
+                if serverMoved && currentConflict == null {
+                  Column {
+                    gap: 5
+                    padding: 8
+                    background: surface
+                    Text { text: "The server draft changed elsewhere since you started editing. Your local copy stays above; both copies are retained."; color: yellow }
+                    ServerCopy { server: serverState }
+                  }
+                }
+                if handoffPending && !serverMoved && currentConflict == null {
+                  Text { text: "This local draft is not on the server yet. Save draft first, or the full app will not see these edits; the local copy stays on this phone."; color: yellow }
                 }
               }
             }
             Flow {
               gap: 8
-              ActionButton { item: current; label: "Save draft"; action: "save"; enabled: canWrite }
+              ActionButton { item: current; label: "Save draft"; action: "save"; enabled: canWrite && !draftTooLong }
               if current.key.kind == "gate" {
                 ActionButton { item: current; label: "Approve"; action: "allow"; advance: true; enabled: gateReady }
                 ActionButton { item: current; label: "Reject"; action: "deny"; advance: true; enabled: gateReady && trim(draft.reason) != "" && len(draft.reason) <= 4000 }
               } else {
                 ActionButton { item: current; label: "Answer"; action: "answer"; advance: true; enabled: askReady && trim(answerText) != "" && len(answerText) <= 4000 }
               }
-              ActionButton { item: current; label: "Skip"; action: "skip"; advance: true; enabled: canWrite && exact.status == "pending" }
+              ActionButton { item: current; label: "Skip"; action: "skip"; advance: true; enabled: canWrite && exact != null && exact.status == "pending" }
               Button {
                 text: "Next"
                 color: muted
-                onTap: {
-                  current = nextItem
-                  currentDetailSlot = -1
-                  startupOpen = false
-                  openRequest = nextItem
-                }
+                onTap: { current = nextItem; tab = "review" }
               }
-              Button { text: "Quick full app"; color: muted; onTap: url("${api}/#/review/${enc(current.key.kind)}/${enc(current.key.pack)}/${enc(current.key.id)}") }
-              Button { text: "Full app escape"; color: muted; onTap: url("${api}/#/${enc(current.key.kind)}/${enc(current.key.pack)}/${enc(current.key.id)}") }
+              Button { text: handoffPending ? "Quick full app (draft stays local)" : "Quick full app"; color: muted; onTap: url("${api}/#/review/${enc(current.key.kind)}/${enc(current.key.pack)}/${enc(current.key.id)}") }
+              Button { text: handoffPending ? "Full app escape (draft stays local)" : "Full app escape"; color: muted; onTap: url("${api}/#/${enc(current.key.kind)}/${enc(current.key.pack)}/${enc(current.key.id)}") }
             }
           }
         }
       }
     }
   }
-
 
   onTap: screen()
 
@@ -1097,14 +1360,17 @@ widget "cdm-review" {
     if authPending {
       Text { text: "Verifying new grant; drafts and requests preserved"; color: yellow }
     } else if token == null {
-      Text { text: pairing ? "Browser pairing in progress" : "Tap to pair and open native review"; color: muted }
+      Text { text: pairing ? "Browser pairing in progress" : pairRequest != null ? "Pairing challenge pending — tap to resume" : "Tap to pair and open native review"; color: muted }
       if pairRequest != null { Text { text: "Code: ${pairRequest.user_code}"; color: accent } }
+      if authNotice != "" { Text { text: authNotice; maxLines: 2; color: yellow } }
     } else {
       Text { text: queue == null ? "Counts unknown — not empty" : "${queue.total} ready · ${queue.problem_count} problems"; style: title }
       if q != null && !q.ok { Text { text: "Offline/stale — actions pause inside"; color: red } }
       if queueValid && !q.out.complete { Text { text: "Partial: ${join(q.out.unavailable_packs, ", ")} unavailable"; color: yellow } }
-      if activityCount > 0 { Text { text: "${activityCount} requests to confirm/check"; color: yellow } }
-      for p in ((queue ?? {}).problems ?? []).take(2) key toJson(p.key) {
+      if cachedQueue != null && !queueValid && cachedQueue.complete == false { Text { text: "Cached copy partial — counts are lower bounds"; color: yellow } }
+      if activityCount + retiredCount > 0 { Text { text: "${activityCount + retiredCount} requests to confirm/check"; color: yellow } }
+      if retiredCount > 0 { Text { text: "${retiredCount} previous-account request(s) remain quarantined; open Requests to discard."; maxLines: 2; color: yellow } }
+      for p in problems.take(2) key toJson(p.key) {
         Text { text: "⚠ ${p.title}"; maxLines: 2; color: yellow }
       }
       Text { text: "Tap for native review"; style: small; color: muted }
