@@ -1,0 +1,363 @@
+widget "pixel gps" {
+  size: 2x2
+  minSize: 2x2
+  meta {
+    description: "GPS bridge — captures exact phone GPS for location widgets (not IP). Serves a local page that writes the fix"
+    version: "1.0"
+    license: "MIT"
+    category: "world"
+    owl: 5
+  }
+
+  requires { pacman: ["python"] }
+
+  // Own port (18765) so it doesn't collide with other store widgets on 8765.
+  source ensure = cmd("""
+python3 - <<'PY'
+import json, os, socket, subprocess, sys, time
+from pathlib import Path
+
+PORT = 18765
+CACHE = Path.home() / ".cache"
+CACHE.mkdir(parents=True, exist_ok=True)
+GPS = CACHE / "pixel-gps.json"
+PID = CACHE / "pixel-gps-server.pid"
+LOG = CACHE / "pixel-gps-server.log"
+SERVER = CACHE / "pixel-gps-server.py"
+
+SERVER_SRC = r'''
+#!/usr/bin/env python3
+import json, re, time, urllib.parse, urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+PORT = 18765
+GPS = Path.home() / ".cache" / "pixel-gps.json"
+UA = "Mozilla/5.0 (omalauncher pixel-gps widget)"
+
+PAGE = """<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pixel GPS → widgets</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #0b0f14; color: #e8eef7;
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 28px 20px;
+    text-align: center; gap: 12px;
+  }
+  h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -0.02em; }
+  p { margin: 0; opacity: 0.75; font-size: 14px; line-height: 1.45; max-width: 28rem; }
+  button {
+    margin-top: 8px; font-size: 17px; font-weight: 600;
+    padding: 14px 26px; border-radius: 14px; border: 0;
+    background: #3b82f6; color: #fff;
+  }
+  button.secondary { background: #1f2937; color: #e8eef7; }
+  #s {
+    margin-top: 10px; font-size: 13px; opacity: 0.9;
+    white-space: pre-wrap; font-variant-numeric: tabular-nums;
+    min-height: 4.5em; max-width: 28rem;
+  }
+  .ok { color: #4ade80; }
+  .err { color: #f87171; }
+</style>
+</head><body>
+  <h1>Pixel GPS</h1>
+  <p>Uses your phone’s real GPS (not IP). Widgets that opt in can read this fix for weather and nearby places.</p>
+  <button id="once">Get GPS fix</button>
+  <button id="watch" class="secondary">Keep updating</button>
+  <div id="s">waiting…</div>
+<script>
+const s = document.getElementById('s');
+let watchId = null;
+function set(msg, cls) { s.className = cls || ''; s.textContent = msg; }
+async function save(pos) {
+  const p = {
+    ok: true, source: 'gps',
+    lat: pos.coords.latitude, lon: pos.coords.longitude,
+    accuracy: pos.coords.accuracy, alt: pos.coords.altitude,
+    speed: pos.coords.speed, heading: pos.coords.heading,
+    at: Date.now() / 1000
+  };
+  set('got fix ±' + Math.round(p.accuracy) + 'm\\n' + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + '\\nsaving…');
+  try {
+    const r = await fetch('/gps', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p) });
+    const t = await r.text();
+    set('saved ✓  ·  ' + t + '\\n' + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + '\\n±' + Math.round(p.accuracy) + 'm accuracy', 'ok');
+  } catch (e) { set('save failed: ' + e, 'err'); }
+}
+function fail(err) { set('GPS error: ' + (err && err.message ? err.message : err), 'err'); }
+const opts = { enableHighAccuracy: true, timeout: 25000, maximumAge: 3000 };
+function once() {
+  if (!navigator.geolocation) { set('no geolocation API', 'err'); return; }
+  set('requesting GPS…');
+  navigator.geolocation.getCurrentPosition(save, fail, opts);
+}
+function toggleWatch() {
+  if (!navigator.geolocation) { set('no geolocation API', 'err'); return; }
+  if (watchId != null) {
+    navigator.geolocation.clearWatch(watchId); watchId = null;
+    document.getElementById('watch').textContent = 'Keep updating';
+    set('live updates stopped'); return;
+  }
+  document.getElementById('watch').textContent = 'Stop updating';
+  set('live GPS on…');
+  watchId = navigator.geolocation.watchPosition(save, fail, opts);
+}
+document.getElementById('once').onclick = once;
+document.getElementById('watch').onclick = toggleWatch;
+setTimeout(once, 350);
+</script>
+</body></html>
+"""
+
+def reverse_geocode(lat, lon):
+    try:
+        q = urllib.parse.urlencode({
+            "lat": f"{lat:.7f}", "lon": f"{lon:.7f}",
+            "format": "jsonv2", "zoom": 14, "addressdetails": 1,
+        })
+        req = urllib.request.Request(
+            "https://nominatim.openstreetmap.org/reverse?" + q,
+            headers={"User-Agent": UA, "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            d = json.load(r)
+        addr = d.get("address") or {}
+        place = (
+            addr.get("city") or addr.get("town") or addr.get("village")
+            or addr.get("hamlet") or addr.get("county") or addr.get("suburb")
+            or ""
+        )
+        region = addr.get("state") or addr.get("region") or ""
+        country = addr.get("country") or ""
+        return {
+            "place": place,
+            "region": region,
+            "country": country,
+            "display": d.get("display_name") or "",
+            "postcode": addr.get("postcode") or "",
+        }
+    except Exception:
+        return {}
+
+def save_fix(p):
+    p = dict(p)
+    p["ok"] = True
+    p["at"] = float(p.get("at") or time.time())
+    try:
+        lat, lon = float(p["lat"]), float(p["lon"])
+    except Exception:
+        return "bad coords"
+    geo = reverse_geocode(lat, lon)
+    p.update(geo)
+    GPS.parent.mkdir(parents=True, exist_ok=True)
+    tmp = GPS.with_suffix(".tmp")
+    tmp.write_text(json.dumps(p))
+    tmp.replace(GPS)
+    bits = []
+    if p.get("place"): bits.append(str(p["place"]))
+    if p.get("region"): bits.append(str(p["region"]))
+    return ", ".join(bits) if bits else "ok"
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def _send(self, code, body, ctype="text/plain; charset=utf-8"):
+        data = body if isinstance(body, bytes) else body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+    def do_GET(self):
+        path = urllib.parse.urlsplit(self.path).path
+        if path in ("/", "/index.html"):
+            self._send(200, PAGE, "text/html; charset=utf-8")
+        elif path == "/gps":
+            if GPS.exists():
+                self._send(200, GPS.read_text(), "application/json")
+            else:
+                self._send(200, '{"ok":false}', "application/json")
+        elif path == "/health":
+            self._send(200, "ok")
+        else:
+            self._send(404, "not found")
+    def do_POST(self):
+        path = urllib.parse.urlsplit(self.path).path
+        if path != "/gps":
+            self._send(404, "not found"); return
+        n = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(n) if n else b"{}"
+        try:
+            p = json.loads(raw.decode("utf-8", "replace"))
+        except Exception:
+            self._send(400, "bad json"); return
+        msg = save_fix(p)
+        self._send(200, msg)
+
+if __name__ == "__main__":
+    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+    httpd.serve_forever()
+'''
+
+def port_open(port):
+    try:
+        with socket.create_connection(("127.0.0.1", port), 0.4):
+            return True
+    except OSError:
+        return False
+
+def alive_pid(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+# write/update server script
+SERVER.write_text(SERVER_SRC)
+SERVER.chmod(0o755)
+
+running = port_open(PORT)
+if not running:
+    # stale pid?
+    try:
+        if PID.exists():
+            old = int(PID.read_text().strip() or "0")
+            if old and alive_pid(old):
+                pass
+    except Exception:
+        pass
+    logf = open(LOG, "ab", buffering=0)
+    proc = subprocess.Popen(
+        [sys.executable, str(SERVER)],
+        stdout=logf, stderr=logf, start_new_session=True,
+    )
+    PID.write_text(str(proc.pid))
+    for _ in range(20):
+        time.sleep(0.15)
+        if port_open(PORT):
+            running = True
+            break
+
+fix = {}
+try:
+    if GPS.exists():
+        fix = json.loads(GPS.read_text())
+except Exception:
+    fix = {}
+
+print(json.dumps({
+    "ok": True,
+    "running": running,
+    "port": PORT,
+    "has_fix": bool(fix.get("ok") and fix.get("lat") is not None),
+    "url": f"http://127.0.0.1:{PORT}/",
+}))
+PY
+  """) every 30s json timeout 12s
+
+  source now = clock every 5s
+  source gps = cmd("cat ~/.cache/pixel-gps.json 2>/dev/null || echo '{}'") every 10s json timeout 3s
+
+  let ok = gps != null && gps.ok == true && gps.lat != null
+  let age = ok ? (now - num(gps.at)) : null
+  let ageTxt = age == null ? "" : age < 60 ? "just now" : age < 3600 ? "${round(age / 60)}m ago" : age < 86400 ? "${round(age / 3600)}h ago" : "${round(age / 86400)}d ago"
+  let acc = ok && gps.accuracy != null ? "±${round(gps.accuracy)}m" : ""
+  let place = ok ? (gps.place != null && str(gps.place) != "" ? str(gps.place) : "fix") : "no fix"
+  let region = ok && gps.region != null ? str(gps.region) : ""
+  let where = region != "" ? "${place}, ${region}" : place
+  let tint = ok ? (age != null && age < 1800 ? green : yellow) : orange
+  let bridge = "http://127.0.0.1:18765/"
+
+  onTap: {
+    refresh()
+    url(bridge)
+  }
+
+  Column {
+    gap: 4
+    align: center
+    justify: center
+    fill: true
+    Text { text: "gps"; style: label; color: muted }
+    Text {
+      text: ok ? "${fixed(gps.lat, 4)}, ${fixed(gps.lon, 4)}" : "tap for GPS"
+      style: title
+      color: tint
+      fontSize: ok ? 13 : 16
+      maxLines: 2
+      align: center
+    }
+    Text {
+      text: ok ? "${where}${acc != "" ? " · " + acc : ""}${ageTxt != "" ? " · " + ageTxt : ""}" : "exact · not IP"
+      style: small
+      color: muted
+      maxLines: 3
+      align: center
+    }
+  }
+
+  screen {
+    title: "pixel gps"
+    Column {
+      scroll: true
+      gap: 12
+      padding: 4
+
+      Text { text: ok ? "live fix" : "no GPS yet"; style: title; color: tint }
+      if ok {
+        Column {
+          gap: 4
+          Text { text: "${fixed(gps.lat, 6)}, ${fixed(gps.lon, 6)}"; style: body; font: mono }
+          Text { text: where; style: body }
+          if gps.display != null && gps.display != "" {
+            Text { text: gps.display; style: small; color: muted; maxLines: 4 }
+          }
+          Text {
+            text: "${acc != "" ? acc + " accuracy · " : ""}${ageTxt}"
+            style: small
+            color: muted
+          }
+        }
+      } else {
+        Text {
+          text: "Opens a local page that reads the phone’s real GPS and writes ~/.cache/pixel-gps.json for widgets that choose to use it. Uses port 18765 (not 8765)."
+          style: small
+          color: muted
+          maxLines: 8
+        }
+      }
+
+      Button {
+        text: ok ? "refresh GPS fix" : "capture GPS"
+        color: accent
+        onTap: {
+          refresh()
+          url(bridge)
+        }
+      }
+      Button {
+        text: "keep updating (live)"
+        color: muted
+        onTap: {
+          refresh()
+          url(bridge)
+        }
+      }
+
+      Text {
+        text: "Optional. Other store widgets keep working on IP / city. Port 18765 avoids clashing with store widgets that already use 8765."
+        style: muted
+        fontSize: 11
+        maxLines: 5
+      }
+      Button { text: "close"; onTap: close() }
+    }
+  }
+}

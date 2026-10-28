@@ -1,0 +1,1073 @@
+widget "potus" {
+  size: 6x3
+  minSize: 2x2
+  padding: 0
+  meta {
+    description: "Trump on Truth Social and White House posts on X. Tap to flip through current and past posts, newest first.";
+    version: "1.0";
+    license: "MIT";
+    category: "news";
+    owl: 5
+  }
+
+  requires { pacman: ["python"] }
+
+  source feed = cmd("""
+python3 - <<'PY'
+"""Trump Truth Social posts + White House X tweets for the potus widget."""
+import html as html_lib
+import json
+import os
+import re
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
+from datetime import datetime, timezone
+
+CACHE = os.path.expanduser("~/.cache/omalauncher-potus.json")
+THUMB_DIR = os.path.expanduser("~/.cache/omalauncher-potus-thumbs")
+MAX_KEEP = 400
+MAX_THUMBS = 40
+TRUTH_PAGES = 5
+TRUTH_LIMIT = 20
+X_COUNT = 40
+
+BROWSER = {
+    "User-Agent": "Mozilla/5.0 (omalauncher potus widget)",
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+BEARER = (
+    "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D"
+    "1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+)
+X_FEATURES = {
+    "rweb_tipjar_consumption_enabled": True,
+    "responsive_web_graphql_exclude_directive_enabled": True,
+    "verified_phone_label_enabled": False,
+    "creator_subscriptions_tweet_preview_api_enabled": True,
+    "responsive_web_graphql_timeline_navigation_enabled": True,
+    "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+    "communities_web_enable_tweet_community_results_fetch": True,
+    "c9s_tweet_anatomy_moderator_badge_enabled": True,
+    "articles_preview_enabled": True,
+    "responsive_web_edit_tweet_api_enabled": True,
+    "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
+    "view_counts_everywhere_api_enabled": True,
+    "longform_notetweets_consumption_enabled": True,
+    "responsive_web_twitter_article_tweet_consumption_enabled": True,
+    "tweet_awards_web_tipping_enabled": False,
+    "creator_subscriptions_quote_tweet_preview_enabled": False,
+    "freedom_of_speech_not_reach_fetch_enabled": True,
+    "standardized_nudges_misinfo": True,
+    "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
+    "rweb_video_timestamps_enabled": True,
+    "longform_notetweets_rich_text_read_enabled": True,
+    "longform_notetweets_inline_media_enabled": True,
+    "responsive_web_enhance_cards_enabled": False,
+}
+X_USER_TWEETS_QIDS = [
+    "E3opETHurmVJflFsUBVuUQ",
+    "V1ze5vAbghGPKpvDOmY3lQ",
+    "HuTx3Kbgjgyep8_JuWm73w",
+    "TQJSXKd5M6dfKvtQEGn0ow",
+]
+
+KIND_LABEL = {
+    "video": "Video",
+    "image": "Photo",
+    "photo": "Photo",
+    "gifv": "GIF",
+    "animated_gif": "GIF",
+    "audio": "Audio",
+}
+
+RT_ONLY = re.compile(
+    r"^(RT:\s*)?https?://\S+$",
+    re.I,
+)
+
+
+def get_bytes(url, headers=None, data=None, method=None, timeout=25, retries=4):
+    h = dict(BROWSER)
+    if headers:
+        h.update(headers)
+    last = None
+    for i in range(retries):
+        try:
+            req = urllib.request.Request(url, headers=h, data=data, method=method)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code in (429, 503, 502):
+                time.sleep(1.5 + i * 2.5)
+                continue
+            raise
+        except Exception as e:
+            last = e
+            time.sleep(0.6 + i * 0.8)
+    if last:
+        raise last
+    raise RuntimeError("fetch failed")
+
+
+def get_json(url, headers=None, data=None, method=None, timeout=25):
+    return json.loads(get_bytes(url, headers=headers, data=data, method=method, timeout=timeout))
+
+
+def clean_html(s):
+    s = s or ""
+    # drop Truth Social quote-inline RT chrome
+    s = re.sub(r'<span[^>]*class="[^"]*quote-inline[^"]*"[^>]*>.*?</span>', "", s, flags=re.I | re.S)
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
+    s = re.sub(r"</p\s*>", "\n", s, flags=re.I)
+    s = re.sub(r"<[^>]+>", "", s)
+    s = html_lib.unescape(s)
+    s = s.replace("\xa0", " ")
+    s = re.sub(r"[ \t]+\n", "\n", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
+
+def is_real_text(text):
+    if not text:
+        return False
+    t = text.strip()
+    if t in KIND_LABEL.values():
+        return False
+    if RT_ONLY.match(t):
+        return False
+    if re.match(r"^RT:\s*https?://\S+$", t, re.I):
+        return False
+    # bare media placeholders from older cache
+    if t.startswith("▶ ") or t.startswith("🖼 ") or t.startswith("♪ "):
+        return False
+    if t.lower() in ("[video]", "[photo]", "[gif]", "video post", "photo post", "gif post"):
+        return False
+    return True
+
+
+def iso_to_ts(s):
+    if not s:
+        return 0
+    try:
+        s = s.replace("Z", "+00:00")
+        return int(datetime.fromisoformat(s).timestamp())
+    except Exception:
+        return 0
+
+
+def tw_date_to_ts(s):
+    try:
+        return int(datetime.strptime(s, "%a %b %d %H:%M:%S %z %Y").timestamp())
+    except Exception:
+        return 0
+
+
+def load_cache():
+    try:
+        with open(CACHE) as f:
+            d = json.load(f)
+        if isinstance(d, dict) and isinstance(d.get("items"), list):
+            return d
+    except Exception:
+        pass
+    return {"items": []}
+
+
+def save_cache(data):
+    os.makedirs(os.path.dirname(CACHE) or ".", exist_ok=True)
+    tmp = CACHE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, CACHE)
+
+
+def media_label(kinds):
+    if not kinds:
+        return ""
+    labels = []
+    for k in kinds[:3]:
+        lab = KIND_LABEL.get(k, k.title() if k else "Media")
+        if lab not in labels:
+            labels.append(lab)
+    return " · ".join(labels)
+
+
+def first_preview(media):
+    for m in media or []:
+        for key in ("preview_url", "preview_remote_url", "url", "remote_url"):
+            u = m.get(key)
+            if u and isinstance(u, str) and u.startswith("http"):
+                return u
+    return ""
+
+
+def thumb_path_for(pid):
+    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", pid)[:120]
+    return os.path.join(THUMB_DIR, f"{safe}.jpg")
+
+
+def download_thumb(pid, url):
+    if not url or not pid:
+        return ""
+    path = thumb_path_for(pid)
+    if os.path.isfile(path) and os.path.getsize(path) > 200:
+        return path
+    try:
+        os.makedirs(THUMB_DIR, exist_ok=True)
+        data = get_bytes(url, headers={"Accept": "image/*,*/*"}, timeout=12)
+        if not data or len(data) < 200:
+            return ""
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+        return path
+    except Exception:
+        return ""
+
+
+def attach_thumbs(items):
+    """Download up to MAX_THUMBS preview images for items that need them."""
+    os.makedirs(THUMB_DIR, exist_ok=True)
+    jobs = []
+    for p in items:
+        pid = p.get("id") or ""
+        preview = p.get("_preview") or p.get("preview") or ""
+        if preview:
+            p["preview"] = preview
+        existing = p.get("thumb") or ""
+        if existing and os.path.isfile(existing) and os.path.getsize(existing) > 200:
+            p["thumb"] = existing
+            continue
+        path = thumb_path_for(pid) if pid else ""
+        if path and os.path.isfile(path) and os.path.getsize(path) > 200:
+            p["thumb"] = path
+            continue
+        if preview and pid:
+            jobs.append((pid, preview, p))
+        else:
+            p["thumb"] = p.get("thumb") or ""
+
+    # newest first already; cap downloads
+    jobs = jobs[:MAX_THUMBS]
+    if not jobs:
+        for p in items:
+            p.setdefault("thumb", "")
+        return items
+
+    with ThreadPoolExecutor(min(8, len(jobs))) as pool:
+        futs = {pool.submit(download_thumb, pid, url): p for pid, url, p in jobs}
+        for fut in as_completed(futs):
+            p = futs[fut]
+            try:
+                path = fut.result() or ""
+            except Exception:
+                path = ""
+            p["thumb"] = path
+
+    for p in items:
+        p.setdefault("thumb", "")
+        p.pop("_preview", None)
+    return items
+
+
+def make_post(pid, src, label, who, handle, text, at, url, likes, boosts, kinds, preview=""):
+    real = is_real_text(text)
+    if not real and kinds:
+        text = media_label(kinds) or "Media"
+    if not text:
+        return None
+    # skip pure RT noise with no media
+    if not real and not kinds:
+        return None
+    if not real and RT_ONLY.match((text or "").strip()):
+        return None
+    post = {
+        "id": pid,
+        "src": src,
+        "label": label,
+        "who": who,
+        "handle": handle,
+        "text": text[:2000],
+        "at": at or 0,
+        "url": url,
+        "likes": likes or 0,
+        "boosts": boosts or 0,
+        "media": kinds[:4],
+        "has_text": real,
+        "thumb": "",
+    }
+    if preview:
+        post["_preview"] = preview
+    return post
+
+
+def fetch_truth(acct, src, label, pages=TRUTH_PAGES):
+    out = []
+    try:
+        acc = get_json(f"https://truthsocial.com/api/v1/accounts/lookup?acct={acct}")
+    except Exception:
+        return out
+    aid = acc.get("id")
+    if not aid:
+        return out
+    max_id = None
+    for _ in range(pages):
+        q = f"exclude_replies=true&exclude_reblogs=true&limit={TRUTH_LIMIT}"
+        if max_id:
+            q += f"&max_id={max_id}"
+        try:
+            sts = get_json(f"https://truthsocial.com/api/v1/accounts/{aid}/statuses?{q}")
+        except Exception:
+            break
+        if not isinstance(sts, list) or not sts:
+            break
+        for s in sts:
+            if s.get("reblog"):
+                continue
+            text = clean_html(s.get("content") or "")
+            media = s.get("media_attachments") or []
+            kinds = [m.get("type") for m in media if m.get("type")]
+            if not is_real_text(text):
+                alts = [
+                    clean_html(m.get("description") or "")
+                    for m in media
+                    if m.get("description")
+                ]
+                alts = [a for a in alts if is_real_text(a)]
+                if alts:
+                    text = alts[0][:500]
+                elif kinds:
+                    text = media_label(kinds)
+                else:
+                    continue
+            # skip RT-only with no useful caption even if media (quote repost chrome)
+            raw = s.get("content") or ""
+            if "quote-inline" in raw and not is_real_text(clean_html(raw)):
+                # still keep if has media — label + thumb
+                if not kinds:
+                    continue
+                if not is_real_text(text):
+                    text = media_label(kinds)
+            pid = str(s.get("id") or "")
+            if not pid:
+                continue
+            url = s.get("url") or f"https://truthsocial.com/@{acct}/{pid}"
+            post = make_post(
+                f"truth:{pid}" if src == "truth" else f"{src}:{pid}",
+                src,
+                label,
+                acc.get("display_name") or acct,
+                f"@{acct}",
+                text,
+                iso_to_ts(s.get("created_at")),
+                url,
+                s.get("favourites_count") or 0,
+                s.get("reblogs_count") or 0,
+                kinds,
+                first_preview(media),
+            )
+            if post:
+                out.append(post)
+        max_id = str(sts[-1].get("id") or "")
+        if len(sts) < TRUTH_LIMIT or not max_id:
+            break
+        time.sleep(0.35)
+    return out
+
+
+def unwrap_tweet(tr):
+    r = tr.get("result") if isinstance(tr, dict) else None
+    if not r:
+        r = tr if isinstance(tr, dict) else {}
+    if r.get("__typename") == "TweetWithVisibilityResults":
+        r = r.get("tweet") or r
+    return r or {}
+
+
+def parse_x_timeline(data):
+    posts = []
+    try:
+        instr = data["data"]["user"]["result"]["timeline_v2"]["timeline"]["instructions"]
+    except Exception:
+        return posts
+    entries = []
+    for ins in instr:
+        if ins.get("type") == "TimelineAddEntries":
+            entries.extend(ins.get("entries") or [])
+        elif ins.get("type") == "TimelinePinEntry":
+            e = ins.get("entry") or {}
+            if e:
+                entries.insert(0, e)
+    for e in entries:
+        c = e.get("content") or {}
+        item = c.get("itemContent") or {}
+        if item.get("itemType") != "TimelineTweet":
+            continue
+        tw = unwrap_tweet(item.get("tweet_results") or {})
+        legacy = tw.get("legacy") or {}
+        text = (legacy.get("full_text") or "").strip()
+        # strip t.co URLs only posts that are pure RT
+        tid = str(legacy.get("id_str") or tw.get("rest_id") or "")
+        if not tid:
+            continue
+        user = (
+            ((tw.get("core") or {}).get("user_results") or {}).get("result") or {}
+        ).get("legacy") or {}
+        kinds = []
+        preview = ""
+        try:
+            media_list = (legacy.get("extended_entities") or legacy.get("entities") or {}).get(
+                "media"
+            ) or []
+            for m in media_list:
+                t = m.get("type")
+                if t:
+                    kinds.append("gifv" if t == "animated_gif" else ("image" if t == "photo" else t))
+                if not preview:
+                    preview = m.get("media_url_https") or m.get("media_url") or ""
+        except Exception:
+            pass
+        if not text and not kinds:
+            continue
+        if text.startswith("RT @") and not kinds:
+            # keep retweets with text; skip empty shells
+            pass
+        sn = user.get("screen_name") or "WhiteHouse"
+        post = make_post(
+            f"x:{tid}",
+            "wh",
+            "White House",
+            user.get("name") or "The White House",
+            f"@{sn}",
+            text if text else media_label(kinds),
+            tw_date_to_ts(legacy.get("created_at") or ""),
+            f"https://x.com/{sn}/status/{tid}",
+            legacy.get("favorite_count") or 0,
+            legacy.get("retweet_count") or 0,
+            kinds,
+            preview,
+        )
+        if post:
+            posts.append(post)
+    return posts
+
+
+def fetch_x_whitehouse():
+    try:
+        guest = get_json(
+            "https://api.twitter.com/1.1/guest/activate.json",
+            headers={"Authorization": f"Bearer {BEARER}"},
+            data=b"",
+            method="POST",
+            timeout=15,
+        )["guest_token"]
+    except Exception:
+        return []
+    uid = "1879644163769335808"
+    try:
+        ufeat = {
+            "hidden_profile_subscriptions_enabled": True,
+            "rweb_tipjar_consumption_enabled": True,
+            "responsive_web_graphql_exclude_directive_enabled": True,
+            "verified_phone_label_enabled": False,
+            "subscriptions_verification_info_is_identity_verified_enabled": True,
+            "subscriptions_verification_info_verified_since_enabled": True,
+            "highlights_tweets_tab_ui_enabled": True,
+            "responsive_web_twitter_article_notes_tab_enabled": True,
+            "subscriptions_feature_can_gift_premium": True,
+            "creator_subscriptions_tweet_preview_api_enabled": True,
+            "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+            "responsive_web_graphql_timeline_navigation_enabled": True,
+        }
+        params = urllib.parse.urlencode(
+            {
+                "variables": json.dumps(
+                    {"screen_name": "WhiteHouse", "withSafetyModeUserFields": True}
+                ),
+                "features": json.dumps(ufeat),
+                "fieldToggles": json.dumps({"withAuxiliaryUserLabels": False}),
+            }
+        )
+        ud = get_json(
+            f"https://api.x.com/graphql/xmU6X_CKVnQ5lSrCbAmJsg/UserByScreenName?{params}",
+            headers={
+                "Authorization": f"Bearer {BEARER}",
+                "x-guest-token": guest,
+                "x-twitter-active-user": "yes",
+            },
+            timeout=15,
+        )
+        uid = ud["data"]["user"]["result"]["rest_id"]
+    except Exception:
+        pass
+
+    hdrs = {
+        "Authorization": f"Bearer {BEARER}",
+        "x-guest-token": guest,
+        "x-twitter-active-user": "yes",
+        "x-twitter-client-language": "en",
+        "content-type": "application/json",
+    }
+    variables = {
+        "userId": uid,
+        "count": X_COUNT,
+        "includePromotedContent": False,
+        "withQuickPromoteEligibilityTweetFields": True,
+        "withVoice": True,
+        "withV2Timeline": True,
+    }
+    params = urllib.parse.urlencode(
+        {
+            "variables": json.dumps(variables),
+            "features": json.dumps(X_FEATURES),
+            "fieldToggles": json.dumps({"withArticlePlainText": False}),
+        }
+    )
+    for qid in X_USER_TWEETS_QIDS:
+        try:
+            d = get_json(
+                f"https://api.x.com/graphql/{qid}/UserTweets?{params}",
+                headers=hdrs,
+                timeout=25,
+            )
+            posts = parse_x_timeline(d)
+            if posts:
+                return posts
+        except urllib.error.HTTPError:
+            continue
+        except Exception:
+            continue
+    return []
+
+
+def fetch_wh_truth_fallback():
+    return fetch_truth("WhiteHouse", "wh", "White House", pages=3)
+
+
+def merge(old_items, new_items):
+    by_id = {}
+    for p in old_items + new_items:
+        p = dict(p)
+        pid = p.get("id")
+        if not pid:
+            continue
+        # fold internal preview into stable field for cache/redownload
+        if p.get("_preview") and not p.get("preview"):
+            p["preview"] = p["_preview"]
+        if "has_text" not in p:
+            p["has_text"] = is_real_text(p.get("text") or "")
+        t = p.get("text") or ""
+        # always normalize legacy emoji / placeholder captions
+        if t.startswith("▶ ") or t.startswith("🖼 ") or t.startswith("♪ ") or t.lower() in (
+            "[video]", "[photo]", "[gif]", "video post", "photo post", "gif post", "▶ video post", "🖼 photo post"
+        ):
+            p["has_text"] = False
+            if p.get("media"):
+                p["text"] = media_label(p.get("media") or []) or "Media"
+            elif t.startswith("▶"):
+                p["text"] = "Video"
+            elif t.startswith("🖼"):
+                p["text"] = "Photo"
+            else:
+                p["text"] = "Media"
+        elif not p["has_text"] and p.get("media"):
+            lab = media_label(p.get("media") or [])
+            if lab:
+                p["text"] = lab
+            p["has_text"] = is_real_text(p["text"])
+        else:
+            p["has_text"] = is_real_text(p.get("text") or "")
+        prev = by_id.get(pid)
+        if prev is None:
+            by_id[pid] = p
+            continue
+        if (p.get("at") or 0) >= (prev.get("at") or 0):
+            if not p.get("thumb") and prev.get("thumb"):
+                p["thumb"] = prev["thumb"]
+            if not p.get("preview") and prev.get("preview"):
+                p["preview"] = prev["preview"]
+            if not p.get("has_text") and prev.get("has_text"):
+                p["text"] = prev["text"]
+                p["has_text"] = True
+            by_id[pid] = p
+        else:
+            if not prev.get("thumb") and p.get("thumb"):
+                prev["thumb"] = p["thumb"]
+            if not prev.get("preview") and p.get("preview"):
+                prev["preview"] = p["preview"]
+            by_id[pid] = prev
+    items = list(by_id.values())
+    # newest first, but real-text posts get a 3h boost so a run of empty
+    # videos doesn't bury the latest captions
+    items.sort(
+        key=lambda p: -(
+            (p.get("at") or 0) + (10800 if p.get("has_text") else 0)
+        )
+    )
+    return items[:MAX_KEEP]
+
+
+def main():
+    cached = load_cache()
+    old = cached.get("items") or []
+    truth, wh, wh_fb = [], [], []
+    with ThreadPoolExecutor(3) as pool:
+        f_t = pool.submit(fetch_truth, "realDonaldTrump", "truth", "Truth Social", TRUTH_PAGES)
+        f_x = pool.submit(fetch_x_whitehouse)
+        f_w = pool.submit(fetch_wh_truth_fallback)
+        wait([f_t, f_x, f_w], timeout=55)
+        try:
+            truth = f_t.result(timeout=0) or []
+        except Exception:
+            truth = []
+        try:
+            wh = f_x.result(timeout=0) or []
+        except Exception:
+            wh = []
+        try:
+            wh_fb = f_w.result(timeout=0) or []
+        except Exception:
+            wh_fb = []
+
+    wh_posts = wh if wh else [
+        {
+            **p,
+            "src": "wh",
+            "label": "White House",
+            "id": p["id"].replace("truth:", "whtruth:").replace("wh:", "whtruth:"),
+        }
+        for p in wh_fb
+    ]
+
+    fresh = truth + wh_posts
+    items = merge(old, fresh)
+    items = attach_thumbs(items)
+
+    # strip internal fields before output
+    clean_items = []
+    for p in items:
+        q = {k: v for k, v in p.items() if not k.startswith("_")}
+        q.setdefault("thumb", "")
+        q.setdefault("has_text", is_real_text(q.get("text") or ""))
+        clean_items.append(q)
+    items = clean_items
+
+    truth_n = sum(1 for p in items if p.get("src") == "truth")
+    wh_n = sum(1 for p in items if p.get("src") == "wh")
+    out = {
+        "ok": len(fresh) > 0 or len(items) > 0,
+        "at": int(time.time()),
+        "truth": truth_n,
+        "wh": wh_n,
+        "fresh": len(fresh),
+        "total": len(items),
+        "items": items,
+    }
+    if items:
+        save_cache(out)
+    print(json.dumps(out, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
+PY
+  """) every 10m json timeout 70s
+  source now = clock every 30s
+
+  state jump = 0 persist
+  state tab = "all" persist
+
+  let all = feed.items ?? []
+  let items = tab == "truth" ? all.filter(p => p.src == "truth") : tab == "wh" ? all.filter(p => p.src == "wh") : all
+  let n = len(items)
+  let idx = n > 0 ? ((jump % n) + n) % n : 0
+  let cur = n > 0 ? items[idx] : null
+  let age = feed != null && feed.at != null ? now - feed.at : null
+  let isTruth = cur != null && cur.src == "truth"
+  let shade = isTruth ? orange : cyan
+  let rel = cur == null || cur.at == 0 ? "" : now - cur.at < 60 ? "now" : now - cur.at < 3600 ? "${max(floor((now - cur.at) / 60), 1)}m" : now - cur.at < 86400 ? "${floor((now - cur.at) / 3600)}h" : now - cur.at < 604800 ? "${floor((now - cur.at) / 86400)}d" : fmtTime(cur.at, "MMM d")
+  let thumb = (cur.thumb ?? "")
+  let hasThumb = thumb != "" && thumb != null
+
+  let h = rows ?? 3
+  let w = cols ?? 6
+  let tiny = h <= 2
+  let short = h <= 3
+  let slim = w < 5
+  let pad = tiny ? 4 : short ? 6 : 10
+  let gap = tiny ? 2 : short ? 3 : 5
+  let fsTab = tiny ? 9 : short ? 10 : slim ? 11 : 12
+  let fsLabel = tiny ? 9 : short ? 10 : 11
+  let fsWho = tiny ? 11 : short ? 12 : slim ? 13 : 14
+  let fsHandle = tiny ? 8 : short ? 9 : 10
+  let bodySize = tiny ? 11 : short ? 12 : slim ? 13 : 15
+  let bodyLines = tiny ? (hasThumb ? 2 : 3) : short ? (hasThumb ? 3 : 5) : hasThumb ? (slim ? 5 : 7) : (slim ? 8 : 10)
+  let thumbPx = tiny ? 40 : short ? (slim ? 52 : 60) : slim ? 72 : 88
+  let showThumb = hasThumb && !(tiny && slim)
+  let showStats = !tiny
+  let showNav = !tiny
+
+  onTap: jump = jump + 1
+  on tab { jump = 0 }
+
+  component Tab(id, label, hue, big = false) {
+    Column {
+      gap: big ? 2 : tiny ? 0 : 2
+      weight: 1
+      Text {
+        text: label
+        align: center
+        maxLines: 1
+        fontSize: big ? 15 : fsTab
+        bold: tab == id
+        color: tab == id ? hue : muted
+        onTap: tab = id
+      }
+      Spacer { height: big ? 2 : tiny ? 1 : 2; fill: width; background: tab == id ? hue : alpha(muted, 0.0) }
+    }
+  }
+
+  Column {
+    gap: gap
+    padding: pad
+
+    Row {
+      gap: tiny ? 4 : 6
+      align: center
+      Text {
+        text: "POTUS"
+        style: label
+        color: accent
+        bold: true
+        maxLines: 1
+        width: tiny ? 40 : 52
+        fontSize: fsLabel
+      }
+      Tab { id: "all"; label: "all"; hue: accent }
+      Tab { id: "truth"; label: tiny ? "TS" : "truth"; hue: orange }
+      Tab { id: "wh"; label: "WH"; hue: cyan }
+      Text {
+        text: age == null ? "..." : age < 90 ? "live" : age < 3600 ? "${max(floor(age / 60), 1)}m" : "${floor(age / 3600)}h"
+        style: small
+        color: muted
+        font: mono
+        maxLines: 1
+        width: tiny ? 28 : 36
+        align: end
+        fontSize: fsLabel
+      }
+    }
+
+    if cur == null {
+      Column {
+        gap: 8
+        weight: 1
+        justify: center
+        Text {
+          text: feed == null ? "loading posts..." : "no posts - tap to retry"
+          style: small
+          color: muted
+          align: center
+          fontSize: bodySize
+          onTap: refresh()
+        }
+      }
+    } else {
+      Column {
+        gap: tiny ? 2 : short ? 4 : 6
+        weight: 1
+
+        Row {
+          gap: tiny ? 4 : 8
+          align: center
+          Text {
+            text: isTruth ? "TRUTH" : "WH"
+            fontSize: tiny ? 8 : 10
+            bold: true
+            color: shade
+            maxLines: 1
+            width: tiny ? 36 : 48
+          }
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: cur.who ?? ""; fontSize: fsWho; bold: true; maxLines: 1 }
+            if !tiny {
+              Text { text: cur.handle ?? ""; style: small; color: muted; maxLines: 1; fontSize: fsHandle }
+            }
+          }
+          Text {
+            text: "${idx + 1}/${n}"
+            font: mono
+            fontSize: tiny ? 9 : 11
+            color: muted
+            maxLines: 1
+            width: tiny ? 40 : 56
+            align: end
+          }
+        }
+
+        if !tiny {
+          Spacer { height: 1; fill: width; background: alpha(muted, 0.22) }
+        }
+
+        if showThumb {
+          Row {
+            gap: tiny ? 4 : 8
+            align: top
+            Image {
+              src: thumb
+              width: thumbPx
+              height: thumbPx
+              fit: cover
+              radius: tiny ? 4 : 6
+              clip: true
+            }
+            Text {
+              text: cur.text ?? ""
+              fontSize: bodySize
+              maxLines: bodyLines
+              color: foreground
+              weight: 1
+            }
+          }
+        } else {
+          Text {
+            text: cur.text ?? ""
+            fontSize: bodySize
+            maxLines: bodyLines
+            color: foreground
+          }
+        }
+
+        Spacer { weight: 1 }
+
+        if showStats {
+          Row {
+            gap: short ? 6 : 10
+            align: center
+            Text {
+              text: (cur.likes ?? 0) > 0 ? "likes ${cur.likes}" : ""
+              style: small
+              color: muted
+              maxLines: 1
+              fontSize: fsLabel
+            }
+            Text {
+              text: (cur.boosts ?? 0) > 0 ? "boosts ${cur.boosts}" : ""
+              style: small
+              color: muted
+              maxLines: 1
+              fontSize: fsLabel
+            }
+            Spacer { weight: 1 }
+            Text { text: rel; style: small; color: muted; font: mono; maxLines: 1; fontSize: fsLabel }
+          }
+        }
+
+        if showNav {
+          Row {
+            gap: short ? 6 : 10
+            align: center
+            Text { text: "tap next"; style: small; color: muted; maxLines: 1; fontSize: fsLabel }
+            Spacer { weight: 1 }
+            Text {
+              text: "open"
+              style: small
+              color: shade
+              maxLines: 1
+              fontSize: fsLabel
+              onTap: url(cur.url)
+            }
+            Text {
+              text: "desk"
+              style: small
+              color: accent
+              maxLines: 1
+              fontSize: fsLabel
+              onTap: screen()
+            }
+          }
+        } else {
+          Row {
+            gap: 4
+            align: center
+            Text { text: rel; style: small; color: muted; font: mono; maxLines: 1; fontSize: fsLabel; weight: 1 }
+            Text {
+              text: "open"
+              style: small
+              color: shade
+              maxLines: 1
+              fontSize: fsLabel
+              onTap: url(cur.url)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "potus desk"
+    Column {
+      gap: 10
+
+      Row {
+        gap: 20
+        align: center
+        Tab { id: "all"; label: "all"; hue: accent; big: true }
+        Tab { id: "truth"; label: "truth"; hue: orange; big: true }
+        Tab { id: "wh"; label: "WH"; hue: cyan; big: true }
+        Spacer { weight: 1 }
+        Text {
+          text: "${idx + 1}/${n}"
+          font: mono
+          style: small
+          color: muted
+          maxLines: 1
+        }
+        if feed != null {
+          Text {
+            text: fmtTime(feed.at, "HH:mm")
+            style: small
+            color: muted
+            font: mono
+            maxLines: 1
+          }
+        }
+      }
+
+      if cur != null {
+        Column {
+          gap: 8
+          weight: 1
+
+          Row {
+            gap: 8
+            align: center
+            Text {
+              text: isTruth ? "TRUTH" : "WH"
+              fontSize: 11
+              bold: true
+              color: shade
+              maxLines: 1
+              width: 52
+            }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: cur.who ?? ""; fontSize: 16; bold: true; maxLines: 1 }
+              Text { text: cur.handle ?? ""; style: small; color: muted; maxLines: 1 }
+            }
+          }
+
+          Column {
+            scroll: true
+            weight: 1
+            gap: 8
+            if hasThumb {
+              Image {
+                src: thumb
+                height: 160
+                fill: width
+                fit: cover
+                radius: 8
+                clip: true
+              }
+            }
+            Text { text: cur.text ?? ""; fontSize: 17 }
+          }
+
+          Row {
+            gap: 10
+            align: center
+            Text {
+              text: (cur.likes ?? 0) > 0 ? "likes ${cur.likes}" : ""
+              style: small
+              color: muted
+              maxLines: 1
+            }
+            Text {
+              text: (cur.boosts ?? 0) > 0 ? "boosts ${cur.boosts}" : ""
+              style: small
+              color: muted
+              maxLines: 1
+            }
+            Spacer { weight: 1 }
+            Text {
+              text: (cur.at ?? 0) == 0 ? "" : fmtTime(cur.at, "MMM d HH:mm")
+              style: small
+              color: muted
+              font: mono
+              maxLines: 1
+            }
+          }
+
+          Row {
+            gap: 8
+            Button { text: "prev"; color: muted; onTap: jump = jump - 1 }
+            Button { text: "next"; onTap: jump = jump + 1 }
+            Spacer { weight: 1 }
+            Button { text: "open"; color: shade; onTap: url(cur.url) }
+          }
+        }
+      } else {
+        Text {
+          text: feed == null ? "loading..." : "no posts for this filter"
+          style: small
+          color: muted
+        }
+      }
+
+      Column {
+        scroll: true
+        gap: 4
+        height: 200
+        for p, i in take(items, 50) key p.id {
+          Row {
+            gap: 8
+            padding: [6, 5]
+            radius: 6
+            background: i == idx ? alpha(accent, 0.14) : alpha(muted, 0.05)
+            onTap: jump = i
+            Box {
+              width: 3
+              height: 28
+              radius: 2
+              background: p.src == "truth" ? orange : cyan
+            }
+            Column {
+              gap: 1
+              weight: 1
+              Text {
+                text: p.text
+                fontSize: 12
+                maxLines: 2
+                color: i == idx ? foreground : muted
+              }
+              Text {
+                text: "${p.label} · ${p.at == 0 ? "" : fmtTime(p.at, "MMM d HH:mm")}"
+                style: small
+                color: muted
+                maxLines: 1
+              }
+            }
+          }
+        }
+      }
+
+      Row {
+        gap: 8
+        Button { text: "refresh"; onTap: refresh() }
+        Spacer { weight: 1 }
+        Button { text: "close"; color: muted; onTap: close() }
+      }
+    }
+  }
+}
