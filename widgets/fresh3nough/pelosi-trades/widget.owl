@@ -107,9 +107,9 @@ def money_u(n):
     return ""
 
 def parse_amount(blob):
-    """Parse '$15,001 - $50,000' or split across lines into midpoint + display range."""
+    '''Parse '$$15,001 - $$50,000' or split across lines into midpoint + display range.'''
     s = re.sub(r"\s+", " ", blob or "")
-    nums = [int(x.replace(",", "")) for x in re.findall(r"\$?\s*([0-9][0-9,]*)", s)]
+    nums = [int(x.replace(",", "")) for x in re.findall(r"\$$?\s*([0-9][0-9,]*)", s)]
     nums = [n for n in nums if n >= 1]
     if not nums:
         return None, ""
@@ -127,9 +127,9 @@ def parse_amount(blob):
     if mid is None:
         mid = (lo + hi) / 2 if hi else lo
     if hi and hi != lo:
-        rng = f"${lo:,}–${hi:,}"
+        rng = f"$${lo:,}–$${hi:,}"
     else:
-        rng = f"${lo:,}"
+        rng = f"$${lo:,}"
     return float(mid), rng
 
 def iso_date(mmddyyyy):
@@ -168,7 +168,7 @@ def side_from(type_tok, desc):
     return (type_tok or "—")[:12], False, False
 
 def list_ptrs(years):
-    """Pelosi PTR DocIDs from the clerk's yearly FD zip index."""
+    '''Pelosi PTR DocIDs from the clerk's yearly FD zip index.'''
     out = []
     for year in years:
         try:
@@ -221,9 +221,9 @@ def pdf_text(year, doc):
     return (r.stdout or b"").decode("utf-8", "replace")
 
 def parse_ptr(text, meta):
-    """Pull trade rows out of a layout-mode PTR text dump."""
+    '''Pull trade rows out of a layout-mode PTR text dump.'''
     # Drop certification / header noise
-    lines = [re.sub(r"[ \t]+$", "", ln) for ln in text.splitlines()]
+    lines = [re.sub(r"[ \t]+$$", "", ln) for ln in text.splitlines()]
     body = "\n".join(lines)
     # Owner token + asset blob ending in [XX], then type letter(s), two dates, amount
     # Amount often wraps to the next line.
@@ -242,14 +242,14 @@ def parse_ptr(text, meta):
         flat = re.sub(r"[ \t]*\n[ \t]*", "\n", ch).strip()
         # Asset: from after owner token to ticker/[CODE]
         m = re.search(
-            r"(SP|JT|DC|SC)\s+(.*?)\s+(P|S(?:\s*\(partial\))?)\s+(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}/\d{1,2}/\d{4})\s+(\$?[\d,].*)$",
+            r"(SP|JT|DC|SC)\s+(.*?)\s+(P|S(?:\s*\(partial\))?)\s+(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}/\d{1,2}/\d{4})\s+(\$$?[\d,].*)$$",
             flat.replace("\n", "  "),
             re.S,
         )
         if not m:
             # try looser: asset then type then one date
             m2 = re.search(
-                r"(SP|JT|DC|SC)\s+(.+?)\s+(P|S(?:\s*\(partial\))?)\s+(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}/\d{1,2}/\d{4})(.*)$",
+                r"(SP|JT|DC|SC)\s+(.+?)\s+(P|S(?:\s*\(partial\))?)\s+(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}/\d{1,2}/\d{4})(.*)$$",
                 re.sub(r"\s+", " ", flat),
                 re.S,
             )
@@ -264,7 +264,7 @@ def parse_ptr(text, meta):
         desc = " ".join(re.sub(r"\s+", " ", d).strip() for d in desc_m)[:160]
         # amount: dollars in rest + following lines of original chunk
         amt_blob = rest + " " + " ".join(
-            ln for ln in ch.splitlines() if "$" in ln or re.search(r"\d,\d{3}", ln)
+            ln for ln in ch.splitlines() if "$$" in ln or re.search(r"\d,\d{3}", ln)
         )
         usd, rng = parse_amount(amt_blob)
         # Ticker often wraps onto the next layout line: "Common Stock (BE) [ST]"
@@ -277,10 +277,10 @@ def parse_ptr(text, meta):
         side, is_buy, is_sell = side_from(typ, desc)
         # asset type code [ST]/ OT AB]
         at = ""
-        am = re.search(r"\[([A-Z]{2})\]\s*$", asset)
+        am = re.search(r"\[([A-Z]{2})\]\s*$$", asset)
         if am:
             at = am.group(1)
-            asset = re.sub(r"\s*\[[A-Z]{2}\]\s*$", "", asset).strip()
+            asset = re.sub(r"\s*\[[A-Z]{2}\]\s*$$", "", asset).strip()
         name = re.sub(r"\s*\([A-Z][A-Z0-9.\-]{0,9}\)\s*", " ", asset)
         name = re.sub(r"\s+", " ", name).strip()[:36]
         trades.append({
@@ -311,7 +311,7 @@ def quotes(syms):
     raw = get(url, accept="application/json").decode("utf-8", "replace")
     if raw.startswith("//"):
         raw = raw[2:]
-    m = re.match(r"^[^(]*\((.*)\)\s*;?\s*$", raw, re.S)
+    m = re.match(r"^[^(]*\((.*)\)\s*;?\s*$$", raw, re.S)
     if m:
         raw = m.group(1)
     data = json.loads(raw)
@@ -398,7 +398,7 @@ def build():
         elif t["sell"]:
             h["sells"] += 1
             h["n"] += 1
-            # don't subtract sale ranges — STOCK Act ranges are too coarse for netting
+            # don't subtract sale ranges - STOCK Act ranges are too coarse for netting
 
     holdings = []
     for tkr, h in hold.items():
@@ -460,7 +460,7 @@ def build():
         if t.get("date") and t.get("usd"):
             months[t["date"][:7]] += t["usd"]
     keys = sorted(months.keys())[-18:]
-    chart = [round(months[k] / 1e6, 2) for k in keys]  # $M
+    chart = [round(months[k] / 1e6, 2) for k in keys]  # $$M
 
     recent = []
     for t in trades[:12]:

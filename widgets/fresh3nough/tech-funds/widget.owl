@@ -186,7 +186,6 @@ def extract_tickers(text, title_mode=False):
     return found
 
 def load_cache():
-    """posts, picks, have_any, fresh_hourly"""
     try:
         if CACHE.exists():
             age = time.time() - CACHE.stat().st_mtime
