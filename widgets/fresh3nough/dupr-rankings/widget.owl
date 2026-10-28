@@ -1,0 +1,176 @@
+widget "dupr rankings" {
+  meta {
+    description: "Public DUPR pickleball rankings — national top pros from dupr.com. No login. Tap to refresh views."
+    version: "1.0"
+    license: "MIT"
+    category: "sport"
+    owl: 9
+  }
+  size: 3x4
+  minSize: 2x3
+
+  requires { pacman: ["python"] }
+
+  source board = cmd("""
+python3 - <<'PY'
+import json, re, ssl, time, urllib.error, urllib.request
+NATION_URL = "https://www.dupr.com/rankings"
+UA = ("Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+ITEM_RE = re.compile(
+    r'class="heading-table name">([^<]*?)</div>'
+    r'.*?fs-cmsfilter-field="age"[^>]*>([^<]*?)</div>'
+    r'.*?class="heading-table right">([^<]*?)</div>',
+    re.S,
+)
+LIMIT = 200
+
+def emit(obj):
+    print(json.dumps(obj, separators=(",", ":")))
+
+def fail(msg):
+    emit({"updated": int(time.time()), "count": 0, "total": 0,
+          "error": msg, "players": []})
+
+try:
+    req = urllib.request.Request(
+        NATION_URL, headers={"User-Agent": UA, "Accept": "text/html"})
+    with urllib.request.urlopen(req, timeout=30,
+                                context=ssl.create_default_context()) as r:
+        html = r.read().decode("utf-8", "replace")
+except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as e:
+    fail(f"rankings page: {getattr(e, 'reason', e)}")
+    raise SystemExit(0)
+
+best = {}
+for name, _age, rating in ITEM_RE.findall(html):
+    name = re.sub(r"\s+", " ", name).strip()
+    try:
+        value = float(rating)
+    except ValueError:
+        continue
+    if name and (name not in best or value > best[name]):
+        best[name] = value
+
+players = [{"name": n, "rating": f"{v:.3f}", "reliability": None}
+           for n, v in best.items()]
+players.sort(key=lambda p: float(p["rating"]), reverse=True)
+total = len(players)
+players = players[:LIMIT]
+for i, p in enumerate(players, 1):
+    p["rank"] = i
+    p["id"] = i
+emit({"updated": int(time.time()), "count": len(players), "total": total,
+      "error": None, "players": players})
+PY
+  """) every 6h json timeout 90s
+
+  source now = clock every 1m
+
+  let players = board.players ?? []
+  let err = board == null ? null : board.error
+  let total = board == null ? 0 : (board.total ?? board.count ?? 0)
+  let count = board == null ? 0 : (board.count ?? 0)
+  let updated = num(board.updated)
+  let ago = updated != null ? fmtAgo(updated, now) : "…"
+  let h = tileHeight ?? 400
+  let nShow = h < 200 ? 5 : (h < 280 ? 9 : (h < 380 ? 12 : 15))
+  let shown = take(players, nShow)
+
+  onTap: screen()
+
+  component Pickle(px = 2) {
+    Canvas {
+      width: 7 * px
+      height: 11 * px
+      sprite(["..ss...", "..ss...", ".gggg..", "gdgggg.", "gggggg.",
+              "gdgggg.", "ggggdg.", "gdgggg.", ".gggg..", "..gg...", "..gg..."],
+             0, 0, px, palette: {g: green, d: mix(green, background, 0.55), s: green})
+    }
+  }
+
+  component Line(p, i) {
+    Row {
+      gap: 4
+      Text { text: "${p.rank ?? (i + 1)}"; width: 20; font: mono; fontSize: 11; color: i < 3 ? accent : muted }
+      Text { text: p.name; weight: 1; maxLines: 1; font: mono; fontSize: 11 }
+      Text { text: fixed(num(p.rating, 0), 3); width: 40; align: end; font: mono; fontSize: 11; color: accent }
+    }
+  }
+
+  Column {
+    gap: 2
+
+    Row {
+      gap: 5
+      align: center
+      Pickle { }
+      Column {
+        weight: 1
+        gap: 0
+        Text { text: "dupr rankings"; bold: true; fontSize: 12; maxLines: 1 }
+        Text { text: "national top pros · ${ago}"; style: label; maxLines: 1 }
+      }
+    }
+
+    if err != null {
+      Text { text: err; style: small; color: yellow; maxLines: 3 }
+    } else {
+      if board == null {
+        Text { text: "loading…"; style: muted }
+      } else {
+        Column {
+          gap: 2
+          weight: 1
+          for p, i in shown key p.id { Line { p: p; i: i } }
+        }
+        Row {
+          gap: 6
+          align: center
+          Text { text: "${total} rated · dupr.com"; style: label; weight: 1 }
+          Button { text: "full list"; onTap: screen() }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "dupr rankings"
+    Column {
+      scroll: true
+      gap: 4
+      padding: 10
+
+      Row {
+        gap: 8
+        align: center
+        Pickle { px: 3 }
+        Column {
+          weight: 1
+          gap: 0
+          Text { text: "national top pros"; style: title; maxLines: 1 }
+          Text { text: "${total} rated · live from dupr.com · ${ago}"; style: muted; maxLines: 1 }
+        }
+      }
+
+      Row {
+        gap: 6
+        Button { text: "refresh"; onTap: refresh() }
+        Spacer { weight: 1 }
+        Button { text: "dupr.com"; onTap: url("https://www.dupr.com/rankings") }
+      }
+
+      if err != null {
+        Text { text: err; color: yellow }
+      }
+      for p, i in take(players, 200) key p.id {
+        Row {
+          gap: 6
+          Text { text: "${p.rank ?? (i + 1)}"; width: 28; align: end; font: mono; color: i < 3 ? accent : muted }
+          Text { text: p.name; weight: 1; font: mono; maxLines: 1 }
+          Text { text: fixed(num(p.rating, 0), 3); width: 46; align: end; font: mono; color: accent }
+        }
+      }
+    }
+  }
+}
