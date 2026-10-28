@@ -9,4 +9,4 @@ The day's prayer times under the clock, and beside them three tabs: **Fortificat
 
 It runs no Linux commands. It reads notifications only to show them under the tabs, and installed apps for its dock.
 
-Data: Aladhan (prayer times), hisnmuslim.com, alquran.cloud, fawazahmed0/hadith-api, wttr.in and Open-Meteo. More screenshots and details: https://github.com/thecloudranger/muslim-panel
+Data: Aladhan (prayer times), hisnmuslim.com, alquran.cloud, fawazahmed0/hadith-api, wttr.in and Open-Meteo. More screenshots and details: https://github.com/bustanworks/muslim-panel
