@@ -1,25 +1,66 @@
-widget "news" {
+widget "local news" {
   size: 6x4
   minSize: 4x3
-  meta { description: "Ohio news first, then national headlines from Fox, NBC, CNN, Breitbart, The Hill and the New York Post. General news, not a tech feed. Tap a headline to read it"; version: "1.1"; license: "MIT"; category: "news"; owl: 5 }
+  meta {
+    description: "Local headlines for a ZIP or city you set (or IP location), plus national news from Fox, NBC, CNN, Breitbart, The Hill and the NY Post. Tap a headline to read it"
+    version: "2.0"
+    license: "MIT"
+    category: "news"
+    owl: 8
+  }
 
   requires { pacman: ["python"] }
 
-  // One fetch, many feeds: Google News for Ohio plus local outlets (Fox 8, NBC4, WKYC),
-  // and national desks for the second tab. Merged, newest first, duplicates dropped.
+  // ZIP or city/region. Empty = IP geolocation for the local tab.
+  state place = "" persist
+  state tab = "local" persist
+  state seen = [] persist
+
+  // One fetch: Google News for the user's place + national desks. Merged, newest first.
+  // sh(place) is concatenated outside the script string so owl interpolates it (store pattern).
   source news = cmd("""
-python3 - <<'OWLNEWS'
-import json, re, time, html, urllib.request
+python3 -c '
+import json, re, sys, time, html, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor, wait
 from email.utils import parsedate_to_datetime
-
-UA = {"User-Agent": "Mozilla/5.0 (omalauncher news widget)"}
-# tab, color index, source label (blank = take it from the headline), url, how many
+UA = {"User-Agent": "omalauncher local-news widget"}
+PLACE = sys.argv[1] if len(sys.argv) > 1 else ""
+def get(url, timeout=10):
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+def resolve_place(raw):
+    raw = (raw or "").strip()
+    if re.fullmatch(r"\\d{5}(-\\d{4})?", raw):
+        z = raw[:5]
+        try:
+            j = json.loads(get("https://api.zippopotam.us/us/" + z, 8).decode())
+            p = (j.get("places") or [{}])[0]
+            city = p.get("place name") or ""
+            state = p.get("state") or ""
+            label = ", ".join(x for x in (city, state) if x) or z
+            return label, (city + " " + state + " " + z).strip()
+        except Exception:
+            return z, z
+    if raw:
+        return raw, raw
+    try:
+        j = json.loads(get("https://ipwho.is/", 8).decode())
+        if j.get("success") is False:
+            raise RuntimeError(j.get("message") or "ip")
+        city = j.get("city") or ""
+        region = j.get("region") or j.get("region_code") or ""
+        country = j.get("country_code") or j.get("country") or ""
+        label = ", ".join(x for x in (city, region) if x) or country or "near you"
+        q = " ".join(x for x in (city, region, country) if x) or "United States"
+        return label, q
+    except Exception:
+        return "near you", "United States"
+label, query = resolve_place(PLACE)
+q = urllib.parse.quote_plus(query + " -football -basketball -baseball -soccer -hockey -nfl -nba -mlb")
+local_url = "https://news.google.com/rss/search?q=%s&hl=en-US&gl=US&ceid=US:en" % q
 FEEDS = [
-    ("ohio", 0, "", "https://news.google.com/rss/search?q=Ohio+-football+-basketball+-buckeyes+-baseball+-soccer+-hockey+-nfl+-nba+-mlb&hl=en-US&gl=US&ceid=US:en", 12),
-    ("ohio", 0, "fox 8", "https://fox8.com/feed/", 4),
-    ("ohio", 4, "nbc4", "https://www.nbc4i.com/feed/", 4),
-    ("ohio", 3, "wkyc", "https://www.wkyc.com/feeds/syndication/rss/news", 3),
+    ("local", 0, "", local_url, 14),
     ("nation", 2, "fox", "https://moxie.foxnews.com/google-publisher/latest.xml", 5),
     ("nation", 3, "nbc", "https://feeds.nbcnews.com/nbcnews/public/news", 5),
     ("nation", 6, "cnn", "http://rss.cnn.com/rss/cnn_topstories.rss", 5),
@@ -27,41 +68,25 @@ FEEDS = [
     ("nation", 5, "the hill", "https://thehill.com/homenews/feed/", 5),
     ("nation", 7, "ny post", "https://nypost.com/feed/", 5),
 ]
-
-def get(url):
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return r.read()
-
 def when(s):
     try:
         return int(parsedate_to_datetime(s).timestamp())
     except Exception:
-        try:
-            return int(datetime.fromisoformat(s.strip().replace("Z", "+00:00")).timestamp())
-        except Exception:
-            return 0
-
+        return 0
 def cdata(s):
     s = s.strip()
-    if s.startswith("<![CDATA["):
-        s = s[9:]
-    if s.endswith("]]>"):
-        s = s[:-3]
+    if s.startswith("<![CDATA["): s = s[9:]
+    if s.endswith("]]>"): s = s[:-3]
     return s
-
 def field(block, *tags):
     for t in tags:
         m = re.search("<" + t + "[^>]*>(.*?)</" + t + ">", block, re.S)
-        if m:
-            return cdata(m.group(1))
+        if m: return cdata(m.group(1))
     return ""
-
 def clean(s):
     return " ".join(html.unescape(re.sub("<[^>]+>", "", s)).split())
-
 def fetch(item):
-    tab, c, label, url, n = item
+    tab, c, src_label, url, n = item
     out = []
     try:
         data = get(url).decode("utf-8", "replace")
@@ -71,18 +96,15 @@ def fetch(item):
         title = clean(field(block, "title"))
         link = field(block, "link").strip()
         at = when(field(block, "pubDate", "dateTimeWritten"))
-        src = label
+        src = src_label
         if not src:
-            m = re.match("(.*) - (.+)$", title)
-            if m:
-                title, src = m.group(1).strip(), m.group(2).strip()
+            m = re.match(r"(.*) - (.+)$", title)
+            if m: title, src = m.group(1).strip(), m.group(2).strip()
         if not title or not link.lower().startswith(("http://", "https://")):
             continue
         out.append({"tab": tab, "c": c, "title": title, "url": link, "at": at, "src": src})
-        if len(out) >= n:
-            break
+        if len(out) >= n: break
     return out
-
 pool = ThreadPoolExecutor(8)
 futs = [pool.submit(fetch, f) for f in FEEDS]
 wait(futs, timeout=25)
@@ -90,24 +112,21 @@ all_items = [p for f in futs if not f.exception() for p in f.result()]
 seen, uniq = set(), []
 for p in sorted(all_items, key=lambda p: -p["at"]):
     if p["url"] not in seen:
-        seen.add(p["url"])
-        uniq.append(p)
-
+        seen.add(p["url"]); uniq.append(p)
 print(json.dumps({
-    "at": int(time.time()),
-    "ohio": [p for p in uniq if p["tab"] == "ohio"],
+    "at": int(time.time()), "place": label, "query": query,
+    "local": [p for p in uniq if p["tab"] == "local"],
     "nation": [p for p in uniq if p["tab"] == "nation"],
 }))
-OWLNEWS
-""") every 15m json timeout 45s
+'
+  """ + " ${sh(place)}") every 15m json timeout 45s
   source now = clock every 60s
-
-  state tab = "ohio" persist
-  state seen = [] persist
+  on place { refresh() }
 
   let tints = [accent, orange, red, blue, green, magenta, cyan, yellow]
-  let cur = tab == "nation" ? "nation" : "ohio"
-  let items = (cur == "nation" ? news.nation : news.ohio) ?? []
+  let cur = tab == "nation" ? "nation" : "local"
+  let items = (cur == "nation" ? news.nation : news.local) ?? []
+  let where = news.place ?? (place != "" ? place : "…")
   let slim = (cols ?? 6) < 5
 
   component Tab(id, label, tint, big = false) {
@@ -153,7 +172,7 @@ OWLNEWS
       if news == null {
         Text { text: "loading headlines…"; style: small; color: muted }
       } else if len(items) == 0 {
-        Text { text: "no headlines - tap to retry"; style: small; color: muted; onTap: refresh() }
+        Text { text: "no headlines · tap to retry"; style: small; color: muted; onTap: refresh() }
       }
       for p in take(items, big ? 40 : 12) key p.url {
         Post { p: p; big: big }
@@ -167,7 +186,7 @@ OWLNEWS
       gap: 6
       align: center
       Text { text: "news"; style: label; color: muted; width: 40; maxLines: 1 }
-      Tab { id: "ohio"; label: "ohio"; tint: accent }
+      Tab { id: "local"; label: "local"; tint: accent }
       Tab { id: "nation"; label: "nation"; tint: cyan }
       Canvas {
         width: 22; height: 16
@@ -175,22 +194,35 @@ OWLNEWS
         rect(7, 3, 10, 10, stroke: muted, width: 1.5)
       }
     }
+    if cur == "local" {
+      Text { text: where; style: label; color: muted; maxLines: 1 }
+    }
     Posts { weight: 1 }
   }
 
   screen {
-    title: "news"
+    title: "local news"
     Column {
       gap: 10
       Row {
         gap: 24
         align: center
-        Tab { id: "ohio"; label: "ohio"; tint: accent; big: true }
+        Tab { id: "local"; label: "local"; tint: accent; big: true }
         Tab { id: "nation"; label: "nation"; tint: cyan; big: true }
         Spacer { weight: 1 }
         if news != null {
           Text { text: "updated ${fmtTime(news.at, "HH:mm")}"; style: small; color: muted }
         }
+      }
+      Input {
+        text: place
+        placeholder: "ZIP or city · empty = IP location"
+        onSubmit: { place = trim(value); refresh() }
+      }
+      Text {
+        text: place != "" ? "local · ${where}" : "local · ${where} (IP)"
+        style: label
+        color: muted
       }
       Posts { big: true; weight: 1 }
       Row {
