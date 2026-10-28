@@ -1,22 +1,17 @@
 widget "today" {
-  page: 1
-  order: 1
   size: 3x3
   minSize: 3x2
-  meta { description: "Date and local weather (GPS file if present, else IP). Tap for 24h, 3-day, wind, UV, sun and moon"; version: "1.2"; license: "MIT"; category: "world"; owl: 8 }
+  meta { description: "Date and local weather by IP (or a city you set). Tap for 24h, 3-day, wind, UV, sun and moon"; version: "1.3"; license: "MIT"; category: "world"; owl: 8 }
 
   source now = clock every 1m
-  source gpsFile = cmd("cat ~/.cache/pixel-gps.json 2>/dev/null || echo '{}'") every 1m json timeout 3s
-  let gpsFresh = gpsFile != null && gpsFile.ok == true && gpsFile.lat != null && (now - num(gpsFile.at) < 172800)
-  let geoQ = gpsFresh ? "${fixed(num(gpsFile.lat), 5)},${fixed(num(gpsFile.lon), 5)}" : ""
-  // GPS coords when we have a fix; bare wttr.in falls back to IP.
-  source wx = http("https://wttr.in/${enc(geoQ)}?format=j1") every 30m timeout 10s json
-  when gpsFresh { refresh() }
-  on geoQ { refresh() }
+  state city = "" persist
+  let qCity = city.replace("%", "%25").replace("+", "%2B").replace("/", "%2F").replace("?", "%3F").replace("#", "%23").replace("&", "%26").replace("'", "%27").replace(" ", "+")
+  // City when set; bare wttr.in falls back to IP.
+  source wx = http("https://wttr.in/${enc(qCity)}?format=j1") every 30m timeout 10s json
+  on qCity { refresh() }
   let cur = wx.current_condition[0]
   let day = wx.weather[0]
   let area = wx.nearest_area[0]
-  let gpsLabel = gpsFresh ? "gps" : "ip"
   let imperial = contains(["united states", "united states of america", "liberia", "myanmar", "burma"], lower(trim(area.country[0].value)))
   let unit = imperial ? "F" : "C"
   let night = contains(cur.weatherIconUrl[0].value, "_night")
@@ -96,7 +91,7 @@ widget "today" {
           Text { text: "↑${get(day, "maxtemp" + unit)}° ↓${get(day, "mintemp" + unit)}°"; style: small; color: muted; align: end; maxLines: 1; padding: [0, 0, 0, 5] }
         }
       }
-      Text { text: "feels ${get(cur, "FeelsLike" + unit)}° · ${lower(area.areaName[0].value)}${gpsFresh ? " · gps" : ""}"; style: small; color: muted; maxLines: 1 }
+      Text { text: "feels ${get(cur, "FeelsLike" + unit)}° · ${lower(area.areaName[0].value)}"; style: small; color: muted; maxLines: 1 }
       Spacer { weight: 1 }
       Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
       Spacer { height: 8 }
@@ -246,21 +241,19 @@ widget "today" {
           value: "${lower(day.astronomy[0].moon_phase)} · ${day.astronomy[0].moon_illumination}% lit"
           tint: foreground
         }
-        // yr.no (Norwegian Meteorological Institute): ad-free and worldwide, opened at wttr's coordinates.
+        // Optional city override (empty = IP). yr.no is ad-free and worldwide.
+        Input {
+          text: city
+          placeholder: "city · empty = IP location"
+          onSubmit: { city = trim(value); refresh() }
+        }
         Row {
           justify: end
           gap: 8
-          Button {
-            text: gpsFresh ? "refresh GPS" : "use Pixel GPS"
-            color: gpsFresh ? green : accent
-            onTap: {
-              url("http://127.0.0.1:8765/")
-            }
-          }
-          Button { text: "open yr.no ↗"; color: muted; onTap: url("https://www.yr.no/en/forecast/daily-table/${gpsFresh ? fixed(num(gpsFile.lat), 4) : area.latitude},${gpsFresh ? fixed(num(gpsFile.lon), 4) : area.longitude}") }
+          Button { text: "open yr.no ↗"; color: muted; onTap: url("https://www.yr.no/en/forecast/daily-table/${area.latitude},${area.longitude}") }
         }
         Text {
-          text: gpsFresh ? "location · Pixel GPS ±${gpsFile.accuracy != null ? round(gpsFile.accuracy) : "?"}m" : "location · IP fallback (tap GPS for exact)"
+          text: city != "" ? "location · ${city}" : "location · IP fallback"
           style: label
           color: muted
         }

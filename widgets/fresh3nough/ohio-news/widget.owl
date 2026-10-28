@@ -1,9 +1,7 @@
 widget "news" {
-  page: 1
-  order: 3
   size: 6x4
   minSize: 4x3
-  meta { description: "Ohio news first, then national headlines from Fox, NBC, CNN, Breitbart, The Hill and the New York Post. General news, not a tech feed. Tap a headline to read it"; version: "1.0"; license: "MIT"; category: "news"; owl: 5 }
+  meta { description: "Ohio news first, then national headlines from Fox, NBC, CNN, Breitbart, The Hill and the New York Post. General news, not a tech feed. Tap a headline to read it"; version: "1.1"; license: "MIT"; category: "news"; owl: 5 }
 
   requires { pacman: ["python"] }
 

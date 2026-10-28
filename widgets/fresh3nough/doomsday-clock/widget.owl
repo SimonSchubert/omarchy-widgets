@@ -1,12 +1,10 @@
 widget "doomsday clock" {
-  page: 1
-  order: 12
   size: 3x5
   minSize: 2x3
   padding: 8
   meta {
     description: "Live Bulletin Doomsday Clock. UI escalates from peace to nuclear firestorm as midnight nears. Auto-updates."
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "world"
     owl: 10
@@ -14,23 +12,19 @@ widget "doomsday clock" {
 
   requires { pacman: ["curl", "python"] }
 
+  // 1s for the tile pulse; the bulletin value only changes once a year.
   source now = clock every 1s
-  source scrape = cmd("curl -sfL -A 'Mozilla/5.0 omalauncher' --max-time 18 'https://thebulletin.org/doomsday-clock/' | python3 -c \"import sys,re;h=sys.stdin.read();s=re.search(r'It is now (\\\\d+) seconds to midnight',h);y=re.search(r'January\\\\s+\\\\d+,\\\\s+(20\\\\d\\\\d)',h);print((s.group(1) if s else '85'),(y.group(1) if y else '2026'))\"") every 30m timeout 30s
-  source page = http("https://thebulletin.org/doomsday-clock/") every 1h timeout 20s
+  // Honest UA. Print nothing on failure so the tile shows "fetching…", not a stale number.
+  source scrape = cmd("curl -sfL -A 'Mozilla/5.0 (omalauncher doomsday-clock widget)' --max-time 18 'https://thebulletin.org/doomsday-clock/' | python3 -c \"import sys,re;h=sys.stdin.read();s=re.search(r'It is now (\\\\d+) seconds to midnight',h);y=re.search(r'January\\\\s+\\\\d+,\\\\s+(20\\\\d\\\\d)',h);print(((s.group(1)+' '+(y.group(1) if y else '')) if s else ''))\"") every 12h timeout 30s
 
   state demo = -1 persist
   state tab = "clock" persist
 
   let parts = words(scrape ?? "")
-  let fromCmd = len(parts) > 0 && parts[0] != "" ? num(parts[0]) : null
-  let yearCmd = len(parts) > 1 ? parts[1] : null
-  let hit = match(page ?? "", "It is now (\\d+) seconds to midnight")
-  let hit2 = match(page ?? "", "(\\d+)\\s+seconds to midnight")
-  let fromHttp = hit != null ? num(hit[1]) : (hit2 != null ? num(hit2[1]) : null)
-  let yearHit = match(page ?? "", "January\\s+\\d+,\\s+(20\\d\\d)")
-  let liveSec = fromCmd ?? fromHttp
-  let setYear = yearCmd ?? (yearHit != null ? yearHit[1] : null) ?? "2026"
-  let secs = demo >= 0 ? demo : (liveSec ?? 85)
+  let liveSec = len(parts) > 0 && parts[0] != "" ? num(parts[0]) : null
+  let setYear = len(parts) > 1 && parts[1] != "" ? parts[1] : null
+  // No live value yet: calm scene + "fetching…", never a made-up second count.
+  let secs = demo >= 0 ? demo : (liveSec != null ? liveSec : 1020)
   let loading = liveSec == null && demo < 0
 
   let danger = clamp(1 - secs / 1020, 0, 1)
@@ -60,7 +54,7 @@ widget "doomsday clock" {
   let tintDim = alpha(tint, 0.2)
   let mins = floor(secs / 60)
   let remS = int(secs % 60)
-  let timeStr = secs <= 0 ? "MIDNIGHT" : mins > 0 ? "${mins}m ${remS}s" : "${int(secs)}s"
+  let timeStr = loading ? "…" : secs <= 0 ? "MIDNIGHT" : mins > 0 ? "${mins}m ${remS}s" : "${int(secs)}s"
   let short = (rows ?? 5) < 4
   let tiny = (rows ?? 5) < 3
   let pulseOn = sid >= 4 && (floor(now) % 2 == 0)
@@ -94,7 +88,7 @@ widget "doomsday clock" {
           Progress { value: danger * 100; color: tint; track: tintDim; animate value: spring() }
           if !short {
             Text {
-              text: loading ? "fetching…" : demo >= 0 ? "DEMO" : "Bulletin · ${setYear}"
+              text: loading ? "fetching…" : demo >= 0 ? "DEMO" : "Bulletin · ${setYear ?? "…"}"
               style: small
               color: muted
               maxLines: 1
@@ -143,7 +137,7 @@ widget "doomsday clock" {
           Text {
             text: loading ? "syncing thebulletin.org…"
               : demo >= 0 ? "demo · ${int(secs)}s (not live)"
-              : "live · ${setYear} · ${liveSec ?? secs}s · Bulletin of the Atomic Scientists"
+              : "live · ${setYear ?? "…"} · ${liveSec}s · Bulletin of the Atomic Scientists"
             style: small
             color: muted
             align: center
@@ -196,13 +190,13 @@ widget "doomsday clock" {
             maxLines: 8
           }
           Text {
-            text: "Now: ${liveSec ?? "…"} seconds to midnight (${setYear}). Closest in history."
+            text: "Now: ${liveSec == null ? "…" : liveSec} seconds to midnight${setYear != null ? " (" + setYear + ")" : ""}."
             style: body
             color: tint
             maxLines: 3
           }
           Text {
-            text: "Scrapes thebulletin.org every 30m. Canvas scenes auto-escalate: peace → watch → missiles → mushrooms → firestorm."
+            text: "Scrapes thebulletin.org every 12h. Canvas scenes auto-escalate: peace → watch → missiles → mushrooms → firestorm."
             style: muted
             maxLines: 6
           }
@@ -264,7 +258,8 @@ widget "doomsday clock" {
       let w = width
       let h = height
       let gnd = h * 0.78
-      let t = time
+      // time only when fullscreen — tile stays a still frame
+      let t = big ? time : 0
       let beat = 0.5 + 0.5 * sin(t * (0.9 + s * 0.35))
       let cx = w / 2
 

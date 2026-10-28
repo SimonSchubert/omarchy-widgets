@@ -2,25 +2,86 @@ widget "card-releases" {
   size: 6x2
   minSize: 3x2
   meta {
-    description: "Countdown timers for upcoming Pokémon TCG and Magic: The Gathering card releases";
-    version: "1.5";
+    description: "Countdown timers for upcoming Pokémon TCG and Magic: The Gathering card releases. MTG dates from Scryfall.";
+    version: "1.6";
     license: "MIT";
     category: "games";
     owl: 10
   }
 
+  requires { pacman: ["python"] }
+
   source now = clock every 1s
 
+  // Known Pokémon TCG drops with announced dates. Unannounced sets show as empty-state copy.
   let pokemonReleases = [
     { id: "p1", name: "Delta Reign", date: 1793941200 }
   ]
 
-  let mtgReleases = [
-    { id: "m1", name: "Star Trek", date: 1794546000 },
-    { id: "m2", name: "Nauctis: The Sunken Realm", date: 1801803600 },
-    { id: "m3", name: "Marvel: Darkhold Destiny", date: 1807243200 }
-  ]
+  // Scryfall /sets — released_at for future expansion-class products.
+  source mtg = cmd("""
+python3 - <<'PY'
+import json, time, urllib.request
+from datetime import date, datetime, timezone
 
+UA = {"User-Agent": "Mozilla/5.0 (omalauncher card-releases widget)", "Accept": "application/json"}
+KEEP = {
+    "expansion", "draft_innovation", "commander", "masters", "funny", "memoir",
+    "from_the_vault", "spellbook", "premium_deck", "duel_deck", "arsenal",
+    "starter", "core",
+}
+
+def get(url):
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+
+today = date.today().isoformat()
+out = []
+try:
+    data = get("https://api.scryfall.com/sets").get("data") or []
+    for s in data:
+        ra = s.get("released_at") or ""
+        if not ra or ra < today:
+            continue
+        if s.get("digital"):
+            continue
+        st = s.get("set_type") or ""
+        if st not in KEEP:
+            continue
+        name = s.get("name") or ""
+        if name.endswith(" Tokens") or name.endswith(" Extras"):
+            continue
+        try:
+            # noon UTC on release day
+            ts = int(datetime.fromisoformat(ra).replace(tzinfo=timezone.utc).timestamp()) + 12 * 3600
+        except Exception:
+            continue
+        out.append({
+            "id": s.get("code") or name,
+            "name": name,
+            "date": ts,
+            "type": st,
+        })
+    out.sort(key=lambda x: x["date"])
+    # de-dupe near-identical companion products by name stem + day
+    seen, uniq = set(), []
+    for r in out:
+        key = (r["date"] // 86400, r["name"].split(":")[0].strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(r)
+    out = uniq[:24]
+    err = ""
+except Exception as e:
+    out, err = [], str(e)[:80]
+
+print(json.dumps({"at": int(time.time()), "sets": out, "err": err}))
+PY
+  """) every 12h json timeout 30s
+
+  let mtgReleases = mtg.sets ?? []
   let pokeUp = pokemonReleases.filter(r => r.date > now - 86400).sortBy(r => r.date)
   let mtgUp = mtgReleases.filter(r => r.date > now - 86400).sortBy(r => r.date)
   let nextPoke = pokeUp.first()
@@ -74,13 +135,26 @@ widget "card-releases" {
     }
   }
 
-  component Block(title, tint, items) {
+  component Empty(msg) {
+    Text {
+      text: msg
+      style: small
+      color: muted
+      maxLines: 2
+      fontSize: fs
+    }
+  }
+
+  component Block(title, tint, items, emptyMsg) {
     let head = items.first()
     let rest = items.drop(1)
     Column {
       gap: short ? 0 : 2
       weight: 1
       Text { text: title; style: small; bold: true; color: tint; maxLines: 1; fontSize: short ? 8 : mid ? 10 : null }
+      if head == null {
+        Empty { msg: emptyMsg }
+      }
       if tall && head != null {
         Text { text: head.name; style: body; bold: true; maxLines: 1 }
         Day { secs: head.date - now; hi: true }
@@ -148,8 +222,8 @@ widget "card-releases" {
         Text { text: "card releases"; style: small; color: muted; maxLines: 1; weight: 1 }
         Text { text: fmtTime(now, "HH:mm"); style: small; color: muted; font: mono; width: 40; align: end }
       }
-      Block { title: "POKÉMON"; tint: #ffd700; items: pokeUp }
-      Block { title: "MAGIC"; tint: #c77dff; items: mtgUp }
+      Block { title: "POKÉMON"; tint: #ffd700; items: pokeUp; emptyMsg: "no date announced" }
+      Block { title: "MAGIC"; tint: #c77dff; items: mtgUp; emptyMsg: mtg == null ? "loading…" : "no upcoming sets" }
     }
 
     if mid {
@@ -158,16 +232,16 @@ widget "card-releases" {
         Text { text: "card releases"; style: small; color: muted; maxLines: 1; weight: 1; fontSize: 10 }
         Text { text: fmtTime(now, "HH:mm"); style: small; color: muted; font: mono; width: 36; align: end; fontSize: 10 }
       }
-      Block { title: "POKÉMON"; tint: #ffd700; items: pokeUp }
-      Block { title: "MAGIC"; tint: #c77dff; items: mtgUp }
+      Block { title: "POKÉMON"; tint: #ffd700; items: pokeUp; emptyMsg: "no date announced" }
+      Block { title: "MAGIC"; tint: #c77dff; items: mtgUp; emptyMsg: mtg == null ? "loading…" : "no upcoming sets" }
     }
 
     if short {
       Row {
         gap: 6
         weight: 1
-        Block { title: "POKÉMON"; tint: #ffd700; items: pokeUp }
-        Block { title: "MAGIC"; tint: #c77dff; items: mtgUp }
+        Block { title: "POKÉMON"; tint: #ffd700; items: pokeUp; emptyMsg: "no date announced" }
+        Block { title: "MAGIC"; tint: #c77dff; items: mtgUp; emptyMsg: mtg == null ? "loading…" : "no upcoming sets" }
       }
     }
   }
@@ -186,7 +260,7 @@ widget "card-releases" {
         gap: 8
         Text { text: "POKÉMON TCG"; style: label; bold: true; color: #ffd700; maxLines: 1 }
         if pokeUp.length == 0 {
-          Text { text: "No upcoming Pokémon sets"; style: small; color: muted }
+          Text { text: "No date announced"; style: small; color: muted }
         }
         for r in pokeUp key r.id {
           ScreenCard { r: r; tint: #4cc9f0 }
@@ -196,12 +270,16 @@ widget "card-releases" {
       Column {
         gap: 8
         Text { text: "MAGIC: THE GATHERING"; style: label; bold: true; color: #c77dff; maxLines: 1 }
-        if mtgUp.length == 0 {
+        if mtg == null {
+          Text { text: "Loading Scryfall…"; style: small; color: muted }
+        }
+        if mtg != null && mtgUp.length == 0 {
           Text { text: "No upcoming MTG sets"; style: small; color: muted }
         }
         for r in mtgUp key r.id {
           ScreenCard { r: r; tint: #c77dff }
         }
+        Text { text: "MTG dates via api.scryfall.com/sets"; style: label; color: muted }
       }
     }
   }
