@@ -1,0 +1,122 @@
+widget "dice" {
+  meta { description: "A pixel dice in your theme's colors. Tap it to roll"; version: "1.2"; license: "MIT"; category: "fun"; owl: 4 }
+  size: 3x3
+  minSize: 1x1
+  padding: 0
+
+  // The face and its pip color, picked by tapping: a new roll and the next
+  // color pair, like the lava lamp picks its next wax. State persists
+  // across restarts.
+  source now = clock every 1s
+  state die = 1 persist
+  state wax = 0 persist
+  state rolling = 0
+  state endsAt = 0 persist
+  state spin = 0
+  let d = clamp(num(die, 1), 1, 6)
+  let colors = [[accent, magenta], [orange, red], [cyan, blue], [green, yellow]]
+  let pick = colors[wax % len(colors)]
+
+  onTap: {
+    rolling = 1
+    endsAt = (now ?? 0) + 2
+    wax = (wax + 1) % len(colors)
+    spin = spin + 720
+    die = run("shuf -i 1-6 -n 1")
+  }
+
+  // The roll lasts until endsAt (1-2 s): the dice spins and its faces
+  // tumble, then it settles on the rolled face.
+  every 1s { rolling = rolling * clamp(endsAt - (now ?? 0), 0, 1) }
+  at endsAt { rolling = 0 }
+
+  // The dice itself, drawn on a coarse grid so it matches the pixel art of
+  // the lava lamp. All lengths are fractions of the height. It bobs and tilts
+  // gently; tapping swaps the face and the pip color.
+  Shader {
+    fill: true
+    fallback: surface
+    rotation: spin
+    animate rotation: spring()
+    uniforms: { bg: background, fg: foreground, a: pick[0], b: pick[1], die: d, rolling: rolling }
+    code: """
+      uniform half4 bg;
+      uniform half4 fg;
+      uniform half4 a;
+      uniform half4 b;
+      uniform float die;
+      uniform float rolling;
+
+      float sdBox(float2 p, float2 h, float r) {
+        float2 q = abs(p) - h + r;
+        return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+      }
+
+      float pip(float2 u, float2 c, float r) {
+        return length(u - c) - r;
+      }
+
+      half4 main(float2 p) {
+        float cell = max(floor(size.y / 72.0), 1.0);
+        p = (floor(p / cell) + 0.5) * cell;
+        float2 q = float2((p.x - size.x * 0.5) / size.y, p.y / size.y);
+        float2 c = float2(0.0, 0.5 + 0.02 * sin(time * 0.7));
+
+        // Soft glow around the dice in the pip color, in flat steps.
+        float gd = max(length((q - c) * float2(1.0, 0.85)) - 0.3, 0.0);
+        float halo = exp(-gd * 9.0) * 0.25;
+        half3 col = mix(bg.rgb, b.rgb, floor(halo * 24.0) / 24.0);
+
+        // The dice, tilted a little as it bobs. While rolling it grows a
+        // little and its faces tumble fast; then it settles on the roll.
+        float ang = 0.1 * sin(time * 0.9);
+        float ca = cos(ang);
+        float sa = sin(ang);
+        float2 u = q - c;
+        u = float2(ca * u.x - sa * u.y, sa * u.x + ca * u.y);
+
+        float roll = rolling > 0.5 ? 1.0 : 0.0;
+        float hb = 0.26 + 0.02 * roll;
+        float cr = 0.06;
+        float sh = sdBox(q - c - float2(0.035, 0.05), float2(hb, hb), cr);
+        if (sh < 0.0) col = mix(col, bg.rgb, 0.0) * 0.55;
+
+        float dd = sdBox(u, float2(hb, hb), cr);
+        if (dd < 0.0) {
+          // Ivory face, lit from above in flat bands, with a darker rim.
+          half3 face = mix(bg.rgb, fg.rgb, 0.88);
+          float lq = floor(clamp(0.5 - u.y / (2.0 * hb), 0.0, 1.0) * 3.0) / 3.0;
+          col = face * (0.9 + 0.1 * lq);
+          if (dd > -0.03) col = mix(col, bg.rgb, 0.35);
+
+          // Pips in the wax color, brighter towards their middle.
+          float s = 0.115;
+          float pr = 0.04;
+          // While rolling the faces tumble fast; then the rolled one shows.
+          float show = roll > 0.5 ? 1.0 + mod(floor(time * 14.0), 6.0) : die;
+          float m = 1.0;
+          if (show < 1.5) {
+            m = pip(u, float2(0.0, 0.0), pr);
+          } else if (show < 2.5) {
+            m = min(pip(u, float2(-s, -s), pr), pip(u, float2(s, s), pr));
+          } else if (show < 3.5) {
+            m = min(pip(u, float2(-s, -s), pr), min(pip(u, float2(0.0, 0.0), pr), pip(u, float2(s, s), pr)));
+          } else if (show < 4.5) {
+            m = min(min(pip(u, float2(-s, -s), pr), pip(u, float2(-s, s), pr)), min(pip(u, float2(s, -s), pr), pip(u, float2(s, s), pr)));
+          } else if (show < 5.5) {
+            m = min(min(pip(u, float2(-s, -s), pr), pip(u, float2(-s, s), pr)), min(min(pip(u, float2(s, -s), pr), pip(u, float2(s, s), pr)), pip(u, float2(0.0, 0.0), pr)));
+          } else {
+            m = min(min(min(pip(u, float2(-s, -s), pr), pip(u, float2(-s, 0.0), pr)), min(pip(u, float2(-s, s), pr), pip(u, float2(s, -s), pr))), min(pip(u, float2(s, 0.0), pr), pip(u, float2(s, s), pr)));
+          }
+          if (m < 0.0) {
+            // Pips always dark so even light wax colors stay readable
+            // on the ivory face: the wax mixed towards the background.
+            half3 pc = mix(a.rgb, bg.rgb, 0.55);
+            col = m < -0.45 * pr ? pc : mix(pc, bg.rgb, 0.4);
+          }
+        }
+        return half4(col, 1.0);
+      }
+    """
+  }
+}
