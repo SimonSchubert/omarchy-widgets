@@ -2,8 +2,8 @@ widget "pixel gps" {
   size: 2x2
   minSize: 2x2
   meta {
-    description: "GPS bridge — captures exact phone GPS for location widgets (not IP). Serves a local page that writes the fix"
-    version: "1.0"
+    description: "GPS bridge - captures exact phone GPS for location widgets (not IP). Serves a local page that writes the fix"
+    version: "1.1"
     license: "MIT"
     category: "world"
     owl: 5
@@ -11,10 +11,10 @@ widget "pixel gps" {
 
   requires { pacman: ["python"] }
 
-  // Own port (18765) so it doesn't collide with other store widgets on 8765.
+  // Own port (18765) so it does not collide with other store widgets on 8765.
   source ensure = cmd("""
 python3 - <<'PY'
-import json, os, socket, subprocess, sys, time
+import base64, json, os, socket, subprocess, sys, time
 from pathlib import Path
 
 PORT = 18765
@@ -25,185 +25,8 @@ PID = CACHE / "pixel-gps-server.pid"
 LOG = CACHE / "pixel-gps-server.log"
 SERVER = CACHE / "pixel-gps-server.py"
 
-SERVER_SRC = r'''
-#!/usr/bin/env python3
-import json, re, time, urllib.parse, urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-
-PORT = 18765
-GPS = Path.home() / ".cache" / "pixel-gps.json"
-UA = "Mozilla/5.0 (omalauncher pixel-gps widget)"
-
-PAGE = """<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Pixel GPS → widgets</title>
-<style>
-  :root { color-scheme: dark; }
-  body {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: #0b0f14; color: #e8eef7;
-    margin: 0; min-height: 100vh; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; padding: 28px 20px;
-    text-align: center; gap: 12px;
-  }
-  h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -0.02em; }
-  p { margin: 0; opacity: 0.75; font-size: 14px; line-height: 1.45; max-width: 28rem; }
-  button {
-    margin-top: 8px; font-size: 17px; font-weight: 600;
-    padding: 14px 26px; border-radius: 14px; border: 0;
-    background: #3b82f6; color: #fff;
-  }
-  button.secondary { background: #1f2937; color: #e8eef7; }
-  #s {
-    margin-top: 10px; font-size: 13px; opacity: 0.9;
-    white-space: pre-wrap; font-variant-numeric: tabular-nums;
-    min-height: 4.5em; max-width: 28rem;
-  }
-  .ok { color: #4ade80; }
-  .err { color: #f87171; }
-</style>
-</head><body>
-  <h1>Pixel GPS</h1>
-  <p>Uses your phone’s real GPS (not IP). Widgets that opt in can read this fix for weather and nearby places.</p>
-  <button id="once">Get GPS fix</button>
-  <button id="watch" class="secondary">Keep updating</button>
-  <div id="s">waiting…</div>
-<script>
-const s = document.getElementById('s');
-let watchId = null;
-function set(msg, cls) { s.className = cls || ''; s.textContent = msg; }
-async function save(pos) {
-  const p = {
-    ok: true, source: 'gps',
-    lat: pos.coords.latitude, lon: pos.coords.longitude,
-    accuracy: pos.coords.accuracy, alt: pos.coords.altitude,
-    speed: pos.coords.speed, heading: pos.coords.heading,
-    at: Date.now() / 1000
-  };
-  set('got fix ±' + Math.round(p.accuracy) + 'm\\n' + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + '\\nsaving…');
-  try {
-    const r = await fetch('/gps', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p) });
-    const t = await r.text();
-    set('saved ✓  ·  ' + t + '\\n' + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + '\\n±' + Math.round(p.accuracy) + 'm accuracy', 'ok');
-  } catch (e) { set('save failed: ' + e, 'err'); }
-}
-function fail(err) { set('GPS error: ' + (err && err.message ? err.message : err), 'err'); }
-const opts = { enableHighAccuracy: true, timeout: 25000, maximumAge: 3000 };
-function once() {
-  if (!navigator.geolocation) { set('no geolocation API', 'err'); return; }
-  set('requesting GPS…');
-  navigator.geolocation.getCurrentPosition(save, fail, opts);
-}
-function toggleWatch() {
-  if (!navigator.geolocation) { set('no geolocation API', 'err'); return; }
-  if (watchId != null) {
-    navigator.geolocation.clearWatch(watchId); watchId = null;
-    document.getElementById('watch').textContent = 'Keep updating';
-    set('live updates stopped'); return;
-  }
-  document.getElementById('watch').textContent = 'Stop updating';
-  set('live GPS on…');
-  watchId = navigator.geolocation.watchPosition(save, fail, opts);
-}
-document.getElementById('once').onclick = once;
-document.getElementById('watch').onclick = toggleWatch;
-setTimeout(once, 350);
-</script>
-</body></html>
-"""
-
-def reverse_geocode(lat, lon):
-    try:
-        q = urllib.parse.urlencode({
-            "lat": f"{lat:.7f}", "lon": f"{lon:.7f}",
-            "format": "jsonv2", "zoom": 14, "addressdetails": 1,
-        })
-        req = urllib.request.Request(
-            "https://nominatim.openstreetmap.org/reverse?" + q,
-            headers={"User-Agent": UA, "Accept": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=10) as r:
-            d = json.load(r)
-        addr = d.get("address") or {}
-        place = (
-            addr.get("city") or addr.get("town") or addr.get("village")
-            or addr.get("hamlet") or addr.get("county") or addr.get("suburb")
-            or ""
-        )
-        region = addr.get("state") or addr.get("region") or ""
-        country = addr.get("country") or ""
-        return {
-            "place": place,
-            "region": region,
-            "country": country,
-            "display": d.get("display_name") or "",
-            "postcode": addr.get("postcode") or "",
-        }
-    except Exception:
-        return {}
-
-def save_fix(p):
-    p = dict(p)
-    p["ok"] = True
-    p["at"] = float(p.get("at") or time.time())
-    try:
-        lat, lon = float(p["lat"]), float(p["lon"])
-    except Exception:
-        return "bad coords"
-    geo = reverse_geocode(lat, lon)
-    p.update(geo)
-    GPS.parent.mkdir(parents=True, exist_ok=True)
-    tmp = GPS.with_suffix(".tmp")
-    tmp.write_text(json.dumps(p))
-    tmp.replace(GPS)
-    bits = []
-    if p.get("place"): bits.append(str(p["place"]))
-    if p.get("region"): bits.append(str(p["region"]))
-    return ", ".join(bits) if bits else "ok"
-
-class H(BaseHTTPRequestHandler):
-    def log_message(self, *a): pass
-    def _send(self, code, body, ctype="text/plain; charset=utf-8"):
-        data = body if isinstance(body, bytes) else body.encode()
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
-    def do_GET(self):
-        path = urllib.parse.urlsplit(self.path).path
-        if path in ("/", "/index.html"):
-            self._send(200, PAGE, "text/html; charset=utf-8")
-        elif path == "/gps":
-            if GPS.exists():
-                self._send(200, GPS.read_text(), "application/json")
-            else:
-                self._send(200, '{"ok":false}', "application/json")
-        elif path == "/health":
-            self._send(200, "ok")
-        else:
-            self._send(404, "not found")
-    def do_POST(self):
-        path = urllib.parse.urlsplit(self.path).path
-        if path != "/gps":
-            self._send(404, "not found"); return
-        n = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(n) if n else b"{}"
-        try:
-            p = json.loads(raw.decode("utf-8", "replace"))
-        except Exception:
-            self._send(400, "bad json"); return
-        msg = save_fix(p)
-        self._send(200, msg)
-
-if __name__ == "__main__":
-    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), H)
-    httpd.serve_forever()
-'''
+SERVER.write_text(base64.b64decode("IyEvdXNyL2Jpbi9lbnYgcHl0aG9uMwppbXBvcnQganNvbiwgdGltZSwgdXJsbGliLnBhcnNlLCB1cmxsaWIucmVxdWVzdApmcm9tIGh0dHAuc2VydmVyIGltcG9ydCBCYXNlSFRUUFJlcXVlc3RIYW5kbGVyLCBUaHJlYWRpbmdIVFRQU2VydmVyCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAoKUE9SVCA9IDE4NzY1CkdQUyA9IFBhdGguaG9tZSgpIC8gIi5jYWNoZSIgLyAicGl4ZWwtZ3BzLmpzb24iClVBID0gIk1vemlsbGEvNS4wIChvbWFsYXVuY2hlciBwaXhlbC1ncHMgd2lkZ2V0KSIKClBBR0UgPSAiIiI8IURPQ1RZUEUgaHRtbD4KPGh0bWwgbGFuZz0iZW4iPjxoZWFkPgo8bWV0YSBjaGFyc2V0PSJ1dGYtOCI+CjxtZXRhIG5hbWU9InZpZXdwb3J0IiBjb250ZW50PSJ3aWR0aD1kZXZpY2Utd2lkdGgsaW5pdGlhbC1zY2FsZT0xLHZpZXdwb3J0LWZpdD1jb3ZlciI+Cjx0aXRsZT5QaXhlbCBHUFMgLSB3aWRnZXRzPC90aXRsZT4KPHN0eWxlPgogIDpyb290IHsgY29sb3Itc2NoZW1lOiBkYXJrOyB9CiAgYm9keSB7CiAgICBmb250LWZhbWlseTogc3lzdGVtLXVpLCAtYXBwbGUtc3lzdGVtLCBzYW5zLXNlcmlmOwogICAgYmFja2dyb3VuZDogIzBiMGYxNDsgY29sb3I6ICNlOGVlZjc7CiAgICBtYXJnaW46IDA7IG1pbi1oZWlnaHQ6IDEwMHZoOyBkaXNwbGF5OiBmbGV4OyBmbGV4LWRpcmVjdGlvbjogY29sdW1uOwogICAgYWxpZ24taXRlbXM6IGNlbnRlcjsganVzdGlmeS1jb250ZW50OiBjZW50ZXI7IHBhZGRpbmc6IDI4cHggMjBweDsKICAgIHRleHQtYWxpZ246IGNlbnRlcjsgZ2FwOiAxMnB4OwogIH0KICBoMSB7IGZvbnQtc2l6ZTogMjJweDsgZm9udC13ZWlnaHQ6IDY1MDsgbWFyZ2luOiAwOyBsZXR0ZXItc3BhY2luZzogLTAuMDJlbTsgfQogIHAgeyBtYXJnaW46IDA7IG9wYWNpdHk6IDAuNzU7IGZvbnQtc2l6ZTogMTRweDsgbGluZS1oZWlnaHQ6IDEuNDU7IG1heC13aWR0aDogMjhyZW07IH0KICBidXR0b24gewogICAgbWFyZ2luLXRvcDogOHB4OyBmb250LXNpemU6IDE3cHg7IGZvbnQtd2VpZ2h0OiA2MDA7CiAgICBwYWRkaW5nOiAxNHB4IDI2cHg7IGJvcmRlci1yYWRpdXM6IDE0cHg7IGJvcmRlcjogMDsKICAgIGJhY2tncm91bmQ6ICMzYjgyZjY7IGNvbG9yOiAjZmZmOwogIH0KICBidXR0b24uc2Vjb25kYXJ5IHsgYmFja2dyb3VuZDogIzFmMjkzNzsgY29sb3I6ICNlOGVlZjc7IH0KICAjcyB7CiAgICBtYXJnaW4tdG9wOiAxMHB4OyBmb250LXNpemU6IDEzcHg7IG9wYWNpdHk6IDAuOTsKICAgIHdoaXRlLXNwYWNlOiBwcmUtd3JhcDsgZm9udC12YXJpYW50LW51bWVyaWM6IHRhYnVsYXItbnVtczsKICAgIG1pbi1oZWlnaHQ6IDQuNWVtOyBtYXgtd2lkdGg6IDI4cmVtOwogIH0KICAub2sgeyBjb2xvcjogIzRhZGU4MDsgfQogIC5lcnIgeyBjb2xvcjogI2Y4NzE3MTsgfQo8L3N0eWxlPgo8L2hlYWQ+PGJvZHk+CiAgPGgxPlBpeGVsIEdQUzwvaDE+CiAgPHA+VXNlcyB5b3VyIHBob25lJ3MgcmVhbCBHUFMgKG5vdCBJUCkuIFdpZGdldHMgdGhhdCBvcHQgaW4gY2FuIHJlYWQgdGhpcyBmaXggZm9yIHdlYXRoZXIgYW5kIG5lYXJieSBwbGFjZXMuPC9wPgogIDxidXR0b24gaWQ9Im9uY2UiPkdldCBHUFMgZml4PC9idXR0b24+CiAgPGJ1dHRvbiBpZD0id2F0Y2giIGNsYXNzPSJzZWNvbmRhcnkiPktlZXAgdXBkYXRpbmc8L2J1dHRvbj4KICA8ZGl2IGlkPSJzIj53YWl0aW5nLi4uPC9kaXY+CjxzY3JpcHQ+CmNvbnN0IHMgPSBkb2N1bWVudC5nZXRFbGVtZW50QnlJZCgncycpOwpsZXQgd2F0Y2hJZCA9IG51bGw7CmZ1bmN0aW9uIHNldChtc2csIGNscykgeyBzLmNsYXNzTmFtZSA9IGNscyB8fCAnJzsgcy50ZXh0Q29udGVudCA9IG1zZzsgfQphc3luYyBmdW5jdGlvbiBzYXZlKHBvcykgewogIGNvbnN0IHAgPSB7CiAgICBvazogdHJ1ZSwgc291cmNlOiAnZ3BzJywKICAgIGxhdDogcG9zLmNvb3Jkcy5sYXRpdHVkZSwgbG9uOiBwb3MuY29vcmRzLmxvbmdpdHVkZSwKICAgIGFjY3VyYWN5OiBwb3MuY29vcmRzLmFjY3VyYWN5LCBhbHQ6IHBvcy5jb29yZHMuYWx0aXR1ZGUsCiAgICBzcGVlZDogcG9zLmNvb3Jkcy5zcGVlZCwgaGVhZGluZzogcG9zLmNvb3Jkcy5oZWFkaW5nLAogICAgYXQ6IERhdGUubm93KCkgLyAxMDAwCiAgfTsKICBzZXQoJ2dvdCBmaXggKy8tJyArIE1hdGgucm91bmQocC5hY2N1cmFjeSkgKyAnbVxcbicgKyBwLmxhdC50b0ZpeGVkKDYpICsgJywgJyArIHAubG9uLnRvRml4ZWQoNikgKyAnXFxuc2F2aW5nLi4uJyk7CiAgdHJ5IHsKICAgIGNvbnN0IHIgPSBhd2FpdCBmZXRjaCgnL2dwcycsIHsgbWV0aG9kOiAnUE9TVCcsIGhlYWRlcnM6IHsnQ29udGVudC1UeXBlJzogJ2FwcGxpY2F0aW9uL2pzb24nfSwgYm9keTogSlNPTi5zdHJpbmdpZnkocCkgfSk7CiAgICBjb25zdCB0ID0gYXdhaXQgci50ZXh0KCk7CiAgICBzZXQoJ3NhdmVkICDCtyAgJyArIHQgKyAnXFxuJyArIHAubGF0LnRvRml4ZWQoNikgKyAnLCAnICsgcC5sb24udG9GaXhlZCg2KSArICdcXG4rLy0nICsgTWF0aC5yb3VuZChwLmFjY3VyYWN5KSArICdtIGFjY3VyYWN5JywgJ29rJyk7CiAgfSBjYXRjaCAoZSkgeyBzZXQoJ3NhdmUgZmFpbGVkOiAnICsgZSwgJ2VycicpOyB9Cn0KZnVuY3Rpb24gZmFpbChlcnIpIHsgc2V0KCdHUFMgZXJyb3I6ICcgKyAoZXJyICYmIGVyci5tZXNzYWdlID8gZXJyLm1lc3NhZ2UgOiBlcnIpLCAnZXJyJyk7IH0KY29uc3Qgb3B0cyA9IHsgZW5hYmxlSGlnaEFjY3VyYWN5OiB0cnVlLCB0aW1lb3V0OiAyNTAwMCwgbWF4aW11bUFnZTogMzAwMCB9OwpmdW5jdGlvbiBvbmNlKCkgewogIGlmICghbmF2aWdhdG9yLmdlb2xvY2F0aW9uKSB7IHNldCgnbm8gZ2VvbG9jYXRpb24gQVBJJywgJ2VycicpOyByZXR1cm47IH0KICBzZXQoJ3JlcXVlc3RpbmcgR1BTLi4uJyk7CiAgbmF2aWdhdG9yLmdlb2xvY2F0aW9uLmdldEN1cnJlbnRQb3NpdGlvbihzYXZlLCBmYWlsLCBvcHRzKTsKfQpmdW5jdGlvbiB0b2dnbGVXYXRjaCgpIHsKICBpZiAoIW5hdmlnYXRvci5nZW9sb2NhdGlvbikgeyBzZXQoJ25vIGdlb2xvY2F0aW9uIEFQSScsICdlcnInKTsgcmV0dXJuOyB9CiAgaWYgKHdhdGNoSWQgIT0gbnVsbCkgewogICAgbmF2aWdhdG9yLmdlb2xvY2F0aW9uLmNsZWFyV2F0Y2god2F0Y2hJZCk7IHdhdGNoSWQgPSBudWxsOwogICAgZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ3dhdGNoJykudGV4dENvbnRlbnQgPSAnS2VlcCB1cGRhdGluZyc7CiAgICBzZXQoJ2xpdmUgdXBkYXRlcyBzdG9wcGVkJyk7IHJldHVybjsKICB9CiAgZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ3dhdGNoJykudGV4dENvbnRlbnQgPSAnU3RvcCB1cGRhdGluZyc7CiAgc2V0KCdsaXZlIEdQUyBvbi4uLicpOwogIHdhdGNoSWQgPSBuYXZpZ2F0b3IuZ2VvbG9jYXRpb24ud2F0Y2hQb3NpdGlvbihzYXZlLCBmYWlsLCBvcHRzKTsKfQpkb2N1bWVudC5nZXRFbGVtZW50QnlJZCgnb25jZScpLm9uY2xpY2sgPSBvbmNlOwpkb2N1bWVudC5nZXRFbGVtZW50QnlJZCgnd2F0Y2gnKS5vbmNsaWNrID0gdG9nZ2xlV2F0Y2g7CnNldFRpbWVvdXQob25jZSwgMzUwKTsKPC9zY3JpcHQ+CjwvYm9keT48L2h0bWw+CiIiIgoKZGVmIHJldmVyc2VfZ2VvY29kZShsYXQsIGxvbik6CiAgICB0cnk6CiAgICAgICAgcSA9IHVybGxpYi5wYXJzZS51cmxlbmNvZGUoewogICAgICAgICAgICAibGF0IjogZiJ7bGF0Oi43Zn0iLCAibG9uIjogZiJ7bG9uOi43Zn0iLAogICAgICAgICAgICAiZm9ybWF0IjogImpzb252MiIsICJ6b29tIjogMTQsICJhZGRyZXNzZGV0YWlscyI6IDEsCiAgICAgICAgfSkKICAgICAgICByZXEgPSB1cmxsaWIucmVxdWVzdC5SZXF1ZXN0KAogICAgICAgICAgICAiaHR0cHM6Ly9ub21pbmF0aW0ub3BlbnN0cmVldG1hcC5vcmcvcmV2ZXJzZT8iICsgcSwKICAgICAgICAgICAgaGVhZGVycz17IlVzZXItQWdlbnQiOiBVQSwgIkFjY2VwdCI6ICJhcHBsaWNhdGlvbi9qc29uIn0sCiAgICAgICAgKQogICAgICAgIHdpdGggdXJsbGliLnJlcXVlc3QudXJsb3BlbihyZXEsIHRpbWVvdXQ9MTApIGFzIHI6CiAgICAgICAgICAgIGQgPSBqc29uLmxvYWQocikKICAgICAgICBhZGRyID0gZC5nZXQoImFkZHJlc3MiKSBvciB7fQogICAgICAgIHBsYWNlID0gKAogICAgICAgICAgICBhZGRyLmdldCgiY2l0eSIpIG9yIGFkZHIuZ2V0KCJ0b3duIikgb3IgYWRkci5nZXQoInZpbGxhZ2UiKQogICAgICAgICAgICBvciBhZGRyLmdldCgiaGFtbGV0Iikgb3IgYWRkci5nZXQoImNvdW50eSIpIG9yIGFkZHIuZ2V0KCJzdWJ1cmIiKQogICAgICAgICAgICBvciAiIgogICAgICAgICkKICAgICAgICByZWdpb24gPSBhZGRyLmdldCgic3RhdGUiKSBvciBhZGRyLmdldCgicmVnaW9uIikgb3IgIiIKICAgICAgICBjb3VudHJ5ID0gYWRkci5nZXQoImNvdW50cnkiKSBvciAiIgogICAgICAgIHJldHVybiB7CiAgICAgICAgICAgICJwbGFjZSI6IHBsYWNlLAogICAgICAgICAgICAicmVnaW9uIjogcmVnaW9uLAogICAgICAgICAgICAiY291bnRyeSI6IGNvdW50cnksCiAgICAgICAgICAgICJkaXNwbGF5IjogZC5nZXQoImRpc3BsYXlfbmFtZSIpIG9yICIiLAogICAgICAgICAgICAicG9zdGNvZGUiOiBhZGRyLmdldCgicG9zdGNvZGUiKSBvciAiIiwKICAgICAgICB9CiAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAgIHJldHVybiB7fQoKZGVmIHNhdmVfZml4KHApOgogICAgcCA9IGRpY3QocCkKICAgIHBbIm9rIl0gPSBUcnVlCiAgICBwWyJhdCJdID0gZmxvYXQocC5nZXQoImF0Iikgb3IgdGltZS50aW1lKCkpCiAgICB0cnk6CiAgICAgICAgbGF0LCBsb24gPSBmbG9hdChwWyJsYXQiXSksIGZsb2F0KHBbImxvbiJdKQogICAgZXhjZXB0IEV4Y2VwdGlvbjoKICAgICAgICByZXR1cm4gImJhZCBjb29yZHMiCiAgICBnZW8gPSByZXZlcnNlX2dlb2NvZGUobGF0LCBsb24pCiAgICBwLnVwZGF0ZShnZW8pCiAgICBHUFMucGFyZW50Lm1rZGlyKHBhcmVudHM9VHJ1ZSwgZXhpc3Rfb2s9VHJ1ZSkKICAgIHRtcCA9IEdQUy53aXRoX3N1ZmZpeCgiLnRtcCIpCiAgICB0bXAud3JpdGVfdGV4dChqc29uLmR1bXBzKHApKQogICAgdG1wLnJlcGxhY2UoR1BTKQogICAgYml0cyA9IFtdCiAgICBpZiBwLmdldCgicGxhY2UiKTogYml0cy5hcHBlbmQoc3RyKHBbInBsYWNlIl0pKQogICAgaWYgcC5nZXQoInJlZ2lvbiIpOiBiaXRzLmFwcGVuZChzdHIocFsicmVnaW9uIl0pKQogICAgcmV0dXJuICIsICIuam9pbihiaXRzKSBpZiBiaXRzIGVsc2UgIm9rIgoKY2xhc3MgSChCYXNlSFRUUFJlcXVlc3RIYW5kbGVyKToKICAgIGRlZiBsb2dfbWVzc2FnZShzZWxmLCAqYSk6CiAgICAgICAgcGFzcwogICAgZGVmIF9zZW5kKHNlbGYsIGNvZGUsIGJvZHksIGN0eXBlPSJ0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04Iik6CiAgICAgICAgZGF0YSA9IGJvZHkgaWYgaXNpbnN0YW5jZShib2R5LCBieXRlcykgZWxzZSBib2R5LmVuY29kZSgpCiAgICAgICAgc2VsZi5zZW5kX3Jlc3BvbnNlKGNvZGUpCiAgICAgICAgc2VsZi5zZW5kX2hlYWRlcigiQ29udGVudC1UeXBlIiwgY3R5cGUpCiAgICAgICAgc2VsZi5zZW5kX2hlYWRlcigiQ29udGVudC1MZW5ndGgiLCBzdHIobGVuKGRhdGEpKSkKICAgICAgICBzZWxmLnNlbmRfaGVhZGVyKCJDYWNoZS1Db250cm9sIiwgIm5vLXN0b3JlIikKICAgICAgICBzZWxmLmVuZF9oZWFkZXJzKCkKICAgICAgICBzZWxmLndmaWxlLndyaXRlKGRhdGEpCiAgICBkZWYgZG9fR0VUKHNlbGYpOgogICAgICAgIHBhdGggPSB1cmxsaWIucGFyc2UudXJsc3BsaXQoc2VsZi5wYXRoKS5wYXRoCiAgICAgICAgaWYgcGF0aCBpbiAoIi8iLCAiL2luZGV4Lmh0bWwiKToKICAgICAgICAgICAgc2VsZi5fc2VuZCgyMDAsIFBBR0UsICJ0ZXh0L2h0bWw7IGNoYXJzZXQ9dXRmLTgiKQogICAgICAgIGVsaWYgcGF0aCA9PSAiL2dwcyI6CiAgICAgICAgICAgIGlmIEdQUy5leGlzdHMoKToKICAgICAgICAgICAgICAgIHNlbGYuX3NlbmQoMjAwLCBHUFMucmVhZF90ZXh0KCksICJhcHBsaWNhdGlvbi9qc29uIikKICAgICAgICAgICAgZWxzZToKICAgICAgICAgICAgICAgIHNlbGYuX3NlbmQoMjAwLCAneyJvayI6ZmFsc2V9JywgImFwcGxpY2F0aW9uL2pzb24iKQogICAgICAgIGVsaWYgcGF0aCA9PSAiL2hlYWx0aCI6CiAgICAgICAgICAgIHNlbGYuX3NlbmQoMjAwLCAib2siKQogICAgICAgIGVsc2U6CiAgICAgICAgICAgIHNlbGYuX3NlbmQoNDA0LCAibm90IGZvdW5kIikKICAgIGRlZiBkb19QT1NUKHNlbGYpOgogICAgICAgIHBhdGggPSB1cmxsaWIucGFyc2UudXJsc3BsaXQoc2VsZi5wYXRoKS5wYXRoCiAgICAgICAgaWYgcGF0aCAhPSAiL2dwcyI6CiAgICAgICAgICAgIHNlbGYuX3NlbmQoNDA0LCAibm90IGZvdW5kIikKICAgICAgICAgICAgcmV0dXJuCiAgICAgICAgbiA9IGludChzZWxmLmhlYWRlcnMuZ2V0KCJDb250ZW50LUxlbmd0aCIpIG9yIDApCiAgICAgICAgcmF3ID0gc2VsZi5yZmlsZS5yZWFkKG4pIGlmIG4gZWxzZSBiInt9IgogICAgICAgIHRyeToKICAgICAgICAgICAgcCA9IGpzb24ubG9hZHMocmF3LmRlY29kZSgidXRmLTgiLCAicmVwbGFjZSIpKQogICAgICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgICAgIHNlbGYuX3NlbmQoNDAwLCAiYmFkIGpzb24iKQogICAgICAgICAgICByZXR1cm4KICAgICAgICBtc2cgPSBzYXZlX2ZpeChwKQogICAgICAgIHNlbGYuX3NlbmQoMjAwLCBtc2cpCgppZiBfX25hbWVfXyA9PSAiX19tYWluX18iOgogICAgaHR0cGQgPSBUaHJlYWRpbmdIVFRQU2VydmVyKCgiMTI3LjAuMC4xIiwgUE9SVCksIEgpCiAgICBodHRwZC5zZXJ2ZV9mb3JldmVyKCkK").decode())
+SERVER.chmod(0o755)
 
 def port_open(port):
     try:
@@ -219,13 +42,8 @@ def alive_pid(pid):
     except Exception:
         return False
 
-# write/update server script
-SERVER.write_text(SERVER_SRC)
-SERVER.chmod(0o755)
-
 running = port_open(PORT)
 if not running:
-    # stale pid?
     try:
         if PID.exists():
             old = int(PID.read_text().strip() or "0")
@@ -257,7 +75,7 @@ print(json.dumps({
     "running": running,
     "port": PORT,
     "has_fix": bool(fix.get("ok") and fix.get("lat") is not None),
-    "url": f"http://127.0.0.1:{PORT}/",
+    "url": "http://127.0.0.1:%s/" % PORT,
 }))
 PY
   """) every 30s json timeout 12s
@@ -268,7 +86,7 @@ PY
   let ok = gps != null && gps.ok == true && gps.lat != null
   let age = ok ? (now - num(gps.at)) : null
   let ageTxt = age == null ? "" : age < 60 ? "just now" : age < 3600 ? "${round(age / 60)}m ago" : age < 86400 ? "${round(age / 3600)}h ago" : "${round(age / 86400)}d ago"
-  let acc = ok && gps.accuracy != null ? "±${round(gps.accuracy)}m" : ""
+  let acc = ok && gps.accuracy != null ? "+/-${round(gps.accuracy)}m" : ""
   let place = ok ? (gps.place != null && str(gps.place) != "" ? str(gps.place) : "fix") : "no fix"
   let region = ok && gps.region != null ? str(gps.region) : ""
   let where = region != "" ? "${place}, ${region}" : place
@@ -327,7 +145,7 @@ PY
         }
       } else {
         Text {
-          text: "Opens a local page that reads the phone’s real GPS and writes ~/.cache/pixel-gps.json for widgets that choose to use it. Uses port 18765 (not 8765)."
+          text: "Opens a local page that reads the phone's real GPS and writes ~/.cache/pixel-gps.json for widgets that choose to use it. Uses port 18765 (not 8765)."
           style: small
           color: muted
           maxLines: 8

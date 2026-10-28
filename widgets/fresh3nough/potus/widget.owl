@@ -14,7 +14,7 @@ widget "potus" {
 
   source feed = cmd("""
 python3 - <<'PY'
-"""Trump Truth Social posts + White House X tweets for the potus widget."""
+'''Trump Truth Social posts + White House X tweets for the potus widget.'''
 import html as html_lib
 import json
 import os
@@ -232,7 +232,7 @@ def download_thumb(pid, url):
 
 
 def attach_thumbs(items):
-    """Download up to MAX_THUMBS preview images for items that need them."""
+    '''Download up to MAX_THUMBS preview images for items that need them.'''
     os.makedirs(THUMB_DIR, exist_ok=True)
     jobs = []
     for p in items:

@@ -78,7 +78,7 @@ def search(q, params=None):
     return post("https://www.youtube.com/youtubei/v1/search?prettyPrint=false", body)
 
 def channel_videos(ucid):
-    """Latest uploads tab for a channel."""
+    '''Latest uploads tab for a channel.'''
     try:
         body = {
             "context": client_ctx(),
@@ -112,7 +112,7 @@ def parse_len(s):
     return t
 
 def parse_published(s):
-    """Rough age in seconds from '2 days ago' style text; smaller = newer."""
+    '''Rough age in seconds from '2 days ago' style text; smaller = newer.'''
     if not s:
         return 10**12
     s = s.lower().strip()

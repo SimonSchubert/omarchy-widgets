@@ -13,7 +13,7 @@ widget "grokipedia" {
 
   source feed = cmd("""
 python3 - <<'PY'
-"""Recent Grokipedia pages (from live approved edits), shuffled for the widget."""
+'''Recent Grokipedia pages (from live approved edits), shuffled for the widget.'''
 import html as html_lib
 import json, os, random, re, time, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -49,7 +49,7 @@ def slug_title(slug):
 
 
 def _balanced_inner(html, open_end):
-    """Return inner HTML of a span opened just before open_end, or None."""
+    '''Return inner HTML of a span opened just before open_end, or None.'''
     depth, i, n = 1, open_end, len(html)
     while i < n and depth:
         a = html.find("<span", i)
@@ -68,7 +68,7 @@ def _balanced_inner(html, open_end):
 
 
 def _strip_element(html, class_token):
-    """Remove elements whose class contains class_token (balanced spans/divs)."""
+    '''Remove elements whose class contains class_token (balanced spans/divs).'''
     out, i = [], 0
     low = html
     token = class_token
@@ -137,7 +137,7 @@ def plain_tex(tex):
 
 
 def _replace_katex_spans(chunk):
-    """Replace each <span class=katex>…</span> with plain tex from annotation."""
+    '''Replace each <span class=katex>…</span> with plain tex from annotation.'''
     out, i = [], 0
     while True:
         j = chunk.find("katex", i)
@@ -172,7 +172,7 @@ def _replace_katex_spans(chunk):
 
 
 def html_to_plain(chunk):
-    """HTML fragment → plain blurb text."""
+    '''HTML fragment → plain blurb text.'''
     if not chunk:
         return ""
     chunk = _replace_katex_spans(chunk)
@@ -198,7 +198,7 @@ def html_to_plain(chunk):
 
 
 def clip_sentences(text, lo=400, hi=700):
-    """Prefer full sentences in [lo, hi]; never cut mid-word."""
+    '''Prefer full sentences in [lo, hi]; never cut mid-word.'''
     if not text:
         return ""
     if len(text) <= hi:
@@ -250,7 +250,7 @@ def useful_note(note, blurb):
 
 
 def lead_from_html(text):
-    """Pull first real article-body paragraph(s) as plain text."""
+    '''Pull first real article-body paragraph(s) as plain text.'''
     ab = text.find('class="article-body"')
     if ab < 0:
         return ""
