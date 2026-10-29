@@ -1,6 +1,6 @@
 widget "data centers" {
   meta {
-    description: "Nearest major data center — neon power-grid graphics, construction and AI hyperscale news. Prefers Pixel GPS."
+    description: "Nearest major data center — neon power-grid graphics, construction and AI hyperscale news. City or IP location."
     version: "1.7"
     license: "MIT"
     category: "world"
@@ -38,25 +38,18 @@ widget "data centers" {
   source now = clock every 1m
   state city = "" persist
   state tab = "build" persist
-  source gpsFile = cmd("cat ~/.cache/pixel-gps.json 2>/dev/null || echo '{}'") every 1m json timeout 3s
-  let gpsFresh = city == "" && gpsFile != null && gpsFile.ok == true && gpsFile.lat != null && (now - num(gpsFile.at) < 172800)
   let qCity = city.replace("%", "%25").replace("+", "%2B").replace("/", "%2F").replace("?", "%3F").replace("#", "%23").replace("&", "%26").replace("'", "%27").replace(" ", "+")
-  let q = city != "" ? qCity : (gpsFresh ? "${fixed(num(gpsFile.lat), 5)},${fixed(num(gpsFile.lon), 5)}" : "")
-  // City when set; else Pixel GPS coords; bare wttr.in falls back to IP.
+  let q = city != "" ? qCity : ""
+  // City when set; bare wttr.in falls back to IP.
   source wx = http("https://wttr.in/${q}?format=j1") every 30m timeout 10s json
   let area = wx.nearest_area[0]
-  let lat = gpsFresh ? num(gpsFile.lat) : num(area.latitude)
-  let lon = gpsFresh ? num(gpsFile.lon) : num(area.longitude)
-  let countryName = gpsFresh && gpsFile.country != null && str(gpsFile.country) != ""
-    ? str(gpsFile.country)
-    : trim(area.country[0].value ?? "")
+  let lat = num(area.latitude)
+  let lon = num(area.longitude)
+  let countryName = trim(area.country[0].value ?? "")
   let imperial = contains(["united states", "united states of america", "liberia", "myanmar", "burma", "us", "usa"], lower(trim(countryName)))
-  let place = gpsFresh && gpsFile.place != null && str(gpsFile.place) != ""
-    ? lower(str(gpsFile.place))
-    : lower(area.areaName[0].value ?? "")
+  let place = lower(area.areaName[0].value ?? "")
   when lat != null { refresh() }
   on qCity { refresh() }
-  on gpsFile.lat { refresh() }
 
   let dcs = [
     {n: "Ashburn VA", o: "AWS·Azure·GCP", lat: 39.0438, lon: -77.4874},
@@ -456,7 +449,7 @@ OWLDC
       padding: 8
     Input {
       text: city
-      placeholder: "city · empty = Pixel GPS / IP"
+      placeholder: "city · empty = IP"
       onSubmit: { city = trim(value); refresh() }
     }
     Column {
@@ -526,7 +519,7 @@ OWLDC
         }
       }
 
-      Text { text: "location · ${city != "" ? city : (gpsFresh ? "Pixel GPS" : "IP/wttr")} · news via google news"; style: label; color: textDim }
+      Text { text: "location · ${city != "" ? city : "IP/wttr"} · news via google news"; style: label; color: textDim }
     }
     }
   }
