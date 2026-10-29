@@ -1,0 +1,1310 @@
+face "muslim-panel" {
+  page: 0
+  statusBar: look != "parchment"
+
+  meta {
+    owl: 13
+    description: "Prayer times under the clock; Fortification (Hisnul Muslim), the Qur'an and a daily hadith beside them, in parchment, ink and maroon"
+    version: "1.0"
+    license: "MIT"
+    category: "productivity"
+  }
+
+  requires {
+    pacman: []
+  }
+
+  // ── Palette and type, after majalisalilm.netlify.app ──
+  // Three looks: parchment (the site's), night (the same at night), theme (your theme over your wallpaper)
+  state look = "parchment" persist
+  let themed = look == "theme"
+  let bg = look == "night" ? #10171f : themed ? background : #efe9db
+  let surf = look == "night" ? #18222d : themed ? surface : #f6f1e6
+  let ink = look == "night" ? #ece5d6 : themed ? foreground : #1c2a3a
+  let dim = look == "night" ? #9a917f : themed ? muted : #6b6455
+  let acc = look == "night" ? #b5473f : themed ? accent : #8f2f2a
+  let onAcc = look == "night" ? #f6f1e6 : themed ? background : #f6f1e6
+  let line = alpha(ink, 0.14)
+  let line2 = alpha(ink, 0.24)
+  // Panels: solid paper, or frosted glass that follows the home screen's tile opacity and blur
+  let panelBg = themed ? alpha(background, tileOpacity ?? 0.6) : alpha(surf, 0.92)
+  let glass = themed ? (tileFrost ?? 0) : 0
+  let fieldBg = themed ? alpha(foreground, 0.06) : surf
+  let gf = "https://raw.githubusercontent.com/google/fonts/main/ofl"
+  let kufi = "${gf}/reemkufi/ReemKufi%5Bwght%5D.ttf"
+  let amiri = "${gf}/amiri/Amiri-Regular.ttf"
+  let news = "${gf}/newsreader/Newsreader-Italic%5Bopsz,wght%5D.ttf"
+  let sans = "${gf}/instrumentsans/InstrumentSans%5Bwdth,wght%5D.ttf"
+
+  background: themed ? linear(0, 0, 0, 1, [alpha(background, 0.55), alpha(background, 0.15), alpha(background, 0.2), alpha(background, 0.6)]) : bg
+  padding: 0
+
+  // ── Settings ──
+  state use24h = false persist
+  state hijriAdj = 0 persist
+  state city = "auto" persist
+  state cityLat = null persist
+  state cityLon = null persist
+  state cityCountry = "" persist
+  state cityQuery = ""
+  state method = "4" persist
+  state school = "0" persist
+  state showTl = true persist
+  state showConfig = false
+  state citySearching = false
+  state configAt = 0
+
+  // ── Tabs ──
+  state activeTab = "fort" persist
+
+  // Fortification
+  state hisnCat = "all" persist
+  state hisnQuery = ""
+  state openCh = null
+  state hisnCache = {} persist
+  state hisnCounts = {} persist
+  state hisnDay = 0 persist
+  state savedCh = [] persist
+
+  // Qur'an & hadith
+  state verseSeed = 0 persist
+  state lastVerse = null persist
+  state hadithBook = "nawawi" persist
+  state hadithSeed = 0 persist
+  state lastHadith = null persist
+
+  // Prayer log: day number -> {fajr: true, ...}
+  state prayerLog = {} persist
+
+  // Dock
+  state pinnedApps = [] persist
+  state showPinModal = false
+  state appSearchQuery = ""
+
+  // ── Live sources ──
+  source now = clock every 10s
+  source bat = android.battery
+  source alarm = android.alarm
+  source notif = android.notifications
+  source apps = android.apps
+
+  source citySearch = http(len(trim(cityQuery)) < 2 ? null : "https://geocoding-api.open-meteo.com/v1/search?name=${enc(trim(cityQuery))}&count=5") every 1h timeout 10s json status
+  let searchResults = len(trim(cityQuery)) >= 2 && citySearch != null && citySearch.ok ? (citySearch.out.results ?? []) : []
+
+  let wxLoc = city == "auto" ? "" : "${cityLat},${cityLon}"
+  source wx = http("https://wttr.in/${enc(wxLoc)}?format=j1") every 30m timeout 10s json status
+  let wxData = wx != null && wx.ok ? wx.out : null
+  let curWx = wxData != null && wxData.current_condition != null ? wxData.current_condition[0] : null
+  let dayWx = wxData != null && wxData.weather != null ? wxData.weather[0] : null
+  let ipArea = wxData != null && wxData.nearest_area != null ? wxData.nearest_area[0] : null
+
+  let lat = city == "auto" ? ipArea.latitude : cityLat
+  let lon = city == "auto" ? ipArea.longitude : cityLon
+  let placeName = city == "auto" ? (ipArea.areaName[0].value ?? "…") : city
+  let countryName = city == "auto" ? (ipArea.country[0].value ?? "") : cityCountry
+
+  // ── Prayer calendar (Aladhan) ──
+  let reqYear = floor(num(fmtTime(now, "yyyy")))
+  let reqMonth = floor(num(fmtTime(now, "M")))
+  let reqDay = floor(num(fmtTime(now, "d")))
+  let nextMonth = reqMonth == 12 ? 1 : reqMonth + 1
+  let nextYear = reqMonth == 12 ? reqYear + 1 : reqYear
+  source cal = http(lat == null ? null : "https://api.aladhan.com/v1/calendar/${int(reqYear)}/${int(reqMonth)}?latitude=${enc(str(lat))}&longitude=${enc(str(lon))}&method=${enc(method)}&school=${enc(school)}&calendarMethod=HJCoSA") every 1h timeout 15s json status
+  source nextCal = http(lat == null || reqDay < 25 ? null : "https://api.aladhan.com/v1/calendar/${int(nextYear)}/${int(nextMonth)}?latitude=${enc(str(lat))}&longitude=${enc(str(lon))}&method=${enc(method)}&school=${enc(school)}&calendarMethod=HJCoSA") every 1h timeout 15s json status
+
+  let calList = lat != null && cal != null && cal.ok && cal.out.data != null ? cal.out.data : []
+  let nextCalList = lat != null && nextCal != null && nextCal.ok && nextCal.out.data != null ? nextCal.out.data : []
+  let allDays = flatten([calList, nextCalList])
+  let zone = calList[0].meta.timezone
+
+  let curMin = floor(num(fmtTime(now, "H", zone))) * 60 + floor(num(fmtTime(now, "m", zone)))
+  let localDay = floor(num(fmtTime(now, "d", zone)))
+  let localMonth = floor(num(fmtTime(now, "M", zone)))
+  let todayItem = allDays.find(d => floor(num(d.date.gregorian.day)) == localDay && floor(num(d.date.gregorian.month.number)) == localMonth) ?? allDays[0]
+  let todayIdx = allDays.indexOf(todayItem)
+
+  // ── Clock & dates ──
+  let sysHour = num(fmtTime(now, "H"))
+  let sysMinute = sysHour * 60 + num(fmtTime(now, "m"))
+  let hr12 = sysHour % 12 == 0 ? 12 : sysHour % 12
+  let clockH = use24h ? fmtTime(now, "HH") : str(hr12)
+  let clockM = fmtTime(now, "mm")
+  let ampm = sysHour < 12 ? "AM" : "PM"
+  let gregStr = fmtTime(now, "EEEE, d MMMM yyyy", null, "en")
+
+  // The offset moves along the calendar to the Hijri date of a day `hijriAdj` away
+  let hijriToday = todayItem != null && todayItem.date != null ? todayItem.date.hijri : null
+  let hijriShifted = todayIdx >= 0 && todayIdx + hijriAdj >= 0 ? first(drop(allDays, todayIdx + hijriAdj)) : null
+  let hijri = hijriAdj == 0 ? hijriToday : (hijriShifted != null && hijriShifted.date != null ? hijriShifted.date.hijri : hijriToday)
+  let hDay = hijri != null ? str(int(num(hijri.day)) + (hijriAdj != 0 && hijriShifted == null ? hijriAdj : 0)) : ""
+  let hDayAr = hDay.replace("0", "٠").replace("1", "١").replace("2", "٢").replace("3", "٣").replace("4", "٤").replace("5", "٥").replace("6", "٦").replace("7", "٧").replace("8", "٨").replace("9", "٩")
+  let hYearAr = str(hijri.year ?? "").replace("0", "٠").replace("1", "١").replace("2", "٢").replace("3", "٣").replace("4", "٤").replace("5", "٥").replace("6", "٦").replace("7", "٧").replace("8", "٨").replace("9", "٩")
+  let hijriEn = hijri != null ? "${hDay} ${hijri.month.en} ${hijri.year} AH" : ""
+  let hijriAr = hijri != null ? "${hijri.month.ar} ${hYearAr}" : ""
+
+  // ── Prayer times ──
+  let tm = todayItem != null ? todayItem.timings : null
+  let fMin = tm != null ? int(num(sub(tm.Fajr, 0, 2))) * 60 + int(num(sub(tm.Fajr, 3, 5))) : null
+  let sMin = tm != null ? int(num(sub(tm.Sunrise, 0, 2))) * 60 + int(num(sub(tm.Sunrise, 3, 5))) : null
+  let dMin = tm != null ? int(num(sub(tm.Dhuhr, 0, 2))) * 60 + int(num(sub(tm.Dhuhr, 3, 5))) : null
+  let aMin = tm != null ? int(num(sub(tm.Asr, 0, 2))) * 60 + int(num(sub(tm.Asr, 3, 5))) : null
+  let mMin = tm != null ? int(num(sub(tm.Maghrib, 0, 2))) * 60 + int(num(sub(tm.Maghrib, 3, 5))) : null
+  let iMin = tm != null ? int(num(sub(tm.Isha, 0, 2))) * 60 + int(num(sub(tm.Isha, 3, 5))) : null
+  let imMin = tm != null ? int(num(sub(tm.Imsak, 0, 2))) * 60 + int(num(sub(tm.Imsak, 3, 5))) : null
+  let midMin = tm != null && tm.Midnight != null ? int(num(sub(tm.Midnight, 0, 2))) * 60 + int(num(sub(tm.Midnight, 3, 5))) : null
+  let ltMin = tm != null && tm.Lastthird != null ? int(num(sub(tm.Lastthird, 0, 2))) * 60 + int(num(sub(tm.Lastthird, 3, 5))) : null
+
+  let activeId = tm == null ? null : curMin < fMin ? "isha" : curMin < sMin ? "fajr" : curMin < dMin ? "sunrise" : curMin < aMin ? "dhuhr" : curMin < mMin ? "asr" : curMin < iMin ? "maghrib" : "isha"
+  let nextId = tm == null ? null : curMin < fMin ? "fajr" : curMin < sMin ? "sunrise" : curMin < dMin ? "dhuhr" : curMin < aMin ? "asr" : curMin < mMin ? "maghrib" : curMin < iMin ? "isha" : "fajr"
+
+  let prayers = [
+    { id: "fajr", name: "Fajr", ar: "الفجر", min: fMin, fard: true },
+    { id: "sunrise", name: "Sunrise", ar: "الشروق", min: sMin, fard: false },
+    { id: "dhuhr", name: "Dhuhr", ar: "الظهر", min: dMin, fard: true },
+    { id: "asr", name: "Asr", ar: "العصر", min: aMin, fard: true },
+    { id: "maghrib", name: "Maghrib", ar: "المغرب", min: mMin, fard: true },
+    { id: "isha", name: "Isha", ar: "العشاء", min: iMin, fard: true }
+  ].map(p => merge(p, {
+    t: p.min == null ? "—" : use24h ? "${pad(floor(p.min / 60), 2, "0")}:${pad(p.min % 60, 2, "0")}" : "${floor(p.min / 60) % 12 == 0 ? 12 : floor(p.min / 60) % 12}:${pad(p.min % 60, 2, "0")}",
+    ap: p.min == null || use24h ? "" : (p.min < 720 ? "AM" : "PM"),
+    current: p.id == activeId,
+    next: p.id == nextId
+  }))
+  let extras = [
+    { name: "Imsak", min: imMin },
+    { name: "Midnight", min: midMin },
+    { name: "Last third", min: ltMin }
+  ].map(s => merge(s, {
+    t: s.min == null ? "—" : use24h ? "${pad(floor(s.min / 60), 2, "0")}:${pad(s.min % 60, 2, "0")}" : "${floor(s.min / 60) % 12 == 0 ? 12 : floor(s.min / 60) % 12}:${pad(s.min % 60, 2, "0")} ${s.min < 720 ? "AM" : "PM"}"
+  }))
+
+  let nextP = prayers.find(p => p.next) ?? prayers[0]
+  let curP = prayers.find(p => p.current)
+  let minLeft = tm == null ? null : curMin >= iMin ? 1440 - curMin + fMin : max(nextP.min - curMin, 0)
+  let since = tm == null ? 0 : curMin >= iMin ? curMin - iMin : curMin < fMin ? 1440 - iMin + curMin : curMin - curP.min
+  let span = (minLeft ?? 0) + since
+  let leftStr = minLeft == null ? "…" : minLeft >= 60 ? "${floor(minLeft / 60)}h ${minLeft % 60}m" : "${minLeft}m"
+
+  let methods = [
+    { id: "4", name: "Umm al-Qura" }, { id: "16", name: "Dubai" }, { id: "8", name: "Gulf" },
+    { id: "3", name: "MWL" }, { id: "5", name: "Egypt" }, { id: "2", name: "ISNA" },
+    { id: "1", name: "Karachi" }, { id: "13", name: "Diyanet" }
+  ]
+  let methodName = (methods.find(x => x.id == method) ?? methods[0]).name
+
+  // Prayer log: today's day number
+  let todayIso = fmtTime(now, "yyyy-MM-dd", zone)
+  let dayNum = todayIso != null ? floor(parseTime("${todayIso}T00:00:00Z") / 86400) : 0
+  let todayLog = get(prayerLog, str(dayNum), {})
+  let prayedCount = ["fajr", "dhuhr", "asr", "maghrib", "isha"].count(k => get(todayLog, k, false) == true)
+
+  // ── Fortification: Hisnul Muslim (hisnmuslim.com) ──
+  let chapters = [
+    { id: 27, name: "Words of remembrance for morning and evening", alias: "أذكار الصباح والمساء", cat: "day" },
+    { id: 28, name: "What to say before sleeping", alias: "أذكار النوم", cat: "day" },
+    { id: 1, name: "Supplications for when you wake up", alias: "أذكار الاستيقاظ من النوم", cat: "day" },
+    { id: 6, name: "Invocation for entering the restroom", alias: "دعاء دخول الخلاء", cat: "home" },
+    { id: 7, name: "Invocation for leaving the restroom", alias: "دعاء الخروج من الخلاء", cat: "home" },
+    { id: 8, name: "What to say before performing ablution", alias: "الذكر قبل الوضوء", cat: "home" },
+    { id: 9, name: "What to say upon completing ablution", alias: "الذكر بعد الفراغ من الوضوء", cat: "home" },
+    { id: 10, name: "What to say when leaving the home", alias: "الذكر عند الخروج من المنزل", cat: "home" },
+    { id: 11, name: "What to say when entering the home", alias: "الذكر عند دخول المنزل", cat: "home" },
+    { id: 12, name: "Invocation for going to the mosque", alias: "دعاء الذهاب إلى المسجد", cat: "home" },
+    { id: 13, name: "Invocation for entering the mosque", alias: "دعاء دخول المسجد", cat: "home" },
+    { id: 14, name: "Invocation for leaving the mosque", alias: "دعاء الخروج من المسجد", cat: "home" },
+    { id: 15, name: "What to say upon hearing the Athan (call to prayer)", alias: "أذكار الآذان", cat: "home" },
+    { id: 2, name: "Invocation when getting dressed", alias: "دعاء ُلبْس الثوب", cat: "day" },
+    { id: 3, name: "Invocation when putting on new clothes", alias: "دعاء ُلبْس الثوب الجديد", cat: "day" },
+    { id: 4, name: "Invocations for someone who has put on new clothes", alias: "الدعاء لمن لبس ثوبا جديدا", cat: "day" },
+    { id: 5, name: "What to say when undressing", alias: "ما يقول إذا وضع ثوبه", cat: "day" },
+    { id: 16, name: "Invocations for the beginning of the prayer", alias: "دعاء الاستفتاح", cat: "prayer" },
+    { id: 17, name: "Invocations during Ruki' (bowing in prayer)", alias: "دعاء الركوع", cat: "prayer" },
+    { id: 18, name: "Invocations for rising from the Ruki'", alias: "دعاء الرفع من الركوع", cat: "prayer" },
+    { id: 19, name: "Invocations during Sujood", alias: "دعاء السجود", cat: "prayer" },
+    { id: 20, name: "Invocations for sitting between two prostrations", alias: "دعاء الجلسة بين السجدتين", cat: "prayer" },
+    { id: 21, name: "Supplications for prostrating due to recitation of the Qur'an", alias: "دعاء سجود التلاوة", cat: "prayer" },
+    { id: 22, name: "Invocation for At-Tashahhud (sitting in prayer)", alias: "التشهد", cat: "prayer" },
+    { id: 23, name: "How to recite blessings on the Prophet after the Tashahhud", alias: "الصلاة على النبي بعد التشهد", cat: "prayer" },
+    { id: 24, name: "Invocations after the final Tash-ahhud and before ending the prayer", alias: "الدعاء بعد التشهد الأخير قبل السلام", cat: "prayer" },
+    { id: 25, name: "What to say after completing the prayer", alias: "الأذكار بعد السلام من الصلاة", cat: "prayer" },
+    { id: 26, name: "Istikharah (seeking Allah's Counsel)", alias: "دعاء صلاة الاستخارة", cat: "prayer" },
+    { id: 29, name: "Invocation to say if you stir in the night", alias: "الدعاء إذا تقلب ليلا", cat: "day" },
+    { id: 30, name: "What to say if you are afraid to go to sleep or feel lonely and depressed", alias: "دعاء الفزع في النوم و من بُلِيَ بالوحشة", cat: "day" },
+    { id: 31, name: "What to do if you have a bad dream or nightmare", alias: "ما يفعل من رأى الرؤيا أو الحلم", cat: "day" },
+    { id: 32, name: "Invocations for Qunut in the Witr prayer", alias: "دعاء قنوت الوتر", cat: "prayer" },
+    { id: 33, name: "What to say immediately following the Witr prayer", alias: "الذكر عقب السلام من الوتر", cat: "prayer" },
+    { id: 34, name: "Invocations in times of worry and grief", alias: "دعاء الهم والحزن", cat: "distress" },
+    { id: 35, name: "Invocations for anguish", alias: "دعاء الكرب", cat: "distress" },
+    { id: 36, name: "Invocations for when you meet an adversary or a powerful ruler.", alias: "دعاء لقاء العدو و ذي السلطان", cat: "distress" },
+    { id: 37, name: "Invocations against the oppression of rulers", alias: "دعاء من خاف ظلم السلطان", cat: "distress" },
+    { id: 38, name: "Invocation against an enemy", alias: "الدعاء على العدو", cat: "distress" },
+    { id: 39, name: "What to say if you fear people may harm you", alias: "ما يقول من خاف قوما", cat: "distress" },
+    { id: 40, name: "Invocations for if you are stricken by in your faith", alias: "دعاء من أصابه وسوسة في الإيمان", cat: "distress" },
+    { id: 41, name: "Invocations for the setting of a debt", alias: "دعاء قضاء الدين", cat: "distress" },
+    { id: 42, name: "Invocation against the distractions of Satan during the prayer and recitation of the Quran", alias: "دعاء الوسوسة في الصلاة و القراءة", cat: "distress" },
+    { id: 43, name: "Invocation for when you find something becoming difficult for you", alias: "دعاء من استصعب عليه أمر", cat: "distress" },
+    { id: 44, name: "What to say and do if you commit a sin", alias: "ما يقول ويفعل من أذنب ذنبا", cat: "distress" },
+    { id: 45, name: "Invocations against the Devil and his promptings", alias: "دعاء طرد الشيطان و وساوسه", cat: "distress" },
+    { id: 46, name: "Invocation for when something you dislike happens, or for when you fail to achieve what you attempt to do", alias: "الدعاء حينما يقع ما لا يرضاه أو ُ غلب على أمره", cat: "distress" },
+    { id: 47, name: "Congratulations for new parents and how they should respond", alias: "ﺗﻬنئة المولود له وجوابه", cat: "family" },
+    { id: 48, name: "How to seek Allah's protection for children", alias: "ما يعوذ به الأولاد", cat: "family" },
+    { id: 49, name: "Invocations for visiting the sick", alias: "الدعاء للمريض في عيادته", cat: "family" },
+    { id: 50, name: "The reward for visiting the sick", alias: "فضل عيادة المريض", cat: "family" },
+    { id: 51, name: "Invocations of the terminal ill", alias: "دعاء المريض الذي يئس من حياته", cat: "family" },
+    { id: 52, name: "What to encourage the dying person to say", alias: "تلقين المحتضر", cat: "family" },
+    { id: 53, name: "Invocation for when tragedy strikes", alias: "دعاء من أصيب بمصيبة", cat: "family" },
+    { id: 54, name: "Invocation for closing the eyes of the dead", alias: "الدعاء عند إغماض الميت", cat: "family" },
+    { id: 55, name: "Invocations for the dead in the Funeral prayer", alias: "الدعاء للميت في الصلاة عليه", cat: "family" },
+    { id: 56, name: "Invocations for a child in the Funeral prayer", alias: "الدعاء للفرط في الصلاة عليه", cat: "family" },
+    { id: 57, name: "Invocation for the bereaved", alias: "دعاء التعزية", cat: "family" },
+    { id: 58, name: "Invocation to be recited when placing the dead in his grave", alias: "الدعاء عند إدخال الميت القبر", cat: "family" },
+    { id: 59, name: "Invocation to be recited after burying the dead", alias: "الدعاء بعد دفن الميت", cat: "family" },
+    { id: 60, name: "Invocation for visiting the graves", alias: "دعاء زيارة القبور", cat: "family" },
+    { id: 61, name: "Invocations for when the wind blows", alias: "دعاء الريح", cat: "nature" },
+    { id: 62, name: "Invocation for when it thunder", alias: "دعاء الرعد", cat: "nature" },
+    { id: 63, name: "Some invocations for rain", alias: "من أدعية الاستسقاء", cat: "nature" },
+    { id: 64, name: "Invocation for when it rains", alias: "الدعاء إذا نزل المطر", cat: "nature" },
+    { id: 65, name: "Supplication after it rains", alias: "الذكر بعد نزول المطر", cat: "nature" },
+    { id: 66, name: "Invocation for the withholding of the rain", alias: "من أدعية الاستصحاء", cat: "nature" },
+    { id: 67, name: "Invocation for sighting the new moon", alias: "دعاء رؤية الهلال", cat: "nature" },
+    { id: 68, name: "Invocations for breaking the fast", alias: "الدعاء عند إفطار الصائم", cat: "food" },
+    { id: 69, name: "Invocations before eating", alias: "الدعاء قبل الطعام", cat: "food" },
+    { id: 70, name: "Invocations after eating", alias: "الدعاء عند الفراغ من الطعام", cat: "food" },
+    { id: 71, name: "A dinner guest's invocation for his host", alias: "دعاء الضيف لصاحب الطعام", cat: "food" },
+    { id: 72, name: "Invocation for someone who gives you drink or offers it to you", alias: "التعريض بالدعاء لطلب الطعام أو الشراب", cat: "food" },
+    { id: 73, name: "Invocation for a family who invites you to break your fast with them", alias: "الدعاء إذا أفطر عند أهل بيت", cat: "food" },
+    { id: 74, name: "Invocation for someone who offers you food when you are fasting, which you decline", alias: "دعاء الصائم إذا حضر الطعام ولم يفطر", cat: "food" },
+    { id: 75, name: "What to say when you are fasting and someone is rude to you", alias: "ما يقول الصائم إذا سابه أحد", cat: "food" },
+    { id: 76, name: "Invocation for when you see the first dates of the season", alias: "الدعاء عند رؤية باكورة الثمر", cat: "food" },
+    { id: 77, name: "Invocation for sneezing", alias: "دعاء العطاس", cat: "social" },
+    { id: 78, name: "What to say to the disbeliever if he sneezes and praises Allah", alias: "ما يقال للكافر إذا عطس فحمد الله", cat: "social" },
+    { id: 79, name: "Invocation for the groom", alias: "الدعاء للمتزوج", cat: "family" },
+    { id: 80, name: "The groom’s supplication on the wedding night or when buying an animal", alias: "دعاء المتزوج و شراء الدابة", cat: "family" },
+    { id: 81, name: "Invocation to be recited before intercourse", alias: "الدعاء قبل إتيان الزوجة", cat: "family" },
+    { id: 82, name: "Invocation for anger", alias: "دعاء الغضب", cat: "distress" },
+    { id: 83, name: "What to say if you see someone afflicted by misfortune", alias: "دعاء من رأى مبتلى", cat: "social" },
+    { id: 84, name: "What to say while sitting in an assembly", alias: "ما يقال في اﻟﻤﺠلس", cat: "social" },
+    { id: 85, name: "The Expiation of Assembly - Kaffaratul-Majlis", alias: "كفارة اﻟﻤﺠلس", cat: "social" },
+    { id: 86, name: "Invocation for someone who says: May Allah forgive you", alias: "الدعاء لمن قال غفر الله لك", cat: "social" },
+    { id: 87, name: "Invocation for someone who does good to you", alias: "الدعاء لمن صنع إليك معروفا", cat: "social" },
+    { id: 88, name: "Invocation for Allah's protection from the False Messiah", alias: "ما يعصم الله به من الدجال", cat: "distress" },
+    { id: 89, name: "Invocation for someone who tells you I love you for the sake of Allah", alias: "الدعاء لمن قال إني أحبك في الله", cat: "social" },
+    { id: 90, name: "Invocation for someone who offers you a share of his wealth", alias: "الدعاء لمن عرض عليك ماله", cat: "social" },
+    { id: 91, name: "Invocation (upon receipt of the loan) for someone who lends you money", alias: "الدعاء لمن أقرض عند القضاء", cat: "social" },
+    { id: 92, name: "Invocation for fear of Shirk", alias: "دعاء الخوف من الشرك", cat: "distress" },
+    { id: 93, name: "Invocation for someone who tells you: May Allah bless you", alias: "الدعاء لمن قال بارك الله فيك", cat: "social" },
+    { id: 94, name: "Invocation against evil portent", alias: "دعاء كراهية الطيرة", cat: "distress" },
+    { id: 95, name: "Invocation for riding in a vehicle or on an animal", alias: "دعاء الركوب", cat: "travel" },
+    { id: 96, name: "Invocation for traveling", alias: "دعاء السفر", cat: "travel" },
+    { id: 97, name: "Invocation for entering a town or city", alias: "دعاء دخول القرية أو البلدة", cat: "travel" },
+    { id: 98, name: "Invocation for entering a market", alias: "دعاء دخول السوق", cat: "travel" },
+    { id: 99, name: "Invocation for when your vehicle or mount begins to fail", alias: "الدعاء إذا تعس المركوب", cat: "travel" },
+    { id: 100, name: "The traveler's invocation for the one he leaves behind", alias: "دعاء المسافر للمقيم", cat: "travel" },
+    { id: 101, name: "The resident's invocations for the traveler", alias: "دعاء المقيم للمسافر", cat: "travel" },
+    { id: 102, name: "Glorifying and magnifying Allah on the journey", alias: "التكبير و التسبيح في سير السفر", cat: "travel" },
+    { id: 103, name: "The traveler's invocation at dawn", alias: "دعاء المسافر إذا أسحر", cat: "travel" },
+    { id: 104, name: "Invocation for a layover (stopping along the way) on the journey", alias: "الدعاء إذا نزل مترلا في سفر أو غيره", cat: "travel" },
+    { id: 105, name: "What to say upon returning from a Journey", alias: "ذكر الرجوع من السفر", cat: "travel" },
+    { id: 106, name: "What to say if something happens to please you or to displease you", alias: "ما يقول من أتاه أمر يسره أو يكرهه", cat: "distress" },
+    { id: 107, name: "The excellence of asking for Allah's blessings upon the Prophet pbuh", alias: "فضل الصلاة على النبي صلى الله عليه و سلم", cat: "social" },
+    { id: 108, name: "Spreading the greetings of Salam (Peace)", alias: "إفشاء السلام", cat: "social" },
+    { id: 109, name: "How to reply to a disbeliever if he says Salam to you", alias: "كيف يرد السلام على الكافر إذا سلم", cat: "social" },
+    { id: 110, name: "Invocation upon hearing the cock's crow or the bray of a donkey", alias: "الدُّعاءُ عِنْدَ سَمَاعِ صِياحِ الدِّيكِ ونَهِيقِ الْحِمَارِ", cat: "social" },
+    { id: 111, name: "Invocation upon hearing a dog barking in the night", alias: "دعاء نباح الكلاب بالليل", cat: "social" },
+    { id: 112, name: "Invocation for someone you have spoken ill to", alias: "الدعاء لمن سببته", cat: "social" },
+    { id: 113, name: "How a Muslim should praise another Muslim", alias: "ما يقول المسلم إذا مدح المسلم", cat: "social" },
+    { id: 114, name: "What a Muslim should say when he is praised", alias: "ما يقول المسلم إذا زكي", cat: "social" },
+    { id: 115, name: "The pilgrim's announcement of his arrival for Hajj or Umrah", alias: "كيف يلبي المحرم في الحج أو العمرة ؟", cat: "hajj" },
+    { id: 116, name: "Saying Allahu Akbar when passing the Black Stone", alias: "التكبير إذا أتى الركن الأسود", cat: "hajj" },
+    { id: 117, name: "Invocation to be recited between the Yemenite Corner and the Black Stone", alias: "الدعاء بين الركن اليماني والحجر الأسود", cat: "hajj" },
+    { id: 118, name: "Invocation to be recited while standing at Safa and Marwah", alias: "دعاء الوقوف على الصفا والمروة", cat: "hajj" },
+    { id: 119, name: "Invocation to be recited on the Day of Arafat", alias: "الدعاء يوم عرفة", cat: "hajj" },
+    { id: 120, name: "Supplication to be recited at the sacred area of Muzdalifah", alias: "الذكر عند المشعر الحرام", cat: "hajj" },
+    { id: 121, name: "Saying Allahu Akbar while stoning the three pillars at Mina", alias: "التكبير عند رمي الجمار مع كل حصاة", cat: "hajj" },
+    { id: 122, name: "What to say when surprised or startled", alias: "دعاء التعجب والأمر السار", cat: "social" },
+    { id: 123, name: "What to say when something that pleases you happens", alias: "ما يفعل من أتاه أمر يسره", cat: "social" },
+    { id: 124, name: "What to say when you feel a pain in your body", alias: "ما يقول من أحس وجعا في جسده", cat: "distress" },
+    { id: 125, name: "What to say when you fear you may afflict something with the evil eye", alias: "دعاء من خشي أن يصيب شيئا بعينه", cat: "distress" },
+    { id: 126, name: "What to say when you feel frightened", alias: "ما يقال عند الفزع", cat: "distress" },
+    { id: 127, name: "What to say when slaughtering or sacrificing an animal", alias: "ما يقول عند الذبح أو النحر", cat: "hajj" },
+    { id: 128, name: "What to say to foil the devil's plots", alias: "ما يقول لرد كيد مردة الشياطين", cat: "distress" },
+    { id: 129, name: "Repentance and seeking forgiveness", alias: "الاستغفار و التوبة", cat: "praise" },
+    { id: 130, name: "The excellence of remembering Allah", alias: "فضل التسبيح و التحميد، و التهليل، و التكبير", cat: "praise" },
+    { id: 131, name: "How the Prophet glorified Allah", alias: "كيف كان النبي يسبح؟", cat: "praise" },
+    { id: 132, name: "Types of goodness and good etiquette for community life", alias: "من أنواع الخير والآداب الجامعة", cat: "social" }
+  ]
+  let cats = [
+    { id: "all", name: "All" }, { id: "saved", name: "Saved" }, { id: "day", name: "Day & night" },
+    { id: "prayer", name: "Prayer" }, { id: "home", name: "Home & mosque" }, { id: "distress", name: "Distress & protection" },
+    { id: "food", name: "Food & fasting" }, { id: "travel", name: "Travel" }, { id: "family", name: "Family, illness & death" },
+    { id: "nature", name: "Rain & sky" }, { id: "social", name: "Manners" }, { id: "hajj", name: "Hajj & sacrifice" },
+    { id: "praise", name: "Praise & repentance" }
+  ]
+  let inCat = hisnCat == "all" ? chapters : hisnCat == "saved" ? chapters.filter(c => contains(savedCh, c.id)) : chapters.filter(c => c.cat == hisnCat)
+  let shownCh = trim(hisnQuery) == "" ? inCat : rank(chapters, trim(hisnQuery))
+
+  // What fits the hour: morning and evening from Fajr and Asr, sleep after Isha
+  let suggestId = tm == null ? 27 : (curMin >= fMin && curMin < dMin) || (curMin >= aMin && curMin < iMin) ? 27 : curMin >= iMin || curMin < fMin ? 28 : 25
+  let suggestCh = chapters.find(c => c.id == suggestId)
+  let suggestWhy = suggestId == 27 ? (curMin < dMin ? "Morning remembrance" : "Evening remembrance") : suggestId == 28 ? "Before sleeping" : "After the prayer"
+
+  source hisnSrc = http(openCh == null ? null : "https://www.hisnmuslim.com/api/en/${int(openCh)}.json") every 24h timeout 15s status
+  // hisnmuslim.com starts its JSON with a byte-order mark, so it's parsed from the first brace
+  let hisnJson = hisnSrc != null && hisnSrc.ok ? parseJson(match(str(hisnSrc.out), "(\\{[\\s\\S]*)")[0] ?? "") : null
+  on hisnJson first {
+    if value != null && len(values(value)) > 0 && openCh != null {
+      hisnCache = set(hisnCache, str(openCh), values(value)[0].map(d => {
+        id: d.ID,
+        a: trim(match(d.ARABIC_TEXT ?? "", "^[\\s(.]*([\\s\\S]*?)[\\s).]*$")[0] ?? d.ARABIC_TEXT ?? ""),
+        tl: trim(match(d.LANGUAGE_ARABIC_TRANSLATED_TEXT ?? "", "^[\\s(]*([\\s\\S]*?)[\\s)]*$")[0] ?? ""),
+        t: trim(match(d.TRANSLATED_TEXT ?? "", "^[\\s(]*([\\s\\S]*?)[\\s)]*$")[0] ?? ""),
+        r: max(int(num(d.REPEAT ?? 1)), 1)
+      }))
+    }
+  }
+  let openInfo = openCh != null ? chapters.find(c => c.id == openCh) : null
+  let duas = openCh != null ? get(hisnCache, str(openCh), null) : null
+  let hisnFailed = openCh != null && duas == null && hisnSrc != null && !hisnSrc.ok
+  let doneCount = duas != null ? duas.count(d => get(hisnCounts, "${openCh}-${d.id}", 0) >= d.r) : 0
+
+  // Counts start over each day
+  on dayNum first {
+    if value > 0 && hisnDay != value {
+      hisnCounts = {}
+      hisnDay = value
+    }
+  }
+
+  // ── Qur'an: a verse a day ──
+  let dayBucket = floor((now ?? 0) / 86400)
+  let ayahNum = floor(hash("muslim-panel-ayah", dayBucket, verseSeed) * 6236) + 1
+  source ayahAr = http("https://api.alquran.cloud/v1/ayah/${int(ayahNum)}/ar.alquran") every 6h timeout 10s json status
+  source ayahEn = http("https://api.alquran.cloud/v1/ayah/${int(ayahNum)}/en.sahih") every 6h timeout 10s json status
+  let liveVerse = ayahEn != null && ayahEn.ok && ayahEn.out.data != null && ayahAr != null && ayahAr.ok ? {
+    arabic: trim(ayahAr.out.data.text ?? ""),
+    text: trim(ayahEn.out.data.text ?? ""),
+    surahEn: ayahEn.out.data.surah.englishName,
+    surahAr: ayahEn.out.data.surah.name,
+    surah: ayahEn.out.data.surah.number,
+    ayah: ayahEn.out.data.numberInSurah
+  } : null
+  let verse = liveVerse ?? lastVerse
+  on liveVerse.text first { lastVerse = liveVerse }
+
+  // ── A hadith a day ──
+  let hadithMax = hadithBook == "nawawi" ? 42 : hadithBook == "qudsi" ? 40 : 300
+  let hadithNum = floor(hash("muslim-panel-hadith", hadithBook, dayBucket, hadithSeed) * hadithMax) + 1
+  let books = [
+    { id: "nawawi", name: "Nawawi's Forty", ar: "ara-nawawi", en: "eng-nawawi" },
+    { id: "qudsi", name: "Hadith Qudsi", ar: "ara-qudsi", en: "eng-qudsi" },
+    { id: "bukhari", name: "Bukhari", ar: "ara-bukhari", en: "eng-bukhari" },
+    { id: "muslim", name: "Muslim", ar: "ara-muslim", en: "eng-muslim" }
+  ]
+  let book = books.find(b => b.id == hadithBook) ?? books[0]
+  source hadAr = http("https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions/${enc(book.ar)}/${int(hadithNum)}.min.json") every 6h timeout 10s json status
+  source hadEn = http("https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions/${enc(book.en)}/${int(hadithNum)}.min.json") every 6h timeout 10s json status
+  let rawHadAr = hadAr != null && hadAr.ok ? (hadAr.out.hadiths[0].text ?? "") : ""
+  let rawHadEn = hadEn != null && hadEn.ok ? (hadEn.out.hadiths[0].text ?? "") : ""
+  let liveHadith = trim(rawHadEn) != "" ? {
+    arabic: trim(rawHadAr.replace("<br />", "\n").replace("<br/>", "\n").replace("<br>", "\n").replace("<p>", "").replace("</p>", "\n").replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&").replace("&nbsp;", " ")),
+    text: trim(rawHadEn.replace("<br />", "\n").replace("<br/>", "\n").replace("<br>", "\n").replace("<p>", "").replace("</p>", "\n").replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&").replace("&nbsp;", " ")),
+    ref: "${book.name} · ${hadithNum}"
+  } : null
+  let hadith = liveHadith ?? lastHadith
+  on liveHadith.text first { lastHadith = liveHadith }
+  on hadEn first {
+    if value.ok && trim(value.out.hadiths[0].text ?? "") == "" {
+      hadithSeed = hadithSeed + 1
+    }
+  }
+
+  // ── Weather ──
+  let sun = [dayWx.astronomy[0].sunrise, dayWx.astronomy[0].sunset]
+    .map(s => match(s ?? "", "(\\d+):(\\d+) (AM|PM)"))
+    .map(t => t == null ? null : (num(t[0]) % 12 + (t[2] == "PM" ? 12 : 0)) * 60 + num(t[1]))
+  let night = sun[0] != null && (sysMinute < sun[0] || sysMinute >= sun[1])
+
+  // ── Dock & notifications ──
+  let allApps = apps ?? []
+  let pinnedObjs = pinnedApps.map(k => allApps.find(a => a.key == k)).filter(a => a != null)
+  let dockApps = len(pinnedObjs) >= 6 ? pinnedObjs.take(6) : flatten([pinnedObjs, allApps.filter(a => (!a.system || a.score > 0) && !contains(pinnedApps, a.key)).sortBy(a => -a.score).take(6 - len(pinnedObjs))])
+  let pickerApps = appSearchQuery == "" ? allApps.take(24) : rank(allApps, appSearchQuery).take(24)
+  let notes = notif != null && notif.available ? (notif.items ?? []) : []
+
+  // ── Layout ──
+  let wide = (tileWidth ?? 0) > (tileHeight ?? 1)
+  let kbOpen = (screenInset ?? 0) > 100
+
+  // The city field exists only while searching, so closing it takes the keyboard with it;
+  // Back closing the keyboard ends the search, and idle settings close by themselves
+  on kbOpen { if !value { citySearching = false; cityQuery = "" } }
+  on showConfig { if value { configAt = now } else { citySearching = false; cityQuery = "" } }
+  on now { if showConfig && !citySearching && now - configAt > 120 { showConfig = false } }
+
+  // Icons, drawn in a 20×20 box
+  component FortIcon(s = 18, tint = acc, hole = surf) {
+    Canvas {
+      size: s
+      scale(s / 20, s / 20, 0, 0) {
+        rect(1, 5, 5, 14, color: tint)
+        rect(14, 5, 5, 14, color: tint)
+        rect(6, 9, 8, 10, color: tint)
+        rect(1, 2.5, 1.6, 2.5, color: tint)
+        rect(4.4, 2.5, 1.6, 2.5, color: tint)
+        rect(14, 2.5, 1.6, 2.5, color: tint)
+        rect(17.4, 2.5, 1.6, 2.5, color: tint)
+        rect(6.8, 7, 1.6, 2, color: tint)
+        rect(9.2, 7, 1.6, 2, color: tint)
+        rect(11.6, 7, 1.6, 2, color: tint)
+        rect(8.3, 12.5, 3.4, 6.5, radius: 1.7, color: hole)
+        rect(2.8, 8, 1.4, 2.4, radius: 0.7, color: hole)
+        rect(15.8, 8, 1.4, 2.4, radius: 0.7, color: hole)
+      }
+    }
+  }
+  component BookIcon(s = 18, tint = acc) {
+    Canvas {
+      size: s
+      scale(s / 20, s / 20, 0, 0) {
+        path([[10, 5], [3, 3], [2, 15], [10, 17]], stroke: tint, width: 1.6, closed: true)
+        path([[10, 5], [17, 3], [18, 15], [10, 17]], stroke: tint, width: 1.6, closed: true)
+        line(10, 5, 10, 17, stroke: tint, width: 1.6)
+      }
+    }
+  }
+  component ScrollIcon(s = 18, tint = acc) {
+    Canvas {
+      size: s
+      scale(s / 20, s / 20, 0, 0) {
+        rect(4, 3, 12, 14, radius: 1.5, stroke: tint, width: 1.6)
+        line(2.5, 3, 17.5, 3, stroke: tint, width: 2.4, cap: round)
+        line(2.5, 17, 17.5, 17, stroke: tint, width: 2.4, cap: round)
+        line(7, 7.5, 13, 7.5, stroke: tint, width: 1.2)
+        line(7, 10, 13, 10, stroke: tint, width: 1.2)
+        line(7, 12.5, 11, 12.5, stroke: tint, width: 1.2)
+      }
+    }
+  }
+
+  // A thin rule with ۞ in the middle
+  component Ornament(w = 160) {
+    Row {
+      align: center
+      gap: 10
+      width: w
+      Box { weight: 1; height: 1; background: line2 }
+      Text { text: "۞"; color: acc; fontSize: 13 }
+      Box { weight: 1; height: 1; background: line2 }
+    }
+  }
+
+  component Chip(label, on = false) {
+    Text {
+      text: label
+      font: sans
+      fontSize: 12
+      fontWeight: on ? 600 : 500
+      color: on ? onAcc : ink
+      background: on ? acc : (themed ? alpha(foreground, 0.06) : alpha(surf, 0.7))
+      border: 1
+      borderColor: on ? acc : line
+      radius: 999
+      padding: [12, 6]
+      maxLines: 1
+    }
+  }
+
+  // ── Left: the arch, the clock and the day's prayers ──
+  component ClockBlock() {
+    Row {
+      gap: 18
+      align: center
+      Box {
+        width: 108
+        height: 120
+        onTap: { haptic(); showConfig = !showConfig; showPinModal = false }
+        Canvas {
+          fill: true
+          let r = width / 2 - 3
+          arc(width / 2, r + 3, r, 270, 180, stroke: acc, width: 3, cap: round)
+          line(3, r + 3, 3, height - 2, stroke: acc, width: 3, cap: round)
+          line(width - 3, r + 3, width - 3, height - 2, stroke: acc, width: 3, cap: round)
+        }
+        Column {
+          fill: true
+          align: center
+          gap: 0
+          padding: [6, 26, 6, 6]
+          Text { text: hDayAr; font: kufi; fontSize: 34; fontWeight: 500; color: acc; align: center }
+          Text { text: hijriAr; font: amiri; fontSize: 12; color: ink; align: center; maxLines: 2 }
+        }
+      }
+      Column {
+        gap: 2
+        weight: 1
+        Text {
+          spans: use24h ? [clockH, {text: ":", color: acc}, clockM] : [clockH, {text: ":", color: acc}, clockM, {text: " ${ampm}", fontSize: 18, color: dim}]
+          font: kufi
+          fontSize: 64
+          fontWeight: 500
+          color: ink
+          maxLines: 1
+        }
+        Text { text: gregStr; font: sans; fontSize: 14; fontWeight: 500; color: ink; maxLines: 1 }
+        Text { text: hijriEn; font: news; fontSize: 15; color: dim; maxLines: 1 }
+        Row {
+          gap: 10
+          align: center
+          if curWx != null {
+            Text { text: weatherIcon(curWx.weatherCode, night); font: icon; fontSize: 15; color: ink }
+            Text { text: "${curWx.temp_C}° ${lower(trim(curWx.weatherDesc[0].value))}"; font: sans; fontSize: 12; color: dim; maxLines: 1 }
+          }
+          Text { text: "${bat.charging ? "⚡" : ""}${bat.level}%"; font: sans; fontSize: 12; color: bat.level < 20 && !bat.charging ? acc : dim }
+          if alarm.set {
+            Text {
+              text: "⏰ ${use24h ? fmtTime(alarm.time, "HH:mm") : fmtTime(alarm.time, "h:mm a", null, "en")}"
+              font: sans
+              fontSize: 12
+              color: dim
+              maxLines: 1
+              onTap: androidApp(alarm.app)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  component NextPrayer() {
+    Column {
+      gap: 8
+      padding: [18, 14]
+      background: acc
+      radius: 18
+      Row {
+        align: bottom
+        Column {
+          gap: 0
+          weight: 1
+          Text { text: "NEXT PRAYER"; font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 3; color: alpha(onAcc, 0.75) }
+          Row {
+            gap: 10
+            align: center
+            Text { text: nextP.name; font: kufi; fontSize: 26; fontWeight: 500; color: onAcc }
+            Text { text: nextP.ar; font: amiri; fontSize: 22; color: alpha(onAcc, 0.85) }
+          }
+        }
+        Column {
+          gap: 0
+          align: end
+          Text { text: "in ${leftStr}"; font: news; fontSize: 22; color: onAcc; align: end }
+          Text { text: "at ${nextP.t} ${nextP.ap}"; font: sans; fontSize: 11; color: alpha(onAcc, 0.75); align: end }
+        }
+      }
+      Box {
+        height: 3
+        fill: width
+        background: alpha(onAcc, 0.25)
+        radius: 2
+        Progress { value: span > 0 ? since / span * 100 : 0; color: onAcc; track: alpha(onAcc, 0); height: 3 }
+      }
+    }
+  }
+
+  component PrayerList() {
+    Column {
+      gap: 2
+      for p in prayers key p.id {
+        let done = get(todayLog, p.id, false) == true
+        Row {
+          gap: 10
+          align: center
+          padding: [12, 8]
+          radius: 12
+          background: p.next ? alpha(acc, 0.09) : alpha(bg, 0)
+          border: 1
+          borderColor: p.next ? alpha(acc, 0.35) : alpha(bg, 0)
+          Box { width: 3; height: 22; radius: 2; background: p.next ? acc : alpha(bg, 0) }
+          Text { text: p.name; font: sans; fontSize: 16; fontWeight: p.next ? 600 : 500; color: p.next ? acc : p.fard ? ink : dim; width: 82 }
+          Text { text: p.ar; font: amiri; fontSize: 17; color: dim; weight: 1 }
+          if p.next {
+            Text { text: "in ${leftStr}"; font: news; fontSize: 14; color: acc; maxLines: 1 }
+          }
+          Text {
+            spans: [p.t, {text: p.ap == "" ? "" : " ${p.ap}", fontSize: 11, color: dim}]
+            font: sans
+            fontSize: 16
+            fontWeight: 500
+            color: p.next ? acc : ink
+          }
+          if p.fard {
+            Box {
+              size: 22
+              radius: 11
+              border: 1.5
+              borderColor: done ? acc : line2
+              background: done ? acc : alpha(bg, 0)
+              align: center
+              onTap: {
+                haptic()
+                prayerLog = set(prayerLog, str(dayNum), set(todayLog, p.id, !done))
+              }
+              if done {
+                Text { text: "✓"; fontSize: 12; color: onAcc; bold: true; align: center }
+              }
+            }
+          } else {
+            Spacer { width: 22 }
+          }
+        }
+      }
+      Row {
+        gap: 14
+        padding: [16, 6, 12, 0]
+        for e in extras key e.name {
+          Text { spans: [{text: "${e.name} ", color: dim}, e.t]; font: sans; fontSize: 11; color: ink; maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  component PrayerHeader() {
+    Row {
+      align: center
+      gap: 8
+      Text { text: "PRAYER TIMES"; font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 3; color: dim }
+      Text { text: "${prayedCount}/5 prayed"; font: news; fontSize: 13; color: acc }
+      Spacer { weight: 1 }
+      Text {
+        text: "${placeName}${countryName != "" ? ", ${countryName}" : ""} · ${methodName}"
+        font: sans
+        fontSize: 11
+        color: dim
+        maxLines: 1
+        onTap: { haptic(); showConfig = true; showPinModal = false }
+      }
+    }
+  }
+
+  component Dock() {
+    Row {
+      gap: 4
+      align: center
+      padding: [10, 8]
+      background: panelBg
+      frost: glass
+      border: 1
+      borderColor: line
+      radius: 999
+      for a in dockApps key a.key {
+        Column {
+          weight: 1
+          align: center
+          onTap: androidApp(a.key)
+          onLongPress: {
+            haptic()
+            pinnedApps = contains(pinnedApps, a.key) ? pinnedApps.filter(k => k != a.key) : flatten([pinnedApps, [a.key]])
+          }
+          Image { src: a.icon; size: 36 }
+        }
+      }
+      Text {
+        text: "+"
+        font: sans
+        fontSize: 20
+        color: showPinModal ? onAcc : acc
+        background: showPinModal ? acc : alpha(bg, 0)
+        radius: 999
+        padding: [10, 2]
+        onTap: { haptic(); showConfig = false; showPinModal = !showPinModal }
+      }
+      Text { text: "⌕"; fontSize: 24; color: acc; padding: [6, 0, 10, 0]; onTap: launcher("drawer") }
+    }
+  }
+
+  // ── Right: the tabs ──
+  component TabButton(id, label, ar) {
+    Row {
+      gap: 8
+      align: center
+      padding: [12, 8]
+      radius: 999
+      background: activeTab == id ? acc : alpha(bg, 0)
+      onTap: { haptic(); activeTab = id; showConfig = false; showPinModal = false }
+      if id == "fort" {
+        FortIcon { s: 17; tint: activeTab == id ? onAcc : acc; hole: activeTab == id ? acc : (themed ? alpha(background, 0.9) : surf) }
+      } else if id == "quran" {
+        BookIcon { s: 17; tint: activeTab == id ? onAcc : acc }
+      } else {
+        ScrollIcon { s: 17; tint: activeTab == id ? onAcc : acc }
+      }
+      Text { text: label; font: sans; fontSize: 14; fontWeight: 600; color: activeTab == id ? onAcc : ink; maxLines: 1 }
+      if activeTab == id {
+        Text { text: ar; font: amiri; fontSize: 14; color: activeTab == id ? alpha(onAcc, 0.8) : dim; maxLines: 1 }
+      }
+    }
+  }
+
+  component Tabs() {
+    Row {
+      gap: 4
+      align: center
+      padding: [6, 6]
+      TabButton { id: "fort"; label: "Fortification"; ar: "الحصن" }
+      TabButton { id: "quran"; label: "Qur'an"; ar: "القرآن" }
+      TabButton { id: "hadith"; label: "Hadith"; ar: "الحديث" }
+      Spacer { weight: 1 }
+      Text {
+        text: "⚙"
+        fontSize: 18
+        color: showConfig ? onAcc : dim
+        background: showConfig ? acc : alpha(bg, 0)
+        radius: 999
+        padding: [10, 4]
+        onTap: { haptic(); showConfig = !showConfig; showPinModal = false }
+      }
+    }
+  }
+
+  component FortList() {
+    Column {
+      gap: 10
+      weight: 1
+      Row {
+        gap: 10
+        align: center
+        padding: [14, 2]
+        background: fieldBg
+        border: 1
+        borderColor: line
+        radius: 999
+        Text { text: "⌕"; fontSize: 18; color: dim }
+        Input {
+          text: hisnQuery
+          placeholder: "Search 132 chapters of Hisnul Muslim…"
+          underline: false
+          color: ink
+          fontSize: 14
+          weight: 1
+          onChange: hisnQuery = value
+        }
+        if hisnQuery != "" {
+          Text { text: "✕"; fontSize: 14; color: dim; padding: [6, 6]; onTap: hisnQuery = "" }
+        }
+      }
+      if trim(hisnQuery) == "" && suggestCh != null && !kbOpen {
+        Row {
+          gap: 12
+          align: center
+          padding: [16, 12]
+          background: alpha(acc, 0.08)
+          border: 1
+          borderColor: alpha(acc, 0.3)
+          radius: 16
+          onTap: { haptic(); openCh = suggestCh.id }
+          FortIcon { s: 26; tint: acc; hole: themed ? alpha(background, 0.9) : mix(surf, acc, 0.08) }
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: upper(suggestWhy); font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 2; color: acc; maxLines: 1 }
+            Text { text: suggestCh.name; font: news; fontSize: 18; color: ink; maxLines: 1 }
+          }
+          Text { text: suggestCh.alias; font: amiri; fontSize: 18; color: ink; maxLines: 1 }
+          Text { text: "›"; fontSize: 22; color: acc }
+        }
+      }
+      if trim(hisnQuery) == "" {
+        Flow {
+          gap: 6
+          for c in cats key c.id {
+            Row {
+              onTap: { haptic(); hisnCat = c.id }
+              Chip { label: c.name; on: hisnCat == c.id }
+            }
+          }
+        }
+      }
+      if len(shownCh) == 0 {
+        Text { text: hisnCat == "saved" ? "Long-press a chapter to save it here." : "Nothing matches."; font: news; fontSize: 16; color: dim; align: center; padding: 24 }
+      }
+      Column {
+        lazy: true
+        weight: 1
+        gap: 0
+        for c in shownCh key c.id {
+          let saved = contains(savedCh, c.id)
+          Row {
+            gap: 12
+            align: center
+            padding: [8, 11]
+            onTap: { haptic(); openCh = c.id }
+            onLongPress: { haptic(); savedCh = saved ? savedCh.filter(x => x != c.id) : flatten([savedCh, [c.id]]) }
+            Text { text: str(c.id); font: kufi; fontSize: 15; color: acc; width: 30; align: center }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: c.name; font: sans; fontSize: 14; fontWeight: 500; color: ink; maxLines: 2 }
+              Text { text: c.alias; font: amiri; fontSize: 15; color: dim; maxLines: 1 }
+            }
+            if saved {
+              Text { text: "★"; fontSize: 14; color: acc }
+            }
+          }
+          Box { height: 1; fill: width; background: line }
+        }
+      }
+    }
+  }
+
+  component FortReader() {
+    Column {
+      gap: 10
+      weight: 1
+      Row {
+        gap: 10
+        align: center
+        Text { text: "‹"; fontSize: 30; color: acc; padding: [8, 0, 8, 4]; onTap: { haptic(); openCh = null } }
+        Column {
+          gap: 0
+          weight: 1
+          Text { text: openInfo.alias; font: amiri; fontSize: 20; color: ink; maxLines: 1 }
+          Text { text: openInfo.name; font: news; fontSize: 15; color: dim; maxLines: 2 }
+        }
+        if duas != null {
+          Text { text: "${doneCount}/${len(duas)}"; font: kufi; fontSize: 16; color: acc }
+          Text {
+            text: "↺"
+            fontSize: 18
+            color: dim
+            padding: [8, 4]
+            onTap: {
+              haptic()
+              hisnCounts = reduce(duas, (m, d, i) => remove(m, "${openCh}-${d.id}"), hisnCounts)
+            }
+          }
+        }
+        Text {
+          text: contains(savedCh, openCh) ? "★" : "☆"
+          fontSize: 18
+          color: acc
+          padding: [6, 4]
+          onTap: { haptic(); savedCh = contains(savedCh, openCh) ? savedCh.filter(x => x != openCh) : flatten([savedCh, [openCh]]) }
+        }
+      }
+      if duas == null {
+        Text { text: hisnFailed ? "Couldn't reach hisnmuslim.com. It'll try again shortly." : "Loading…"; font: news; fontSize: 16; color: dim; align: center; padding: 32 }
+      } else {
+        Column {
+          lazy: true
+          weight: 1
+          gap: 10
+          for d in duas key d.id {
+            let n = get(hisnCounts, "${openCh}-${d.id}", 0)
+            let full = n >= d.r
+            Column {
+              gap: 10
+              padding: [18, 16]
+              background: full ? alpha(acc, 0.08) : fieldBg
+              border: 1
+              borderColor: full ? alpha(acc, 0.4) : line
+              radius: 16
+              onTap: {
+                if !full {
+                  haptic()
+                  hisnCounts = set(hisnCounts, "${openCh}-${d.id}", n + 1)
+                }
+              }
+              onLongPress: { haptic(); hisnCounts = remove(hisnCounts, "${openCh}-${d.id}") }
+              Text { text: d.a; font: amiri; fontSize: 23; color: ink; align: end }
+              if showTl && d.tl != "" {
+                Text { text: d.tl; font: news; fontSize: 15; color: dim }
+              }
+              Text { text: d.t; font: sans; fontSize: 14; color: ink }
+              Row {
+                gap: 8
+                align: center
+                Text { text: d.r > 1 ? "Say it ${d.r} times" : "Say it once"; font: sans; fontSize: 11; fontWeight: 600; letterSpacing: 1; color: dim; weight: 1 }
+                Text {
+                  text: full ? "✓ done" : d.r > 1 ? "${n} / ${d.r}  · tap" : "tap when said"
+                  font: sans
+                  fontSize: 12
+                  fontWeight: 600
+                  color: full ? onAcc : acc
+                  background: full ? acc : alpha(acc, 0.08)
+                  radius: 999
+                  padding: [12, 5]
+                }
+              }
+            }
+          }
+          Text { text: "From Hisnul Muslim (Fortress of the Muslim) by Sa'id al-Qahtani, via hisnmuslim.com"; font: news; fontSize: 12; color: dim; align: center; padding: [8, 4, 8, 12] }
+        }
+      }
+    }
+  }
+
+  component QuranTab() {
+    Column {
+      gap: 16
+      weight: 1
+      scroll: true
+      padding: [12, 8]
+      if verse == null {
+        Text { text: "Loading…"; font: news; fontSize: 16; color: dim; align: center; padding: 32 }
+      } else {
+        Column {
+          gap: 2
+          align: center
+          Text { text: "VERSE OF THE DAY"; font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 3; color: dim; align: center }
+          Text { text: verse.surahAr; font: amiri; fontSize: 22; color: acc; align: center }
+          Text { text: "${verse.surahEn} · ${verse.surah}:${verse.ayah}"; font: sans; fontSize: 12; color: dim; align: center }
+        }
+        Text { text: verse.arabic; font: amiri; fontSize: 28; color: ink; align: center }
+        Box { align: center; fill: width; Ornament { w: 220 } }
+        Text { text: "“${verse.text}”"; font: news; fontSize: 19; color: ink; align: center }
+        Text { text: "Saheeh International"; font: sans; fontSize: 11; color: dim; align: center }
+        Row {
+          gap: 10
+          fill: width
+          justify: center
+          Row { onTap: { haptic(); verseSeed = verseSeed + 1 }; Chip { label: "Another verse" } }
+          Row { onTap: url("https://quran.com/${verse.surah}/${verse.ayah}"); Chip { label: "Read the surah ›"; on: true } }
+        }
+      }
+    }
+  }
+
+  component HadithTab() {
+    Column {
+      gap: 14
+      weight: 1
+      Flow {
+        gap: 6
+        for b in books key b.id {
+          Row { onTap: { haptic(); hadithBook = b.id; hadithSeed = 0; lastHadith = null }; Chip { label: b.name; on: hadithBook == b.id } }
+        }
+      }
+      Column {
+        gap: 14
+        weight: 1
+        scroll: true
+        padding: [12, 4]
+        if hadith == null {
+          Text { text: "Loading…"; font: news; fontSize: 16; color: dim; align: center; padding: 32 }
+        } else {
+          Column {
+            gap: 2
+            align: center
+            Text { text: "HADITH OF THE DAY"; font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 3; color: dim; align: center }
+            Text { text: hadith.ref; font: news; fontSize: 15; color: acc; align: center }
+          }
+          if hadith.arabic != "" {
+            Text { text: hadith.arabic; font: amiri; fontSize: 21; color: ink; align: end }
+            Box { align: center; fill: width; Ornament { w: 220 } }
+          }
+          Text { text: hadith.text; font: sans; fontSize: 15; color: ink }
+          Row {
+            fill: width
+            justify: center
+            Row { onTap: { haptic(); hadithSeed = hadithSeed + 1 }; Chip { label: "Another hadith" } }
+          }
+        }
+      }
+    }
+  }
+
+  component Settings() {
+    Column {
+      gap: 14
+      weight: 1
+      scroll: true
+      padding: [8, 4]
+      Row {
+        align: center
+        Text { text: "Settings"; font: kufi; fontSize: 24; color: ink; weight: 1 }
+        Row { onTap: { haptic(); showConfig = false }; Chip { label: "Done"; on: true } }
+      }
+      Text { text: "APPEARANCE"; font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 3; color: dim }
+      Flow {
+        gap: 6
+        Row { onTap: { haptic(); look = "parchment" }; Chip { label: "Parchment"; on: look == "parchment" } }
+        Row { onTap: { haptic(); look = "night" }; Chip { label: "Night"; on: look == "night" } }
+        Row { onTap: { haptic(); look = "theme" }; Chip { label: "Theme & wallpaper"; on: themed } }
+      }
+      Text { text: "LOCATION"; font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 3; color: dim }
+      Text { text: city == "auto" ? "Automatic: ${placeName}${countryName != "" ? ", ${countryName}" : ""}" : "${city}, ${cityCountry}"; font: news; fontSize: 16; color: ink }
+      if citySearching {
+        Row {
+          gap: 10
+          align: center
+          padding: [14, 2]
+          background: fieldBg
+          border: 1
+          borderColor: acc
+          radius: 999
+          Input {
+            text: cityQuery
+            placeholder: "Search a city, then tap it…"
+            underline: false
+            color: ink
+            fontSize: 14
+            weight: 1
+            onChange: cityQuery = value
+            onSubmit: {
+              if len(searchResults) > 0 {
+                city = searchResults[0].name
+                cityLat = searchResults[0].latitude
+                cityLon = searchResults[0].longitude
+                cityCountry = searchResults[0].country ?? ""
+              }
+              citySearching = false
+              cityQuery = ""
+            }
+          }
+          Text { text: "Cancel"; font: sans; fontSize: 13; fontWeight: 600; color: acc; padding: [8, 6]; onTap: { haptic(); citySearching = false; cityQuery = "" } }
+        }
+        for r in searchResults key "${r.latitude},${r.longitude}" {
+          Text {
+            text: "${r.name}, ${r.admin1 ?? ""} ${r.country ?? ""}"
+            font: sans
+            fontSize: 14
+            color: ink
+            padding: [14, 8]
+            onTap: { haptic(); city = r.name; cityLat = r.latitude; cityLon = r.longitude; cityCountry = r.country ?? ""; citySearching = false; cityQuery = "" }
+          }
+        }
+      } else {
+        Row {
+          gap: 6
+          Row { onTap: { haptic(); citySearching = true; configAt = now }; Chip { label: "Change city…" } }
+          Row { onTap: { haptic(); city = "auto"; cityLat = null; cityLon = null; cityCountry = "" }; Chip { label: "Use my location"; on: city == "auto" } }
+        }
+      }
+
+      Text { text: "CALCULATION"; font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 3; color: dim }
+      Flow {
+        gap: 6
+        for x in methods key x.id {
+          Row { onTap: { haptic(); method = x.id }; Chip { label: x.name; on: method == x.id } }
+        }
+      }
+      Text { text: "ASR"; font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 3; color: dim }
+      Row {
+        gap: 6
+        Row { onTap: school = "0"; Chip { label: "Shafi'i, Maliki, Hanbali"; on: school == "0" } }
+        Row { onTap: school = "1"; Chip { label: "Hanafi"; on: school == "1" } }
+      }
+      Text { text: "HIJRI DATE"; font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 3; color: dim }
+      Row {
+        gap: 6
+        for k in [-2, -1, 0, 1, 2] key k {
+          Row { onTap: hijriAdj = k; Chip { label: k > 0 ? "+${k}" : str(k); on: hijriAdj == k } }
+        }
+      }
+      Text { text: "DISPLAY"; font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 3; color: dim }
+      Row {
+        gap: 6
+        Row { onTap: use24h = !use24h; Chip { label: "24-hour clock"; on: use24h } }
+        Row { onTap: showTl = !showTl; Chip { label: "Transliteration"; on: showTl } }
+      }
+      Text { text: "Tap the arch to open or close these settings."; font: news; fontSize: 13; color: dim }
+    }
+  }
+
+  component PinPicker() {
+    Column {
+      gap: 10
+      weight: 1
+      Row {
+        align: center
+        Text { text: "Pin apps to the dock"; font: kufi; fontSize: 22; color: ink; weight: 1 }
+        Row { onTap: showPinModal = false; Chip { label: "Done"; on: true } }
+      }
+      Row {
+        padding: [14, 2]
+        background: fieldBg
+        border: 1
+        borderColor: line
+        radius: 999
+        Input { text: appSearchQuery; placeholder: "Search apps…"; underline: false; color: ink; fontSize: 14; weight: 1; onChange: appSearchQuery = value }
+      }
+      Grid {
+        columns: 5
+        gap: 8
+        lazy: true
+        weight: 1
+        for a in pickerApps key a.key {
+          let pinned = contains(pinnedApps, a.key)
+          Column {
+            gap: 4
+            align: center
+            padding: [6, 8]
+            background: pinned ? alpha(acc, 0.12) : alpha(surf, 0)
+            border: 1
+            borderColor: pinned ? acc : alpha(surf, 0)
+            radius: 12
+            onTap: { haptic(); pinnedApps = pinned ? pinnedApps.filter(k => k != a.key) : flatten([pinnedApps, [a.key]]) }
+            Image { src: a.icon; size: 36 }
+            Text { text: a.name; font: sans; fontSize: 11; color: pinned ? acc : ink; align: center; maxLines: 1 }
+          }
+        }
+      }
+    }
+  }
+
+  component RightPanel() {
+    Column {
+      gap: 8
+      padding: [10, 10, 10, 12]
+      background: panelBg
+      frost: glass
+      border: 1
+      borderColor: line
+      radius: 22
+      weight: 1
+      Tabs { }
+      Box { height: 1; fill: width; background: line }
+      Column {
+        weight: 1
+        padding: [8, 4]
+        if showConfig {
+          Settings { weight: 1 }
+        } else if showPinModal {
+          PinPicker { weight: 1 }
+        } else if activeTab == "fort" {
+          if openCh == null {
+            FortList { weight: 1 }
+          } else {
+            FortReader { weight: 1 }
+          }
+        } else if activeTab == "quran" {
+          QuranTab { weight: 1 }
+        } else {
+          HadithTab { weight: 1 }
+        }
+      }
+    }
+  }
+
+  component Notes() {
+    if len(notes) > 0 && !kbOpen {
+      Column {
+        gap: 4
+        padding: [14, 10]
+        background: panelBg
+        frost: glass
+        border: 1
+        borderColor: line
+        radius: 18
+        Row {
+          Text { text: "NOTIFICATIONS"; font: sans; fontSize: 10; fontWeight: 600; letterSpacing: 3; color: dim; weight: 1 }
+          Text { text: str(len(notes)); font: kufi; fontSize: 13; color: acc }
+        }
+        Column {
+          scroll: true
+          height: len(notes) == 1 ? 40 : 84
+          gap: 4
+          for item in notes key item.key {
+            Row {
+              gap: 10
+              align: center
+              padding: [4, 4]
+              onTap: notification("open", item.key)
+              onLongPress: { haptic(); notification("dismiss", item.key) }
+              Image { src: item.icon; size: 22 }
+              Column {
+                gap: 0
+                weight: 1
+                Text { text: item.title; font: sans; fontSize: 13; fontWeight: 600; color: ink; maxLines: 1 }
+                if item.text != "" {
+                  Text { text: item.text; font: sans; fontSize: 12; color: dim; maxLines: 1 }
+                }
+              }
+              Text { text: fmtAgo(item.time, now); font: sans; fontSize: 11; color: dim }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── The page ──
+  Box {
+    fill: true
+
+    // The geometric pattern, faint, as on the site
+    Canvas {
+      fill: true
+      visible: !themed
+      let cols = ceil(width / 120)
+      let rows = ceil(height / 120)
+      for i in range(cols * rows) {
+        translate((i % cols) * 120, floor(i / cols) * 120) {
+          path([[60, 4], [116, 60], [60, 116], [4, 60]], closed: true, stroke: alpha(ink, 0.05), width: 1)
+          path([[60, 20], [100, 60], [60, 100], [20, 60]], closed: true, stroke: alpha(ink, 0.05), width: 1)
+          circle(60, 60, 8, stroke: alpha(ink, 0.05), width: 1)
+        }
+      }
+    }
+    Box { fill: true; visible: look == "parchment"; background: radial(0.5, -0.1, 0.8, [alpha(#ffffff, 0.55), alpha(#ffffff, 0)]) }
+
+    if wide {
+      Row {
+        gap: 22
+        fill: true
+        padding: [28, 22, 28, 12]
+        if !kbOpen {
+          Column {
+            gap: 14
+            width: max((tileWidth ?? 900) * 0.4, 340)
+            fill: height
+            // Over the wallpaper, the left side gets glass too so the times stay readable
+            padding: themed ? [16, 14] : 0
+            background: themed ? panelBg : alpha(bg, 0)
+            frost: glass
+            border: themed ? 1 : 0
+            borderColor: line
+            radius: 22
+            ClockBlock { }
+            NextPrayer { }
+            PrayerHeader { }
+            PrayerList { }
+            Spacer { weight: 1 }
+            Dock { }
+            Spacer { height: screenInset }
+          }
+        }
+        Column {
+          gap: 12
+          weight: 1
+          fill: height
+          RightPanel { weight: 1 }
+          Notes { }
+          Spacer { height: screenInset }
+        }
+      }
+    } else {
+      Column {
+        gap: 12
+        fill: true
+        padding: [18, 16, 18, 10]
+        if !kbOpen {
+          Column {
+            gap: 12
+            padding: themed ? [14, 12] : 0
+            background: themed ? panelBg : alpha(bg, 0)
+            frost: glass
+            radius: 22
+            ClockBlock { }
+            NextPrayer { }
+          }
+        }
+        RightPanel { weight: 1 }
+        if !kbOpen {
+          Dock { }
+        }
+        Spacer { height: screenInset }
+      }
+    }
+  }
+}
