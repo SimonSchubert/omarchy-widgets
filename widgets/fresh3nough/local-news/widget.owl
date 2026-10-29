@@ -2,8 +2,8 @@ widget "local news" {
   size: 6x4
   minSize: 4x3
   meta {
-    description: "Local + national headlines — neon cyberpunk tile. ZIP/city or IP location; Fox, NBC, CNN, Breitbart, The Hill, NY Post"
-    version: "2.1"
+    description: "Local + national headlines — neon cyberpunk tile. ZIP/city, Pixel GPS, or IP; Fox, NBC, CNN, Breitbart, The Hill, NY Post"
+    version: "2.2"
     license: "MIT"
     category: "news"
     owl: 8
@@ -34,24 +34,41 @@ widget "local news" {
 
   background: void
 
-  // ZIP or city/region. Empty = IP geolocation for the local tab.
+  // ZIP or city/region. Empty = Pixel GPS (when fresh) else IP geolocation for the local tab.
   state place = "" persist
   state tab = "local" persist
   state seen = [] persist
 
   // One fetch: Google News for the user's place + national desks. Merged, newest first.
   // sh(place) is concatenated outside the script string so owl interpolates it (store pattern).
+  source now = clock every 60s
+  // Pixel GPS bridge: ~/.cache/pixel-gps.json (from 05-pixel-gps / browser geolocation).
+  source gpsFile = cmd("cat ~/.cache/pixel-gps.json 2>/dev/null || echo '{}'") every 1m json timeout 3s
+  let gpsFresh = place == "" && gpsFile != null && gpsFile.ok == true && gpsFile.lat != null && (now - num(gpsFile.at) < 172800)
   source news = cmd("""
 python3 -c '
-import json, re, sys, time, html, urllib.parse, urllib.request
+import json, re, sys, time, html, urllib.parse, urllib.request, os
 from concurrent.futures import ThreadPoolExecutor, wait
 from email.utils import parsedate_to_datetime
 UA = {"User-Agent": "omalauncher local-news widget"}
 PLACE = sys.argv[1] if len(sys.argv) > 1 else ""
+GPS_PATH = os.path.expanduser("~/.cache/pixel-gps.json")
 def get(url, timeout=10):
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
+def pixel_gps():
+    try:
+        with open(GPS_PATH) as f:
+            j = json.load(f)
+        if not j or not j.get("ok") or j.get("lat") is None:
+            return None
+        age = time.time() - float(j.get("at") or 0)
+        if age > 172800:
+            return None
+        return j
+    except Exception:
+        return None
 def resolve_place(raw):
     raw = (raw or "").strip()
     if re.fullmatch(r"\d{5}(-\d{4})?", raw):
@@ -67,6 +84,15 @@ def resolve_place(raw):
             return z, z
     if raw:
         return raw, raw
+    gps = pixel_gps()
+    if gps:
+        city = (gps.get("place") or "").strip()
+        region = (gps.get("region") or "").strip()
+        country = (gps.get("country") or "").strip()
+        post = (gps.get("postcode") or "").strip()
+        label = ", ".join(x for x in (city, region) if x) or country or "Pixel GPS"
+        q = " ".join(x for x in (city, region, post, country) if x) or label
+        return label, q
     try:
         j = json.loads(get("https://ipwho.is/", 8).decode())
         if j.get("success") is False:
@@ -143,8 +169,8 @@ print(json.dumps({
 }))
 '
   """ + " ${sh(place)}") every 15m json timeout 45s
-  source now = clock every 60s
   on place { refresh() }
+  on gpsFile.lat { refresh() }
 
   let tints = [neon, neonOrange, neonRed, neonBlue, upColor, neonPink, neon, neonYellow]
   let cur = tab == "nation" ? "nation" : "local"
@@ -255,11 +281,11 @@ print(json.dumps({
       }
       Input {
         text: place
-        placeholder: "ZIP or city · empty = IP location"
+        placeholder: "ZIP or city · empty = Pixel GPS / IP"
         onSubmit: { place = trim(value); refresh() }
       }
       Text {
-        text: place != "" ? "local · ${where}" : "local · ${where} (IP)"
+        text: place != "" ? "local · ${where}" : (gpsFresh ? "local · ${where} (Pixel GPS)" : "local · ${where} (IP)")
         style: label
         color: textDim
       }
