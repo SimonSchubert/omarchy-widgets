@@ -30,20 +30,6 @@ QUERIES = [
     "PPA Tour live",
     "PPA Tour finals",
     "PPA Tour mixed doubles final",
-    "PPA Tour men's doubles final",
-    "PPA Tour women's doubles final",
-    "Ben Johns PPA full match",
-    "Anna Leigh Waters PPA full match",
-    "MLP pickleball full match",
-    "Major League Pickleball full match",
-    "MLP live stream",
-    "APP Tour pickleball full match",
-    "APP Tour championship",
-    "pickleball championship full match",
-    "pickleball finals full match",
-    "professional pickleball full match",
-    "pickleball tour live stream",
-    "live pickleball match PPA",
 ]
 
 CHANNEL_IDS = [
@@ -337,8 +323,7 @@ for ucid in CHANNEL_IDS:
     for v in vids:
         ingest(v)
 
-for q in ("PPA Tour full match", "PPA Tour championship match", "MLP full match pickleball",
-          "APP Tour full match", "pickleball championship full match"):
+for q in ("PPA Tour full match", "PPA Tour championship match"):
     try:
         data = search(q)
     except Exception:
@@ -368,13 +353,13 @@ except Exception:
 cycle = items[:show_n]
 print(json.dumps({"items": cycle, "new": new_count, "lib": len(items)}))
 PY
-  """) every 20m json timeout 90s
+  """) every 4h json timeout 90s
 
-  source now = clock every 1s
+  source now = clock every 1m
 
   let items = pb.items ?? []
   let n = len(items)
-  let idx = n > 0 ? floor(now / 2) % n : 0
+  let idx = n > 0 ? floor(now / 60) % n : 0
   let cur = n > 0 ? items[idx] : null
   let tag = cur == null ? "" : (cur.live ? "LIVE" : "PPA")
   let tagBg = cur != null && cur.live ? #e11d48 : #0ea5e9

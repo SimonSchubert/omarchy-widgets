@@ -11,7 +11,7 @@ widget "card-releases" {
 
   requires { pacman: ["python"] }
 
-  source now = clock every 1s
+  source now = clock every 1m
 
   // Known Pokémon TCG drops with announced dates. Unannounced sets show as empty-state copy.
   let pokemonReleases = [
@@ -259,7 +259,7 @@ PY
       Column {
         gap: 8
         Text { text: "POKÉMON TCG"; style: label; bold: true; color: #ffd700; maxLines: 1 }
-        if pokeUp.length == 0 {
+        if len(pokeUp) == 0 {
           Text { text: "No date announced"; style: small; color: muted }
         }
         for r in pokeUp key r.id {
@@ -273,7 +273,7 @@ PY
         if mtg == null {
           Text { text: "Loading Scryfall…"; style: small; color: muted }
         }
-        if mtg != null && mtgUp.length == 0 {
+        if mtg != null && len(mtgUp) == 0 {
           Text { text: "No upcoming MTG sets"; style: small; color: muted }
         }
         for r in mtgUp key r.id {

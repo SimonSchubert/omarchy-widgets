@@ -12,9 +12,9 @@ widget "doomsday clock" {
 
   requires { pacman: ["curl", "python"] }
 
-  // 1s for the tile pulse; the bulletin value only changes once a year.
+  // 1s only on the full screen for pulse; tile stays still.
   source now = clock every 1s
-  // Honest UA. Print nothing on failure so the tile shows "fetching…", not a stale number.
+  // Honest UA. Print nothing on failure so the tile shows nothing until a real value arrives.
   source scrape = cmd("curl -sfL -A 'Mozilla/5.0 (omalauncher doomsday-clock widget)' --max-time 18 'https://thebulletin.org/doomsday-clock/' | python3 -c \"import sys,re;h=sys.stdin.read();s=re.search(r'It is now (\\\\d+) seconds to midnight',h);y=re.search(r'January\\\\s+\\\\d+,\\\\s+(20\\\\d\\\\d)',h);print(((s.group(1)+' '+(y.group(1) if y else '')) if s else ''))\"") every 12h timeout 30s
 
   state demo = -1 persist
@@ -23,12 +23,14 @@ widget "doomsday clock" {
   let parts = words(scrape ?? "")
   let liveSec = len(parts) > 0 && parts[0] != "" ? num(parts[0]) : null
   let setYear = len(parts) > 1 && parts[1] != "" ? parts[1] : null
-  // No live value yet: calm scene + "fetching…", never a made-up second count.
-  let secs = demo >= 0 ? demo : (liveSec != null ? liveSec : 1020)
+  // No live value yet and not demoing: show an empty tile (no fake SAFE/1020s).
+  let ready = demo >= 0 || liveSec != null
+  let secs = demo >= 0 ? demo : (liveSec != null ? liveSec : 0)
   let loading = liveSec == null && demo < 0
 
-  let danger = clamp(1 - secs / 1020, 0, 1)
-  let sid = secs <= 0 ? 7
+  let danger = ready ? clamp(1 - secs / 1020, 0, 1) : 0
+  let sid = !ready ? -1
+    : secs <= 0 ? 7
     : secs < 30 ? 6
     : secs < 60 ? 5
     : secs < 90 ? 4
@@ -37,9 +39,9 @@ widget "doomsday clock" {
     : secs < 360 ? 1
     : 0
 
-  let label = sid == 0 ? "SAFE" : sid == 1 ? "WATCH" : sid == 2 ? "ELEVATED" : sid == 3 ? "HIGH"
+  let label = sid < 0 ? "" : sid == 0 ? "SAFE" : sid == 1 ? "WATCH" : sid == 2 ? "ELEVATED" : sid == 3 ? "HIGH"
     : sid == 4 ? "CRITICAL" : sid == 5 ? "SEVERE" : sid == 6 ? "CATASTROPHIC" : "MIDNIGHT"
-  let blurb = sid == 0 ? "cold war thaw · hope holds"
+  let blurb = sid < 0 ? "" : sid == 0 ? "cold war thaw · hope holds"
     : sid == 1 ? "arms race quiet · stay vigilant"
     : sid == 2 ? "treaties fray · risks rise"
     : sid == 3 ? "arsenals live · clocks tick"
@@ -47,17 +49,18 @@ widget "doomsday clock" {
     : sid == 5 ? "silos open · cities burn"
     : sid == 6 ? "firestorm · fallout sky"
     : "doomsday · the hand is still"
-  let gem = sid == 0 ? "🕊" : sid == 1 ? "🌍" : sid == 2 ? "⚠" : sid == 3 ? "🚀"
+  let gem = sid < 0 ? "" : sid == 0 ? "🕊" : sid == 1 ? "🌍" : sid == 2 ? "⚠" : sid == 3 ? "🚀"
     : sid == 4 ? "☢" : sid == 5 ? "💥" : sid == 6 ? "☠" : "⬛"
-  let tint = sid == 0 ? #4ade80 : sid == 1 ? #67e8f9 : sid == 2 ? #fbbf24 : sid == 3 ? #f97316
+  let tint = sid < 0 ? muted : sid == 0 ? #4ade80 : sid == 1 ? #67e8f9 : sid == 2 ? #fbbf24 : sid == 3 ? #f97316
     : sid == 4 ? #ef4444 : sid == 5 ? #dc2626 : sid == 6 ? #fef08a : #ffffff
   let tintDim = alpha(tint, 0.2)
   let mins = floor(secs / 60)
   let remS = int(secs % 60)
-  let timeStr = loading ? "…" : secs <= 0 ? "MIDNIGHT" : mins > 0 ? "${mins}m ${remS}s" : "${int(secs)}s"
+  let timeStr = !ready ? "" : secs <= 0 ? "MIDNIGHT" : mins > 0 ? "${mins}m ${remS}s" : "${int(secs)}s"
   let short = (rows ?? 5) < 4
   let tiny = (rows ?? 5) < 3
-  let pulseOn = sid >= 4 && (floor(now) % 2 == 0)
+  // Pulse only in the full-screen view, never on the tile.
+  let pulseOn = false
 
   onTap: screen()
 
@@ -65,7 +68,10 @@ widget "doomsday clock" {
     gap: 2
     fill: true
 
-    if tiny {
+    if !ready {
+      // Empty until a real Bulletin value (or demo) arrives — no fake SAFE/1020s.
+      Spacer { weight: 1 }
+    } else if tiny {
       Text { text: "${gem} ${timeStr}"; style: title; color: tint; bold: true; align: center }
       Text { text: label; style: label; color: muted; align: center }
     } else {
@@ -83,12 +89,12 @@ widget "doomsday clock" {
           gap: 1
           background: linear(0, 0, 0, 1, [alpha(background, 0), alpha(background, 0.9)])
           Text { text: "${gem}  ${label}"; style: label; color: tint; bold: true }
-          Text { text: timeStr; style: title; color: pulseOn ? #ffffff : tint; bold: true }
+          Text { text: timeStr; style: title; color: tint; bold: true }
           Text { text: "to midnight"; style: small; color: muted }
           Progress { value: danger * 100; color: tint; track: tintDim; animate value: spring() }
           if !short {
             Text {
-              text: loading ? "fetching…" : demo >= 0 ? "DEMO" : "Bulletin · ${setYear ?? "…"}"
+              text: demo >= 0 ? "DEMO" : "Bulletin · ${setYear ?? "…"}"
               style: small
               color: muted
               maxLines: 1
@@ -101,6 +107,7 @@ widget "doomsday clock" {
 
   screen {
     title: "doomsday clock"
+    let fsPulse = ready && sid >= 4 && (floor(now) % 2 == 0)
     Column {
       gap: 8
       padding: 12
@@ -118,6 +125,17 @@ widget "doomsday clock" {
       }
 
       if tab == "clock" {
+        if !ready {
+          Column {
+            gap: 8
+            align: center
+            justify: center
+            weight: 1
+            Text { text: "waiting for Bulletin…"; style: muted; align: center }
+            Button { text: "refresh"; onTap: refresh() }
+            Button { text: "Bulletin"; onTap: url("https://thebulletin.org/doomsday-clock/") }
+          }
+        } else {
         Box {
           fill: width
           height: 240
@@ -130,13 +148,12 @@ widget "doomsday clock" {
         Column {
           gap: 4
           align: center
-          Text { text: "${gem}  IT IS ${timeStr} TO MIDNIGHT"; style: title; color: tint; bold: true; align: center }
+          Text { text: "${gem}  IT IS ${timeStr} TO MIDNIGHT"; style: title; color: fsPulse ? #ffffff : tint; bold: true; align: center }
           Text { text: label; style: body; color: tint; align: center }
           Text { text: blurb; style: muted; align: center }
           Progress { value: danger * 100; color: tint; track: tintDim; animate value: spring() }
           Text {
-            text: loading ? "syncing thebulletin.org…"
-              : demo >= 0 ? "demo · ${int(secs)}s (not live)"
+            text: demo >= 0 ? "demo · ${int(secs)}s (not live)"
               : "live · ${setYear ?? "…"} · ${liveSec}s · Bulletin of the Atomic Scientists"
             style: small
             color: muted
@@ -150,6 +167,7 @@ widget "doomsday clock" {
           Button { text: "refresh"; onTap: refresh() }
           Button { text: "Bulletin"; onTap: url("https://thebulletin.org/doomsday-clock/") }
           Button { text: "statement"; onTap: url("https://thebulletin.org/doomsday-clock/current-time/") }
+        }
         }
       }
 

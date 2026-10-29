@@ -12,7 +12,7 @@ widget "data centers" {
 
   requires { pacman: ["python"] }
 
-  source now = clock every 1s
+  source now = clock every 1m
   state city = "" persist
   state tab = "build" persist
   let qCity = city.replace("%", "%25").replace("+", "%2B").replace("/", "%2F").replace("?", "%3F").replace("#", "%23").replace("&", "%26").replace("'", "%27").replace(" ", "+")

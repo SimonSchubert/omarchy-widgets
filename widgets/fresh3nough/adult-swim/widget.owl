@@ -4,7 +4,7 @@ widget "adult swim" {
   padding: 0
 
   meta {
-    description: "90s [as] cartoon block — Adult Swim shows cycle every 2s (ATHF, Space Ghost, Robot Chicken, Venture Bros, Rick & Morty…). Tap opens the stream.";
+    description: "90s [as] cartoon block — Adult Swim shows cycle about once a minute (ATHF, Space Ghost, Robot Chicken, Venture Bros, Rick & Morty…). Tap opens the stream.";
     version: "1.0";
     license: "MIT";
     category: "fun";
@@ -55,28 +55,6 @@ QUERIES = [
     "The Venture Bros full episode",
     "Rick and Morty full episode Adult Swim",
     "Metalocalypse full episode",
-    "Squidbillies full episode",
-    "Harvey Birdman full episode",
-    "Sealab 2021 full episode",
-    "The Boondocks full episode",
-    "Samurai Jack full episode Adult Swim",
-    "Primal full episode Adult Swim",
-    "Smiling Friends full episode",
-    "12 oz Mouse full episode",
-    "Superjail full episode",
-    "Moral Orel full episode",
-    "Home Movies full episode",
-    "FLCL full episode",
-    "Cowboy Bebop full episode",
-    "Off the Air Adult Swim",
-    "Eric Andre Show full episode",
-    "Tim and Eric full episode",
-    "Joe Pera Talks With You full episode",
-    "Ballmastrz 9009 full episode",
-    "Xavier Renegade Angel full episode",
-    "Dream Corp LLC full episode",
-    "Adult Swim [as] full episodes marathon",
-    "Adult Swim Toonami full episode",
 ]
 
 # Adult Swim, Toonami, Williams Street-ish channels
@@ -387,7 +365,7 @@ for ucid in CHANNEL_IDS:
         ingest(v if isinstance(v, dict) and v.get("videoId") else v)
 
 # also pull Adult Swim channel live / popular via search params (this week)
-for q in ("Adult Swim full episode", "Rick and Morty full episode", "Aqua Teen full episode"):
+for q in ("Adult Swim full episode", "Rick and Morty full episode"):
     try:
         data = search(q)
     except Exception:
@@ -443,12 +421,12 @@ while len(cycle) < show_n and keys:
 
 print(json.dumps({"items": cycle[:show_n], "new": new_count, "lib": len(items)}))
 PY
-  """) every 20m json timeout 90s
-  source now = clock every 1s
+  """) every 4h json timeout 90s
+  source now = clock every 1m
 
   let items = as.items ?? []
   let n = len(items)
-  let idx = n > 0 ? floor(now / 2) % n : 0
+  let idx = n > 0 ? floor(now / 60) % n : 0
   let cur = n > 0 ? items[idx] : null
   let tag = cur == null ? "" : (cur.tag ?? (cur.live ? "LIVE" : "AS"))
   let show = cur == null ? "" : (cur.show ?? "Adult Swim")

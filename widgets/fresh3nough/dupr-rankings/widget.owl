@@ -1,7 +1,7 @@
 widget "dupr rankings" {
   meta {
-    description: "Public DUPR pickleball rankings — national top pros from dupr.com. No login. Tap to refresh views."
-    version: "1.0"
+    description: "Public DUPR pickleball rankings — Open Men's Doubles top pros from dupr.com, using DUPR's own order. No login. Tap for the full list."
+    version: "1.1"
     license: "MIT"
     category: "sport"
     owl: 9
@@ -15,22 +15,25 @@ widget "dupr rankings" {
 python3 - <<'PY'
 import json, re, ssl, time, urllib.error, urllib.request
 NATION_URL = "https://www.dupr.com/rankings"
-UA = ("Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+# Honest UA — dupr.com answers it; no fake Chrome string.
+UA = "Mozilla/5.0 (omalauncher dupr-rankings widget)"
 ITEM_RE = re.compile(
     r'class="heading-table name">([^<]*?)</div>'
     r'.*?fs-cmsfilter-field="age"[^>]*>([^<]*?)</div>'
     r'.*?class="heading-table right">([^<]*?)</div>',
     re.S,
 )
-LIMIT = 200
+# One real list only: Open Men's Doubles is the default tab on dupr.com/rankings.
+# Ranks are DUPR's own order (1..N in that list), not a renumber across categories.
+LIST_LABEL = "Open Men's Doubles"
+LIMIT = 50
 
 def emit(obj):
     print(json.dumps(obj, separators=(",", ":")))
 
 def fail(msg):
     emit({"updated": int(time.time()), "count": 0, "total": 0,
-          "error": msg, "players": []})
+          "label": LIST_LABEL, "error": msg, "players": []})
 
 try:
     req = urllib.request.Request(
@@ -42,26 +45,39 @@ except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as
     fail(f"rankings page: {getattr(e, 'reason', e)}")
     raise SystemExit(0)
 
-best = {}
-for name, _age, rating in ITEM_RE.findall(html):
+# Collections are in page order: Open MD, Open WD, Open MS, Open WS, then seniors/juniors.
+positions = [m.start() for m in re.finditer(r'class="post_list ranking-collection', html)]
+if not positions:
+    fail("no ranking tables on page")
+    raise SystemExit(0)
+# First collection = Open Men's Doubles (default active list on the site).
+start = positions[0]
+end = positions[1] if len(positions) > 1 else len(html)
+chunk = html[start:end]
+
+players = []
+for i, (name, age, rating) in enumerate(ITEM_RE.findall(chunk), 1):
     name = re.sub(r"\s+", " ", name).strip()
     try:
         value = float(rating)
     except ValueError:
         continue
-    if name and (name not in best or value > best[name]):
-        best[name] = value
+    if not name:
+        continue
+    players.append({
+        "id": i,
+        "rank": i,  # DUPR's own position in this list
+        "name": name,
+        "age": age.strip(),
+        "rating": f"{value:.3f}",
+        "reliability": None,
+    })
+    if len(players) >= LIMIT:
+        break
 
-players = [{"name": n, "rating": f"{v:.3f}", "reliability": None}
-           for n, v in best.items()]
-players.sort(key=lambda p: float(p["rating"]), reverse=True)
 total = len(players)
-players = players[:LIMIT]
-for i, p in enumerate(players, 1):
-    p["rank"] = i
-    p["id"] = i
-emit({"updated": int(time.time()), "count": len(players), "total": total,
-      "error": None, "players": players})
+emit({"updated": int(time.time()), "count": total, "total": total,
+      "label": LIST_LABEL, "error": None, "players": players})
 PY
   """) every 6h json timeout 90s
 
@@ -69,6 +85,7 @@ PY
 
   let players = board.players ?? []
   let err = board == null ? null : board.error
+  let label = board == null ? "Open Men's Doubles" : (board.label ?? "Open Men's Doubles")
   let total = board == null ? 0 : (board.total ?? board.count ?? 0)
   let count = board == null ? 0 : (board.count ?? 0)
   let updated = num(board.updated)
@@ -109,7 +126,7 @@ PY
         weight: 1
         gap: 0
         Text { text: "dupr rankings"; bold: true; fontSize: 12; maxLines: 1 }
-        Text { text: "national top pros · ${ago}"; style: label; maxLines: 1 }
+        Text { text: "${label} · ${ago}"; style: label; maxLines: 1 }
       }
     }
 
@@ -127,7 +144,7 @@ PY
         Row {
           gap: 6
           align: center
-          Text { text: "${total} rated · dupr.com"; style: label; weight: 1 }
+          Text { text: "top ${total} · dupr.com"; style: label; weight: 1 }
           Button { text: "full list"; onTap: screen() }
         }
       }
@@ -148,8 +165,8 @@ PY
         Column {
           weight: 1
           gap: 0
-          Text { text: "national top pros"; style: title; maxLines: 1 }
-          Text { text: "${total} rated · live from dupr.com · ${ago}"; style: muted; maxLines: 1 }
+          Text { text: label; style: title; maxLines: 1 }
+          Text { text: "DUPR ranks · live from dupr.com · ${ago}"; style: muted; maxLines: 1 }
         }
       }
 
@@ -163,7 +180,7 @@ PY
       if err != null {
         Text { text: err; color: yellow }
       }
-      for p, i in take(players, 200) key p.id {
+      for p, i in take(players, 50) key p.id {
         Row {
           gap: 6
           Text { text: "${p.rank ?? (i + 1)}"; width: 28; align: end; font: mono; color: i < 3 ? accent : muted }

@@ -3,7 +3,7 @@ widget "youtube volleyball" {
   minSize: 2x3
   padding: 0
   meta {
-    description: "YouTube volleyball full matches (NCAA, FIVB, VNL, beach). Cycles thumbnails; tap opens the video"
+    description: "YouTube volleyball full matches (NCAA, FIVB, VNL, beach). Cycles thumbnails about once a minute; tap opens the video"
     version: "1.0"
     license: "MIT"
     category: "fun"
@@ -30,20 +30,6 @@ QUERIES = [
     "NCAA volleyball full match",
     "NCAA women's volleyball full match",
     "college volleyball full match",
-    "FIVB volleyball full match",
-    "VNL volleyball full match",
-    "Nations League volleyball full match",
-    "World Championships volleyball full match",
-    "Olympics volleyball full match",
-    "men's volleyball full match",
-    "women's volleyball full match",
-    "high school volleyball full match",
-    "club volleyball full match",
-    "beach volleyball full match",
-    "AVP beach volleyball full match",
-    "volleyball championship full match",
-    "volleyball final full match",
-    "live volleyball match",
 ]
 
 # known full-match channel UCIDS (browse latest uploads)
@@ -342,8 +328,7 @@ for ucid in CHANNEL_IDS:
         ingest(v)
 
 # second pass core queries
-for q in ("volleyball full match", "NCAA volleyball full match", "VNL full match volleyball",
-          "FIVB full match", "beach volleyball full match"):
+for q in ("volleyball full match", "NCAA volleyball full match"):
     try:
         data = search(q)
     except Exception:
@@ -378,13 +363,13 @@ except Exception:
 cycle = items[:show_n]
 print(json.dumps({"items": cycle, "new": new_count, "lib": len(items)}))
 PY
-  """) every 20m json timeout 90s
+  """) every 4h json timeout 90s
 
-  source now = clock every 1s
+  source now = clock every 1m
 
   let items = vb.items ?? []
   let n = len(items)
-  let idx = n > 0 ? floor(now / 2) % n : 0
+  let idx = n > 0 ? floor(now / 60) % n : 0
   let cur = n > 0 ? items[idx] : null
   let tag = cur == null ? "" : (cur.live ? "LIVE" : "YT")
   let tagBg = cur != null && cur.live ? #e11d48 : #ff0000

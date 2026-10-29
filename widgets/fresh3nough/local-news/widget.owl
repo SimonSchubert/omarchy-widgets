@@ -31,7 +31,7 @@ def get(url, timeout=10):
         return r.read()
 def resolve_place(raw):
     raw = (raw or "").strip()
-    if re.fullmatch(r"\\d{5}(-\\d{4})?", raw):
+    if re.fullmatch(r"\d{5}(-\d{4})?", raw):
         z = raw[:5]
         try:
             j = json.loads(get("https://api.zippopotam.us/us/" + z, 8).decode())
