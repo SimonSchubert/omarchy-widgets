@@ -191,7 +191,9 @@ widget "timesheet" {
   let todayDow = now == null ? -1 : clockDayNames.indexOf(fmtTime(now, "EEE", null, "en"))
   let todayKey = now == null ? "" : fmtTime(now, "dd/MM/yy")
   let clockNowMin = now == null ? -1 : int(fmtTime(now, "H") ?? 0) * 60 + int(fmtTime(now, "m") ?? 0)
-  let todayWeek = now == null ? null : weeks.find(w => w.week == int(fmtTime(now, "ww")))
+  let todayMon = now == null || todayDow < 0 ? 0 : now - (int(fmtTime(now, "H") ?? 0) * 3600 + int(fmtTime(now, "m") ?? 0) * 60 + int(fmtTime(now, "s") ?? 0)) - todayDow * 86400 + 43200
+  let todayMonIso = todayMon == 0 ? "" : fmtTime(todayMon, "yyyy-MM-dd")
+  let todayWeek = now == null || todayMonIso == "" ? null : weeks.find(w => (w.monday ?? 0) > 0 && fmtTime(w.monday, "yyyy-MM-dd") == todayMonIso)
   let todayWi = todayWeek == null ? -1 : weeks.indexOf(todayWeek)
   let todayDay = todayWeek != null && todayDow >= 0 && todayDow < len(todayWeek.days) ? todayWeek.days[todayDow] : null
   let clockSlots = todayDay == null ? [] : [
@@ -1092,7 +1094,12 @@ widget "timesheet" {
                 align: center
                 gap: 8
                 padding: [2, 0, 0, 0]
-                Text { text: "Add default lunch break"; style: body; color: foreground; weight: 1; maxLines: 1 }
+                Column {
+                  gap: 0
+                  weight: 1
+                  Text { text: "Add default lunch break"; style: body; color: foreground; maxLines: 1 }
+                  Text { text: "today on, unconfirmed days only"; style: small; color: muted; maxLines: 1 }
+                }
                 Box {
                   width: 24
                   height: 24
@@ -1104,10 +1111,8 @@ widget "timesheet" {
                   onTap: {
                     let next = !lunchOn
                     lunchOn = next
-                    if (next && lunchReady) {
-                      weeks = weeks.map(w => set(w, "days", w.days.map((d, di) => di < 5 ? merge(d, {amOut: lunchStartHM, amOutM: lunchStartMin, pmIn: lunchEndHM, pmInM: lunchEndMin}) : d)))
-                    } else if (!next && lunchReady) {
-                      weeks = weeks.map(w => set(w, "days", w.days.map((d, di) => di < 5 && d.amOutM == lunchStartMin && d.pmInM == lunchEndMin ? merge(d, {amOut: "", amOutM: null, pmIn: "", pmInM: null}) : d)))
+                    if (lunchReady) {
+                      weeks = weeks.map((w, wi) => wi != todayWi ? w : set(w, "days", w.days.map((d, di) => di >= 5 || (d.done ?? false) || fmtTime((w.monday ?? 0) + di * 86400, "yyyy-MM-dd") < todayIso ? d : (next ? merge(d, {amOut: lunchStartHM, amOutM: lunchStartMin, pmIn: lunchEndHM, pmInM: lunchEndMin}) : (d.amOutM == lunchStartMin && d.pmInM == lunchEndMin ? merge(d, {amOut: "", amOutM: null, pmIn: "", pmInM: null}) : d)))))
                     }
                   }
                   Text { text: lunchOn ? "󰄬" : ""; font: icon; fontSize: 12; color: green; align: center }
@@ -1153,7 +1158,7 @@ widget "timesheet" {
                         let end = (start + lunchDurMin) % 1440
                         let st = pad(floor(start / 60), 2, "0") + ":" + pad(start % 60, 2, "0")
                         let en = pad(floor(end / 60), 2, "0") + ":" + pad(end % 60, 2, "0")
-                        weeks = weeks.map(w => set(w, "days", w.days.map((d, di) => di < 5 ? merge(d, {amOut: st, amOutM: start, pmIn: en, pmInM: end}) : d)))
+                        weeks = weeks.map((w, wi) => wi != todayWi ? w : set(w, "days", w.days.map((d, di) => di >= 5 || (d.done ?? false) || fmtTime((w.monday ?? 0) + di * 86400, "yyyy-MM-dd") < todayIso ? d : merge(d, {amOut: st, amOutM: start, pmIn: en, pmInM: end}))))
                       }
                     }
                   }
@@ -1192,7 +1197,7 @@ widget "timesheet" {
                       if (lunchOn && lunchStartMin >= 0 && dur > 0) {
                         let end = (lunchStartMin + dur) % 1440
                         let en = pad(floor(end / 60), 2, "0") + ":" + pad(end % 60, 2, "0")
-                        weeks = weeks.map(w => set(w, "days", w.days.map((d, di) => di < 5 ? merge(d, {amOut: lunchStartHM, amOutM: lunchStartMin, pmIn: en, pmInM: end}) : d)))
+                        weeks = weeks.map((w, wi) => wi != todayWi ? w : set(w, "days", w.days.map((d, di) => di >= 5 || (d.done ?? false) || fmtTime((w.monday ?? 0) + di * 86400, "yyyy-MM-dd") < todayIso ? d : merge(d, {amOut: lunchStartHM, amOutM: lunchStartMin, pmIn: en, pmInM: end}))))
                       }
                     }
                   }
