@@ -1,0 +1,471 @@
+// OmaChat v1.0: manual secure Cloudflare connection; URLs remain ordinary text.
+widget "OmaChat" {
+  meta { owl: 17; description: "OmaChat live Cloudflare chat — native WebSocket"; version: "1.0.0"; license: "MIT" }
+  size: 3x2
+  minSize: 3x2
+  padding: 6
+  background: #000000
+  onTap: screen()
+
+  // Session intent is deliberately not persisted: launcher startup stays offline.
+  state connectionRequested = false
+  // Native initial-join deadline only; never persisted or rearmed on socket loss.
+  state initialJoinDeadline = 0
+  state initialJoinTimedOut = false
+  source now = clock every 1s
+  // Fixed URL/headers: nickname changes never reconnect the socket.
+  source chat = ws(connectionRequested ? "wss://chat.omachat.workers.dev/ws" : null, {Origin: "https://chat.omachat.workers.dev"}) json status
+  state nick = ""
+  state nickDraft = "guest"
+  state nickSubmitCount = 0
+  state editingNick = false
+  state draft = ""
+  state submitCount = 0
+  state notice = "Offline. Press CONNECT to join."
+  // Per-runtime random namespace plus a monotonic counter: ASCII IDs under 64 chars.
+  state deliveryPrefix = "owl_${random(1000000000)}_${random(1000000000)}_${random(1000000000)}_${random(1000000000)}"
+  state deliverySequence = 0
+  state pendingDeliveries = {}
+  state deliveryConfirmed = false
+  state deliveryFailure = ""
+  state ready = false
+  state restoreAttempted = false
+  state serverSession = ""
+  state latestId = 0
+  // Only confirmed preferences and the local clear boundary survive restarts.
+  state preferredNick = "" persist
+  state moderationResumeToken = null secret
+  state clearMark = {session: "", cutoff: 0} persist
+  state events = []
+  state serverNotices = []
+  state users = []
+  state showingUsers = false
+  let connected = connectionRequested && chat.open && ready
+  let validNick = connected ? trim(nickDraft) != "" : len(match(trim(nickDraft), "^([^\\s\\p{Cc}]+)$")) > 0
+  let deliveryFeedback = len(keys(pendingDeliveries)) > 0 ? (deliveryFailure == "" ? "Sending..." : "Sending... ${deliveryFailure}") : (deliveryFailure != "" ? deliveryFailure : deliveryConfirmed ? "Message sent." : "")
+  let statusText = initialJoinTimedOut && notice == "Connection timed out. Press CONNECT to retry." ? notice : deliveryFeedback != "" ? deliveryFeedback : notice
+  // Retain at most 100 server events and expire them at 24 hours.
+  // Server times are JavaScript milliseconds; OWL formatting uses seconds.
+  let messages = (events + serverNotices).filter(e => e.time / 1000 >= now - 86400).sortBy(e => -e.time).map(e => {
+    id: e.id,
+    time: fmtTime(e.time / 1000, "HH:mm"),
+    nick: e.nick ?? "",
+    body: e.kind == "action" ? "* ${e.nick} ${e.text}" : e.text,
+    kind: e.kind == "message" ? "chat" : e.kind == "action" ? "action" : "system"
+  })
+
+  // Changing/cancelling this deadline cancels OWL's previous native timer wait.
+  at initialJoinDeadline {
+    if initialJoinDeadline > 0 && connectionRequested && !connected {
+      initialJoinTimedOut = true
+      initialJoinDeadline = 0
+      connectionRequested = false
+      notice = "Connection timed out. Press CONNECT to retry."
+    }
+  }
+
+  on connectionRequested {
+    if value {
+      initialJoinTimedOut = false
+      initialJoinDeadline = connected ? 0 : now + 15
+    } else {
+      initialJoinDeadline = 0
+      if len(keys(pendingDeliveries)) > 0 {
+        deliveryFailure = "Connection lost. Message not confirmed."
+        pendingDeliveries = {}
+      }
+      deliveryConfirmed = false
+      ready = false
+      restoreAttempted = false
+      users = []
+      notice = initialJoinTimedOut ? "Connection timed out. Press CONNECT to retry." : "Offline. Press CONNECT to join."
+    }
+  }
+
+  on chat.open first {
+    if !value {
+      if len(keys(pendingDeliveries)) > 0 {
+        deliveryFailure = "Connection lost. Message not confirmed."
+        pendingDeliveries = {}
+      }
+      deliveryConfirmed = false
+      ready = false
+      restoreAttempted = false
+      users = []
+      notice = connectionRequested ? "Offline. Reconnecting; messages are not queued." : initialJoinTimedOut ? "Connection timed out. Press CONNECT to retry." : "Offline. Press CONNECT to join."
+    }
+  }
+
+  on chat each {
+    // Ignore packets already queued when the user explicitly disconnected.
+    if connectionRequested {
+      if value.type == "hello" {
+        // A new greeting must never carry uncertain sends into a new connection.
+        if len(keys(pendingDeliveries)) > 0 {
+          deliveryFailure = "Connection lost. Message not confirmed."
+          pendingDeliveries = {}
+          deliveryConfirmed = false
+        }
+        ready = false
+        users = []
+        serverSession = value.session
+        if clearMark.session != serverSession {
+          clearMark = {session: serverSession, cutoff: 0}
+        }
+        latestId = value.latestId
+        // Replace history on every hello; deduplicate its IDs within this session.
+        let historyById = reduce(value.history ?? [], (acc, item) => set(acc, str(item.id), item), {})
+        events = values(historyById).filter(e => e.id > clearMark.cutoff && e.time / 1000 >= now - 86400).sortBy(e => -e.id).take(100)
+        serverNotices = []
+        nick = value.nick
+        nickDraft = preferredNick != "" ? preferredNick : value.nick
+        notice = "Connected to #general. URLs stay plain text."
+        // First client input after hello; repeated hellos never retry this connection.
+        // Keep the saved preference until the existing nick acknowledgement confirms it.
+        if !restoreAttempted {
+          restoreAttempted = true
+          if preferredNick != "" {
+            send(chat, {type: "restore_nick", nick: preferredNick})
+          }
+          // Match the deployed browser's moderation continuity across connections.
+          // Send the previous token before replacing it; never display the token.
+          if value.resumeToken != null {
+            if moderationResumeToken != null {
+              send(chat, {type: "resume_moderation", token: moderationResumeToken})
+            }
+            moderationResumeToken = value.resumeToken
+          }
+        }
+        ready = true
+        initialJoinDeadline = 0
+      } else if value.type == "ack" && ready {
+        // Private ACKs affect delivery feedback only, never transcript/history IDs.
+        let pendingSession = get(pendingDeliveries, value.clientId)
+        if pendingSession != null && pendingSession == serverSession && (value.status == "accepted" || value.status == "rejected") {
+          pendingDeliveries = remove(pendingDeliveries, value.clientId)
+          if value.status == "accepted" {
+            deliveryConfirmed = true
+          } else {
+            let rejection = lower(trim(str(value.reason ?? "")))
+            deliveryFailure = rejection == "muted" ? "Message not sent. You are muted." : rejection == "rate_limited" ? "Message not sent. Please slow down." : rejection == "too_long" ? "Message not sent. Your message is too long." : rejection == "" ? "Message not sent." : "Message not sent. ${capitalize(replace(rejection, "_", " "))}"
+          }
+        }
+      } else if value.type == "event" && ready {
+        // IDs increase on this ordered connection. A new session resets latestId.
+        if value.id > latestId {
+          latestId = value.id
+          if value.id > clearMark.cutoff {
+            events = ([value] + events).filter(e => e.time / 1000 >= now - 86400).take(100)
+          }
+        }
+      } else if value.type == "nick" && ready {
+        nick = value.nick
+        nickDraft = value.nick
+        preferredNick = value.nick
+        editingNick = false
+        notice = "Nickname confirmed by server."
+      } else if value.type == "presence" && ready {
+        users = value.users ?? []
+      } else if value.type == "notice" && ready {
+        serverNotices = ([{time: value.time, kind: "notice", nick: "", text: value.text}] + serverNotices).take(10)
+        notice = value.text
+      } else if value.type == "clear" && ready {
+        clearMark = {session: serverSession, cutoff: latestId}
+        events = []
+        serverNotices = []
+        notice = "Chat cleared on this device only."
+      }
+    }
+  }
+
+  on nickSubmitCount {
+    if len(keys(pendingDeliveries)) == 0 {
+      deliveryConfirmed = false
+      deliveryFailure = ""
+    }
+    let wanted = trim(nickDraft)
+    if !connected {
+      if wanted == "" {
+        notice = "Enter a nickname."
+      } else if len(match(wanted, "^([^\\s\\p{Cc}]+)$")) == 0 {
+        notice = "Use a single nickname without spaces or control characters."
+      } else {
+        preferredNick = wanted
+        nickDraft = wanted
+        editingNick = false
+        notice = "Nickname saved."
+      }
+    } else if wanted == "" {
+      notice = "Enter a nickname. The server validates it."
+    } else if wanted == nick {
+      editingNick = false
+      notice = "Nickname unchanged."
+    } else {
+      send(chat, {type: "input", text: "/nick ${wanted}"})
+      notice = "Nickname requested; awaiting server confirmation."
+    }
+  }
+
+  // Button and keyboard submission share one path; no optimistic insert or retry.
+  on submitCount {
+    let line = trim(draft)
+    if len(keys(pendingDeliveries)) == 0 {
+      deliveryConfirmed = false
+      deliveryFailure = ""
+    }
+    if line == "" {
+      notice = "Type a message or /help."
+    } else if lower(line) == "/clear" {
+      // Match the browser: /clear changes this client's cutoff, not the server.
+      clearMark = {session: serverSession, cutoff: latestId}
+      events = []
+      serverNotices = []
+      draft = ""
+      notice = "Chat cleared on this device only."
+    } else if !connected {
+      notice = "Offline. Draft kept; nothing was sent."
+    } else {
+      // Only ordinary messages and nonempty /me actions participate in ACK delivery.
+      let needsAck = !startsWith(line, "/") || (lower(first(words(line))) == "/me" && len(words(line)) > 1)
+      if needsAck {
+        deliverySequence = deliverySequence + 1
+        let clientId = "${deliveryPrefix}_${deliverySequence}"
+        pendingDeliveries = set(pendingDeliveries, clientId, serverSession)
+        // Register before sending so even an immediate ACK can be matched.
+        send(chat, {type: "input", text: line, clientId: clientId})
+      } else {
+        send(chat, {type: "input", text: line})
+        notice = "Command sent."
+      }
+      draft = ""
+    }
+  }
+
+  component TerminalText(label, tint = green, pointSize = 12) {
+    Text { text: label; font: mono; fontSize: pointSize; color: tint }
+  }
+
+  Column {
+    fill: true
+    gap: 4
+    padding: 6
+    border: 1
+    borderColor: green
+    radius: 0
+    Row {
+      gap: 3
+      align: center
+      Text { text: "OMACHAT // #general"; font: mono; fontSize: 12; color: accent; maxLines: 1; weight: 1 }
+    }
+    Box { fill: width; height: 1; background: green }
+    Row {
+      fill: width
+      gap: 4
+      align: center
+      Text { text: connected ? "CONNECTED" : "OFFLINE"; font: mono; fontSize: 9.5; color: cyan; maxLines: 1; weight: 1 }
+      if connected {
+        Text { text: "${len(users)} ONLINE"; font: mono; fontSize: 9.5; color: cyan; maxLines: 1 }
+      }
+    }
+    Column {
+      gap: 3
+      weight: 1
+      // Take the latest entries, then restore oldest-to-newest display order.
+      for message in messages.filter(m => m.kind != "system").take(3).reverse() {
+        Text {
+          font: mono
+          fontSize: 11.5
+          color: green
+          maxLines: 1
+          spans: [
+            {text: "[${message.time}] ", color: cyan},
+            {text: message.kind == "chat" ? "${message.nick}: " : "", color: message.nick == "pixel" ? yellow : message.nick == "tux" ? magenta : accent},
+            {text: message.body, color: green}
+          ]
+        }
+      }
+    }
+    Row {
+      gap: 4
+      align: center
+      Text { text: "> █"; font: mono; fontSize: 11.5; color: accent; weight: 1; maxLines: 1 }
+      Text { text: "[ open chat ]"; font: mono; fontSize: 10.5; color: accent; maxLines: 1 }
+    }
+  }
+
+  screen {
+    // The launcher supplies the single title row and working X button.
+    title: "OMACHAT // #general"
+    Column {
+      fill: true
+      background: #000000
+      padding: 6
+      gap: 5
+      Box { fill: width; height: 1; background: green }
+      Flow {
+        gap: 6
+        align: center
+        Text { text: connected ? "[CONNECTED]" : "[OFFLINE]"; font: mono; fontSize: 11; color: cyan }
+        // Transparent tap padding surrounds a small filled terminal label.
+        Row {
+          radius: 0
+          ripple: false
+          padding: [6, 8]
+          onTap: {
+            if connectionRequested {
+              connectionRequested = false
+            } else {
+              ready = false
+              restoreAttempted = false
+              users = []
+              notice = "Connecting to OmaChat..."
+              connectionRequested = true
+            }
+          }
+          Text {
+            text: connectionRequested ? "[ DISCONNECT ]" : "[ CONNECT ]"
+            font: mono
+            fontSize: 11
+            color: #000000
+            background: green
+            radius: 0
+            padding: [3, 1]
+          }
+        }
+        if connected {
+          Text { text: "${len(users)} ONLINE"; font: mono; fontSize: 11; color: cyan }
+        }
+      }
+      Flow {
+        gap: 6
+        Text { text: connected ? "NICK: ${nick}" : "PREFERRED: ${preferredNick == "" ? "unset" : preferredNick}"; font: mono; fontSize: 12; color: accent }
+        Text {
+          text: "[change]"
+          font: mono
+          fontSize: 11
+          color: accent
+          padding: [3, 5]
+          onTap: { nickDraft = preferredNick != "" ? preferredNick : nick == "" ? "guest" : nick; editingNick = !editingNick }
+        }
+      }
+      if editingNick {
+        Row {
+          align: center
+          gap: 4
+          Input {
+            text: nickDraft
+            placeholder: "Guest nickname"
+            color: green
+            fontSize: 13
+            weight: 1
+            focus: editingNick
+            onChange: nickDraft = value
+            onSubmit: { nickDraft = value; nickSubmitCount = nickSubmitCount + 1 }
+          }
+          Text {
+            text: "[set]"
+            font: mono
+            fontSize: 12
+            color: validNick ? accent : muted
+            padding: [5, 10]
+            onTap: nickSubmitCount = nickSubmitCount + 1
+          }
+          if nick != "" {
+            Text { text: "[cancel]"; font: mono; fontSize: 11; color: cyan; padding: [3, 10]; onTap: editingNick = false }
+          }
+        }
+      }
+
+      // Native reverse layout anchors the latest item at scroll position zero.
+      // Top arrangement keeps short conversations at the top, without a gap.
+      // OWL follows every list change; conditional following needs launcher support.
+      // Text/spans intentionally have no link handlers or URL actions.
+      // Keep the transcript mounted underneath this opaque users panel.
+      // Switching views does not recreate its native scrolling list.
+      Box {
+        fill: width
+        weight: 1
+        Column {
+          fill: true
+          lazy: true
+          reverse: true
+          justify: start
+          gap: 4
+          padding: 5
+          border: 1
+          borderColor: green
+          radius: 0
+          for message in messages {
+            Text {
+              onLongPress: copy(message.body)
+              font: mono
+              fontSize: 13
+              color: green
+              spans: [
+                {text: "[${message.time}] ", color: cyan, fontSize: 10.4},
+                {text: message.kind == "system" ? "*** " : message.kind == "action" ? "* ${message.nick} " : "${message.nick}: ", color: message.kind == "system" ? yellow : green},
+                {text: message.kind == "action" ? sub(message.body, len(message.nick) + 3) : message.body, color: message.kind == "system" ? yellow : green}
+              ]
+            }
+          }
+        }
+        if showingUsers {
+          Column {
+            fill: true
+            background: #000000
+            border: 1
+            borderColor: green
+            radius: 0
+            padding: 5
+            gap: 6
+            Text { text: connected ? "${len(users)} USERS ONLINE" : "USERS"; font: mono; fontSize: 13; color: accent }
+            Box { fill: width; height: 1; background: green }
+            Column {
+              fill: width
+              weight: 1
+              lazy: true
+              gap: 6
+              for onlineNick in (connected ? users : []) key onlineNick {
+                Text {
+                  text: "● ${onlineNick}${onlineNick == nick ? " (you)" : ""}"
+                  font: mono
+                  fontSize: 13
+                  color: onlineNick == nick ? accent : green
+                }
+              }
+              if !connected {
+                Text { text: "Offline — connect to see online users."; font: mono; fontSize: 13; color: cyan }
+              }
+            }
+            Text { text: "[ BACK TO CHAT ]"; font: mono; fontSize: 12; color: accent; padding: [6, 10]; onTap: showingUsers = false }
+          }
+        }
+      }
+      Row {
+        gap: 6
+        align: center
+        Text { text: connected ? statusText : "${statusText} History is not live."; font: mono; fontSize: 10; color: cyan; weight: 1 }
+        Text { text: "[ USERS ]"; font: mono; fontSize: 11; color: accent; padding: [4, 8]; onTap: showingUsers = !showingUsers }
+      }
+      Text { text: "/nick /me /users /help /clear"; font: mono; fontSize: 10; color: cyan }
+      Box { fill: width; height: 1; background: green }
+      // Outside the transcript so the input stays above the keyboard.
+      Row {
+        gap: 4
+        align: center
+        TerminalText { label: ">"; tint: accent; pointSize: 14 }
+        Input {
+          text: draft
+          placeholder: "Message #general..."
+          color: green
+          fontSize: 14
+          weight: 1
+          underline: false
+          onChange: draft = value
+          onSubmit: { draft = value; submitCount = submitCount + 1 }
+        }
+        Text { text: "[ SEND ]"; font: mono; fontSize: 12; color: connected ? accent : muted; padding: [4, 12]; onTap: submitCount = submitCount + 1 }
+      }
+    }
+  }
+}
