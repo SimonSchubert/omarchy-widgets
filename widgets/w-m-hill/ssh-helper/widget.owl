@@ -62,6 +62,7 @@ widget "ssh helper" {
   // First start on a fresh install: the ~/.ssh folder and file with the right modes, host keys, port 8022
   // when no Port is set (Android won't let apps listen below 1024), and a profile hook that gives SSH logins the
   // PATH and settings omalauncher's terminals get, snapshotted here from the launcher. Then (re)start sshd,
+  // keys only (Arch's defaults allow passwords, and the system has user alarm with the password alarm),
   // logging to a file (there's no syslog) cut to its last 500 lines, and report its last line if it didn't stay up.
   on starts {
     result = run("""
@@ -73,7 +74,7 @@ widget "ssh helper" {
       log=~/.cache/ssh-helper/sshd.log
       [ -f "$log" ] && tail -n 500 "$log" > "$log.tmp" && mv "$log.tmp" "$log"
       pkill -x sshd && sleep 0.5
-      /usr/bin/sshd -E "$log"; sleep 0.7
+      /usr/bin/sshd -E "$log" -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no; sleep 0.7
       pgrep -x sshd >/dev/null && echo ok || tail -n 1 "$log"
     """)
   }
