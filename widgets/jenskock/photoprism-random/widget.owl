@@ -1,8 +1,8 @@
 widget "photoprism random" {
   meta {
     owl: 5
-    description: "A random photo from your PhotoPrism library."
-    version: "5.0"
+    description: "A random photo from your PhotoPrism library. Tap the photo for the full image; ↻ loads another."
+    version: "5.1"
     license: "MIT"
     category: "fun"
   }
@@ -20,6 +20,7 @@ widget "photoprism random" {
 
   // The photo command reads the session file itself, so sign-in has to run it again.
   state seen = ""
+  state panel = "settings"
   when sessionText != null && sessionText != "" && sessionText != seen {
     seen = sessionText
     refresh()
@@ -102,45 +103,54 @@ def main():
         fail("no photos")
     item = photos[0]
     photo_hash = item.get("Hash") or ((item.get("Files") or [{}])[0].get("Hash"))
-    safe = "".join(c for c in str(photo_hash or "") if c.isalnum())
-    if not safe:
+    if not photo_hash:
         fail("could not load photo")
 
-    thumb = (
+    prefix = (
         "/api/v1/t/"
         + urllib.parse.quote(str(photo_hash), safe="")
         + "/"
         + urllib.parse.quote(str(preview), safe="")
-        + "/fit_720"
+        + "/"
     )
-    try:
-        jpeg = call(thumb, binary=True)
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            fail("session expired")
-        fail(f"image failed: HTTP {e.code}")
-    except urllib.error.URLError as e:
-        fail("network error: " + str(getattr(e, "reason", e)))
-    if not jpeg:
-        fail("could not load photo")
+
+    def fetch_size(size):
+        try:
+            jpeg = call(prefix + size, binary=True)
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                fail("session expired")
+            fail(f"image failed: HTTP {e.code}")
+        except urllib.error.URLError as e:
+            fail("network error: " + str(getattr(e, "reason", e)))
+        if not jpeg:
+            fail("could not load photo")
+        return jpeg
+
+    thumb_jpeg = fetch_size("fit_720")
+    full_jpeg = fetch_size("fit_3840")
 
     cache.mkdir(parents=True, exist_ok=True)
     cache.chmod(0o700)
-    dest = cache / f"{safe}.jpg"
-    tmp = cache / f".{safe}.part"
-    tmp.write_bytes(jpeg)
-    tmp.chmod(0o600)
-    os.replace(tmp, dest)
-    for old in cache.iterdir():
-        if old != dest and old.suffix in (".jpg", ".part"):
-            old.unlink()
-    print(dest)
+
+    def write_jpeg(name, data):
+        dest = cache / name
+        tmp = cache / f".{name}.part"
+        tmp.write_bytes(data)
+        tmp.chmod(0o600)
+        os.replace(tmp, dest)
+        return dest
+
+    # Fixed names so a refresh doesn't leave the tile pointing at a deleted file.
+    thumb = write_jpeg("widget.jpg", thumb_jpeg)
+    full = write_jpeg("widget-full.jpg", full_jpeg)
+    print(json.dumps({"thumb": str(thumb), "full": str(full)}))
 
 
 if __name__ == "__main__":
     main()
 PY
-""") every 30m timeout 60s status
+""") every 30m timeout 60s json status
 
   component SignIn() {
     Button {
@@ -272,29 +282,60 @@ except KeyboardInterrupt:
   } else {
     Box {
       fill: true
-      Image { src: shot.out; fit: cover; fill: true; onTap: refresh() }
+      Image {
+        src: shot.out.thumb
+        fit: cover
+        fill: true
+        onTap: {
+          panel = "photo"
+          screen()
+        }
+      }
       Box {
         align: topEnd
         padding: 6
-        Button { text: "⚙"; onTap: screen() }
+        Row {
+          gap: 6
+          Button { text: "↻"; onTap: refresh() }
+          Button {
+            text: "⚙"
+            onTap: {
+              panel = "settings"
+              screen()
+            }
+          }
+        }
       }
     }
   }
 
   screen {
-    title: "PhotoPrism"
-    Column {
-      gap: 10
-      padding: 16
-      if session.url != null && session.url != "" {
-        Text { text: session.url; style: small; maxLines: 2 }
+    title: panel == "photo" ? "" : "PhotoPrism"
+    if panel == "photo" {
+      Box {
+        fill: true
+        background: "#000000"
+        Image {
+          src: shot.ok ? shot.out.full : null
+          fit: contain
+          fill: true
+          onTap: close()
+        }
       }
-      if session.username != null && session.username != "" {
-        Text { text: session.username; style: muted }
+    } else {
+      Column {
+        gap: 10
+        padding: 16
+        if session.url != null && session.url != "" {
+          Text { text: session.url; style: small; maxLines: 2 }
+        }
+        if session.username != null && session.username != "" {
+          Text { text: session.username; style: muted }
+        }
+        SignIn {}
+        Button { text: "sign out"; onTap: run("rm -f ~/.config/photoprism-random/session.json ~/.config/photoprism-random/config.json; find ~/.cache/photoprism-random -maxdepth 1 -type f -delete 2>/dev/null; true") }
+        Button { text: "close"; onTap: close() }
       }
-      SignIn {}
-      Button { text: "sign out"; onTap: run("rm -f ~/.config/photoprism-random/session.json ~/.config/photoprism-random/config.json; find ~/.cache/photoprism-random -maxdepth 1 -type f -delete 2>/dev/null; true") }
-      Button { text: "close"; onTap: close() }
     }
   }
 }
