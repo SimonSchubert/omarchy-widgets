@@ -1,8 +1,8 @@
 widget "photoprism random" {
   meta {
-    owl: 5
-    description: "A random photo from your PhotoPrism library. Tap the photo for the full image; ↻ loads another."
-    version: "5.1"
+    owl: 9
+    description: "A random photo from your PhotoPrism library. Tap the photo for the full image; ↻ loads another. On a failed refresh the last photo stays, with ! and the error in settings."
+    version: "5.2"
     license: "MIT"
     category: "fun"
   }
@@ -21,6 +21,8 @@ widget "photoprism random" {
   // The photo command reads the session file itself, so sign-in has to run it again.
   state seen = ""
   state panel = "settings"
+  state last = null persist
+  state err = ""
   when sessionText != null && sessionText != "" && sessionText != seen {
     seen = sessionText
     refresh()
@@ -152,6 +154,23 @@ if __name__ == "__main__":
 PY
 """) every 30m timeout 60s json status
 
+  on shot first {
+    if value.ok {
+      last = value.out
+      err = ""
+    } else {
+      err = trim(value.err) != "" ? trim(value.err) : "could not load photo"
+    }
+  }
+  on shot {
+    if value.ok {
+      last = value.out
+      err = ""
+    } else {
+      err = trim(value.err) != "" ? trim(value.err) : "could not load photo"
+    }
+  }
+
   component SignIn() {
     Button {
       text: "sign in"
@@ -259,7 +278,7 @@ except KeyboardInterrupt:
       Text { text: "not signed in"; style: title }
       SignIn {}
     }
-  } else if shot == null {
+  } else if last == null && shot == null {
     Column {
       justify: center
       align: center
@@ -267,23 +286,30 @@ except KeyboardInterrupt:
       padding: 12
       Text { text: "loading…"; style: title }
     }
-  } else if !shot.ok {
+  } else if last == null {
     Column {
       justify: center
       gap: 8
       fill: true
       padding: 12
       Text { text: "photoprism"; style: muted }
-      Text { text: shot.err != "" ? shot.err : "could not load photo"; style: small; maxLines: 5 }
+      Text { text: err != "" ? err : "could not load photo"; style: small; maxLines: 5 }
       SignIn {}
       Button { text: "retry"; onTap: refresh() }
-      Button { text: "sign out"; onTap: run("rm -f ~/.config/photoprism-random/session.json ~/.config/photoprism-random/config.json; find ~/.cache/photoprism-random -maxdepth 1 -type f -delete 2>/dev/null; true") }
+      Button {
+        text: "sign out"
+        onTap: {
+          last = null
+          err = ""
+          run("rm -f ~/.config/photoprism-random/session.json ~/.config/photoprism-random/config.json; find ~/.cache/photoprism-random -maxdepth 1 -type f -delete 2>/dev/null; true")
+        }
+      }
     }
   } else {
     Box {
       fill: true
       Image {
-        src: shot.out.thumb
+        src: last.thumb
         fit: cover
         fill: true
         onTap: {
@@ -296,6 +322,16 @@ except KeyboardInterrupt:
         padding: 6
         Row {
           gap: 6
+          if err != "" {
+            Button {
+              text: "!"
+              color: red
+              onTap: {
+                panel = "settings"
+                screen()
+              }
+            }
+          }
           Button { text: "↻"; onTap: refresh() }
           Button {
             text: "⚙"
@@ -316,7 +352,7 @@ except KeyboardInterrupt:
         fill: true
         background: "#000000"
         Image {
-          src: shot.ok ? shot.out.full : null
+          src: last != null ? last.full : null
           fit: contain
           fill: true
           onTap: close()
@@ -326,6 +362,9 @@ except KeyboardInterrupt:
       Column {
         gap: 10
         padding: 16
+        if err != "" {
+          Text { text: err; style: small; color: red; maxLines: 6 }
+        }
         if session.url != null && session.url != "" {
           Text { text: session.url; style: small; maxLines: 2 }
         }
@@ -333,7 +372,15 @@ except KeyboardInterrupt:
           Text { text: session.username; style: muted }
         }
         SignIn {}
-        Button { text: "sign out"; onTap: run("rm -f ~/.config/photoprism-random/session.json ~/.config/photoprism-random/config.json; find ~/.cache/photoprism-random -maxdepth 1 -type f -delete 2>/dev/null; true") }
+        Button { text: "retry"; onTap: refresh() }
+        Button {
+          text: "sign out"
+          onTap: {
+            last = null
+            err = ""
+            run("rm -f ~/.config/photoprism-random/session.json ~/.config/photoprism-random/config.json; find ~/.cache/photoprism-random -maxdepth 1 -type f -delete 2>/dev/null; true")
+          }
+        }
         Button { text: "close"; onTap: close() }
       }
     }
