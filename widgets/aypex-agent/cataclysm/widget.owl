@@ -1,0 +1,28 @@
+widget "cataclysm" {
+  // Cataclysm: Dark Days Ahead, the ASCII (curses) build, live in the tile.
+  // Tap the tile to give it the keyboard; tap outside it or press Back to let go.
+  // The game wants at least 80x24 characters, hence the wide tile and the smallish font
+  // (6 pt, raised from 5 for readability; the tile is already full width, so a bigger font risks dropping under 80 columns).
+  // Saves live in the game's own folder, so quitting and restarting picks up where you left off.
+  size: 6x6
+  minSize: 6x5
+  padding: 0
+
+  meta {
+    owl: 2
+    description: "Cataclysm: Dark Days Ahead, the ASCII roguelike, playing in a live terminal on the home screen. Tap to play, Back to let go; quitting offers a restart"
+    version: "1.1"
+    license: "MIT"
+    category: "games"
+  }
+
+  requires { pacman: ["cataclysm-dda"] }
+
+  // The theme's background behind the see-through terminal keeps the map readable over wallpaper.
+  Terminal {
+    fontSize: 6
+    background: alpha(background, 0.85)
+    // Not installed: say so and leave a shell. Too small: after the game gives up, say how big the tile is.
+    command: 'clear; if ! command -v cataclysm >/dev/null; then echo; echo "  Cataclysm: Dark Days Ahead is not installed."; echo "  Install it from the widget, or run:  sudo pacman -S cataclysm-dda"; echo; exec bash; fi; cataclysm; c=$(tput cols); l=$(tput lines); if [ "$c" -lt 80 ] || [ "$l" -lt 24 ]; then echo; echo "  This tile is $c x $l characters; Cataclysm needs 80 x 24."; echo "  Make the tile bigger, then restart it."; exec bash; fi'
+  }
+}
