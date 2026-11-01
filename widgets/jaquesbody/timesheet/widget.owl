@@ -1,7 +1,7 @@
 widget "timesheet" {
   meta {
     owl: 10
-    description: "A weekly timesheet with an optional default lunch break, clock-in prompts at each scheduled start and end time, and a running balance that turns into holidays."
+    description: "A weekly timesheet: clock-in prompts at each scheduled start and end, an optional default lunch break, a graph of the running balance, a holiday track with whole and half days logged from a calendar, and exports to Markdown, text or CSV."
     version: "1.4"
     license: "MIT"
     category: "productivity"
