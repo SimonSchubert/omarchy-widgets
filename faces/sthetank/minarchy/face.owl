@@ -1,7 +1,7 @@
 face "minarchy" {
   // Distraction-free home page inspired by Olauncher. Heavily edited version based on minimal by Simon Schubert.
 
-  meta { owl: 13; description: "Olauncher-inspired minimalist home page (based on minimal by Simon Schubert) with a customizable text app list, custom app renaming & emojis, settings sheet, and 20 languages"; version: "1.2"; license: "MIT"; category: "productivity" }
+  meta { owl: 13; description: "Olauncher-inspired minimalist home page (based on minimal by Simon Schubert) with a customizable text app list, custom app renaming & emojis, settings sheet, and 20 languages"; version: "1.3"; license: "MIT"; category: "productivity" }
   requires { pacman: ["ttf-jetbrains-mono"] }
 
   state showStatusBar = false persist
@@ -179,10 +179,11 @@ face "minarchy" {
   }
 
   component SlotItem(slotKey, i) {
-    let itemApp = (apps ?? []).find(a => a.key == slotKey || a.package == slotKey)
+    let slotPkg = split(slotKey ?? "", "/")[0]
+    let itemApp = (apps ?? []).find(a => a.key == slotKey || a.package == slotKey) ?? (apps ?? []).find(a => a.package == slotPkg && (contains(slotKey, "@") ? contains(a.key, "@") : !contains(a.key, "@"))) ?? (apps ?? []).find(a => a.package == slotPkg)
     let badge = n.available && itemApp != null ? len(n.items.filter(nItem => nItem.package == itemApp.package)) : 0
     let defaultName = itemApp != null ? itemApp.name : t[0]
-    let label = (renames ?? {})[slotKey] ?? defaultName
+    let label = (renames ?? {})[slotKey] ?? ((itemApp != null && (renames ?? {})[itemApp.key] != null) ? (renames ?? {})[itemApp.key] : defaultName)
 
     Text {
       spans: [label, badge > 0 ? {text: "  ${badge}", color: accent, fontSize: 15, fontWeight: 400} : ""]
@@ -362,8 +363,9 @@ face "minarchy" {
   // Action sheet for long-press on an app slot
   component ActionSheet() {
     let targetKey = activeSlots[actionSlot]
-    let itemApp = (apps ?? []).find(a => a.key == targetKey || a.package == targetKey)
-    let targetName = (renames ?? {})[targetKey] ?? (itemApp != null ? itemApp.name : t[0])
+    let targetPkg = split(targetKey ?? "", "/")[0]
+    let itemApp = (apps ?? []).find(a => a.key == targetKey || a.package == targetKey) ?? (apps ?? []).find(a => a.package == targetPkg && (contains(targetKey, "@") ? contains(a.key, "@") : !contains(a.key, "@"))) ?? (apps ?? []).find(a => a.package == targetPkg)
+    let targetName = (renames ?? {})[targetKey] ?? ((itemApp != null && (renames ?? {})[itemApp.key] != null) ? (renames ?? {})[itemApp.key] : (itemApp != null ? itemApp.name : t[0]))
     Column {
       fill: true
       padding: wide ? [40, 24] : [24, 20]
