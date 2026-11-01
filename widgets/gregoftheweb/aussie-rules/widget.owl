@@ -1,0 +1,421 @@
+widget "aussie-rules" {
+  meta {
+    owl: 9
+    description: "Your AFL club first - ladder spot, last and next game - then every round's scores and the ladder. Tap for the finals: wildcard round, bracket and the premiers"
+    version: "1.0.0"
+    license: "MIT"
+    category: "sport"
+  }
+  size: 6x4
+  minSize: 3x3
+
+  source now = clock every 1m
+
+  // The season runs March to September; until the next one starts, this shows the last one.
+  let year = now ? int(fmtTime(now, "yyyy")) - (int(fmtTime(now, "M")) < 3 ? 1 : 0) : null
+
+  // Squiggle's free AFL API: every game of the season (finals too) and the home-and-away ladder.
+  // It asks each app to say who it is in its User-Agent.
+  source games = http(year ? "https://api.squiggle.com.au/?q=games;year=${int(year)}" : null, {"User-Agent": "omalauncher aussie-rules widget (github.com/SimonSchubert/omarchy-widgets)"}) every 10m json timeout 20s
+  source table = http(year ? "https://api.squiggle.com.au/?q=standings;year=${int(year)}" : null, {"User-Agent": "omalauncher aussie-rules widget (github.com/SimonSchubert/omarchy-widgets)"}) every 30m json timeout 20s
+
+  state view = "team"
+  state myTeam = null persist   // a Squiggle team id, picked with the gear; the premiers until then
+  state rdPick = null           // the scores tab's round, as an index into rounds; the current one while null
+
+  // The eighteen clubs by Squiggle's ids, with the names of their logos there.
+  let teams = [
+    {id: 1, ab: "ADE", full: "Adelaide", logo: "Adelaide"},
+    {id: 2, ab: "BRI", full: "Brisbane Lions", logo: "Brisbane"},
+    {id: 3, ab: "CAR", full: "Carlton", logo: "Carlton"},
+    {id: 4, ab: "COL", full: "Collingwood", logo: "Collingwood"},
+    {id: 5, ab: "ESS", full: "Essendon", logo: "Essendon"},
+    {id: 6, ab: "FRE", full: "Fremantle", logo: "Fremantle"},
+    {id: 7, ab: "GEE", full: "Geelong", logo: "Geelong"},
+    {id: 8, ab: "GCS", full: "Gold Coast", logo: "GoldCoast"},
+    {id: 9, ab: "GWS", full: "GWS Giants", logo: "Giants"},
+    {id: 10, ab: "HAW", full: "Hawthorn", logo: "Hawthorn"},
+    {id: 11, ab: "MEL", full: "Melbourne", logo: "Melbourne"},
+    {id: 12, ab: "NOR", full: "North Melbourne", logo: "NorthMelbourne"},
+    {id: 13, ab: "POR", full: "Port Adelaide", logo: "PortAdelaide"},
+    {id: 14, ab: "RIC", full: "Richmond", logo: "Richmond"},
+    {id: 15, ab: "STK", full: "St Kilda", logo: "StKilda"},
+    {id: 16, ab: "SYD", full: "Sydney", logo: "Sydney"},
+    {id: 17, ab: "WCE", full: "West Coast", logo: "WestCoast"},
+    {id: 18, ab: "WBD", full: "Western Bulldogs", logo: "Bulldogs"}
+  ]
+  // Looked up by the id (teams are in id order), a final's is_final or a ladder spot.
+  // Squiggle's is_final: 7 the wildcard round, 3 a qualifying final, 2 an elimination final, 4 semi, 5 preliminary, 6 grand.
+  let finS = ["", "", "EF", "QF", "SF", "PF", "GF", "WC"]
+  let finL = ["", "", "Elimination Final", "Qualifying Final", "Semi-Final", "Preliminary Final", "Grand Final", "Wildcard Final"]
+  let ords = ["", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th", "13th", "14th", "15th", "16th", "17th", "18th"]
+
+  let all = (games.games ?? []).sortBy(g => g.unixtime)
+  let ladder = (table.standings ?? []).sortBy(s => s.rank)
+
+  // Where the season is: home and away, the finals, or done with a premier.
+  let gf = all.find(g => g.is_grand_final == 1)
+  let over = gf && gf.complete == 100
+  let premier = over ? gf.winnerteamid : null
+  let finals = all.filter(g => g.is_final > 0)
+  let inFinals = !over && any(finals, g => g.complete > 0)
+  let early = !over && !inFinals && (ladder[0].played ?? 0) < 8
+
+  let me = myTeam ?? premier ?? ladder[0].id ?? 1
+  let meL = ladder.find(s => s.id == me)
+  let rec = meL ? (meL.draws > 0 ? "${meL.wins}-${meL.losses}-${meL.draws}" : "${meL.wins}-${meL.losses}") : "…"
+  let mine = all.filter(g => g.hteamid == me || g.ateamid == me)
+  let lastGame = mine.filter(g => g.complete == 100).last()
+  let nextGame = mine.find(g => g.complete < 100)
+  let myFinals = finals.filter(g => g.hteamid == me || g.ateamid == me)
+  let myLastFinal = myFinals.last()
+  let finish = !myLastFinal ? "Missed the finals" : myLastFinal.winnerteamid == me ? (myLastFinal.is_grand_final == 1 ? "Premiers" : "Still alive") : myLastFinal.is_grand_final == 1 ? "Runners-up: lost the Grand Final" : "Out in the ${finL[myLastFinal.is_final]}"
+  let live = all.filter(g => g.complete > 0 && g.complete < 100)
+
+  // The rounds, Opening Round through the Grand Final; the current one is the first with a game to play.
+  let rounds = sort(unique(all.map(g => g.round)))
+  let curRound = (all.find(g => g.complete < 100) ?? all.last()).round
+  let curIdx = rounds.indexOf(curRound)
+  let rdIdx = rdPick ?? curIdx
+  let rdGames = all.filter(g => g.round == rounds[rdIdx]).sortBy(g => (g.complete > 0 && g.complete < 100 ? 0 : 1) * 10000000000 + g.unixtime)
+  let rdFrom = fmtTime(rdGames[0].unixtime, "d MMM")
+  let rdTo = fmtTime(rdGames.last().unixtime, "d MMM")
+  let finRounds = sort(unique(finals.map(g => g.round)))
+
+  // From 2026 the top ten play finals: 7th hosts 10th and 8th hosts 9th in the wildcard round,
+  // while 1st-4th meet in the qualifying finals (1 v 4, 2 v 3) and 5th and 6th wait to host
+  // the wildcard winners in the elimination finals (5th the winner of 7 v 10, 6th of 8 v 9).
+  let tenth = ladder[9]
+  let behind = (tenth.pts ?? 0) - (meL.pts ?? 0)
+  let left = 23 - (meL.played ?? 0)
+
+  component Badge(id, px = 18) {
+    let t = teams.find(x => x.id == id)
+    if t {
+      Image { src: "https://squiggle.com.au/wp-content/themes/squiggle/assets/images/${enc(t.logo)}.png"; size: px; fit: contain }
+    }
+  }
+
+  // A game as the AFL lists it, home side first.
+  component GameRow(g) {
+    let isLive = g.complete > 0 && g.complete < 100
+    let final = g.complete == 100
+    let hWon = final && g.winnerteamid == g.hteamid
+    let aWon = final && g.winnerteamid == g.ateamid
+    let wide = (tileWidth ?? 240) >= 340
+    let px = wide ? 18 : 14
+    let scW = wide ? 30 : 24
+    let stW = wide ? 112 : 40
+    let gap = wide ? 8 : 4
+    let ctrW = 2 * scW + stW + 12
+    let tag = finS[g.is_final]
+    let status = isLive ? g.timestr : final ? (tag != "" ? "${tag} · FT" : "FT") : fmtTime(g.unixtime, wide ? "EEE d/M h:mm a" : "d/M h:mma")
+
+    Row {
+      gap: gap
+      Badge { id: g.hteamid; px: px }
+      Text { text: teams[g.hteamid - 1].ab; style: small; weight: 1; maxLines: 1; bold: g.hteamid == me; color: final && !hWon ? muted : foreground }
+      if !final && !isLive {
+        Text { text: tag != "" && wide ? "${tag} · ${status}" : status; style: small; width: ctrW; align: center; color: muted; maxLines: 1 }
+      } else {
+        Row {
+          width: ctrW; gap: 0; align: center
+          Text { text: "${g.hscore}"; style: small; width: scW; align: end; bold: hWon; color: isLive ? accent : hWon ? foreground : muted }
+          Box { width: 6 }
+          Text { text: status; style: small; width: stW; align: center; color: isLive ? accent : muted; maxLines: 1 }
+          Box { width: 6 }
+          Text { text: "${g.ascore}"; style: small; width: scW; align: start; bold: aWon; color: isLive ? accent : aWon ? foreground : muted }
+        }
+      }
+      Text { text: teams[g.ateamid - 1].ab; style: small; weight: 1; maxLines: 1; align: end; bold: g.ateamid == me; color: final && !aWon ? muted : foreground }
+      Badge { id: g.ateamid; px: px }
+    }
+  }
+
+  // Last or next game from your club's side: the opponent, the result or the bounce, and where.
+  component MyGame(label, g) {
+    let home = g.hteamid == me
+    let opp = home ? g.ateamid : g.hteamid
+    let at = home ? "v" : "@"
+    let res = g.winnerteamid == me ? "W" : g.winnerteamid == opp ? "L" : "D"
+    let score = home ? "${g.hscore}–${g.ascore}" : "${g.ascore}–${g.hscore}"
+    let what = g.is_final > 0 ? finL[g.is_final] : g.roundname
+    Column {
+      gap: 2
+      Text { text: label; style: label; color: muted }
+      Row {
+        gap: 10
+        Badge { id: opp; px: 28 }
+        Column {
+          weight: 1
+          if g.complete == 100 {
+            Text { text: "${res} ${score}  ${at} ${teams[opp - 1].full}"; maxLines: 1; bold: true; color: res == "W" ? green : res == "L" ? red : foreground }
+            Text { text: "${what} · ${fmtTime(g.unixtime, 'EEE d MMM')}"; style: small; color: muted; maxLines: 1 }
+          } else if g.complete > 0 {
+            Text { text: "${score}  ${at} ${teams[opp - 1].full}"; maxLines: 1; bold: true; color: accent }
+            Text { text: "${what} · ${g.timestr}"; style: small; color: accent; maxLines: 1 }
+          } else {
+            Text { text: "${at} ${teams[opp - 1].full}"; maxLines: 1 }
+            Text { text: "${what} · ${fmtTime(g.unixtime, 'EEE d MMM · h:mm a')} · ${g.venue}"; style: small; color: muted; maxLines: 1 }
+          }
+        }
+      }
+    }
+  }
+
+  component LadderRow(s) {
+    Row {
+      gap: 6; padding: [4, 1, 4, 1]; radius: 4
+      background: s.id == me ? alpha(accent, 0.2) : rgb(0, 0, 0, 0)
+      Text { text: "${s.rank}"; width: 22; style: small; color: muted }
+      Badge { id: s.id; px: 16 }
+      Text { text: teams[s.id - 1].ab; weight: 1; style: small; bold: s.id == me }
+      Text { text: s.draws > 0 ? "${s.wins}-${s.losses}-${s.draws}" : "${s.wins}-${s.losses}"; width: 54; style: small; align: end }
+      Text { text: "${s.pts}"; width: 30; style: small; bold: true; align: end }
+      Text { text: "${round(s.percentage, 1)}%"; width: 56; style: small; align: end; color: s.percentage >= 100 ? green : red }
+    }
+  }
+
+  // A final on the playoff screen: its kind, both clubs with their ladder spots, and the score.
+  component FinalRow(g) {
+    let fin = g.complete == 100
+    let hWon = fin && g.winnerteamid == g.hteamid
+    let aWon = fin && g.winnerteamid == g.ateamid
+    Row {
+      gap: 8; padding: [6, 1, 6, 1]; radius: 6
+      background: g.hteamid == me || g.ateamid == me ? alpha(accent, 0.2) : rgb(0, 0, 0, 0)
+      Text { text: finS[g.is_final]; width: 30; style: small; color: muted }
+      Text { text: "${(ladder.find(s => s.id == g.hteamid) ?? {}).rank ?? ''}"; width: 20; style: small; color: muted; align: end }
+      Badge { id: g.hteamid; px: 22 }
+      Text { text: teams[g.hteamid - 1].ab; weight: 1; bold: hWon; color: fin && !hWon ? muted : foreground }
+      if fin || g.complete > 0 {
+        Text { text: "${g.hscore} – ${g.ascore}"; width: 86; align: center; color: g.complete < 100 ? accent : foreground }
+      } else {
+        Text { text: fmtTime(g.unixtime, "EEE d/M"); width: 86; align: center; style: small; color: muted }
+      }
+      Text { text: teams[g.ateamid - 1].ab; weight: 1; align: end; bold: aWon; color: fin && !aWon ? muted : foreground }
+      Badge { id: g.ateamid; px: 22 }
+      Text { text: "${(ladder.find(s => s.id == g.ateamid) ?? {}).rank ?? ''}"; width: 20; style: small; color: muted }
+    }
+  }
+
+  // A final as the ladder sets it up today, before it's played.
+  component ProjRow(tag, a, b = null, bText = null) {
+    Row {
+      gap: 8; padding: [6, 1, 6, 1]; radius: 6
+      background: ladder[a - 1].id == me || ladder[(b ?? 1) - 1].id == me && b ? alpha(accent, 0.2) : rgb(0, 0, 0, 0)
+      Text { text: tag; width: 30; style: small; color: muted }
+      Text { text: "${a}"; width: 20; style: small; color: muted; align: end }
+      Badge { id: ladder[a - 1].id; px: 22 }
+      Text { text: teams[ladder[a - 1].id - 1].ab; weight: 1; bold: ladder[a - 1].id == me }
+      Text { text: "v"; width: 20; align: center; color: muted }
+      if b {
+        Text { text: teams[ladder[b - 1].id - 1].ab; weight: 1; align: end; bold: ladder[b - 1].id == me }
+        Badge { id: ladder[b - 1].id; px: 22 }
+        Text { text: "${b}"; width: 20; style: small; color: muted }
+      } else {
+        Text { text: bText; weight: 1; align: end; style: small; color: muted; maxLines: 1 }
+      }
+    }
+  }
+
+  onTap: screen()
+
+  Column {
+    Row {
+      Text { text: "Aussie Rules"; style: title; weight: 1; maxLines: 1 }
+      if count(live) > 0 {
+        Text { text: "${count(live)} live"; style: small; color: accent; width: 70; align: end; bold: true }
+      } else if over && (tileWidth ?? 240) >= 340 {
+        Text { text: "season over"; style: small; color: muted; width: 90; align: end }
+      } else if !over {
+        Text { text: now ? fmtTime(now, "EEE d") : ""; style: small; color: muted; width: 70; align: end }
+      }
+      Button { text: "⚙"; width: 40; color: view == "settings" ? accent : muted; onTap: view = view == "settings" ? "team" : "settings" }
+    }
+    Row {
+      Button { text: lower(teams[me - 1].ab); weight: 1; color: view == "team" ? accent : muted; onTap: view = "team" }
+      Button { text: "scores"; weight: 1; color: view == "scores" ? accent : muted; onTap: view = "scores" }
+      Button { text: "ladder"; weight: 1; color: view == "ladder" ? accent : muted; onTap: view = "ladder" }
+    }
+    if view == "scores" && count(rounds) > 0 {
+      Row {
+        Button { text: "‹"; width: 48; color: rdIdx > 0 ? foreground : muted; onTap: { if rdIdx > 0 { rdPick = rdIdx - 1 } } }
+        Box {
+          weight: 1
+          onTap: rdPick = null
+          Column {
+            Text { text: rdGames[0].roundname ?? "…"; align: center; color: rdIdx == curIdx ? accent : foreground; maxLines: 1 }
+            Text { text: "${rdFrom == rdTo ? rdFrom : rdFrom + ' – ' + rdTo}${rdIdx == curIdx ? (over ? ' · last of the season' : ' · this round') : ''}"; style: small; align: center; color: muted; maxLines: 1 }
+          }
+        }
+        Button { text: "›"; width: 48; color: rdIdx < count(rounds) - 1 ? foreground : muted; onTap: { if rdIdx < count(rounds) - 1 { rdPick = rdIdx + 1 } } }
+      }
+    }
+    Column {
+      weight: 1
+      scroll: true
+      if view == "team" {
+        Row {
+          gap: 10
+          Badge { id: me; px: 36 }
+          Text { text: teams[me - 1].full; style: title; weight: 1; maxLines: 1 }
+        }
+        if meL {
+          Text { text: "${ords[meL.rank]} · ${rec} · ${meL.pts} pts · ${round(meL.percentage, 1)}%"; color: muted; maxLines: 1 }
+        } else {
+          Text { text: "…"; color: muted }
+        }
+        if over {
+          if premier == me {
+            Text { text: "🏆 ${year} PREMIERS"; bold: true; color: green }
+          } else {
+            Text { text: "${year}: ${finish}. ${teams[premier - 1].full} won the flag."; style: small; color: muted; maxLines: 2 }
+          }
+        }
+        Box { height: 6 }
+        if lastGame { MyGame { label: "last game"; g: lastGame } }
+        Box { height: 6 }
+        if nextGame {
+          MyGame { label: nextGame.complete > 0 ? "live now" : "next game"; g: nextGame }
+        } else if over {
+          Text { text: "Season over: see you in March"; style: small; color: muted }
+        } else if inFinals && myLastFinal.winnerteamid != me {
+          Text { text: "Season over for ${teams[me - 1].full}"; style: small; color: muted }
+        }
+      } else if view == "settings" {
+        Text { text: "your club"; style: label; color: muted }
+        Grid {
+          columns: 3; gap: 4
+          for t in teams key t.id {
+            Box {
+              padding: 4; radius: 6
+              background: t.id == me ? alpha(accent, 0.25) : rgb(0, 0, 0, 0)
+              onTap: { myTeam = t.id; view = "team" }
+              Row { gap: 6; Badge { id: t.id; px: 18 }; Text { text: t.ab; style: small } }
+            }
+          }
+        }
+      } else if view == "scores" {
+        if count(rdGames) == 0 {
+          Text { text: "loading…"; style: small; color: muted }
+        } else {
+          for g in rdGames key g.id { GameRow { g: g } }
+        }
+      } else {
+        // One ladder of eighteen: the top six go straight to the finals, 7th to 10th to the wildcard round.
+        for s in ladder key s.id {
+          if s.rank == 1 { Text { text: "top 6: straight into the finals"; style: label; color: muted; padding: [0, 2, 0, 2] } }
+          if s.rank == 7 { Text { text: "7th–10th: wildcard round"; style: label; color: muted; padding: [0, 6, 0, 2] } }
+          if s.rank == 11 { Text { text: "outside the ten"; style: label; color: muted; padding: [0, 6, 0, 2] } }
+          LadderRow { s: s }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "AFL finals"
+    Column {
+      scroll: true
+      gap: 6
+      if over {
+        // The season's done: the premiers, the Grand Final, and how your club's year ended.
+        Row {
+          gap: 14
+          Badge { id: premier; px: 72 }
+          Column {
+            weight: 1
+            Text { text: "${year} PREMIERS"; style: label; color: accent }
+            Text { text: teams[premier - 1].full; style: title; maxLines: 1 }
+            Text { text: gf.winnerteamid == gf.hteamid ? "${gf.hgoals}.${gf.hbehinds} (${gf.hscore}) d ${teams[gf.ateamid - 1].full} ${gf.agoals}.${gf.abehinds} (${gf.ascore})" : "${gf.agoals}.${gf.abehinds} (${gf.ascore}) d ${teams[gf.hteamid - 1].full} ${gf.hgoals}.${gf.hbehinds} (${gf.hscore})" }
+            Text { text: "Grand Final · ${gf.venue} · ${fmtTime(gf.unixtime, 'EEE d MMM', 'Australia/Melbourne')} · by ${abs(gf.hscore - gf.ascore)} points"; style: small; color: muted; maxLines: 2 }
+          }
+        }
+        Box { height: 6 }
+        Row {
+          gap: 12
+          Badge { id: me; px: 36 }
+          Column {
+            weight: 1
+            if premier == me {
+              Text { text: "${teams[me - 1].full}: PREMIERS"; style: title; color: green }
+            } else if !myLastFinal {
+              Text { text: "${teams[me - 1].full}: missed the finals"; style: title; color: red }
+            } else {
+              Text { text: "${teams[me - 1].full}: ${finish}"; style: title; color: myLastFinal.is_grand_final == 1 ? foreground : red }
+            }
+            Text { text: meL ? "Finished ${ords[meL.rank]} on the ladder · ${rec} · ${round(meL.percentage, 1)}%" : "…"; color: muted }
+          }
+        }
+        if !myLastFinal && meL && meL.rank > 10 {
+          Text { text: "${(tenth.pts ?? 0) - (meL.pts ?? 0)} points short of 10th (${teams[tenth.id - 1].full}). There's always next year." }
+        }
+      } else if early {
+        Box { height: 40 }
+        Text { text: "Too early for finals talk, mate - come back after round 8"; style: title; align: center }
+      } else if inFinals {
+        Text { text: "Finals under way"; style: title; color: accent }
+        Row {
+          gap: 12
+          Badge { id: me; px: 36 }
+          Column {
+            weight: 1
+            Text { text: "${teams[me - 1].full}: ${myLastFinal ? (myLastFinal.complete < 100 ? 'playing the ' + finL[myLastFinal.is_final] : myLastFinal.winnerteamid == me ? 'through the ' + finL[myLastFinal.is_final] : 'out in the ' + finL[myLastFinal.is_final]) : 'missed the finals'}"; style: title }
+            Text { text: meL ? "${ords[meL.rank]} on the ladder" : "…"; color: muted }
+          }
+        }
+      } else {
+        // Home and away: where your club would land if the finals started today.
+        Row {
+          gap: 12
+          Badge { id: me; px: 44 }
+          Column {
+            weight: 1
+            if !meL {
+              Text { text: "${teams[me - 1].ab}: loading…"; style: title }
+            } else if meL.rank <= 6 {
+              Text { text: "${teams[me - 1].full} are IN: ${ords[meL.rank]}, a week-one final"; style: title; color: green }
+            } else if meL.rank <= 10 {
+              Text { text: "${teams[me - 1].full} are IN: ${ords[meL.rank]}, the wildcard round"; style: title; color: green }
+            } else {
+              Text { text: "${teams[me - 1].full} are OUT: ${ords[meL.rank]}"; style: title; color: red }
+            }
+            Text { text: "${meL.pts ?? 0} pts · ${round(meL.percentage ?? 0, 1)}% · ${left} games left"; color: muted }
+          }
+        }
+        if meL.rank <= 4 {
+          Text { text: "Qualifying final against ${teams[ladder[4 - meL.rank].id - 1].full} (${ords[5 - meL.rank]}): win and it's a week off and a home preliminary final; lose and there's still a semi-final." }
+        } else if meL.rank <= 6 {
+          Text { text: "A week off while the wildcard round is played, then an elimination final at home against the winner of ${meL.rank == 5 ? '7th v 10th' : '8th v 9th'}." }
+        } else if meL.rank <= 10 {
+          Text { text: "Wildcard final against ${teams[ladder[16 - meL.rank].id - 1].full} (${ords[17 - meL.rank]}), ${meL.rank <= 8 ? 'at home' : 'away'}: win and it's an elimination final against ${meL.rank == 7 || meL.rank == 10 ? '5th' : '6th'}." }
+        } else if meL {
+          Text { text: "To get in: ${behind} points (${behind / 4 == int(behind / 4) ? int(behind / 4) : round(behind / 4, 1)} wins) behind ${teams[tenth.id - 1].full} in 10th, with ${left} to play." }
+        }
+      }
+
+      // The bracket, round by round, as it was played; or as the ladder sets it up today.
+      if over || inFinals {
+        for r in (over ? finRounds.reverse() : finRounds) {
+          Box { height: 10 }
+          Text { text: finals.find(g => g.round == r).roundname; style: title }
+          for g in finals.filter(g => g.round == r) key g.id { FinalRow { g: g } }
+        }
+      } else if !early && count(ladder) >= 10 {
+        Box { height: 10 }
+        Text { text: "If the finals started today"; style: title }
+        Text { text: "wildcard round"; style: small; color: muted; padding: [0, 4, 0, 0] }
+        ProjRow { tag: "WC"; a: 7; b: 10 }
+        ProjRow { tag: "WC"; a: 8; b: 9 }
+        Text { text: "finals week 1"; style: small; color: muted; padding: [0, 4, 0, 0] }
+        ProjRow { tag: "QF"; a: 1; b: 4 }
+        ProjRow { tag: "QF"; a: 2; b: 3 }
+        ProjRow { tag: "EF"; a: 5; bText: "winner 7 v 10" }
+        ProjRow { tag: "EF"; a: 6; bText: "winner 8 v 9" }
+        Text { text: "Then the semi-finals (QF losers host EF winners), preliminary finals and the Grand Final at the MCG."; style: small; color: muted }
+      }
+      Button { text: "close"; onTap: close() }
+    }
+  }
+}
