@@ -46,19 +46,29 @@ The widget language is documented in [docs/LANGUAGE.md](docs/LANGUAGE.md).
 An app is an OWL file that starts with `app "name" { }` instead of `widget`: the nodes at its top
 are the whole full-screen view, and it has no tile, so no `size`. It goes at
 `apps/<your GitHub username, lowercase>/<name>/app.owl`, follows the same steps and rules as a
-widget, needs `meta { owl: 8 }`, and should have an `icon`: an SVG in the file, drawn in
-`currentColor` so it takes the user's theme accent, or a PNG embedded as an `asset`. The launcher
-shows it standalone on the theme's background; see the Apps section of the launcher's widget
-README for the style the store's apps share. A game or a view with a header of its own can leave
+widget, needs `meta { owl: 8 }`, and should have an `icon`: an SVG in the file, or a PNG embedded as an `asset`. The launcher draws no
+frame around it, so like the store's other apps it's a colored picture on a rounded tile of its own:
+a 256×256 `viewBox` with a `rx="56"` rect first, one big subject in flat fills of a few colors, with
+light and shadow, and no text. The launcher's docs/apps.md has the details. A game or a view with a header of its own can leave
 the window's title row out with `title: ""`; launchers before that show an empty title row instead:
 
 ```owl
 app "notes" {
   meta { owl: 8; description: "Quick notes that stay on the phone"; version: "1.0"; license: "MIT"; category: "productivity" }
   title: "notes"
-  icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M11 5h18l9 9v29H11z"/>
-    <path d="M29 5v9h9M17 24h15M17 32h10"/>
+  icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+    <rect width="256" height="256" rx="56" fill="#24283B"/>
+    <rect x="70" y="58" width="128" height="164" rx="14" fill="#16161E" fill-opacity="0.5"/>
+    <rect x="64" y="50" width="128" height="164" rx="14" fill="#F4E3A1"/>
+    <path d="M64 64a14 14 0 0 1 14-14h100a14 14 0 0 1 14 14v18H64z" fill="#E0AF68"/>
+    <path d="M86 112h84M86 140h84M86 168h52" stroke="#B8A36A" stroke-width="10" stroke-linecap="round"/>
+    <g transform="rotate(45 178 168)">
+      <rect x="164" y="88" width="28" height="104" rx="4" fill="#7AA2F7"/>
+      <rect x="164" y="88" width="10" height="104" fill="#A9C1FF"/>
+      <rect x="164" y="76" width="28" height="18" rx="4" fill="#F7768E"/>
+      <path d="M164 192h28l-14 26z" fill="#F0D2B0"/>
+      <path d="M173 209h10l-5 9z" fill="#1A1B26"/>
+    </g>
   </svg>"""
   state notes = [] persist
   Column {
