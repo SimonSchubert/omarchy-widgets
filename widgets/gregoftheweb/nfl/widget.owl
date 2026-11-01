@@ -1,0 +1,341 @@
+widget "NFL-gonzo" {
+  meta {
+    owl: 9
+    description: "Your NFL team first - record, last and next game - then scores and standings. Tap for the playoff picture: your seed, your matchup or what it takes to get in, and who has clinched"
+    version: "1.2.0"
+    license: "MIT"
+    category: "sport"
+  }
+  requires { pacman: ["curl", "coreutils"] }
+  size: 6x4
+  minSize: 3x3
+
+  source scores = http("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard") every 5m json timeout 20s
+  source table = http("https://site.api.espn.com/apis/v2/sports/football/nfl/standings") every 30m json timeout 20s
+  source now = clock every 1m
+
+  // Team logos, fetched once into ~/.cache/nfl-logos and left there, so the widget
+  // stays one small file with no paths to local images. The team list is fixed, so
+  // nothing the API sends can reach the shell. ESPN serves the Titans under ten.
+  source logos = cmd("""
+    d=~/.cache/nfl-logos
+    mkdir -p "$d"
+    for a in ari atl bal buf car chi cin cle dal den det gb hou ind jax kc lac lar lv mia min ne no nyg nyj phi pit sea sf tb ten wsh; do
+      [ -s "$d/$a.png" ] || curl -fsm 15 -o "$d/$a.png" "https://a.espncdn.com/i/teamlogos/nfl/500/$a.png" || rm -f "$d/$a.png"
+    done
+    echo '{"ready": true}'
+  """) every 1h json timeout 120s
+
+  state view = "team"
+  state myTeam = "SEA" persist   // picked with the gear; ESPN's abbreviation
+  state wkPick = null            // the scores tab's week, as an index into weeks; this week's while null
+  state confPick = null          // the standings tab's conference; your team's until one is tapped
+
+  // Your team's season: its record and division place, and every game with scores.
+  source sched = http("https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${enc(lower(myTeam))}/schedule") every 5m json timeout 20s
+  // Standings by division, for the standings tabs and the team picker.
+  source divTable = http("https://site.api.espn.com/apis/v2/sports/football/nfl/standings?level=3") every 6h json timeout 20s
+
+  let games = scores.events ?? []
+
+  // Every week of the regular season and the playoffs, from the scoreboard's calendar.
+  let weeks = flatten((scores.leagues[0].calendar ?? []).filter(c => c.value != "1").map(c => (c.entries ?? []).map(e => {type: num(c.value), week: num(e.value), label: e.alternateLabel ?? e.label, dates: e.detail})))
+  let curWk = weeks.map(w => w.type * 100 + w.week).indexOf(scores.season.type * 100 + scores.week.number)
+  let wkIdx = wkPick ?? curWk
+  let wk = weeks[wkIdx]
+  source wkScores = http("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${int(scores.season.year)}&seasontype=${int(wk.type)}&week=${int(wk.week)}") every 5m json timeout 20s
+
+  let mine = sched.team
+  let season = sched.events ?? []
+  let lastGame = season.filter(g => g.competitions[0].status.type.state == 'post').last()
+  let nextGame = season.find(g => g.competitions[0].status.type.state != 'post')
+  let divs = flatten((divTable.children ?? []).map(c => c.children ?? []))
+  let myConf = (divTable.children ?? []).find(c => any(flatten((c.children ?? []).map(d => d.standings.entries ?? [])), e => e.team.abbreviation == myTeam))
+  let conf = confPick ?? myConf.abbreviation ?? "AFC"
+  let live = games.filter(g => g.competitions[0].status.type.state == 'in')
+  let done = games.filter(g => g.competitions[0].status.type.state == 'post').reverse()
+  let next = games.filter(g => g.competitions[0].status.type.state == 'pre')
+  let cap = clamp((rows ?? 4) * 3 - 2, 5, 14)
+  let picked = flatten([live.take(3), done.take(3), next.take(cap)]).take(cap)
+  // The picked week's games, live ones first, then in kickoff order; null while another week is loading.
+  let wkFresh = wkScores.season.type == wk.type && wkScores.week.number == wk.week
+  let wkGames = wkIdx == curWk ? games : wkFresh ? wkScores.events ?? [] : null
+  let wkList = (wkGames ?? []).sortBy(g => (g.competitions[0].status.type.state == 'in' ? 0 : 1) * 10000000000 + parseTime(g.date))
+
+  let confs = table.children ?? []
+
+  // The playoff picture behind the tile, from the conference standings: seeds 1-4 lead
+  // their divisions, 5-7 are wild cards, and 2 hosts 7, 3 hosts 6, 4 hosts 5 while 1 rests.
+  // ESPN's clincher marks: * the 1 seed, z a division, y a wild card, x a berth, e out.
+  let early = (scores.season.type ?? 0) < 2 || (scores.season.type == 2 && (scores.week.number ?? 0) < 8)
+  let poConf = confs.find(c => any(c.standings.entries ?? [], e => e.team.abbreviation == myTeam))
+  let poConfs = flatten([[poConf], confs.filter(c => c.abbreviation != poConf.abbreviation)]).filter(c => c)
+  let poList = (poConf.standings.entries ?? []).sortBy(e => (e.stats.find(s => s.name == 'playoffSeed') ?? {}).value ?? 999)
+  let poMe = poList.find(e => e.team.abbreviation == myTeam)
+  let mySeed = int((poMe.stats.find(s => s.name == 'playoffSeed') ?? {}).value)
+  let myClinch = (poMe.stats.find(s => s.name == 'clincher') ?? {}).displayValue
+  let myName = poMe.team.shortDisplayName ?? myTeam
+  let myOrd = mySeed == 1 ? "1st" : mySeed == 2 ? "2nd" : mySeed == 3 ? "3rd" : "${mySeed}th"
+  let foeSeed = mySeed && mySeed > 1 && mySeed <= 7 ? 9 - mySeed : null
+  let foe = poList.find(e => (e.stats.find(s => s.name == 'playoffSeed') ?? {}).value == foeSeed)
+  let seventh = poList.find(e => (e.stats.find(s => s.name == 'playoffSeed') ?? {}).value == 7)
+  let myDiv = divs.find(d => any(d.standings.entries ?? [], e => e.team.abbreviation == myTeam))
+  let divLead = (myDiv.standings.entries ?? []).sortBy(e => (e.stats.find(s => s.name == 'playoffSeed') ?? {}).value ?? 999)[0]
+  let myW = (poMe.stats.find(s => s.name == 'wins') ?? {}).value ?? 0
+  let myL = (poMe.stats.find(s => s.name == 'losses') ?? {}).value ?? 0
+  let myT = (poMe.stats.find(s => s.name == 'ties') ?? {}).value ?? 0
+  let left = 17 - myW - myL - myT
+  let back7 = (((seventh.stats.find(s => s.name == 'wins') ?? {}).value ?? 0) - myW + myL - ((seventh.stats.find(s => s.name == 'losses') ?? {}).value ?? 0)) / 2
+  let backDiv = (((divLead.stats.find(s => s.name == 'wins') ?? {}).value ?? 0) - myW + myL - ((divLead.stats.find(s => s.name == 'losses') ?? {}).value ?? 0)) / 2
+
+  component Badge(t, px = 18) {
+    let a = lower(t.team.abbreviation ?? '')
+    if t.team.abbreviation {
+      Image { src: "~/.cache/nfl-logos/${a == 't' ? 'ten' : a}.png"; size: px; fit: contain }
+    }
+  }
+
+  component GameRow(g) {
+    let c = g.competitions[0]
+    let away = c.competitors.filter(t => t.homeAway == 'away')[0] ?? c.competitors[1]
+    let home = c.competitors.filter(t => t.homeAway == 'home')[0] ?? c.competitors[0]
+    let live = c.status.type.state == 'in'
+    let final = c.status.type.state == 'post'
+    let pre = c.status.type.state == 'pre'
+    let detail = c.status.type.shortDetail
+
+    // Every row has the same shape - badge, team, centre, team, badge - and the
+    // centre keeps one width whether or not there are scores in it, so the
+    // badges and abbreviations line up down the whole list.
+    // Decide from the tile itself: on the landscape home screen the screen is
+    // wide but the tile is narrow, and the wide centre left no room for the teams.
+    let wide = (tileWidth ?? 240) >= 340
+    let px = wide ? 18 : 14
+    let scW = wide ? 24 : 18
+    let dotW = wide ? 8 : 6
+    let stW = wide ? 128 : 34
+    let gap = wide ? 8 : 4
+    let ctrW = 2 * scW + 2 * dotW + stW
+
+    // A full "10/11 - 1:00 PM EDT" won't fit across a narrow tile's middle.
+    // Kickoff in the phone's time zone; ESPN's own text is always Eastern.
+    let kick = contains(detail, "TBD") ? "TBD" : fmtTime(parseTime(g.date), wide ? "EEE M/d h:mm a" : "M/d h:mma")
+
+    Row {
+      gap: gap
+      Badge { t: away; px: px }
+      Text { text: away.team.abbreviation; style: small; weight: 1; maxLines: 1; color: final && !away.winner ? muted : foreground }
+      if pre {
+        Text { text: kick; style: small; width: ctrW; align: center; color: muted; maxLines: 1 }
+      } else {
+        Row {
+          width: ctrW; gap: 0; align: center
+          Text { text: away.score ?? '–'; style: small; width: scW; padding: [0, 0, 5, 0]; align: end; bold: final && away.winner; color: live ? accent : final && !away.winner ? muted : foreground }
+          Box { width: dotW; height: 5; radius: 2.5; background: live ? accent : rgb(0, 0, 0, 0) }
+          Text { text: detail; style: small; width: stW; align: center; color: live ? accent : muted; maxLines: 1 }
+          Box { width: dotW }
+          Text { text: home.score ?? '–'; style: small; width: scW; padding: [5, 0, 0, 0]; align: start; bold: final && home.winner; color: live ? accent : final && !home.winner ? muted : foreground }
+        }
+      }
+      Text { text: home.team.abbreviation; style: small; weight: 1; maxLines: 1; align: end; color: final && !home.winner ? muted : foreground }
+      Badge { t: home; px: px }
+    }
+  }
+
+  // Last or next game from your team's side: the opponent's logo, the result or kickoff, and when.
+  component MyGame(label, g) {
+    let c = g.competitions[0]
+    let me = c.competitors.find(t => t.team.abbreviation == myTeam) ?? c.competitors[0]
+    let opp = c.competitors.find(t => t.team.abbreviation != myTeam) ?? c.competitors[1]
+    let state = c.status.type.state
+    let at = me.homeAway == 'home' ? "vs" : "@"
+    let res = me.winner ? "W" : opp.winner ? "L" : "T"
+    let score = "${me.score.displayValue ?? me.score ?? '–'}–${opp.score.displayValue ?? opp.score ?? '–'}"
+    let t = parseTime(g.date)
+    Column {
+      gap: 2
+      Text { text: label; style: label; color: muted }
+      Row {
+        gap: 10
+        Badge { t: opp; px: 28 }
+        Column {
+          weight: 1
+          if state == 'post' {
+            Text { text: "${res} ${score}  ${at} ${opp.team.shortDisplayName ?? opp.team.abbreviation}"; maxLines: 1; bold: true; color: res == "W" ? green : res == "L" ? red : foreground }
+            Text { text: fmtTime(t, "EEE MMM d"); style: small; color: muted }
+          } else if state == 'in' {
+            Text { text: "${score}  ${at} ${opp.team.shortDisplayName ?? opp.team.abbreviation}"; maxLines: 1; bold: true; color: accent }
+            Text { text: c.status.type.shortDetail; style: small; color: accent }
+          } else {
+            Text { text: "${at} ${opp.team.shortDisplayName ?? opp.team.abbreviation}"; maxLines: 1 }
+            Text { text: c.status.type.detail == "TBD" ? "TBD" : fmtTime(t, "EEE MMM d · h:mm a"); style: small; color: muted }
+          }
+        }
+      }
+    }
+  }
+
+  component TeamRow(t) {
+    let diff = (t.stats.find(s => s.name == 'pointDifferential') ?? {}).value ?? 0
+    Row {
+      Text { text: (t.stats.find(s => s.name == 'playoffSeed') ?? {}).displayValue ?? '–'; width: 24; style: small; color: muted }
+      Text { text: t.team.abbreviation; weight: 1; style: small }
+      Text { text: (t.stats.find(s => s.name == 'overall') ?? {}).displayValue ?? '–'; width: 46; style: small; bold: true; align: end }
+      Text { text: (t.stats.find(s => s.name == 'pointDifferential') ?? {}).displayValue ?? '–'; width: 42; style: small; align: end; color: diff > 0 ? green : diff < 0 ? red : muted }
+    }
+  }
+
+  onTap: screen()
+
+  Column {
+    Row {
+      Text { text: "NFL"; style: title; weight: 1 }
+      if count(live) > 0 {
+        Text { text: "${count(live)} live"; style: small; color: accent; width: 60; align: end; bold: true }
+      } else {
+        Text { text: fmtTime(now, "EEE d"); style: small; color: muted; width: 60; align: end }
+      }
+      Button { text: "⚙"; width: 40; color: view == "settings" ? accent : muted; onTap: view = view == "settings" ? "team" : "settings" }
+    }
+    Row {
+      Button { text: lower(myTeam); weight: 1; color: view == "team" ? accent : muted; onTap: view = "team" }
+      Button { text: "scores"; weight: 1; color: view == "scores" ? accent : muted; onTap: view = "scores" }
+      Button { text: "standings"; weight: 1; color: view == "standings" ? accent : muted; onTap: view = "standings" }
+    }
+    if view == "scores" && wk {
+      Row {
+        Button { text: "‹"; width: 48; color: wkIdx > 0 ? foreground : muted; onTap: { if wkIdx > 0 { wkPick = wkIdx - 1 } } }
+        Box {
+          weight: 1
+          onTap: wkPick = null
+          Column {
+            Text { text: wk.label; align: center; color: wkIdx == curWk ? accent : foreground; maxLines: 1 }
+            Text { text: wkIdx == curWk ? "${wk.dates} · this week" : wk.dates; style: small; align: center; color: muted; maxLines: 1 }
+          }
+        }
+        Button { text: "›"; width: 48; color: wkIdx < count(weeks) - 1 ? foreground : muted; onTap: { if wkIdx < count(weeks) - 1 { wkPick = wkIdx + 1 } } }
+      }
+    }
+    if view == "standings" {
+      Row {
+        for c in divTable.children ?? [] {
+          Button { text: c.abbreviation; weight: 1; color: conf == c.abbreviation ? accent : muted; onTap: confPick = c.abbreviation }
+        }
+      }
+    }
+    Column {
+      weight: 1
+      scroll: true
+      if view == "team" {
+        Row {
+          gap: 10
+          Badge { t: {team: {abbreviation: myTeam}}; px: 36 }
+          Text { text: mine.name ?? myTeam; style: title; weight: 1; maxLines: 1 }
+        }
+        Text { text: "${mine.recordSummary ?? '…'} : ${replace(mine.standingSummary ?? '…', ' in ', ' ')}"; color: muted }
+        Box { height: 6 }
+        if lastGame { MyGame { label: "last game"; g: lastGame } }
+        Box { height: 6 }
+        if nextGame { MyGame { label: nextGame.competitions[0].status.type.state == 'in' ? "live now" : "next game"; g: nextGame } } else { Text { text: "no more games this season"; style: small; color: muted } }
+      } else if view == "settings" {
+        Text { text: "your team"; style: label; color: muted }
+        for d in divs {
+          Text { text: d.name; style: small; color: muted }
+          Grid {
+            columns: 4; gap: 4
+            for e in d.standings.entries ?? [] key e.team.id {
+              Box {
+                padding: 4; radius: 6
+                background: e.team.abbreviation == myTeam ? alpha(accent, 0.25) : rgb(0, 0, 0, 0)
+                onTap: { myTeam = e.team.abbreviation; view = "team" }
+                Row { gap: 6; Badge { t: e; px: 18 }; Text { text: e.team.abbreviation; style: small } }
+              }
+            }
+          }
+        }
+      } else if view == "scores" {
+        if wkGames == null {
+          Text { text: "loading…"; style: small; color: muted }
+        } else if count(wkList) == 0 {
+          Text { text: "no games this week"; style: small; color: muted }
+        } else {
+          for g in wkList key g.id { GameRow { g: g } }
+        }
+      } else {
+        // Each division best first; the number is the team's playoff seed in its conference.
+        for d in ((divTable.children ?? []).find(c => c.abbreviation == conf) ?? {}).children ?? [] {
+          Text { text: d.name; style: label; color: muted; padding: [0, 6, 0, 0] }
+          for t in (d.standings.entries ?? []).sortBy(e => (e.stats.find(s => s.name == 'playoffSeed') ?? {}).value ?? 999) key t.team.id {
+            TeamRow { t: t }
+          }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "NFL playoffs"
+    Column {
+      scroll: true
+      gap: 6
+      if early {
+        Box { height: 40 }
+        Text { text: "It's too early for playoffs dude, come back after week 8"; style: title; align: center }
+      } else {
+        Row {
+          gap: 12
+          Badge { t: {team: {abbreviation: myTeam}}; px: 44 }
+          Column {
+            weight: 1
+            if !mySeed {
+              Text { text: "${myTeam}: loading…"; style: title }
+            } else if mySeed <= 7 {
+              Text { text: "${myName} are IN: ${myOrd} seed in the ${poConf.abbreviation}"; style: title; color: green }
+            } else if myClinch == "e" {
+              Text { text: "${myName} are OUT: eliminated"; style: title; color: red }
+            } else {
+              Text { text: "${myName} are OUT: ${mySeed}th in the ${poConf.abbreviation}"; style: title; color: red }
+            }
+            Text { text: "${(poMe.stats.find(s => s.name == 'overall') ?? {}).displayValue ?? '…'}, ${left} games left · Week ${scores.week.number}"; color: muted }
+          }
+        }
+        if mySeed == 1 {
+          Text { text: "Holds the only bye: no Wild Card game, and home field all the way through the ${poConf.abbreviation}." }
+        } else if mySeed && mySeed <= 4 {
+          Text { text: "Wild Card round: would host the ${foeSeed}th seed, ${foe.team.displayName ?? '…'} (${(foe.stats.find(s => s.name == 'overall') ?? {}).displayValue ?? '…'})." }
+        } else if mySeed && mySeed <= 7 {
+          Text { text: "Wild Card round: would visit the ${foeSeed == 2 ? '2nd' : foeSeed == 3 ? '3rd' : '4th'} seed, ${foe.team.displayName ?? '…'} (${(foe.stats.find(s => s.name == 'overall') ?? {}).displayValue ?? '…'})." }
+        } else if myClinch == "e" {
+          Text { text: "Mathematically out. There's always next year." }
+        } else if mySeed {
+          Text { text: back7 > 0 ? "To get in: make up ${back7 == 0.5 ? 'half a game' : back7 == 1 ? '1 game' : '${round(back7, 1)} games'} on ${seventh.team.displayName} (${(seventh.stats.find(s => s.name == 'overall') ?? {}).displayValue}) for the 7th seed, or ${backDiv == 0.5 ? 'half a game' : round(backDiv, 1)} on ${divLead.team.displayName} to win the ${myDiv.name}, with ${left} to play." : "To get in: level with ${seventh.team.displayName} on record but behind on tiebreakers. Win more than them in the last ${left}, or catch ${divLead.team.displayName} (${round(backDiv, 1)} back) in the ${myDiv.name}." }
+        }
+        if myClinch == "*" || myClinch == "z" || myClinch == "y" || myClinch == "x" {
+          Text { text: myClinch == "*" ? "Clinched the 1 seed." : myClinch == "z" ? "Clinched the division." : myClinch == "y" ? "Clinched a wild card." : "Clinched a playoff spot."; color: green; bold: true }
+        }
+
+        for c in poConfs {
+          Box { height: 10 }
+          Text { text: "${c.abbreviation} playoff picture"; style: title }
+          for t in (c.standings.entries ?? []).sortBy(e => (e.stats.find(s => s.name == 'playoffSeed') ?? {}).value ?? 999) key t.team.id {
+            let seed = (t.stats.find(s => s.name == 'playoffSeed') ?? {}).value
+            let cl = (t.stats.find(s => s.name == 'clincher') ?? {}).displayValue
+            let status = cl == "*" ? "clinched 1 seed" : cl == "z" ? "clinched division" : cl == "y" ? "clinched wild card" : cl == "x" ? "clinched berth" : cl == "e" ? "eliminated" : seed <= 4 ? "leads division" : seed <= 7 ? "wild card" : "in the hunt"
+            if seed == 5 { Text { text: "wild cards"; style: small; color: muted; padding: [0, 4, 0, 0] } }
+            if seed == 8 { Text { text: "outside looking in"; style: small; color: muted; padding: [0, 4, 0, 0] } }
+            Row {
+              gap: 10; padding: [6, 1, 6, 1]; radius: 6
+              background: t.team.abbreviation == myTeam ? alpha(accent, 0.2) : rgb(0, 0, 0, 0)
+              Text { text: "${int(seed)}"; width: 28; color: muted }
+              Badge { t: t; px: 22 }
+              Text { text: t.team.abbreviation; width: 56; bold: t.team.abbreviation == myTeam }
+              Text { text: (t.stats.find(s => s.name == 'overall') ?? {}).displayValue ?? '–'; width: 72 }
+              Text { text: status; weight: 1; align: end; maxLines: 1; bold: cl && cl != "e"; color: cl == "e" ? red : cl ? green : seed <= 7 ? foreground : muted }
+            }
+          }
+        }
+      }
+      Button { text: "close"; onTap: close() }
+    }
+  }
+}
