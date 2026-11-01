@@ -1,0 +1,1066 @@
+widget "solar" {
+  page: 1
+  order: 40
+  size: 3x4
+  minSize: 3x3
+  meta { description: "SolarEdge power now and today's energy, with the day's curve. Open it for the peak, month, lifetime, and battery or grid if the site has them."; version: "1.1"; license: "MIT"; category: "home"; owl: 10 }
+
+  requires { pacman: ["curl", "jq", "python"] }
+
+  source now = clock every 1m
+  source solar = file("~/.config/omarchy-solaredge/data.json") json
+  source pulse = cmd("""
+  set -uo pipefail
+  umask 077
+  dest="$HOME/.local/bin/solaredge-sync"
+  marker="# solaredge-sync 1.0.7"
+  if ! grep -qxF "$marker" "$dest" 2>/dev/null; then
+    mkdir -p "$HOME/.local/bin"
+    cat > "$dest" << 'SOLAREDGE_SYNC_END'
+#!/bin/bash
+# solaredge-sync 1.0.7
+
+set -uo pipefail
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-solaredge"
+AUTH="${CONFIG}/auth.json"
+DATA="${CONFIG}/data.json"
+LOCK="${CONFIG}/lock"
+API="https://monitoringapi.solaredge.com/v2"
+TOKEN_URL="${API}/oauth2/token"
+MIN_POWER_GAP=2400
+DETAILS_GAP=3600
+PROBE_GAP=86400
+
+mkdir -p "$CONFIG"
+chmod 700 "$CONFIG"
+
+now_s() { date +%s; }
+
+iso_utc() { date -u -d "$1" +%Y-%m-%dT%H:%M:%SZ; }
+
+prev() {
+  if [[ -s "$DATA" ]]; then cat "$DATA"; else echo '{}'; fi
+}
+
+write_data() {
+  local patch="$1"
+  local tmp
+  tmp=$(mktemp "${CONFIG}/data.XXXXXX")
+  if ! jq -c --argjson patch "$patch" '. * $patch' <(prev) >"$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  chmod 600 "$tmp"
+  mv "$tmp" "$DATA"
+}
+
+fail_soft() {
+  local kind="$1" msg="$2"
+  if [[ -s "$DATA" ]] && jq -e '.powerW != null and .error != "auth" and .error != "setup"' "$DATA" >/dev/null 2>&1; then
+    write_data "$(jq -cn --arg k "$kind" --arg m "$msg" '{ok: true, error: $k, message: $m}')"
+  else
+    write_data "$(jq -cn --arg k "$kind" --arg m "$msg" '{ok: false, error: $k, message: $m}')"
+  fi
+}
+
+auth_fail() {
+  write_data "$(jq -cn --arg m "$1" '{ok: false, error: "auth", message: $m}')"
+}
+
+have_auth() {
+  [[ -s "$AUTH" ]] && jq -e '.site_id != null and .client_id != null and .client_secret != null and .refresh_token != null' "$AUTH" >/dev/null 2>&1
+}
+
+save_tokens() {
+  local access="$1" refresh="$2" expires="$3"
+  local tmp
+  tmp=$(mktemp "${CONFIG}/auth.XXXXXX")
+  jq --arg a "$access" --arg r "$refresh" --argjson e "$expires" \
+    '.access_token = $a | .refresh_token = $r | .expires_at = $e' "$AUTH" >"$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$AUTH"
+}
+
+capture() {
+  local __name="$1"
+  shift
+  local __file __status
+  __file=$(mktemp)
+  "$@" >"$__file"
+  __status=$?
+  printf -v "$__name" '%s' "$(cat "$__file")"
+  rm -f "$__file"
+  return "$__status"
+}
+
+# Curl -K config so tokens never appear on the process argv (/proc).
+curl_quote() {
+  local s=$1
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  printf '%s' "$s"
+}
+
+curl_pairs() {
+  PAIRS=()
+  while (( $# )); do
+    if [[ "$1" == --data-urlencode && -n "${2:-}" ]]; then
+      PAIRS+=("$2")
+      shift 2
+    else
+      shift
+    fi
+  done
+}
+
+token_post() {
+  local basic="$1"
+  shift
+  local tmp cfg code pair
+  curl_pairs "$@"
+  tmp=$(mktemp)
+  cfg=$(mktemp "${CONFIG}/curl.XXXXXX")
+  chmod 600 "$cfg"
+  {
+    echo 'silent'
+    echo 'show-error'
+    echo 'request = "POST"'
+    printf 'url = "%s"\n' "$(curl_quote "$TOKEN_URL")"
+    printf 'header = "Authorization: Basic %s"\n' "$(curl_quote "$basic")"
+    echo 'header = "Content-Type: application/x-www-form-urlencoded"'
+    echo 'header = "Accept: application/json"'
+    echo 'max-time = "20"'
+    for pair in "${PAIRS[@]}"; do
+      printf 'data-urlencode = "%s"\n' "$(curl_quote "$pair")"
+    done
+  } >"$cfg"
+  code=$(curl -sS -K "$cfg" -o "$tmp" -w '%{http_code}' || true)
+  HTTP_CODE="$code"
+  cat "$tmp"
+  rm -f "$tmp" "$cfg"
+}
+
+basic_auth() {
+  printf '%s:%s' "$1" "$2" | base64 -w 0
+}
+
+ensure_token() {
+  local exp now access
+  now=$(now_s)
+  exp=$(jq -r '.expires_at // 0' "$AUTH")
+  access=$(jq -r '.access_token // empty' "$AUTH")
+  if [[ -n "$access" && "$exp" =~ ^[0-9]+$ ]] && (( now + 300 < exp )); then
+    ACCESS="$access"
+    return 0
+  fi
+  local id secret refresh basic body new_refresh new_access expires_in
+  id=$(jq -r '.client_id' "$AUTH")
+  secret=$(jq -r '.client_secret' "$AUTH")
+  refresh=$(jq -r '.refresh_token' "$AUTH")
+  basic=$(basic_auth "$id" "$secret")
+  capture body token_post "$basic" \
+    --data-urlencode "grant_type=refresh_token" \
+    --data-urlencode "refresh_token=${refresh}"
+  if [[ "$HTTP_CODE" != "200" ]]; then
+    auth_fail "SolarEdge rejected the token. Connect again."
+    return 1
+  fi
+  new_access=$(jq -r '.access_token // empty' <<<"$body")
+  new_refresh=$(jq -r '.refresh_token // empty' <<<"$body")
+  expires_in=$(jq -r '.expires_in // 7200' <<<"$body")
+  if [[ -z "$new_access" || -z "$new_refresh" ]]; then
+    auth_fail "SolarEdge rejected the token. Connect again."
+    return 1
+  fi
+  save_tokens "$new_access" "$new_refresh" "$((now + expires_in))"
+  ACCESS="$new_access"
+}
+
+se_get() {
+  local path="$1"
+  shift
+  local url="${API}/sites/${SITE_ID}"
+  [[ -n "$path" ]] && url="${url}/${path}"
+  local tmp cfg code try pair
+  curl_pairs "$@"
+  for try in 1 2; do
+    tmp=$(mktemp)
+    cfg=$(mktemp "${CONFIG}/curl.XXXXXX")
+    chmod 600 "$cfg"
+    {
+      echo 'silent'
+      echo 'show-error'
+      echo 'get'
+      echo 'globoff'
+      printf 'url = "%s"\n' "$(curl_quote "$url")"
+      printf 'header = "Authorization: Bearer %s"\n' "$(curl_quote "$ACCESS")"
+      echo 'header = "Accept: application/json"'
+      echo 'max-time = "20"'
+      for pair in "${PAIRS[@]}"; do
+        printf 'data-urlencode = "%s"\n' "$(curl_quote "$pair")"
+      done
+    } >"$cfg"
+    code=$(curl -sS -K "$cfg" -o "$tmp" -w '%{http_code}' || true)
+    HTTP_CODE="$code"
+    rm -f "$cfg"
+    if [[ "$code" == "401" && "$try" == "1" ]]; then
+      rm -f "$tmp"
+      local old="$ACCESS"
+      jq '.expires_at = 0' "$AUTH" >"${AUTH}.tmp" && mv "${AUTH}.tmp" "$AUTH" && chmod 600 "$AUTH"
+      ensure_token || { HTTP_CODE=401; echo '{}'; return 1; }
+      [[ "$ACCESS" == "$old" ]] && { HTTP_CODE=401; echo '{}'; return 1; }
+      continue
+    fi
+    cat "$tmp"
+    rm -f "$tmp"
+    return 0
+  done
+}
+
+power_json='
+def asnum:
+  if . == null then null
+  elif type == "number" then .
+  elif type == "string" then (tonumber? // null)
+  elif type == "object" then (.value // .power // .amount | asnum)
+  else null end;
+def scale($unit):
+  if $unit == "KW" then . * 1000 elif $unit == "MW" then . * 1000000 else . end;
+(.power // .) as $root
+| ($root.unit // "W" | ascii_upcase) as $unit
+| [ ($root.values // $root.telemetries // [])[]
+    | {t: (.timestamp // .timeStamp // .date // .time // ""), v: (.value | asnum)}
+    | select(.t != "")
+  ] | sort_by(.t) as $points
+| [$points[] | select(.v != null) | .v = (.v | scale($unit))] as $live
+| (if ($live | length) == 0 then null else ($live | max_by(.v)) end) as $peak
+| (if ($live | length) == 0 then null else ($live | last) end) as $last
+| {
+    curve: [$points[] | if .v == null then 0 else (.v | scale($unit)) end],
+    powerW: (if $last == null then 0 else $last.v end),
+    sample: (if $last == null then null else $last.t end),
+    peakW: (if $peak == null then null else $peak.v end),
+    peakStamp: (if $peak == null then null else $peak.t end)
+  }
+'
+
+energy_json='
+def asnum:
+  if . == null then null
+  elif type == "number" then .
+  elif type == "string" then (tonumber? // null)
+  elif type == "object" then (.value // .amount | asnum)
+  else null end;
+(.energy // .) as $root
+| ($root.unit // "KWH" | ascii_upcase) as $unit
+| [ ($root.values // [])[].value | asnum | select(. != null) ] as $vs
+| if ($vs | length) == 0 then null
+  else ($vs | add) as $sum
+    | if $unit == "WH" then $sum / 1000 elif $unit == "MWH" then $sum * 1000 else $sum end
+  end
+'
+
+overview_kwh='
+def asnum:
+  if . == null then null
+  elif type == "number" then .
+  elif type == "string" then (tonumber? // null)
+  else null end;
+def kwh($node):
+  if $node == null then null
+  else ($node.total | asnum) as $t
+    | if $t == null then null
+      else ($node.unit // "WH" | ascii_upcase) as $u
+        | if $u == "WH" then $t / 1000 elif $u == "MWH" then $t * 1000 else $t end
+      end
+  end;
+def part($node; $key):
+  if $node == null then null
+  else kwh({total: $node[$key], unit: $node.unit})
+  end;
+{
+  productionKwh: kwh(.production),
+  consumptionKwh: kwh(.consumption),
+  fromPvKwh: part(.consumption; "fromPv"),
+  fromGridKwh: part(.consumption; "fromGrid")
+}
+'
+
+meter_series_json='
+def asnum:
+  if . == null then null
+  elif type == "number" then .
+  elif type == "string" then (tonumber? // null)
+  else null end;
+def lastv($node):
+  if $node == null then null
+  else [($node.values // [])[] | .value | asnum | select(. != null)]
+    | if length == 0 then null else last end
+  end;
+[.meters | to_entries[] | select(.key != "CONSUMPTION") | .value
+  | select(has("importPower") or has("exportPower"))] | last as $g
+| {
+    importW: (if $g == null then null else lastv($g.importPower) end),
+    exportW: (if $g == null then null else lastv($g.exportPower) end)
+  }
+'
+
+battery_json='
+def asnum:
+  if . == null then null
+  elif type == "number" then .
+  elif type == "object" then (.value | asnum)
+  else null end;
+[ .. | objects | select(has("stateOfEnergy") or has("stateOfCharge") or has("soc")) ] | last as $b
+| if $b == null then null
+  else ($b.stateOfEnergy // $b.stateOfCharge // $b.soc | asnum) as $soc
+  | if $soc == null then null
+    else {
+      soc: $soc,
+      powerW: (
+        if ($b | has("chargePower") or has("dischargePower"))
+        then ((($b.chargePower | asnum) // 0) - (($b.dischargePower | asnum) // 0))
+        else ($b.power // $b.chargeDischargePower | asnum)
+        end
+      )
+    }
+    end
+  end
+'
+
+meter_json='
+def asnum:
+  if . == null then null
+  elif type == "number" then .
+  elif type == "object" then (.value // .power | asnum)
+  else null end;
+def interesting:
+  has("consumptionPower") or has("loadPower") or has("importPower") or has("exportPower")
+  or has("purchasedPower") or has("feedInPower") or has("gridImport") or has("gridExport")
+  or ((.power | type? == "object") and ((.power | has("consumption")) or (.power | has("import")) or (.power | has("export"))));
+[ .. | objects | select(interesting) ] | last as $m
+| if $m == null then null
+  else {
+    consumptionW: ($m.consumptionPower // $m.loadPower // $m.power.consumption // $m.power.load | asnum),
+    importW: ($m.importPower // $m.purchasedPower // $m.gridImport // $m.power.import // $m.power.purchased | asnum),
+    exportW: ($m.exportPower // $m.feedInPower // $m.gridExport // $m.power.export // $m.power.feedIn | asnum)
+  }
+  | if .consumptionW == null and .importW == null and .exportW == null then null else . end
+  end
+'
+
+devices_json='
+def texts: [.. | strings | ascii_upcase];
+{
+  battery: (texts | any(. == "BATTERY" or . == "STORAGE")),
+  meter: (texts | any(. == "METER"))
+}
+'
+
+apply_power() {
+  local body="$1"
+  local parsed sample peak
+  parsed=$(jq -c "$power_json" <<<"$body") || return 1
+  sample=$(jq -r '.sample // empty' <<<"$parsed")
+  peak=$(jq -r '.peakStamp // empty' <<<"$parsed")
+  local sample_s="null" peak_s="null"
+  [[ -n "$sample" ]] && sample_s=$(date -d "$sample" +%s 2>/dev/null || echo null)
+  [[ -n "$peak" ]] && peak_s=$(date -d "$peak" +%s 2>/dev/null || echo null)
+  if [[ -z "$sample_s" || "$sample_s" == "null" ]]; then sample_s=$(now_s); fi
+  jq -cn --argjson p "$parsed" --argjson sample "$sample_s" --argjson peak "$peak_s" \
+    '{ok: true, error: null, message: null, fetched: (now | floor),
+      curve: $p.curve, powerW: $p.powerW, sampleTime: $sample, peakW: $p.peakW, peakTime: $peak}'
+}
+
+apply_kwh() {
+  jq -c "$energy_json" <<<"$1"
+}
+
+SITE_ID=""
+ACCESS=""
+
+load_site() {
+  SITE_ID=$(jq -r '.site_id' "$AUTH")
+}
+
+same_local_day() {
+  local stamp="$1"
+  [[ "$stamp" =~ ^[0-9]+$ ]] || return 1
+  [[ $(date -d "@${stamp}" +%Y-%m-%d) == $(date +%Y-%m-%d) ]]
+}
+
+night_hour() {
+  local h
+  h=$(date +%H)
+  (( 10#$h < 5 || 10#$h >= 21 ))
+}
+
+hold_night() {
+  write_data "$(jq -cn '{ok: true, error: null, message: null, powerW: 0, fetched: (now | floor)}')"
+}
+
+fetch_power_and_today() {
+  local from to body patch kwh
+  from=$(iso_utc "12 hours ago")
+  to=$(iso_utc "now")
+  capture body se_get "power" \
+    --data-urlencode "from=${from}" \
+    --data-urlencode "to=${to}" \
+    --data-urlencode "resolution=QUARTER_HOUR" \
+    --data-urlencode "unit=W" || return 1
+  if [[ "$HTTP_CODE" == "429" ]]; then
+    fail_soft rate "SolarEdge rate limit. Trying again later."
+    return 1
+  fi
+  if [[ "$HTTP_CODE" != "200" ]]; then
+    fail_soft offline "No connection to SolarEdge (${HTTP_CODE})."
+    return 1
+  fi
+  patch=$(apply_power "$body") || { fail_soft offline "SolarEdge sent power data this widget couldn't read."; return 1; }
+  local midnight kwh="null" energy_note="" ov series cpatch grid
+  midnight=$(iso_utc "today 00:00")
+  capture body se_get "overview" \
+    --data-urlencode "from=${midnight}" \
+    --data-urlencode "to=${to}" || true
+  if [[ "$HTTP_CODE" == "429" ]]; then
+    energy_note="SolarEdge rate limit. Trying again later."
+  elif [[ "$HTTP_CODE" == "200" ]]; then
+    ov=$(jq -c "$overview_kwh" <<<"$body" 2>/dev/null) || ov='{}'
+    kwh=$(jq -c '.productionKwh // null' <<<"$ov")
+    patch=$(jq -c --argjson ov "$ov" '. + {
+      consTodayKwh: $ov.consumptionKwh,
+      consFromPvKwh: $ov.fromPvKwh,
+      consFromGridKwh: $ov.fromGridKwh
+    }' <<<"$patch")
+  fi
+  if [[ "$kwh" == "null" || -z "$kwh" ]]; then
+    capture body se_get "energy" \
+      --data-urlencode "from=${midnight}" \
+      --data-urlencode "to=${to}" \
+      --data-urlencode "resolution=DAY" \
+      --data-urlencode "unit=KWH" || true
+    if [[ "$HTTP_CODE" == "200" ]]; then
+      kwh=$(apply_kwh "$body" 2>/dev/null) || kwh=null
+    fi
+  fi
+  if [[ "$kwh" == "null" || -z "$kwh" ]]; then
+    kwh=$(jq -c '[.curve[]?] | if length == 0 then null else (add * 0.25 / 1000) end' <<<"$patch")
+  fi
+  patch=$(jq -c --argjson kwh "$kwh" --arg note "$energy_note" \
+    '.todayKwh = $kwh | if $note == "" then . else .error = "rate" | .message = $note end' <<<"$patch")
+
+  capture body se_get "meters/telemetry" \
+    --data-urlencode "from=${from}" \
+    --data-urlencode "to=${to}" \
+    --data-urlencode "resolution=QUARTER_HOUR" || true
+  if [[ "$HTTP_CODE" == "200" ]]; then
+    series=$(jq -c '.meters.CONSUMPTION.consumptionPower // empty' <<<"$body")
+    if [[ -n "$series" && "$series" != "null" ]] && jq -e '.values | length > 0' <<<"$series" >/dev/null 2>&1; then
+      cpatch=$(apply_power "$series") || cpatch=""
+      if [[ -n "$cpatch" ]]; then
+        patch=$(jq -c --argjson c "$cpatch" '. + {
+          consCurve: $c.curve,
+          consW: $c.powerW,
+          consSampleTime: $c.sampleTime,
+          consPeakW: $c.peakW,
+          consPeakTime: $c.peakTime,
+          consMeter: true
+        }' <<<"$patch")
+      fi
+    else
+      patch=$(jq -c '. + {consMeter: false}' <<<"$patch")
+    fi
+    grid=$(jq -c "$meter_series_json" <<<"$body" 2>/dev/null) || grid='{}'
+    patch=$(jq -c --argjson g "$grid" '
+      .meter = {
+        consumptionW: (.consW // null),
+        importW: $g.importW,
+        exportW: $g.exportW
+      }
+      | if .meter.consumptionW == null and .meter.importW == null and .meter.exportW == null
+        then del(.meter) else . end
+    ' <<<"$patch")
+  fi
+  write_data "$patch"
+}
+
+want_details() {
+  local at now
+  [[ "${1:-}" == "force" ]] && return 0
+  now=$(now_s)
+  at=$(jq -r '.detailsAt // 0' <(prev))
+  [[ "$at" =~ ^[0-9]+$ ]] || at=0
+  (( now - at >= DETAILS_GAP ))
+}
+
+fetch_details() {
+  local to from body kwh patch batt meter
+  to=$(iso_utc "now")
+  from=$(iso_utc "$(date +%Y-%m-01) 00:00")
+  patch=$(jq -cn '{detailsAt: (now | floor)}')
+
+  capture body se_get "energy" \
+    --data-urlencode "from=${from}" \
+    --data-urlencode "to=${to}" \
+    --data-urlencode "resolution=MONTH" \
+    --data-urlencode "unit=KWH" || return 1
+  if [[ "$HTTP_CODE" == "429" ]]; then
+    fail_soft rate "SolarEdge rate limit. Trying again later."
+    return 1
+  fi
+  if [[ "$HTTP_CODE" == "200" ]]; then
+    kwh=$(apply_kwh "$body" 2>/dev/null) || kwh=null
+    patch=$(jq -c --argjson k "$kwh" '.monthKwh = $k' <<<"$patch")
+  fi
+
+  capture body se_get "overview" \
+    --data-urlencode "from=${from}" \
+    --data-urlencode "to=${to}" || true
+  if [[ "$HTTP_CODE" == "200" ]]; then
+    kwh=$(jq -c "$overview_kwh" <<<"$body" 2>/dev/null | jq -c '.consumptionKwh // null') || kwh=null
+    patch=$(jq -c --argjson k "$kwh" '.consMonthKwh = $k' <<<"$patch")
+  fi
+
+  capture body se_get "energy" \
+    --data-urlencode "from=2010-01-01T00:00:00Z" \
+    --data-urlencode "to=${to}" \
+    --data-urlencode "resolution=TOTAL" \
+    --data-urlencode "unit=KWH" || return 1
+  if [[ "$HTTP_CODE" == "200" ]]; then
+    kwh=$(apply_kwh "$body" 2>/dev/null) || kwh=null
+    patch=$(jq -c --argjson k "$kwh" '.lifetimeKwh = $k' <<<"$patch")
+  fi
+  write_data "$patch"
+
+  local probe_at have_battery have_meter
+  probe_at=$(jq -r '.probeAt // 0' <(prev))
+  have_battery=$(jq -r 'if .battery == null then "no" else "yes" end' <(prev))
+  have_meter=$(jq -r 'if .meter == null then "no" else "yes" end' <(prev))
+  [[ "$probe_at" =~ ^[0-9]+$ ]] || probe_at=0
+  local probe=1
+  if [[ "${FORCE:-0}" != "1" && "$have_battery" == "no" && "$have_meter" == "no" ]] \
+    && (( $(now_s) - probe_at < PROBE_GAP )) && (( probe_at > 0 )); then
+    probe=0
+  fi
+  if (( probe )); then
+    local devs kinds
+    capture devs se_get "devices" \
+      --data-urlencode "types=BATTERY" \
+      --data-urlencode "types=METER" \
+      --data-urlencode "types=STORAGE" || return 1
+    local dev_code="$HTTP_CODE"
+    if [[ -z "$devs" ]]; then devs='{}'; fi
+    kinds=$(jq -c "$devices_json" <<<"$devs" 2>/dev/null) || kinds='{"battery":true,"meter":true}'
+    local from3 batt_body meter_body
+    from3=$(iso_utc "3 hours ago")
+    if [[ $(jq -r '.battery' <<<"$kinds") == "true" || "$dev_code" != "200" ]]; then
+      capture batt_body se_get "storage/telemetry" \
+        --data-urlencode "from=${from3}" \
+        --data-urlencode "to=${to}" \
+        --data-urlencode "resolution=QUARTER_HOUR" || return 1
+      if [[ "$HTTP_CODE" == "200" ]]; then
+        batt=$(jq -c "$battery_json" <<<"$batt_body") || batt=null
+      else
+        batt=null
+      fi
+    else
+      batt=null
+    fi
+    if [[ $(jq -r '.meter' <<<"$kinds") == "true" || "$dev_code" != "200" ]]; then
+      capture meter_body se_get "meters/telemetry" \
+        --data-urlencode "from=${from3}" \
+        --data-urlencode "to=${to}" \
+        --data-urlencode "resolution=QUARTER_HOUR" || return 1
+      if [[ "$HTTP_CODE" == "200" ]]; then
+        meter=$(jq -c "$meter_series_json" <<<"$meter_body" | jq -c --argjson body "$meter_body" '
+          . as $g
+          | [$body.meters.CONSUMPTION.consumptionPower.values // [] | .[] | .value | numbers] as $vs
+          | {
+              consumptionW: (if ($vs | length) == 0 then null else $vs[-1] end),
+              importW: $g.importW,
+              exportW: $g.exportW
+            }
+          | if .consumptionW == null and .importW == null and .exportW == null then null else . end
+        ') || meter=null
+      else
+        meter=null
+      fi
+    else
+      meter=null
+    fi
+    if [[ "$meter" == "null" || -z "$meter" ]]; then
+      patch=$(jq -c --argjson b "$batt" '.battery = $b | .probeAt = (now | floor)' <<<"$patch")
+    else
+      patch=$(jq -c --argjson b "$batt" --argjson m "$meter" \
+        '.battery = $b | .meter = $m | .probeAt = (now | floor)' <<<"$patch")
+    fi
+  fi
+  write_data "$patch"
+}
+
+sync_body() {
+  local mode="$1"
+  load_site
+  ensure_token || return 0
+
+  local fetched now stamp
+  now=$(now_s)
+  fetched=$(jq -r '.fetched // 0' <(prev))
+  stamp=$(jq -r '.sampleTime // 0' <(prev))
+  [[ "$fetched" =~ ^[0-9]+$ ]] || fetched=0
+  [[ "$stamp" =~ ^[0-9]+$ ]] || stamp=0
+
+  if [[ "$mode" == "sync" ]] && night_hour && same_local_day "$stamp"; then
+    local pw
+    pw=$(jq -r '.powerW // empty' <(prev))
+    [[ "$pw" == "0" ]] || hold_night
+    return 0
+  fi
+
+  if [[ "$mode" != "force" ]] && (( fetched > 0 && now - fetched < MIN_POWER_GAP )); then
+    :
+  else
+    fetch_power_and_today || return 0
+  fi
+
+  if [[ "$mode" == "details" || "$mode" == "force" ]]; then
+    FORCE=0
+    [[ "$mode" == "force" ]] && FORCE=1
+    if [[ "$mode" == "force" ]] || want_details; then
+      fetch_details || return 0
+    fi
+  fi
+}
+
+prompt() {
+  local label="$1" default="${2:-}" value
+  if [[ -n "$default" ]]; then
+    printf '%s [%s]: ' "$label" "$default" >/dev/tty
+  else
+    printf '%s: ' "$label" >/dev/tty
+  fi
+  IFS= read -r value </dev/tty || return 1
+  if [[ -z "$value" ]]; then printf '%s' "$default"; else printf '%s' "$value"; fi
+}
+
+prompt_secret() {
+  local value
+  printf '%s: ' "$1" >/dev/tty
+  IFS= read -rs value </dev/tty || return 1
+  printf '\n' >/dev/tty
+  printf '%s' "$value"
+}
+
+setup_flow() {
+  local redirect="http://127.0.0.1:8734/callback"
+  local saved_site="" saved_id="" saved_secret=""
+  if [[ -s "$AUTH" ]]; then
+    saved_site=$(jq -r '.site_id // empty' "$AUTH" 2>/dev/null || true)
+    saved_id=$(jq -r '.client_id // empty' "$AUTH" 2>/dev/null || true)
+    saved_secret=$(jq -r '.client_secret // empty' "$AUTH" 2>/dev/null || true)
+  fi
+
+  printf '\nSolarEdge setup\n' >/dev/tty
+  printf 'In the developer portal, set the redirect URI to exactly:\n' >/dev/tty
+  printf '%s\n' "$redirect" >/dev/tty
+  printf 'The portal rejects the name localhost. This address is the phone.\n' >/dev/tty
+  printf 'The site id is the number in the monitoring address, after /site/.\n' >/dev/tty
+  printf 'Approve in the browser when it opens. Nothing to copy back.\n\n' >/dev/tty
+
+  local site client secret codefile py_pid code url i state
+  site=$(prompt "Site id" "$saved_site")
+  client=$(prompt "Client id" "$saved_id")
+  if [[ -n "$saved_secret" && "$client" == "$saved_id" ]]; then
+    secret=$(prompt_secret "Client secret (press enter to keep the saved one)")
+    [[ -z "$secret" ]] && secret="$saved_secret"
+  else
+    secret=$(prompt_secret "Client secret")
+  fi
+  if [[ ! "$site" =~ ^[0-9]+$ || -z "$client" || -z "$secret" ]]; then
+    printf 'Site id, client id and client secret are all required.\n' >/dev/tty
+    return 1
+  fi
+
+  state=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+  codefile=$(mktemp "${CONFIG}/code.XXXXXX")
+  chmod 600 "$codefile"
+  : >"$codefile"
+  if python3 -c 'import socket,sys; s=socket.socket(); r=s.connect_ex(("127.0.0.1",8734)); s.close(); sys.exit(0 if r==0 else 1)'; then
+    printf 'Port 8734 is already in use. Close whatever is using it and try again.\n' >/dev/tty
+    rm -f "$codefile"
+    return 1
+  fi
+
+  local pyscript
+  pyscript=$(mktemp "${CONFIG}/listen.XXXXXX.py")
+  cat > "$pyscript" << 'PY'
+import http.server, os, urllib.parse, sys
+code_path = sys.argv[1]
+expected_state = sys.argv[2]
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path != "/callback":
+            self.send_response(204)
+            self.end_headers()
+            return
+        query = urllib.parse.parse_qs(parsed.query)
+        code = (query.get("code") or [""])[0]
+        err = (query.get("error") or [""])[0]
+        got_state = (query.get("state") or [""])[0]
+        if got_state != expected_state:
+            text = "error:bad_state"
+            page = b"<html><body><h1>SolarEdge setup rejected.</h1><p>Unexpected state. Close this page and try again.</p></body></html>"
+        elif code:
+            text = code
+            page = b"<html><body><h1>Connected.</h1><p>You can close this page.</p></body></html>"
+        else:
+            text = "error:" + (err or "missing")
+            page = b"<html><body><h1>SolarEdge did not approve.</h1><p>You can close this page.</p></body></html>"
+        tmp = code_path + ".tmp"
+        with open(tmp, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, code_path)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(page)))
+        self.end_headers()
+        self.wfile.write(page)
+    def log_message(self, fmt, *args):
+        return
+server = http.server.HTTPServer(("127.0.0.1", 8734), Handler)
+while True:
+    server.handle_request()
+    try:
+        with open(code_path) as fh:
+            if fh.read():
+                break
+    except FileNotFoundError:
+        pass
+PY
+  python3 "$pyscript" "$codefile" "$state" >/dev/null 2>&1 &
+  py_pid=$!
+  sleep 0.2
+  if ! kill -0 "$py_pid" 2>/dev/null; then
+    printf 'Could not listen on %s\n' "$redirect" >/dev/tty
+    rm -f "$codefile" "$pyscript"
+    return 1
+  fi
+
+  url=$(jq -nr --arg id "$client" --arg redir "$redirect" --arg state "$state" \
+    '"https://connect.solaredge.com/authorize?response_type=code&client_id=\($id|@uri)&redirect_uri=\($redir|@uri)&scope=\("SITE_DATA DEVICE_DATA"|@uri)&state=\($state|@uri)"')
+  printf 'Opening the browser. Approve access for your site.\n' >/dev/tty
+  printf '%s\n\n' "$url" >/dev/tty
+  xdg-open "$url" >/dev/null 2>&1 || true
+
+  code=""
+  for i in $(seq 1 180); do
+    if [[ -s "$codefile" ]]; then
+      code=$(cat "$codefile")
+      break
+    fi
+    if ! kill -0 "$py_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  kill "$py_pid" 2>/dev/null || true
+  wait "$py_pid" 2>/dev/null || true
+  rm -f "$codefile" "${codefile}.tmp" "$pyscript"
+
+  if [[ -z "$code" ]]; then
+    printf 'No approval arrived. The browser has to reach %s\n' "$redirect" >/dev/tty
+    return 1
+  fi
+  if [[ "$code" == error:* ]]; then
+    if [[ "$code" == error:bad_state ]]; then
+      printf 'Setup rejected a callback with the wrong state. Try again.\n' >/dev/tty
+    else
+      printf 'SolarEdge did not approve (%s).\n' "${code#error:}" >/dev/tty
+    fi
+    return 1
+  fi
+
+  local tmp basic body detail
+  tmp=$(mktemp "${CONFIG}/auth.XXXXXX")
+  jq -n --arg site "$site" --arg id "$client" --arg secret "$secret" --arg redir "$redirect" \
+    '{site_id: $site, client_id: $id, client_secret: $secret, redirect_uri: $redir}' >"$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$AUTH"
+
+  exec 9>"$LOCK"
+  flock 9
+  basic=$(basic_auth "$client" "$secret")
+  capture body token_post "$basic" \
+    --data-urlencode "grant_type=authorization_code" \
+    --data-urlencode "code=${code}" \
+    --data-urlencode "redirect_uri=${redirect}"
+  if [[ "$HTTP_CODE" != "200" ]]; then
+    detail=$(printf '%s' "$body" | tr '\n\r' '  ' | cut -c1-180)
+    auth_fail "SolarEdge returned ${HTTP_CODE}. Connect again."
+    printf 'SolarEdge returned %s.\n%s\n' "$HTTP_CODE" "$detail" >/dev/tty
+    return 1
+  fi
+  local access refresh expires_in
+  access=$(jq -r '.access_token // empty' <<<"$body")
+  refresh=$(jq -r '.refresh_token // empty' <<<"$body")
+  expires_in=$(jq -r '.expires_in // 7200' <<<"$body")
+  if [[ -z "$access" || -z "$refresh" ]]; then
+    auth_fail "SolarEdge rejected the code. Connect again."
+    printf 'No refresh token in the answer.\n' >/dev/tty
+    return 1
+  fi
+  save_tokens "$access" "$refresh" "$(( $(now_s) + expires_in ))"
+  ACCESS="$access"
+  SITE_ID="$site"
+  sync_body force
+  if jq -e '.ok == true' "$DATA" >/dev/null 2>&1; then
+    printf '\nConnected. The tile will pick this up in a moment.\n' >/dev/tty
+  else
+    printf '\nSaved the token, but the first reading failed: %s\n' \
+      "$(jq -r '.message // .error // "unknown"' "$DATA")" >/dev/tty
+  fi
+}
+
+classify() {
+  local arg="${1:-}" now
+  now=$(now_s)
+  if [[ "$arg" == "setup" ]]; then MODE=setup; return; fi
+  if [[ "$arg" == "force" ]]; then MODE=force; return; fi
+  if [[ "$arg" == "details" ]]; then MODE=details; return; fi
+  if [[ "$arg" =~ ^-?[0-9]+$ ]]; then
+    local n=$((arg))
+    if (( n < 0 && now + n < 180 && now + n >= 0 )); then MODE=force; return; fi
+    if (( n > 0 && now - n < 180 )); then MODE=details; return; fi
+  fi
+  MODE=sync
+}
+
+self_test() {
+  local got
+  got=$(jq -c "$power_json" <<'JSON'
+{"unit":"W","values":[{"timestamp":"2026-10-27T06:00:00Z","value":null},{"timestamp":"2026-10-27T06:15:00Z","value":100},{"date":"2026-10-27T06:30:00Z","value":4000}]}
+JSON
+)
+  jq -e '.powerW == 4000 and .peakW == 4000 and (.curve | length) == 3 and .curve[0] == 0' <<<"$got" >/dev/null
+  got=$(jq -c "$power_json" <<'JSON'
+{"unit":"KW","values":[{"timestamp":"2026-10-27T08:00:00Z","value":1.5}]}
+JSON
+)
+  jq -e '.powerW == 1500' <<<"$got" >/dev/null
+  got=$(jq -c "$energy_json" <<'JSON'
+{"unit":"WH","values":[{"value":1500},{"value":500}]}
+JSON
+)
+  jq -e '. == 2' <<<"$got" >/dev/null
+  got=$(jq -c "$battery_json" <<'JSON'
+{"devices":[{"telemetries":[{"stateOfEnergy":72,"chargePower":0,"dischargePower":800}]}]}
+JSON
+)
+  jq -e '.soc == 72 and .powerW == -800' <<<"$got" >/dev/null
+  got=$(jq -c "$meter_json" <<'JSON'
+{"meters":[{"power":{"consumption":1400,"import":0,"export":2100}}]}
+JSON
+)
+  jq -e '.consumptionW == 1400 and .exportW == 2100 and .importW == 0' <<<"$got" >/dev/null
+  got=$(jq -c "$devices_json" <<'JSON'
+{"devices":[{"type":"INVERTER"},{"type":"BATTERY"},{"deviceType":"METER"}]}
+JSON
+)
+  jq -e '.battery == true and .meter == true' <<<"$got" >/dev/null
+  got=$(jq -c "$overview_kwh" <<'JSON'
+{"production":{"total":8110,"unit":"WH"},"consumption":{"total":13014,"unit":"WH","fromPv":4694,"fromGrid":8320}}
+JSON
+)
+  jq -e '.productionKwh == 8.11 and .consumptionKwh == 13.014 and .fromPvKwh == 4.694 and .fromGridKwh == 8.32' <<<"$got" >/dev/null
+  printf 'ok\n'
+}
+
+MODE=sync
+classify "${1:-}"
+
+if [[ "$MODE" == "setup" ]]; then
+  setup_flow
+  exit $?
+fi
+
+if [[ "${1:-}" == "--self-test" ]]; then
+  self_test
+  exit $?
+fi
+
+exec 9>"$LOCK"
+flock 9
+
+if ! have_auth; then
+  tmp=$(mktemp "${CONFIG}/data.XXXXXX")
+  printf '%s\n' '{"ok":false,"error":"setup","message":"Connect a SolarEdge site."}' >"$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$DATA"
+  exit 0
+fi
+
+sync_body "$MODE"
+exit 0
+SOLAREDGE_SYNC_END
+    chmod 755 "$dest"
+  fi
+  mode=sync
+  dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-solaredge"
+  if [ -f "$dir/force" ]; then
+    rm -f "$dir/force" "$dir/details"
+    mode=force
+  elif [ -f "$dir/details" ]; then
+    rm -f "$dir/details"
+    mode=details
+  fi
+  exec "$dest" "$mode"
+  """) every 45m timeout 60s
+
+  let watts = solar.powerW
+  let producing = watts != null && watts > 0
+  let powerText = watts == null ? "…" : watts >= 1000 ? "${fmtNum(watts / 1000, 1)} kW" : "${fmtNum(watts)} W"
+  let todayText = solar.todayKwh == null ? "…" : "${fmtNum(solar.todayKwh, 1)} kWh"
+  let peakWatts = solar.peakW
+  let peakText = peakWatts == null ? "…" : peakWatts >= 1000 ? "${fmtNum(peakWatts / 1000, 1)} kW" : "${fmtNum(peakWatts)} W"
+  let peakWhen = solar.peakTime == null ? "" : fmtTime(solar.peakTime, "HH:mm")
+  let curve = solar.curve ?? []
+  let curveMax = (max(curve) ?? 0) > 0 ? max(curve) : 1
+  let sample = solar.sampleTime
+  let axisPoints = count(curve)
+  let axisStart = sample != null && axisPoints > 1 ? sample - (axisPoints - 1) * 15 * 60 : null
+  let axisMid = axisStart != null ? axisStart + (sample - axisStart) / 2 : null
+  let ageSec = sample == null ? null : now - sample
+  let stale = ageSec != null && ageSec > 20 * 60
+  let ago = sample == null ? "" : ageSec < 45 ? "now" : "${fmtAgo(sample, now)} ago"
+  let ready = solar.ok == true
+  let monthText = solar.monthKwh == null ? "…" : "${fmtNum(solar.monthKwh, 1)} kWh"
+  let lifeText = solar.lifetimeKwh == null ? "…" : "${fmtNum(solar.lifetimeKwh, 0)} kWh"
+  let battAbs = abs(solar.battery.powerW)
+  let battMag = battAbs == null ? "" : battAbs >= 1000 ? "${fmtNum(battAbs / 1000, 1)} kW" : "${fmtNum(battAbs)} W"
+  let battFlow = solar.battery.powerW == null ? "" : solar.battery.powerW > 50 ? "charging" : solar.battery.powerW < -50 ? "discharging" : "idle"
+  let battLine = battFlow == "" ? battMag : battMag == "" ? battFlow : "${battFlow} ${battMag}"
+  let homeW = solar.meter.consumptionW
+  let importW = solar.meter.importW
+  let exportW = solar.meter.exportW
+  let homeText = homeW == null ? "…" : homeW >= 1000 ? "${fmtNum(homeW / 1000, 1)} kW" : "${fmtNum(homeW)} W"
+  let importText = importW == null ? "…" : importW >= 1000 ? "${fmtNum(importW / 1000, 1)} kW" : "${fmtNum(importW)} W"
+  let exportText = exportW == null ? "…" : exportW >= 1000 ? "${fmtNum(exportW / 1000, 1)} kW" : "${fmtNum(exportW)} W"
+  let ageColor = (stale || solar.error != null) ? yellow : muted
+
+  onTap: {
+    if ready { run("mkdir -p ~/.config/omarchy-solaredge && touch ~/.config/omarchy-solaredge/details") }
+    screen()
+  }
+
+  component Rule() {
+    Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
+  }
+
+  component Stat(label, value) {
+    Column {
+      gap: 2
+      padding: [10, 8]
+      border: 1
+      borderColor: alpha(muted, 0.3)
+      Text { text: label; style: label; color: muted; maxLines: 1 }
+      Text { text: value; style: body; maxLines: 1 }
+    }
+  }
+
+  Column {
+    gap: 2
+    Row {
+      align: center
+      Text { text: "production"; style: muted; weight: 1 }
+      if ready { Text { text: ago; style: small; color: ageColor; maxLines: 1 } }
+    }
+    if ready {
+      Text { text: powerText; style: title; color: producing ? yellow : muted; maxLines: 1 }
+      Text { text: "${todayText} today"; style: small; color: muted; maxLines: 1 }
+      Sparkline { values: curve; min: 0; max: curveMax; color: yellow; area: true; fill: width; weight: 1 }
+    } else {
+      Spacer { weight: 1 }
+      Text { text: solar.error == "auth" ? "reconnect" : "set up"; style: title }
+      Text { text: "tap to connect"; style: small; color: muted }
+      Spacer { weight: 1 }
+    }
+  }
+
+  screen {
+    title: "production"
+    if ready {
+      Column {
+        scroll: true
+        gap: 14
+        if solar.error != null { Text { text: solar.message ?? solar.error; style: small; color: yellow } }
+        Text { text: powerText; fontSize: 44; color: producing ? yellow : muted; maxLines: 1 }
+        Text { text: "${todayText} today"; style: body }
+        Text { text: sample == null ? ago : "${fmtTime(sample, "HH:mm")} · ${ago}"; style: small; color: ageColor }
+        Column {
+          gap: 2
+          Sparkline { values: curve; min: 0; max: curveMax; color: yellow; area: true; fill: width; height: 160 }
+          if axisStart != null {
+            Grid {
+              columns: 3
+              Text { text: fmtTime(axisStart, "HH:mm"); style: small; color: muted }
+              Text { text: fmtTime(axisMid, "HH:mm"); style: small; color: muted; align: center }
+              Text { text: fmtTime(sample, "HH:mm"); style: small; color: muted; align: end }
+            }
+          }
+        }
+        Text { text: peakWhen == "" ? "peak ${peakText}" : "peak ${peakText} at ${peakWhen}"; style: small; color: muted }
+        Rule { }
+        Grid {
+          columns: 2
+          gap: 8
+          Stat { label: "today"; value: todayText }
+          Stat { label: "this month"; value: monthText }
+          Stat { label: "lifetime"; value: lifeText }
+        }
+        if solar.battery.soc != null {
+          Rule { }
+          Text { text: "battery"; style: label; color: accent }
+          Row {
+            gap: 12
+            align: center
+            Ring { value: solar.battery.soc; max: 100; size: 64; thickness: 6; color: green }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: "${round(solar.battery.soc)}%"; style: title; maxLines: 1 }
+              Text { text: battLine; style: small; color: muted; maxLines: 1 }
+            }
+          }
+        }
+        if solar.meter != null && (homeW != null || importW != null || exportW != null) {
+          Rule { }
+          Text { text: "house and grid"; style: label; color: accent }
+          Grid {
+            columns: 2
+            gap: 8
+            if homeW != null { Stat { label: "home"; value: homeText } }
+            if importW != null { Stat { label: "import"; value: importText } }
+            if exportW != null { Stat { label: "export"; value: exportText } }
+          }
+        }
+        Button { text: "refresh"; onTap: run("mkdir -p ~/.config/omarchy-solaredge && touch ~/.config/omarchy-solaredge/force") }
+        Text { text: "reconnect"; style: small; color: muted; onTap: terminal("~/.local/bin/solaredge-sync setup", "solar") }
+      }
+    } else {
+      Column {
+        scroll: true
+        gap: 12
+        Text { text: solar.message ?? "Connect your SolarEdge site."; style: body }
+        Text { text: "Create a Site Access app at the developer portal with SITE_DATA and DEVICE_DATA."; style: small; color: muted }
+        Text { text: "Set its redirect URI to http://127.0.0.1:8734/callback. The portal rejects the name localhost. This address is the phone."; style: small; color: muted }
+        Text { text: "Tap set up and approve in the browser. The phone catches the approval. Nothing to copy back."; style: small; color: muted }
+        Text { text: "The site id is the number in the monitoring address, after /site/. Press enter to keep a value you already entered."; style: small; color: muted }
+        Button { text: solar.error == "auth" ? "reconnect" : "set up"; onTap: terminal("~/.local/bin/solaredge-sync setup", "solar") }
+        Button { text: "developer portal"; onTap: url("https://developer.solaredge.com/") }
+        Button { text: "monitoring"; onTap: url("https://monitoring.solaredge.com/") }
+      }
+    }
+  }
+}
