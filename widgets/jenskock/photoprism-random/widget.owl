@@ -2,7 +2,7 @@ widget "photoprism random" {
   meta {
     owl: 9
     description: "A random photo from your PhotoPrism library. Tap the photo for the full image; ↻ loads another. On a failed refresh the last photo stays, with ! and the error in settings."
-    version: "5.2"
+    version: "5.3"
     license: "MIT"
     category: "fun"
   }
@@ -38,6 +38,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+# Python's default agent is rejected with 403 by some PhotoPrism servers.
+UA = "PhotoPrismRandomWidget/5.3 (Linux; omalauncher)"
+
 conf = pathlib.Path.home() / ".config" / "photoprism-random"
 session_path = conf / "session.json"
 cache = pathlib.Path.home() / ".cache" / "photoprism-random"
@@ -71,7 +74,7 @@ def main():
     def call(path, binary=False):
         req = urllib.request.Request(
             base + path,
-            headers={"X-Auth-Token": token, "Accept": "*/*"},
+            headers={"X-Auth-Token": token, "Accept": "*/*", "User-Agent": UA},
         )
         with urllib.request.urlopen(req, timeout=45) as res:
             raw = res.read()
@@ -183,6 +186,9 @@ import sys
 import urllib.error
 import urllib.request
 
+# Python's default agent is rejected with 403 by some PhotoPrism servers.
+UA = "PhotoPrismRandomWidget/5.3 (Linux; omalauncher)"
+
 conf = pathlib.Path.home() / ".config" / "photoprism-random"
 session_path = conf / "session.json"
 config_path = conf / "config.json"
@@ -231,7 +237,7 @@ def main():
     req = urllib.request.Request(
         url + "/api/v1/session",
         data=body,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": UA},
         method="POST",
     )
     try:
