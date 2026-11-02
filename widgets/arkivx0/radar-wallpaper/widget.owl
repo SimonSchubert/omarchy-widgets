@@ -1,5 +1,5 @@
 widget "radar wallpaper" {
-  meta { description: "Live NWS national radar on a night map as your wallpaper, centered on you. Runs a background loop; about 4 MB every 15 min."; version: "1.12"; license: "MIT"; category: "world"; owl: 6 }
+  meta { description: "Live NWS national radar on a night map as your wallpaper, centered on you. Runs a background loop; about 4 MB every 15 min."; version: "1.13"; license: "MIT"; category: "world"; owl: 6 }
   size: 3x2
   minSize: 2x2
   requires { pacman: ["curl", "ffmpeg"] }
@@ -24,12 +24,19 @@ widget "radar wallpaper" {
   let reachLabel = reach == "close" ? "closer" : reach == "wide" ? "wider" : "around me"
   let dw = int(sys.display.width)
   let dh = int(sys.display.height)
+  // A place already saved. wttr.in being down does not mean the map is lost.
+  let savedLat = match(cfg ?? "", "lat=(-?[0-9.]+)")[0]
+  let savedLon = match(cfg ?? "", "lon=(-?[0-9.]+)")[0]
+  let haveSaved = savedLat != null && savedLon != null
   // wttr.in answers Partridge, Kansas when it cannot place the IP. That is not a location.
   let area = wx != null && wx.ok ? wx.out.nearest_area[0] : null
   let fallback = area != null && area.areaName[0].value == "Partridge"
-  let lat = area == null || fallback ? null : area.latitude
-  let lon = area == null || fallback ? null : area.longitude
-  let where = wx == null ? "locating…" : !wx.ok ? "location failed" : fallback ? "location unknown" : null
+  // ipinfo only when wttr cannot place the phone and nothing is saved yet.
+  source ip = http(wx != null && (!wx.ok || fallback) && !haveSaved ? "https://ipinfo.io/json" : null) every 30m timeout 10s json status
+  let ipLoc = ip != null && ip.ok ? split(ip.out.loc ?? "", ",") : null
+  let lat = area != null && !fallback ? area.latitude : (ipLoc != null && len(ipLoc) >= 2 ? trim(ipLoc[0]) : null)
+  let lon = area != null && !fallback ? area.longitude : (ipLoc != null && len(ipLoc) >= 2 ? trim(ipLoc[1]) : null)
+  let where = lat != null || haveSaved ? null : (wx == null ? "locating…" : "location failed")
 
   when sys != null {
     run("""
@@ -1282,7 +1289,7 @@ fi
       Text { text: label; style: title }
       Text { text: "Live radar centered on you, playing behind the home screen."; style: small; color: muted }
       if where != null {
-        Text { text: where == "locating…" ? "Finding where you are through wttr.in…" : "wttr.in could not place this phone, so the map stays on the last place it had, or the middle of the country."; style: small; color: where == "location failed" ? red : muted }
+        Text { text: where == "locating…" ? "Finding where you are…" : "This phone could not be placed, so the map stays on the last place it had, or the middle of the country."; style: small; color: where == "location failed" ? red : muted }
       }
       Row {
         gap: 8
