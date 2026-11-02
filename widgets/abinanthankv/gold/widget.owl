@@ -1,0 +1,504 @@
+widget "gold" {
+  size: 4x3
+  minSize: 3x2
+  meta { owl: 13; description: "Gold and silver rates in India: 24K and 22K per gram and per 10 g, silver per gram and per kg, the change since yesterday, and a year of history as a chart or a list, for 160-odd cities"; version: "1.0"; license: "MIT"; category: "finance" }
+
+  // Rates come from goodreturns.in, one page per city and metal: today's rate and the last ten days.
+  // Older days are kept here as they pass, and the year before them comes from Yahoo's Gold BeES and
+  // Silver BeES ETFs, which follow the Indian prices: their closes scaled so the newest one is today's rate.
+  state metal = "gold" persist
+  state city = "mumbai" persist
+  state citySearch = ""
+  state range = "1m" persist
+  state fromText = "" persist
+  state toText = "" persist
+  // every rate seen, by day: gold "2026-11-01" -> { t, k24, k22 }, silver -> { t, v }, ₹ per gram
+  state saved = {} persist
+  state savedAg = {} persist
+
+  source now = clock every 10m
+  source rates = http("https://www.goodreturns.in/gold-rates/${enc(city)}.html") every 30m timeout 20s status
+  source srates = http("https://www.goodreturns.in/silver-rates/${enc(city)}.html") every 30m timeout 20s status
+  source etf = http("https://query1.finance.yahoo.com/v8/finance/chart/GOLDBEES.NS?range=1y&interval=1d") json status every 1h
+  source setf = http("https://query1.finance.yahoo.com/v8/finance/chart/SILVERBEES.NS?range=1y&interval=1d") json status every 1h
+
+  // The gold table: a date, then 24K and 22K per gram.
+  let rowRe = "<td>([A-Z][a-z][a-z] [0-9]{1,2}, [0-9]{4})</td>[\\s\\S]*?&#x20b9;([0-9,]+)[\\s\\S]*?<td>\\s*&#x20b9;([0-9,]+)"
+  let days = matchAll(rates.out ?? "", rowRe)
+    .map(m => ({ t: parseTime(m[0], "MMM d, yyyy"), k24: num(replace(m[1], ",", "")), k22: num(replace(m[2], ",", "")) }))
+    .filter(r => r.t != null && r.k24 > 0 && r.k22 > 0)
+    .sortBy(r => -r.t)
+    .map(r => set(r, "key", fmtTime(r.t, "yyyy-MM-dd")))
+  let today = len(days) > 0 ? days[0] : null
+
+  // The silver table: a date, then 10 grams, 100 grams and 1 kg.
+  let srowRe = "<td>([A-Z][a-z][a-z] [0-9]{1,2}, [0-9]{4})</td>[\\s\\S]*?<td>\\s*&#x20b9;([0-9,]+)</td>"
+  let sdays = matchAll(srates.out ?? "", srowRe)
+    .map(m => ({ t: parseTime(m[0], "MMM d, yyyy"), v: num(replace(m[1], ",", "")) / 10 }))
+    .filter(r => r.t != null && r.v > 0)
+    .sortBy(r => -r.t)
+    .map(r => set(r, "key", fmtTime(r.t, "yyyy-MM-dd")))
+  let stoday = len(sdays) > 0 ? sdays[0] : null
+
+  let etfTs = etf.out.chart.result[0].timestamp ?? []
+  let etfCl = etf.out.chart.result[0].indicators.quote[0].close ?? []
+  let etfPts = range(min(len(etfTs), len(etfCl)))
+    .map(i => ({ t: etfTs[i], c: etfCl[i] }))
+    .filter(p => p.t != null && p.c != null)
+  let lastEtf = len(etfPts) > 0 ? last(etfPts).c : null
+  let factor = (lastEtf > 0 && today != null) ? today.k24 / lastEtf : null
+  let est = factor == null ? [] : etfPts.map(p => ({
+    key: fmtTime(p.t, "yyyy-MM-dd"),
+    t: p.t,
+    k24: round(p.c * factor),
+    k22: round(p.c * factor * 22 / 24),
+    est: true
+  }))
+
+  let setfTs = setf.out.chart.result[0].timestamp ?? []
+  let setfCl = setf.out.chart.result[0].indicators.quote[0].close ?? []
+  let setfPts = range(min(len(setfTs), len(setfCl)))
+    .map(i => ({ t: setfTs[i], c: setfCl[i] }))
+    .filter(p => p.t != null && p.c != null)
+  let sLastEtf = len(setfPts) > 0 ? last(setfPts).c : null
+  let sFactor = (sLastEtf > 0 && stoday != null) ? stoday.v / sLastEtf : null
+  let sest = sFactor == null ? [] : setfPts.map(p => ({
+    key: fmtTime(p.t, "yyyy-MM-dd"),
+    t: p.t,
+    v: p.c * sFactor,
+    est: true
+  }))
+
+  // Both merge the same way, under the city they came from: a real rate wins over an estimate for its day.
+  on rates first {
+    let base = reduce(days, (acc, r) => set(acc, "${city}|${r.key}", set(r, "c", city)), saved ?? {})
+    saved = reduce(est, (acc, r) => get(acc, "${city}|${r.key}", null) == null ? set(acc, "${city}|${r.key}", set(r, "c", city)) : acc, base)
+  }
+  on etf first {
+    let base = reduce(days, (acc, r) => set(acc, "${city}|${r.key}", set(r, "c", city)), saved ?? {})
+    saved = reduce(est, (acc, r) => get(acc, "${city}|${r.key}", null) == null ? set(acc, "${city}|${r.key}", set(r, "c", city)) : acc, base)
+  }
+  on srates first {
+    let base = reduce(sdays, (acc, r) => set(acc, "${city}|${r.key}", set(r, "c", city)), savedAg ?? {})
+    savedAg = reduce(sest, (acc, r) => get(acc, "${city}|${r.key}", null) == null ? set(acc, "${city}|${r.key}", set(r, "c", city)) : acc, base)
+  }
+  on setf first {
+    let base = reduce(sdays, (acc, r) => set(acc, "${city}|${r.key}", set(r, "c", city)), savedAg ?? {})
+    savedAg = reduce(sest, (acc, r) => get(acc, "${city}|${r.key}", null) == null ? set(acc, "${city}|${r.key}", set(r, "c", city)) : acc, base)
+  }
+
+  let isAg = metal == "silver"
+  let au = values(saved ?? {}).filter(r => r.c == city).sortBy(r => r.t)
+  let ag = values(savedAg ?? {}).filter(r => r.c == city).sortBy(r => r.t)
+  let hist = isAg ? ag : au
+  let cur = isAg ? (stoday ?? (len(ag) > 0 ? last(ag) : null)) : (today ?? (len(au) > 0 ? last(au) : null))
+  let lastTwo = drop(hist, max(0, len(hist) - 2))
+  // The day before: the older of the last two rates.
+  let prevRow = len(lastTwo) > 1 ? lastTwo[0] : null
+
+  // The price per gram, whichever metal is up: 24K for gold, silver as it comes.
+  let curG = cur == null ? null : isAg ? cur.v : cur.k24
+  let beforeG = prevRow == null ? null : isAg ? prevRow.v : prevRow.k24
+  let dG = (curG == null || beforeG == null) ? null : curG - beforeG
+  let pct = (dG == null || beforeG <= 0) ? null : dG / beforeG * 100
+  let mood = dG == null || dG == 0 ? muted : dG > 0 ? green : red
+  let arrow = dG == null || dG == 0 ? "·" : dG > 0 ? "▲" : "▼"
+  // 22K, gold only.
+  let cur22 = isAg || cur == null ? null : cur.k22
+  let before22 = isAg || prevRow == null ? null : prevRow.k22
+  let d22 = (cur22 == null || before22 == null) ? null : cur22 - before22
+  let mood22 = d22 == null || d22 == 0 ? muted : d22 > 0 ? green : red
+
+  // Text for the numbers: whole rupees lose the decimals, others keep one.
+  let gramTxt = curG == null ? "…" : curG == round(curG) ? fmtNum(curG) : fixed(curG, 1)
+  let kgTxt = curG == null ? "…" : fmtNum(round(curG * 1000))
+  let dAbsTxt = dG == null ? "" : abs(dG) == round(abs(dG)) ? fmtNum(abs(dG)) : fixed(abs(dG), 1)
+  let pctTxt = pct == null ? "" : "${fixed(abs(pct), 2)}%"
+  let dGramTxt = dG == null ? "" : dG == 0 ? "flat" : "${arrow} ₹${dAbsTxt}"
+  let d22GramTxt = d22 == null ? "" : d22 == 0 ? "flat" : "${arrow} ₹${abs(d22) == round(abs(d22)) ? fmtNum(abs(d22)) : fixed(abs(d22), 1)}"
+  let tenGTxt = curG == null ? "…" : fmtNum(round(curG * 10))
+  let changeTxt = dG == null ? "…" : dG == 0 ? "unchanged since yesterday" : isAg ? "${arrow} ₹${dAbsTxt} per gram (${pctTxt}) since yesterday" : "${arrow} ₹${fmtNum(round(abs(dG)))} (${pctTxt}) since yesterday"
+
+  // What the screen's filters pick.
+  let tnow = now ?? 0
+  let custom = range == "custom"
+  let pd = range == "1w" ? 7 : range == "1m" ? 30 : range == "3m" ? 90 : range == "6m" ? 180 : range == "1y" ? 365 : 0
+  let userFrom = custom ? parseTime(fromText, "yyyy-MM-dd") : null
+  let userTo = custom ? parseTime(toText, "yyyy-MM-dd") : null
+  // One date typed is enough: from a day means up to today, to a day means the month before it.
+  let t0 = custom ? (userFrom ?? ((userTo ?? tnow) - 30 * 86400)) : range == "all" ? 0 : tnow - pd * 86400
+  let t1 = custom ? ((userTo ?? tnow) + 86399) : tnow + 86400
+  let shown = hist.filter(r => r.t >= t0 && r.t <= t1)
+  let shownG = shown.map(r => isAg ? r.v : r.k24)
+  let firstG = len(shownG) > 0 ? first(shownG) : null
+  let hiRate = len(shownG) > 0 ? max(shownG) : null
+  let loRate = len(shownG) > 0 ? min(shownG) : null
+  let spanPct = (firstG == null || curG == null || firstG <= 0) ? null : (curG - firstG) / firstG * 100
+  let hiTxt = hiRate == null ? "…" : hiRate == round(hiRate) ? fmtNum(hiRate) : fixed(hiRate, 1)
+  let loTxt = loRate == null ? "…" : loRate == round(loRate) ? fmtNum(loRate) : fixed(loRate, 1)
+  let tableRows = drop(shown, max(0, len(shown) - 31)).reverse()
+  let sparkRows = drop(hist, max(0, len(hist) - 30))
+  let spark = sparkRows.map(r => isAg ? r.v : r.k24)
+  let sparkLo = len(spark) > 0 ? min(spark) : 0
+  let sparkHi = len(spark) > 0 ? max(spark) : 1
+  let shortTile = (tileHeight ?? 999) < 150
+
+  // The city menu, as goodreturns lists it in the page's own city menu, so it keeps up with theirs:
+  // 160-odd cities in India, plus the countries they quote gold for.
+  let cityRe = "href=\"/gold-rates/([a-z0-9\\-]+)\\.html\""
+  let quickCities = ["mumbai", "delhi", "bangalore", "chennai", "hyderabad", "kolkata", "pune", "ahmedabad", "jaipur", "surat"]
+  let citySlugs = unique(flatten([
+    matchAll(rates.out ?? "", cityRe).map(m => m[0]),
+    matchAll(srates.out ?? "", cityRe).map(m => m[0])
+  ])).filter(s => s != "calculator").sort()
+  let cities = (len(citySlugs) > 0 ? citySlugs : quickCities)
+    .map(c => ({ slug: c, label: join(split(replace(c, "-", " "), " ").map(w => capitalize(w)), " ") }))
+  // Silver is quoted for Indian cities only, gold for the countries too.
+  let abroad = ["abu-dhabi", "ajman", "australia", "bahrain", "bangladesh", "canada", "china", "dammam", "doha", "dubai", "england", "france", "fujairah", "germany", "japan", "kuwait", "malaysia", "muscat", "nepal", "new-zealand", "oman", "pakistan", "qatar", "ras-al-khaimah", "russia", "saudi-arabia", "sharjah", "singapore", "sri-lanka", "united-arab-emirates", "united-states"]
+  let cityChoices = isAg ? cities.filter(c => indexOf(abroad, c.slug) < 0) : cities
+  let cityLabel = join(split(replace(city, "-", " "), " ").map(w => capitalize(w)), " ")
+  let abroadNow = isAg && indexOf(abroad, city) >= 0
+  let cityQuery = trim(lower(citySearch))
+  let cityHits = cityQuery == "" ? [] : cityChoices.filter(c => contains(lower(c.label), cityQuery)).take(24)
+  let cityQuick = cityChoices.filter(c => indexOf(quickCities, c.slug) >= 0)
+  // The chips: the quick ones, and always the one in use, even if it isn't among them.
+  let cityPicks = cityQuery == "" ? (indexOf(quickCities, city) >= 0 ? cityQuick : cityChoices.filter(c => c.slug == city) + cityQuick) : cityHits
+  let ranges = [
+    { k: "1w", label: "1W" }, { k: "1m", label: "1M" }, { k: "3m", label: "3M" },
+    { k: "6m", label: "6M" }, { k: "1y", label: "1Y" }, { k: "all", label: "all" }
+  ]
+
+  onTap: screen()
+
+  component Rule() {
+    Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
+  }
+
+  component Chip(label, active = false) {
+    Row {
+      padding: [10, 5]
+      radius: 6 * corners
+      background: active ? alpha(accent, 0.22) : alpha(muted, 0.10)
+      Text { text: label; style: small; color: active ? accent : foreground; maxLines: 1 }
+    }
+  }
+
+  component Figure(label, value, tint = foreground) {
+    Column {
+      gap: 0
+      Text { text: label; style: label; color: muted; maxLines: 1 }
+      Text { text: value; style: title; color: tint; maxLines: 1 }
+    }
+  }
+
+  Column {
+    gap: 3
+    Row {
+      align: center
+      gap: 10
+      Text { text: "gold"; style: small; color: isAg ? muted : accent; onTap: metal = "gold" }
+      Text { text: "silver"; style: small; color: isAg ? accent : muted; onTap: metal = "silver" }
+      Text { text: cityLabel; style: small; color: muted; weight: 1; align: end; maxLines: 1 }
+    }    Row {
+      align: top
+      gap: 10
+      Column {
+        gap: 0
+        weight: 1
+        Text { text: isAg ? "per gram" : "24K /g"; style: label; color: muted }
+        Text { text: gramTxt; fontSize: min(21, max(12, (tileWidth ?? 220) * 0.07)); maxLines: 1 }
+        Text { text: dGramTxt; style: small; color: mood; maxLines: 1 }
+      }
+      Column {
+        gap: 0
+        weight: 1
+        Text { text: isAg ? "per kg" : "22K /g"; style: label; color: muted }
+        Text { text: isAg ? kgTxt : (cur22 == null ? "…" : fmtNum(cur22)); fontSize: min(21, max(12, (tileWidth ?? 220) * 0.07)); maxLines: 1 }
+        Text { text: isAg ? (dG == null || dG == 0 ? "flat" : "${arrow} ${pctTxt}") : d22GramTxt; style: small; color: isAg ? mood : mood22; maxLines: 1 }
+      }
+    }
+    Sparkline {
+      values: spark
+      min: sparkLo - (sparkHi - sparkLo) * 0.15 - 1
+      max: sparkHi + (sparkHi - sparkLo) * 0.15 + 1
+      area: alpha(accent, 0.22)
+      color: accent
+      fill: width
+      weight: 1
+      visible: !shortTile
+    }
+    Text {
+      text: cur == null ? (isAg ? (srates == null ? "loading…" : srates.ok ? "no rates" : "offline") : (rates == null ? "loading…" : rates.ok ? "no rates" : "offline")) : isAg ? "₹${gramTxt}/g · ${len(hist)} days" : "₹${tenGTxt}/10g · ${len(hist)} days"
+      style: label
+      color: muted
+      maxLines: 1
+    }
+  }
+
+  screen {
+    title: "${metal} · ${cityLabel}"
+    Column {
+      scroll: true
+      gap: 10
+
+      Row {
+        gap: 6
+        Box {
+          onTap: metal = "gold"
+          Chip { label: "gold"; active: !isAg }
+        }
+        Box {
+          onTap: metal = "silver"
+          Chip { label: "silver"; active: isAg }
+        }
+        Spacer { weight: 1 }
+      }
+
+      Row {
+        visible: !isAg
+        gap: 12
+        align: top
+        Column {
+          gap: 0
+          weight: 1
+          Text { text: "24K per gram"; style: label; color: muted }
+          Text { text: "₹${gramTxt}"; fontSize: 26; color: accent; maxLines: 1 }
+          Text { text: "₹${tenGTxt} per 10 g"; style: small; color: muted }
+        }
+        Column {
+          gap: 0
+          weight: 1
+          Text { text: "22K per gram"; style: label; color: muted }
+          Text { text: cur22 == null ? "…" : "₹${fmtNum(cur22)}"; fontSize: 26; maxLines: 1 }
+          Text { text: cur22 == null ? "" : "₹${fmtNum(round(cur22 * 10))} per 10 g"; style: small; color: muted }
+        }
+      }
+      Row {
+        visible: isAg
+        gap: 12
+        align: top
+        Column {
+          gap: 0
+          weight: 1
+          Text { text: "per gram"; style: label; color: muted }
+          Text { text: "₹${gramTxt}"; fontSize: 26; color: accent; maxLines: 1 }
+          Text { text: "1 gram of silver"; style: small; color: muted }
+        }
+        Column {
+          gap: 0
+          weight: 1
+          Text { text: "per kg"; style: label; color: muted }
+          Text { text: "₹${kgTxt}"; fontSize: 26; maxLines: 1 }
+          Text { text: "1,000 grams"; style: small; color: muted }
+        }
+      }
+
+      Text {
+        text: changeTxt
+        style: body
+        color: mood
+      }
+      Text {
+        text: abroadNow ? "goodreturns quotes silver by city in India only · pick one below" : isAg ? (srates == null ? "loading…" : srates.ok ? (stoday == null ? "no rates on the page" : "rate for ${fmtTime(stoday.t, "d MMM yyyy")}") : "offline · ${srates.code}") : (rates == null ? "loading…" : rates.ok ? (today == null ? "no rates on the page" : "rate for ${fmtTime(today.t, "d MMM yyyy")}") : "offline · ${rates.code}")
+        style: small
+        color: muted
+      }
+
+      Rule { }
+      Row {
+        align: center
+        Text { text: "city"; style: label; color: muted; weight: 1 }
+        Text {
+          text: isAg ? "${len(cityChoices)} cities in India" : "${len(cityChoices)} cities and countries"
+          style: small
+          color: muted
+        }
+        Text {
+          text: "  refresh"
+          style: small
+          color: accent
+          onTap: refresh()
+        }
+      }
+      Input {
+        text: citySearch
+        placeholder: "search a city, like lucknow or coimbatore"
+        fontSize: 13
+        onChange: citySearch = lower(value)
+        onSubmit: { city = len(cityHits) > 0 ? first(cityHits).slug : city; citySearch = "" }
+      }
+      Flow {
+        gap: 6
+        for c in cityPicks {
+          Box {
+            onTap: { city = c.slug; citySearch = "" }
+            Chip { label: c.label; active: c.slug == city }
+          }
+        }
+      }
+      Text {
+        text: cityQuery == "" ? "tap one, or search for any of them" : len(cityHits) == 0 ? "no city matches \"${cityQuery}\"" : len(cityHits) == 1 ? "1 match · press ⏎ to take it" : len(cityHits) >= 24 ? "24 of many matches, type more" : "${len(cityHits)} matches · press ⏎ to take the first"
+        style: small
+        color: muted
+      }
+
+      Rule { }
+      Text { text: "history"; style: label; color: accent }
+      Flow {
+        gap: 6
+        for r in ranges {
+          Box {
+            onTap: { range = r.k; fromText = ""; toText = "" }
+            Chip { label: r.label; active: range == r.k }
+          }
+        }
+      }
+      Row {
+        gap: 6
+        Input {
+          text: fromText
+          placeholder: "from yyyy-mm-dd"
+          fontSize: 13
+          weight: 1
+          onSubmit: { fromText = trim(value); range = "custom" }
+        }
+        Input {
+          text: toText
+          placeholder: "to yyyy-mm-dd"
+          fontSize: 13
+          weight: 1
+          onSubmit: { toText = trim(value); range = "custom" }
+        }
+        Box {
+          onTap: { fromText = ""; toText = ""; range = "1m" }
+          Chip { label: "✕" }
+        }
+      }
+
+      Text {
+        text: custom ? "${fmtTime(t0, "d MMM yyyy")} → ${fmtTime(max(t1 - 86399, t0), "d MMM yyyy")}" : "tap a range above, or type dates, yyyy-mm-dd, and press ⏎"
+        style: small
+        color: muted
+      }
+
+      Row {
+        gap: 10
+        align: top
+        Figure { label: isAg ? "high /g" : "high"; value: "₹${hiTxt}"; weight: 1 }
+        Figure { label: isAg ? "low /g" : "low"; value: "₹${loTxt}"; weight: 1 }
+        Figure {
+          label: "over the range"
+          value: spanPct == null ? "…" : "${spanPct > 0 ? "▲" : spanPct < 0 ? "▼" : "·"}${fixed(abs(spanPct), 1)}%"
+          tint: spanPct == null ? muted : spanPct > 0 ? green : red
+          weight: 1
+        }
+      }
+
+      Canvas {
+        height: 190
+        fill: width
+        let n = len(shown)
+        let v1 = shown.map(r => isAg ? r.v : r.k24)
+        let v2 = isAg ? v1 : shown.map(r => r.k22)
+        let gLo = n > 0 ? min(flatten([v1, v2])) : 0
+        let gHi = n > 0 ? max(flatten([v1, v2])) : 1
+        let spread = max(gHi - gLo, gHi * 0.02, 1)
+        let yl = gLo - spread * 0.15
+        let yh = gHi + spread * 0.15
+        let top = 14
+        let bottom = height - 26
+        let spanT = max(t1 - t0, 1)
+        let xfmt = spanT > 200 * 86400 ? "d MMM yy" : "d MMM"
+        let yHiTxt = gHi == round(gHi) ? fmtNum(gHi) : fixed(gHi, 1)
+        let yLoTxt = gLo == round(gLo) ? fmtNum(gLo) : fixed(gLo, 1)
+        let pts1 = shown.map(r => ({
+          x: (r.t - t0) / spanT * (width - 8) + 4,
+          y: bottom - ((isAg ? r.v : r.k24) - yl) / (yh - yl) * (bottom - top)
+        }))
+        for i in range(3) {
+          rect(0, top + i * (bottom - top) / 2, width, 1, fill: alpha(muted, 0.18))
+        }
+        if !isAg {
+          path(shown.map(r => ({
+            x: (r.t - t0) / spanT * (width - 8) + 4,
+            y: bottom - (r.k22 - yl) / (yh - yl) * (bottom - top)
+          })), stroke: cyan, width: 1.5)
+        }
+        path(pts1, stroke: accent, width: 2)
+        if n > 0 {
+          text("₹${yHiTxt}", 2, top, size: 10, color: muted)
+          text("₹${yLoTxt}", 2, bottom, size: 10, color: muted)
+          text(fmtTime(first(shown).t, xfmt), 4, height - 9, size: 10, color: muted)
+          text(fmtTime(last(shown).t, xfmt), width - 4, height - 9, size: 10, color: muted, align: end)
+          text("last ${n} days", width - 4, top, size: 10, color: muted, align: end)
+        } else {
+          text("no rates in this range", width / 2, height / 2, size: 13, color: muted, align: center)
+        }
+      }
+      Row {
+        gap: 14
+        Row {
+          visible: !isAg
+          gap: 5
+          align: center
+          Spacer { size: 8; background: accent; radius: 4 }
+          Text { text: "24K"; style: small; color: muted }
+        }
+        Row {
+          visible: !isAg
+          gap: 5
+          align: center
+          Spacer { size: 8; background: cyan; radius: 4 }
+          Text { text: "22K"; style: small; color: muted }
+        }
+        Row {
+          visible: isAg
+          gap: 5
+          align: center
+          Spacer { size: 8; background: accent; radius: 4 }
+          Text { text: "silver"; style: small; color: muted }
+        }
+        Spacer { weight: 1 }
+        Text { text: "₹ per gram"; style: small; color: muted }
+      }
+
+      Rule { }
+      Row {
+        gap: 8
+        Text { text: "day"; style: label; color: muted; weight: 1 }
+        Text { text: isAg ? "per gram" : "24K"; style: label; color: muted; width: 80; align: end }
+        Text { text: isAg ? "per kg" : "22K"; style: label; color: muted; width: 88; align: end }
+        Text { text: "change"; style: label; color: muted; width: 70; align: end }
+      }
+      for r, i in tableRows key r.key {
+        Row {
+          gap: 8
+          padding: [0, 2]
+          let older = i + 1 < len(tableRows) ? tableRows[i + 1] : null
+          let rg = isAg ? r.v : r.k24
+          let og = older == null ? null : isAg ? older.v : older.k24
+          let chg = (rg == null || og == null) ? null : rg - og
+          let chgTxt = chg == null ? "" : chg == 0 ? "—" : "${chg > 0 ? "▲" : "▼"}${abs(chg) == round(abs(chg)) ? fmtNum(abs(chg)) : fixed(abs(chg), 1)}"
+          let tint = chg == null || chg == 0 ? muted : chg > 0 ? green : red
+          let gTxt = rg == null ? "" : rg == round(rg) ? fmtNum(rg) : fixed(rg, 1)
+          let kTxt = rg == null ? "" : fmtNum(round(rg * 1000))
+          Text { text: fmtTime(r.t, "EEE d MMM yy"); style: small; weight: 1; maxLines: 1; color: r.est ? muted : foreground }
+          Text { text: isAg ? gTxt : fmtNum(r.k24); style: small; width: 80; align: end; maxLines: 1 }
+          Text { text: isAg ? kTxt : fmtNum(r.k22); style: small; width: 88; align: end; maxLines: 1 }
+          Text { text: chgTxt; style: small; width: 70; align: end; maxLines: 1; color: tint }
+        }
+      }
+      Text {
+        text: len(shown) > 31 ? "the last 31 of ${len(shown)} days" : ""
+        style: small
+        color: muted
+      }
+      Text {
+        text: isAg ? "rates: goodreturns.in · older days: silver ETF, scaled to the newest rate" : "rates: goodreturns.in · older days: gold ETF, scaled to the newest rate"
+        style: small
+        color: muted
+      }
+      Spacer { height: 6 }
+    }
+  }
+}
