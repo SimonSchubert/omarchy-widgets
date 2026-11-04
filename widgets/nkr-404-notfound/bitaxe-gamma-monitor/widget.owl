@@ -1,7 +1,7 @@
 widget "bitaxe gamma monitor" {
   size: 6x3
   minSize: 4x3
-  meta { description: "Monitor a Bitaxe Gamma miner's hashrate, temperature, fan speed, uptime and best difficulty over your local network"; version: "1.0"; license: "MIT"; category: "system"; owl: 10 }
+  meta { description: "Monitor a Bitaxe Gamma miner's hashrate, temperature, fan speed, uptime and best difficulty over your local network"; version: "1.1"; license: "MIT"; category: "system"; owl: 10 }
 
   requires { pacman: ["curl"] }
 
@@ -19,7 +19,9 @@ widget "bitaxe gamma monitor" {
   let uptime = data == null ? null : num(data.totalUptimeSeconds)
   let best = data == null ? null : num(data.bestDiff)
   let tempColor = temp == null ? muted : temp >= 75 ? red : temp >= 65 ? yellow : green
-  let rateHistory = history(rate, 36)
+  // The source updates every 3 seconds, so ten readings cover 30 seconds.
+  let rateHistory = history(rate, 10)
+  let tempHistory = history(temp, 10)
 
   onTap: screen()
 
@@ -44,7 +46,40 @@ widget "bitaxe gamma monitor" {
       Text { text: rate == null ? "—" : "${fixed(rate / 1000, 2)} TH/s"; fontSize: 30; fontWeight: 650; color: online ? foreground : muted; weight: 1; maxLines: 1 }
       Text { text: "当前算力"; style: small; color: muted; align: end; width: 64 }
     }
-    Sparkline { values: rateHistory; min: 0; color: accent; area: true; height: 22 }
+    // Blue left axis: hash rate in TH/s. Orange right axis: temperature in °C.
+    Canvas {
+      height: 72
+      fill: width
+      let left = 42
+      let right = width - 42
+      let top = 8
+      let bottom = height - 15
+      let rateValues = rateHistory.filter(v => v != null).map(v => v / 1000)
+      let tempValues = tempHistory.filter(v => v != null)
+      let rateMin = floor((min(rateValues) ?? 0) * 10) / 10
+      let rateMax = ceil((max(rateValues) ?? 0) * 10) / 10
+      let tempMin = floor(min(tempValues) ?? 0)
+      let tempMax = ceil(max(tempValues) ?? 0)
+      let rateSpan = max(rateMax - rateMin, 0.1)
+      let tempSpan = max(tempMax - tempMin, 1)
+      let ratePoints = rateValues.map((v, i) => [left + i / max(len(rateValues) - 1, 1) * (right - left), bottom - (v - rateMin) / rateSpan * (bottom - top)])
+      let tempPoints = tempValues.map((v, i) => [left + i / max(len(tempValues) - 1, 1) * (right - left), bottom - (v - tempMin) / tempSpan * (bottom - top)])
+      for i in range(3) {
+        let y = top + i / 2 * (bottom - top)
+        line(left, y, right, y, stroke: alpha(muted, 0.25), width: 1)
+      }
+      line(left, top, left, bottom, stroke: alpha(accent, 0.55), width: 1)
+      line(right, top, right, bottom, stroke: alpha(orange, 0.55), width: 1)
+      if len(ratePoints) > 1 { path(ratePoints, stroke: accent, width: 2, cap: round) }
+      if len(tempPoints) > 1 { path(tempPoints, stroke: orange, width: 2, cap: round) }
+      if len(ratePoints) > 0 { circle(ratePoints[-1][0], ratePoints[-1][1], 2.5, fill: accent) }
+      if len(tempPoints) > 0 { circle(tempPoints[-1][0], tempPoints[-1][1], 2.5, fill: orange) }
+      text("${fixed(rateMax, 1)}T", left - 5, top + 4, size: 9, align: end, color: accent)
+      text("${fixed(rateMin, 1)}T", left - 5, bottom - 2, size: 9, align: end, color: accent)
+      text("${tempMax}°", right + 5, top + 4, size: 9, align: start, color: orange)
+      text("${tempMin}°", right + 5, bottom - 2, size: 9, align: start, color: orange)
+      text("30 秒", width / 2, height - 5, size: 9, align: center, color: muted)
+    }
     Row {
       gap: 14
       Stat { label: "温度"; value: temp == null ? "—" : "${fixed(temp, 1)} °C"; tint: tempColor }
