@@ -1,0 +1,105 @@
+widget "bitaxe gamma monitor" {
+  size: 6x3
+  minSize: 4x3
+  meta { description: "Monitor a Bitaxe Gamma miner's hashrate, temperature, fan speed, uptime and best difficulty over your local network"; version: "1.1"; license: "MIT"; category: "system"; owl: 10 }
+
+  requires { pacman: ["curl"] }
+
+  // Tap the tile to enter this Bitaxe's IP address or local host name.
+  state host = "" persist
+  let configured = trim(host) != ""
+  source miner = cmd(configured ? "curl -fsS --connect-timeout 2 --max-time 4 http://${sh(host)}/api/system/info" : "printf '{}'") every 3s json timeout 6s status
+
+  let data = miner.out
+  let online = configured && miner != null && miner.ok
+  let rate = data == null ? null : num(data.hashRate)
+  let temp = data == null ? null : num(data.temp)
+  let fanPct = data == null ? null : num(data.fanspeed)
+  let fanRpm = data == null ? null : num(data.fanrpm)
+  let uptime = data == null ? null : num(data.totalUptimeSeconds)
+  let best = data == null ? null : num(data.bestDiff)
+  let tempColor = temp == null ? muted : temp >= 75 ? red : temp >= 65 ? yellow : green
+  // The source updates every 3 seconds, so ten readings cover 30 seconds.
+  let rateHistory = history(rate, 10)
+  let tempHistory = history(temp, 10)
+
+  onTap: screen()
+
+  component Stat(label, value, tint = foreground, size = 14) {
+    Column {
+      gap: 1
+      weight: 1
+      Text { text: label; style: label; color: muted; maxLines: 1 }
+      Text { text: value; font: mono; fontSize: size; color: tint; maxLines: 1 }
+    }
+  }
+
+  Column {
+    gap: 5
+    Row {
+      align: center
+      Text { text: "BITAXE γ"; style: label; color: accent; weight: 1 }
+      Text { text: !configured ? "点击设置" : online ? "● 在线" : miner == null ? "连接中…" : "● 离线"; style: small; color: !configured || miner == null ? muted : online ? green : red }
+    }
+    Row {
+      align: bottom
+      Text { text: rate == null ? "—" : "${fixed(rate / 1000, 2)} TH/s"; fontSize: 30; fontWeight: 650; color: online ? foreground : muted; weight: 1; maxLines: 1 }
+      Text { text: "当前算力"; style: small; color: muted; align: end; width: 64 }
+    }
+    // Blue left axis: hash rate in TH/s. Orange right axis: temperature in °C.
+    Canvas {
+      height: 72
+      fill: width
+      let left = 42
+      let right = width - 42
+      let top = 8
+      let bottom = height - 15
+      let rateValues = rateHistory.filter(v => v != null).map(v => v / 1000)
+      let tempValues = tempHistory.filter(v => v != null)
+      let rateMin = floor((min(rateValues) ?? 0) * 10) / 10
+      let rateMax = ceil((max(rateValues) ?? 0) * 10) / 10
+      let tempMin = floor(min(tempValues) ?? 0)
+      let tempMax = ceil(max(tempValues) ?? 0)
+      let rateSpan = max(rateMax - rateMin, 0.1)
+      let tempSpan = max(tempMax - tempMin, 1)
+      let ratePoints = rateValues.map((v, i) => [left + i / max(len(rateValues) - 1, 1) * (right - left), bottom - (v - rateMin) / rateSpan * (bottom - top)])
+      let tempPoints = tempValues.map((v, i) => [left + i / max(len(tempValues) - 1, 1) * (right - left), bottom - (v - tempMin) / tempSpan * (bottom - top)])
+      for i in range(3) {
+        let y = top + i / 2 * (bottom - top)
+        line(left, y, right, y, stroke: alpha(muted, 0.25), width: 1)
+      }
+      line(left, top, left, bottom, stroke: alpha(accent, 0.55), width: 1)
+      line(right, top, right, bottom, stroke: alpha(orange, 0.55), width: 1)
+      if len(ratePoints) > 1 { path(ratePoints, stroke: accent, width: 2, cap: round) }
+      if len(tempPoints) > 1 { path(tempPoints, stroke: orange, width: 2, cap: round) }
+      if len(ratePoints) > 0 { circle(ratePoints[-1][0], ratePoints[-1][1], 2.5, fill: accent) }
+      if len(tempPoints) > 0 { circle(tempPoints[-1][0], tempPoints[-1][1], 2.5, fill: orange) }
+      text("${fixed(rateMax, 1)}T", left - 5, top + 4, size: 9, align: end, color: accent)
+      text("${fixed(rateMin, 1)}T", left - 5, bottom - 2, size: 9, align: end, color: accent)
+      text("${tempMax}°", right + 5, top + 4, size: 9, align: start, color: orange)
+      text("${tempMin}°", right + 5, bottom - 2, size: 9, align: start, color: orange)
+      text("30 秒", width / 2, height - 5, size: 9, align: center, color: muted)
+    }
+    Row {
+      gap: 14
+      Stat { label: "温度"; value: temp == null ? "—" : "${fixed(temp, 1)} °C"; tint: tempColor }
+      Stat { label: "风扇（%/RPM）"; value: fanPct == null ? "—" : "${round(fanPct)}% / ${round(fanRpm)}"; tint: fanPct == null || fanPct == 0 ? muted : cyan; size: 12 }
+      Stat { label: "累计启动"; value: uptime == null ? "—" : fmtDuration(uptime) }
+      Stat { label: "最佳难度"; value: best == null ? "—" : fmtNum(best, {compact: true}) }
+    }
+  }
+
+  screen {
+    title: "Bitaxe Gamma monitor"
+    Column {
+      gap: 14
+      Text { text: "矿机地址"; style: label; color: muted }
+      Input { text: host; placeholder: "例如 192.168.1.100"; focus: true; onSubmit: { host = trim(value); refresh(); close() } }
+      Text { text: "输入 Bitaxe 的 IP 或局域网主机名后按发送键保存。每 3 秒刷新一次。"; style: small; color: muted }
+      if configured && miner != null && !online {
+        Text { text: "无法读取 ${host}：${miner.err ?? "请确认设备在线且地址正确"}"; color: red; style: small }
+      }
+      Button { text: "立即刷新"; onTap: refresh() }
+    }
+  }
+}
