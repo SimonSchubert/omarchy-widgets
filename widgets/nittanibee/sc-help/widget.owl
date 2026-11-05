@@ -1,0 +1,530 @@
+widget "SC help" {
+  meta {
+    owl: 18
+    description: "South Carolina help for people who are homeless or about to be: 2-1-1, coordinated entry by region, shelters, housing and benefit applications, IDs, health, food, legal aid, veterans and youth."
+    version: "1.0"
+    license: "MIT"
+    category: "home"
+  }
+
+  strings {
+    en {
+      title: "SC help"
+      tagline: "shelter · benefits · IDs"
+      call211: "Call 2-1-1"
+      call211Note: "24/7 shelter, food & rent help"
+      call211Text: "text your ZIP to 898211"
+      crisisLine: "crisis line"
+      safetyLine: "safety line"
+      snapMedicaid: "SNAP & Medicaid"
+      applyOrLogIn: "apply or log in"
+      tapForShelters: "Tap for shelters & housing"
+
+      screenTitle: "South Carolina help"
+      intro: "Every card opens an official page: apply, create an account, log in, or call. Start with 2-1-1 if you are not sure where to go."
+      statewideReferrals: "24/7 statewide referrals"
+      crisisLifeline: "suicide & crisis lifeline"
+      footer: "Links go to official sites. If a page has moved, call 2-1-1 and they will connect you."
+      close: "close"
+
+      urgent: "Urgent & 24/7"
+      urgentNote: "free, confidential"
+      coordinatedEntry: "Coordinated entry"
+      coordinatedEntryNote: "get housed"
+      shelterTonight: "Shelter tonight"
+      shelterTonightNote: "call ahead"
+      applyLogIn: "Apply & log in"
+      applyLogInNote: "create accounts"
+      housingRent: "Housing & rent help"
+      housingRentNote: "vouchers & waitlists"
+      food: "Food"
+      foodNote: "pantries & meals"
+      health: "Health & mental health"
+      healthNote: "low cost or free"
+      ids: "IDs & documents"
+      idsNote: "needed to apply"
+      legalWork: "Legal help & work"
+      legalWorkNote: "free civil aid"
+      youthFamilies: "Youth & families"
+      youthFamiliesNote: "schools & shelter"
+      veterans: "Veterans"
+      veteransNote: "VA & SSVF"
+      directories: "Statewide directories"
+      directoriesNote: "more help"
+
+      sc211: "SC 2-1-1"
+      sc211Note: "Call 866-892-9211, text your ZIP to 898211, or search the online directory for shelter and services near you"
+      lifeline988: "988 Suicide & Crisis Lifeline"
+      lifeline988Note: "Call or text 988 · 24/7 crisis counseling"
+      dvHotline: "National Domestic Violence Hotline"
+      dvHotlineNote: "Call 1-800-799-7233 · text START to 88788 · chat online"
+      sistercare: "Sistercare"
+      sistercareNote: "Midlands DV shelter and 24-hour crisis line: 803-765-9428"
+      vetCrisis: "Veterans Crisis Line"
+      vetCrisisNote: "Dial 988 and press 1, text 838255, or chat · 24/7"
+      mobileCrisis: "SC mobile crisis"
+      mobileCrisisNote: "Call 1-833-364-2274 · mental health or substance use crisis, 24/7"
+      findTreatment: "Find treatment"
+      findTreatmentNote: "SAMHSA's finder for mental health and addiction treatment by ZIP code"
+
+      ceUpstate: "Upstate coordinated entry"
+      ceUpstateNote: "13 Upstate counties · assessment and housing referrals · 864-241-0462"
+      ceMidlands: "Midlands coordinated entry"
+      ceMidlandsNote: "Pick your county in MACH's Find Help for local resources and coordinated entry"
+      cePeeDee: "Pee Dee coordinated entry"
+      cePeeDeeNote: "TCHC/ECHO · call 843-492-2600 or start online"
+      ceLowcountry: "Lowcountry coordinated entry"
+      ceLowcountryNote: "Charleston region · call 843-737-8357 or apply online"
+
+      one80: "One80 Place"
+      one80Note: "Charleston shelter, meals, housing help · see Get Help"
+      oliverGospel: "Oliver Gospel Mission"
+      oliverGospelNote: "Columbia shelter, meals and recovery programs"
+      transitions: "Transitions"
+      transitionsNote: "Columbia day center and shelter for adults"
+      homelessNoMore: "Homeless No More"
+      homelessNoMoreNote: "Columbia: family shelter and transitional housing"
+      homelessNoMoreNote2: "Family shelter, housing and children's programs in the Midlands"
+      womensShelter: "Women's Shelter"
+      womensShelterNote: "Columbia shelter and support for women and children"
+      palmettoPlace: "Palmetto Place"
+      palmettoPlaceNote: "Columbia: shelter and services for youth and young adults"
+      palmettoPlaceNote2: "Shelter, meals and case management for youth and young adults in Columbia"
+      miracleHill: "Miracle Hill Ministries"
+      miracleHillNote: "Upstate shelters, meals and recovery · Greenville area"
+      salvationArmy: "Salvation Army Greenville"
+      salvationArmyNote: "Emergency shelter and homelessness services in Greenville County"
+      familyPromise: "Family Promise of the Midlands"
+      familyPromiseNote: "Shelter and case management for families with children"
+      familyPromiseNote2: "Shelter and support for families experiencing homelessness"
+      greenvilleGuide: "Greenville homeless guide"
+      greenvilleGuideNote: "The city's list of shelters, housing and day services by need"
+
+      dssBenefits: "DSS benefits: SNAP, TANF, Medicaid"
+      dssBenefitsNote: "Apply for food and cash assistance in SCCES, or sign in to your account"
+      dssTrack: "Track a DSS application"
+      dssTrackNote: "Check the status of a SNAP or TANF application you already filed"
+      dssSignIn: "DSS account sign in"
+      dssSignInNote: "Log in to DSS services and documents · create an account"
+      medicaidApply: "Apply for Medicaid"
+      medicaidApplyNote: "SC Healthy Connections application · start or resume online"
+      medicaidPortal: "Medicaid member portal"
+      medicaidPortalNote: "Log in to check coverage, renew, upload documents and update your case"
+      medicaidStart: "Medicaid: getting started"
+      medicaidStartNote: "Who qualifies, what to bring, and how to apply step by step"
+      scThrive: "SC Thrive: benefits help"
+      scThriveNote: "Free help applying for SNAP, Medicaid and tax credits · apply or book an appointment"
+      thriveHub: "Thrive Hub login"
+      thriveHubNote: "Log in to your SC Thrive account to track applications and documents"
+      ebt: "EBT card login"
+      ebtNote: "Check your SNAP balance and transactions, or replace a lost card"
+      ssaAccount: "SSA my Social Security"
+      ssaAccountNote: "Create an account or log in: benefits, earnings and replacement card"
+      ssaSsi: "Apply for SSI"
+      ssaSsiNote: "Start a Supplemental Security Income application online"
+      scWorksJobSeeker: "SC Works job seeker"
+      scWorksJobSeekerNote: "Create a job-seeker account and search the state's largest job database"
+      wicApply: "WIC pre-application"
+      wicApplyNote: "Check eligibility and start a WIC application online"
+
+      hcv: "SC Housing Choice Voucher"
+      hcvNote: "How the statewide rental voucher works, and how to apply through your housing authority"
+      scHousing: "SC Housing"
+      scHousingNote: "State housing agency: rental help, homeownership and homelessness programs"
+      columbiaApply: "Columbia Housing: apply"
+      columbiaApplyNote: "Apply online for public housing and vouchers in Columbia"
+      charlestonCity: "Charleston city applicant portal"
+      charlestonCityNote: "Log in or create an applicant account for Charleston city housing"
+      charlestonCounty: "Charleston County Housing: apply"
+      charlestonCountyNote: "Apply for public housing and vouchers in Charleston County"
+      greenvilleHa: "Greenville Housing Authority"
+      greenvilleHaNote: "Public housing and vouchers in Greenville · apply and check waitlists"
+      rha1: "SC Regional Housing Authority 1"
+      rha1Note: "Public housing and vouchers across the Lowcountry and rural counties"
+      rha3: "SC Regional Housing Authority 3"
+      rha3Note: "Apply online for public housing in the Pee Dee and Lowcountry"
+      hudSc: "HUD in South Carolina"
+      hudScNote: "Find HUD housing, counselors, rental help and local offices"
+      hudScNote2: "Federal housing help, counselors and local HUD offices"
+      housingSearch: "SC Housing Search"
+      housingSearchNote: "Search affordable apartments by county, rent and bedrooms"
+
+      harvestHope: "Harvest Hope Food Bank"
+      harvestHopeNote: "Find a pantry or hot meal near you in the Midlands, Upstate and Pee Dee"
+      lowcountryFoodBank: "Lowcountry Food Bank"
+      lowcountryFoodBankNote: "Find food pantries and meal sites across the Lowcountry"
+      secondHarvest: "Second Harvest Metrolina"
+      secondHarvestNote: "Find pantries and meal programs in York, Lancaster and Chester counties"
+      snap: "SNAP in South Carolina"
+      snapNote: "Who qualifies, what you can buy, and how to apply for food stamps"
+      wic: "WIC nutrition program"
+      wicNote: "Food, formula and breastfeeding help for pregnant people and young children"
+
+      bhddMental: "BHDD mental health"
+      bhddMentalNote: "State mental health services, crisis help and local community centers"
+      bhddSubstance: "BHDD substance use services"
+      bhddSubstanceNote: "Treatment, recovery and harm reduction services across SC"
+      freeClinics: "SC free clinics"
+      freeClinicsNote: "Find a free or low-cost clinic for uninsured adults near you"
+      publicHealthClinics: "SC public health clinics"
+      publicHealthClinicsNote: "Find a county health department for vaccines, STI care and checkups"
+      findTreatmentNote2: "Search addiction and mental health treatment by location and insurance"
+
+      dmvId: "SC DMV identification cards"
+      dmvIdNote: "How to get a state ID, what documents to bring, and reduced fees"
+      dmvOnline: "SC DMV online services"
+      dmvOnlineNote: "Renew or replace a license or ID, and change your address online"
+      birthCert: "SC birth certificates"
+      birthCertNote: "Order a certified birth certificate from vital records · fees and offices"
+      ssaCard: "Replace a Social Security card"
+      ssaCardNote: "What you need and how to get a free replacement card"
+      vitalRecords: "Vital records offices"
+      vitalRecordsNote: "Find the DPH office that issues birth and death certificates near you"
+
+      scLegal: "South Carolina Legal Services"
+      scLegalNote: "Free civil legal help for housing, benefits, family and consumer problems · 1-888-346-5592"
+      scBar: "SC Bar: get legal help"
+      scBarNote: "Find legal aid, lawyer referrals and free advice clinics"
+      freeLegalAnswers: "SC Free Legal Answers"
+      freeLegalAnswersNote: "Post a civil legal question and get an answer from a volunteer lawyer"
+      scAppleseed: "SC Appleseed Legal Justice"
+      scAppleseedNote: "Advocacy and know-your-rights help for housing, benefits and immigrants"
+      scWorks: "SC Works"
+      scWorksNote: "Career centers, training and help finding a job across the state"
+      scWorksJobs: "SC Works jobs"
+      scWorksJobsNote: "Search and apply for jobs in the state's online database"
+      scDew: "SC DEW"
+      scDewNote: "Unemployment benefits, job search and reemployment help"
+      vocRehab: "SC Vocational Rehabilitation"
+      vocRehabNote: "Free job training and placement for people with disabilities"
+
+      mckinneyVento: "McKinney-Vento school help"
+      mckinneyVentoNote: "Your right to stay in school while homeless · state coordinator and liaisons"
+      runaway: "National Runaway Safeline"
+      runawayNote: "Call or text 1-800-786-2929 · 24/7 help for young people"
+
+      vaHomeless: "VA homeless programs"
+      vaHomelessNote: "Housing, health care and case management for veterans · 877-424-3838"
+      vaCallCenter: "VA National Call Center"
+      vaCallCenterNote: "24/7 help for homeless veterans and those at risk · 877-424-3838"
+      scDva: "SC Department of Veterans' Affairs"
+      scDvaNote: "State benefits, claims help and veterans' programs"
+      vaColumbia: "Columbia VA health care"
+      vaColumbiaNote: "VA hospital and clinics in the Midlands · appointments and services"
+      vaCharleston: "Charleston VA health care"
+      vaCharlestonNote: "VA hospital and clinics in the Lowcountry · appointments and services"
+
+      ich: "SC Interagency Council on Homelessness"
+      ichNote: "Statewide plans, local continuums of care and best practices"
+      sc211Site: "SC 211"
+      sc211SiteNote: "The statewide information and referral line · call, text or search online"
+      sc211Guides: "SC 211 resource guides"
+      sc211GuidesNote: "Printable guides to housing, food, utilities, health and more"
+      findhelp: "Findhelp.org"
+      findhelpNote: "Search free and reduced-cost services by ZIP code"
+      unitedWay: "United Way Association of SC"
+      unitedWayNote: "The network behind 2-1-1, with local United Way contacts"
+      aiken: "Aiken County Homeless Coalition"
+      aikenNote: "Local shelter, outreach and housing resources in Aiken County"
+      catawba: "Catawba Area Coalition"
+      catawbaNote: "Homeless services and coordinated entry in the Catawba region"
+    }
+  }
+
+  size: 3x4
+  minSize: 3x4
+  onTap: screen()
+
+  // One tappable resource: a glyph, what it is, and what you can do there.
+  component Card(glyph, name, note, href, tint = accent) {
+    Row {
+      gap: 10
+      padding: [12, 9]
+      background: alpha(surface, 0.5)
+      border: 1
+      borderColor: alpha(foreground, 0.07)
+      radius: 10 * corners
+      onTap: url(href)
+      Box {
+        width: 38
+        height: 38
+        background: alpha(tint, 0.16)
+        radius: 9 * corners
+        align: center
+        Text { text: glyph; fontSize: 10; bold: true; color: tint; align: center; maxLines: 1 }
+      }
+      Column {
+        weight: 1
+        gap: 2
+        Text { text: name; bold: true; maxLines: 2 }
+        Text { text: note; style: small; color: muted; maxLines: 3 }
+      }
+      Text { text: "›"; fontSize: 22; color: alpha(foreground, 0.35) }
+    }
+  }
+
+  // A smaller link on the tile itself.
+  component Mini(glyph, name, note, href, tint = accent) {
+    Row {
+      gap: 9
+      padding: [10, 7]
+      background: alpha(surface, 0.5)
+      border: 1
+      borderColor: alpha(foreground, 0.07)
+      radius: 9 * corners
+      onTap: url(href)
+      Box {
+        width: 28
+        height: 28
+        background: alpha(tint, 0.16)
+        radius: 7 * corners
+        align: center
+        Text { text: glyph; fontSize: 8; bold: true; color: tint; align: center; maxLines: 1 }
+      }
+      Column {
+        weight: 1
+        gap: 1
+        Text { text: name; bold: true; style: small; maxLines: 1 }
+        Text { text: note; style: small; color: muted; maxLines: 1 }
+      }
+      Text { text: "›"; fontSize: 18; color: alpha(foreground, 0.35) }
+    }
+  }
+
+  // A heading in the full-screen list.
+  component Section(title, note = "") {
+    Row {
+      gap: 8
+      align: bottom
+      padding: [2, 10]
+      Text { text: title; bold: true; fontSize: 17; color: accent; weight: 1; maxLines: 1 }
+      Text { text: note; style: small; color: muted; maxLines: 1; align: end }
+    }
+  }
+
+  Column {
+    gap: 6
+
+    Row {
+      align: center
+      gap: 8
+      Column {
+        weight: 1
+        gap: 1
+        Text { text: str.title; style: title; maxLines: 1 }
+        Text { text: str.tagline; style: small; color: muted; maxLines: 1 }
+      }
+      Box {
+        width: 38
+        height: 38
+        background: alpha(accent, 0.18)
+        radius: 10 * corners
+        align: center
+        Text { text: "SC"; fontSize: 12; bold: true; color: accent; align: center }
+      }
+    }
+
+    Column {
+      gap: 2
+      padding: [12, 9]
+      background: alpha(red, 0.16)
+      border: 1
+      borderColor: alpha(red, 0.35)
+      radius: 12 * corners
+      onTap: url("tel:8668929211")
+      Text { text: str.call211; fontSize: 19; bold: true; color: red; maxLines: 1 }
+      Text { text: str.call211Note; style: small; maxLines: 1 }
+      Text { text: str.call211Text; style: small; color: muted; maxLines: 1 }
+    }
+
+    Row {
+      gap: 8
+      Column {
+        weight: 1
+        gap: 1
+        padding: [10, 7]
+        background: alpha(magenta, 0.13)
+        radius: 9 * corners
+        onTap: url("tel:988")
+        Text { text: "988"; bold: true; fontSize: 16; color: magenta }
+        Text { text: str.crisisLine; style: small; color: muted; maxLines: 1 }
+      }
+      Column {
+        weight: 1
+        gap: 1
+        padding: [10, 7]
+        background: alpha(red, 0.13)
+        radius: 9 * corners
+        onTap: url("tel:18007997233")
+        Text { text: "DV"; bold: true; fontSize: 16; color: red }
+        Text { text: str.safetyLine; style: small; color: muted; maxLines: 1 }
+      }
+    }
+
+    Mini { glyph: "$$"; name: str.snapMedicaid; note: str.applyOrLogIn; href: "https://benefitsportal.dss.sc.gov/#/login"; tint: green }
+
+    Spacer { weight: 1 }
+
+    Row {
+      align: center
+      gap: 6
+      Text { text: str.tapForShelters; style: small; color: accent; weight: 1; maxLines: 1 }
+      Text { text: "›"; fontSize: 20; color: accent }
+    }
+  }
+
+  screen {
+    title: str.screenTitle
+    Column {
+      scroll: true
+      gap: 14
+      padding: [16, 10]
+
+      Column {
+        gap: 3
+        Text { text: str.screenTitle; style: title }
+        Text { text: str.intro; style: small; color: muted; maxLines: 3 }
+      }
+
+      Row {
+        gap: 10
+        Column {
+          weight: 1
+          gap: 2
+          padding: [12, 10]
+          background: alpha(red, 0.16)
+          border: 1
+          borderColor: alpha(red, 0.35)
+          radius: 12 * corners
+          onTap: url("tel:8668929211")
+          Text { text: str.call211; bold: true; fontSize: 17; color: red }
+          Text { text: str.statewideReferrals; style: small; color: muted; maxLines: 1 }
+        }
+        Column {
+          weight: 1
+          gap: 2
+          padding: [12, 10]
+          background: alpha(magenta, 0.14)
+          border: 1
+          borderColor: alpha(magenta, 0.3)
+          radius: 12 * corners
+          onTap: url("tel:988")
+          Text { text: "988"; bold: true; fontSize: 17; color: magenta }
+          Text { text: str.crisisLifeline; style: small; color: muted; maxLines: 1 }
+        }
+      }
+
+      Section { title: str.urgent; note: str.urgentNote }
+      Card { glyph: "211"; name: str.sc211; note: str.sc211Note; href: "https://resources.sc211.org/#/"; tint: red }
+      Card { glyph: "988"; name: str.lifeline988; note: str.lifeline988Note; href: "tel:988"; tint: magenta }
+      Card { glyph: "DV"; name: str.dvHotline; note: str.dvHotlineNote; href: "https://www.thehotline.org/"; tint: red }
+      Card { glyph: "SC"; name: str.sistercare; note: str.sistercareNote; href: "https://www.sistercare.org/"; tint: red }
+      Card { glyph: "VET"; name: str.vetCrisis; note: str.vetCrisisNote; href: "https://www.veteranscrisisline.net/"; tint: blue }
+      Card { glyph: "MED"; name: str.mobileCrisis; note: str.mobileCrisisNote; href: "tel:18333642274"; tint: cyan }
+      Card { glyph: "RX"; name: str.findTreatment; note: str.findTreatmentNote; href: "https://findtreatment.gov/"; tint: cyan }
+
+      Section { title: str.coordinatedEntry; note: str.coordinatedEntryNote }
+      Card { glyph: "CE"; name: str.ceUpstate; note: str.ceUpstateNote; href: "https://www.upstatecoc.org/coordinated-entry"; tint: green }
+      Card { glyph: "CE"; name: str.ceMidlands; note: str.ceMidlandsNote; href: "https://www.midlandshomeless.com/find-help"; tint: green }
+      Card { glyph: "CE"; name: str.cePeeDee; note: str.cePeeDeeNote; href: "https://gethelp.tchcsc.org"; tint: green }
+      Card { glyph: "CE"; name: str.ceLowcountry; note: str.ceLowcountryNote; href: "https://lowcountrycoc.org/gethelp"; tint: green }
+
+      Section { title: str.shelterTonight; note: str.shelterTonightNote }
+      Card { glyph: "BED"; name: str.one80; note: str.one80Note; href: "https://one80place.org/gethelp"; tint: orange }
+      Card { glyph: "BED"; name: str.oliverGospel; note: str.oliverGospelNote; href: "https://www.olivergospel.org/"; tint: orange }
+      Card { glyph: "BED"; name: str.transitions; note: str.transitionsNote; href: "https://www.transitionssc.org/"; tint: orange }
+      Card { glyph: "FAM"; name: str.homelessNoMore; note: str.homelessNoMoreNote; href: "https://www.homelessnomoresc.org/"; tint: orange }
+      Card { glyph: "WOM"; name: str.womensShelter; note: str.womensShelterNote; href: "https://www.womenshelter.org/"; tint: orange }
+      Card { glyph: "YTH"; name: str.palmettoPlace; note: str.palmettoPlaceNote; href: "https://www.palmettoplace.org/"; tint: orange }
+      Card { glyph: "BED"; name: str.miracleHill; note: str.miracleHillNote; href: "https://miraclehill.org/"; tint: orange }
+      Card { glyph: "BED"; name: str.salvationArmy; note: str.salvationArmyNote; href: "https://www.salvationarmyusa.org/usa-southern-territory/north-and-south-carolina/greenville-sc-area-command/homelessness/"; tint: orange }
+      Card { glyph: "FAM"; name: str.familyPromise; note: str.familyPromiseNote; href: "https://www.familypromisemidlands.org/"; tint: orange }
+      Card { glyph: "SC"; name: str.greenvilleGuide; note: str.greenvilleGuideNote; href: "https://www.greenvillesc.gov/homeless-services-resource-guide"; tint: orange }
+
+      Section { title: str.applyLogIn; note: str.applyLogInNote }
+      Card { glyph: "DSS"; name: str.dssBenefits; note: str.dssBenefitsNote; href: "https://benefitsportal.dss.sc.gov/#/login"; tint: green }
+      Card { glyph: "DSS"; name: str.dssTrack; note: str.dssTrackNote; href: "https://benefitsportal.dss.sc.gov/#/benefits/track"; tint: green }
+      Card { glyph: "DSS"; name: str.dssSignIn; note: str.dssSignInNote; href: "https://portal.dss.sc.gov/login.aspx"; tint: green }
+      Card { glyph: "MED"; name: str.medicaidApply; note: str.medicaidApplyNote; href: "https://apply.scdhhs.gov/"; tint: cyan }
+      Card { glyph: "MED"; name: str.medicaidPortal; note: str.medicaidPortalNote; href: "https://apply.scdhhs.gov/CitizenPortal/"; tint: cyan }
+      Card { glyph: "MED"; name: str.medicaidStart; note: str.medicaidStartNote; href: "https://www.scdhhs.gov/members/getting-started"; tint: cyan }
+      Card { glyph: "$$"; name: str.scThrive; note: str.scThriveNote; href: "https://scthrive.org/for-you/apply-for-benefits/"; tint: green }
+      Card { glyph: "$$"; name: str.thriveHub; note: str.thriveHubNote; href: "https://scthrive.goodgrid.com/"; tint: green }
+      Card { glyph: "EBT"; name: str.ebt; note: str.ebtNote; href: "https://www.connectebt.com/ebtconnect/recipient/SC/"; tint: yellow }
+      Card { glyph: "SSA"; name: str.ssaAccount; note: str.ssaAccountNote; href: "https://www.ssa.gov/myaccount/"; tint: blue }
+      Card { glyph: "SSA"; name: str.ssaSsi; note: str.ssaSsiNote; href: "https://www.ssa.gov/apply/ssi"; tint: blue }
+      Card { glyph: "JOB"; name: str.scWorksJobSeeker; note: str.scWorksJobSeekerNote; href: "https://jobs.scworks.org/"; tint: yellow }
+      Card { glyph: "WIC"; name: str.wicApply; note: str.wicApplyNote; href: "https://apps.dhec.sc.gov/Health/WIC"; tint: yellow }
+
+      Section { title: str.housingRent; note: str.housingRentNote }
+      Card { glyph: "HUD"; name: str.hcv; note: str.hcvNote; href: "https://www.schousing.com/Home/RentersHousingChoiceVoucher"; tint: blue }
+      Card { glyph: "HUD"; name: str.scHousing; note: str.scHousingNote; href: "https://www.schousing.com/"; tint: blue }
+      Card { glyph: "HUD"; name: str.columbiaApply; note: str.columbiaApplyNote; href: "https://www.columbiahousingsc.org/apply-for-housing"; tint: blue }
+      Card { glyph: "HUD"; name: str.charlestonCity; note: str.charlestonCityNote; href: "https://housing-chacity.securecafe.com/onlineleasing/housing-authority-of-the-city-of-charleston/guestlogin.aspx"; tint: blue }
+      Card { glyph: "HUD"; name: str.charlestonCounty; note: str.charlestonCountyNote; href: "https://apps.cchra.net/apply/ApplIntro.aspx"; tint: blue }
+      Card { glyph: "HUD"; name: str.greenvilleHa; note: str.greenvilleHaNote; href: "https://www.tgha.net/"; tint: blue }
+      Card { glyph: "HUD"; name: str.rha1; note: str.rha1Note; href: "https://www.scrha.net/"; tint: blue }
+      Card { glyph: "HUD"; name: str.rha3; note: str.rha3Note; href: "https://scrha3.org/public-housing/application/"; tint: blue }
+      Card { glyph: "HUD"; name: str.hudSc; note: str.hudScNote; href: "https://www.hud.gov/states/south-carolina"; tint: blue }
+      Card { glyph: "HUD"; name: str.housingSearch; note: str.housingSearchNote; href: "https://schousingsearch.com/"; tint: blue }
+
+      Section { title: str.food; note: str.foodNote }
+      Card { glyph: "FOOD"; name: str.harvestHope; note: str.harvestHopeNote; href: "https://harvesthope.org/"; tint: yellow }
+      Card { glyph: "FOOD"; name: str.lowcountryFoodBank; note: str.lowcountryFoodBankNote; href: "https://www.lowcountryfoodbank.org/find-food/"; tint: yellow }
+      Card { glyph: "FOOD"; name: str.secondHarvest; note: str.secondHarvestNote; href: "https://www.secondharvestmetrolina.org/find-food/"; tint: yellow }
+      Card { glyph: "SNAP"; name: str.snap; note: str.snapNote; href: "https://dss.sc.gov/assistance-programs/snap/"; tint: yellow }
+      Card { glyph: "WIC"; name: str.wic; note: str.wicNote; href: "https://dph.sc.gov/health-wellness/family-planning/women-infants-and-children-wic-nutrition-program"; tint: yellow }
+
+      Section { title: str.health; note: str.healthNote }
+      Card { glyph: "MED"; name: str.bhddMental; note: str.bhddMentalNote; href: "https://bhdd.sc.gov/mental-health"; tint: cyan }
+      Card { glyph: "MED"; name: str.bhddSubstance; note: str.bhddSubstanceNote; href: "https://bhdd.sc.gov/substance-use-services"; tint: cyan }
+      Card { glyph: "MED"; name: str.freeClinics; note: str.freeClinicsNote; href: "https://scfreeclinics.org/clinics/"; tint: cyan }
+      Card { glyph: "MED"; name: str.publicHealthClinics; note: str.publicHealthClinicsNote; href: "https://dph.sc.gov/public/public-health-clinics"; tint: cyan }
+      Card { glyph: "RX"; name: str.findTreatment; note: str.findTreatmentNote2; href: "https://findtreatment.gov/"; tint: cyan }
+
+      Section { title: str.ids; note: str.idsNote }
+      Card { glyph: "ID"; name: str.dmvId; note: str.dmvIdNote; href: "https://dmv.sc.gov/driver-services/identification-cards"; tint: yellow }
+      Card { glyph: "ID"; name: str.dmvOnline; note: str.dmvOnlineNote; href: "https://www.scdmvonline.com/SCTRNS/Public/Transactions/Info.aspx"; tint: yellow }
+      Card { glyph: "ID"; name: str.birthCert; note: str.birthCertNote; href: "https://dph.sc.gov/public/vital-records/birth-certificates"; tint: yellow }
+      Card { glyph: "SSA"; name: str.ssaCard; note: str.ssaCardNote; href: "https://www.ssa.gov/ssnumber/"; tint: blue }
+      Card { glyph: "DOC"; name: str.vitalRecords; note: str.vitalRecordsNote; href: "https://dph.sc.gov/public/vital-records/office-locations"; tint: yellow }
+
+      Section { title: str.legalWork; note: str.legalWorkNote }
+      Card { glyph: "LAW"; name: str.scLegal; note: str.scLegalNote; href: "https://sclegal.org/"; tint: purple }
+      Card { glyph: "LAW"; name: str.scBar; note: str.scBarNote; href: "https://www.scbar.org/for-the-public/quicklinks/get-legal-help/"; tint: purple }
+      Card { glyph: "LAW"; name: str.freeLegalAnswers; note: str.freeLegalAnswersNote; href: "https://sc.freelegalanswers.org/"; tint: purple }
+      Card { glyph: "LAW"; name: str.scAppleseed; note: str.scAppleseedNote; href: "https://www.scjustice.org/"; tint: purple }
+      Card { glyph: "JOB"; name: str.scWorks; note: str.scWorksNote; href: "https://scworks.org/"; tint: yellow }
+      Card { glyph: "JOB"; name: str.scWorksJobs; note: str.scWorksJobsNote; href: "https://jobs.scworks.org/vosnet/Default.aspx"; tint: yellow }
+      Card { glyph: "JOB"; name: str.scDew; note: str.scDewNote; href: "https://dew.sc.gov/"; tint: yellow }
+      Card { glyph: "JOB"; name: str.vocRehab; note: str.vocRehabNote; href: "https://www.scvrd.net/"; tint: yellow }
+
+      Section { title: str.youthFamilies; note: str.youthFamiliesNote }
+      Card { glyph: "YTH"; name: str.palmettoPlace; note: str.palmettoPlaceNote2; href: "https://www.palmettoplace.org/"; tint: orange }
+      Card { glyph: "FAM"; name: str.homelessNoMore; note: str.homelessNoMoreNote2; href: "https://www.homelessnomoresc.org/"; tint: orange }
+      Card { glyph: "FAM"; name: str.familyPromise; note: str.familyPromiseNote2; href: "https://www.familypromisemidlands.org/"; tint: orange }
+      Card { glyph: "SCH"; name: str.mckinneyVento; note: str.mckinneyVentoNote; href: "https://ed.sc.gov/policy/federal-education-programs/every-student-succeeds-act-essa-title-ix-part-a-mckinney-vento-homeless-assistance-act/"; tint: orange }
+      Card { glyph: "YTH"; name: str.runaway; note: str.runawayNote; href: "https://www.1800runaway.org/"; tint: orange }
+
+      Section { title: str.veterans; note: str.veteransNote }
+      Card { glyph: "VET"; name: str.vaHomeless; note: str.vaHomelessNote; href: "https://www.va.gov/homeless/"; tint: blue }
+      Card { glyph: "VET"; name: str.vaCallCenter; note: str.vaCallCenterNote; href: "https://www.va.gov/homeless/nationalcallcenter.asp"; tint: blue }
+      Card { glyph: "VET"; name: str.scDva; note: str.scDvaNote; href: "https://scdva.sc.gov/"; tint: blue }
+      Card { glyph: "VET"; name: str.vaColumbia; note: str.vaColumbiaNote; href: "https://www.va.gov/columbia-south-carolina-health-care/"; tint: blue }
+      Card { glyph: "VET"; name: str.vaCharleston; note: str.vaCharlestonNote; href: "https://www.va.gov/charleston-health-care/"; tint: blue }
+
+      Section { title: str.directories; note: str.directoriesNote }
+      Card { glyph: "SC"; name: str.ich; note: str.ichNote; href: "https://www.schomeless.org/"; tint: green }
+      Card { glyph: "211"; name: str.sc211Site; note: str.sc211SiteNote; href: "https://www.sc211.org/"; tint: red }
+      Card { glyph: "211"; name: str.sc211Guides; note: str.sc211GuidesNote; href: "https://www.sc211.org/resource-guides"; tint: red }
+      Card { glyph: "SC"; name: str.findhelp; note: str.findhelpNote; href: "https://www.findhelp.org/"; tint: green }
+      Card { glyph: "SC"; name: str.unitedWay; note: str.unitedWayNote; href: "https://www.uwasc.org/"; tint: green }
+      Card { glyph: "HUD"; name: str.hudSc; note: str.hudScNote2; href: "https://www.hud.gov/states/south-carolina"; tint: blue }
+      Card { glyph: "SC"; name: str.aiken; note: str.aikenNote; href: "https://www.aikencountyhomelesscoalition.org/"; tint: green }
+      Card { glyph: "SC"; name: str.catawba; note: str.catawbaNote; href: "https://www.sccach.org/"; tint: green }
+
+      Text { text: str.footer; style: small; color: muted; maxLines: 2; padding: [2, 8] }
+      Button { text: str.close; onTap: close() }
+    }
+  }
+}
