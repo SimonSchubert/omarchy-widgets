@@ -1,0 +1,514 @@
+widget "weather net" {
+  page: 2
+  order: 3
+  size: 4x6
+  minSize: 2x3
+  padding: 6
+  meta {
+    owl: 7
+    description: "Earth's weather as animated swarms on a holographic globe over real coastlines, day and night, with an hourly or daily forecast rail. Zoom from the whole planet to your city."
+    version: "1.0"
+    license: "MIT"
+    category: "world"
+  }
+
+  // ---------------------------------------------------------------- state
+  state zoom = 1 persist            // magnification of the globe (1 = whole Earth)
+  state chunks = 12               // forecast steps on the rail (fills the column)
+  state span = "h" persist          // "h" hours, "d" days
+  state unit = "c" persist          // "c" or "f"
+  state selLat = 0 persist
+  state selLon = 0 persist
+  state selName = "here" persist
+  state picked = 0 persist          // 1 once the user chose a place
+  state layers = 15 persist         // bitmask: 1 coast, 2 graticule, 4 weather, 8 mesh
+  state cities = "New York@40.7128,-74.006|London@51.5074,-0.1278|Tokyo@35.6762,139.6503|Sydney@-33.8688,151.2093|Reykjavik@64.1466,-21.9426" persist
+  state q = ""
+
+  // ---------------------------------------------------------------- sources
+  source now = clock every 1s
+  // Where the phone is, by IP (no shell, works on any phone).
+  source geo = http("https://ipapi.co/json/") every 6h timeout 10s json
+
+  // A grid of monitoring stations over the whole planet.
+  let glats = range(-60, 61, 30)
+  let glons = range(-180, 180, 30)
+  let ggrid = glats.map(la => glons.map(lo => {la: la, lo: lo})).flatten()
+  let gLatStr = join(ggrid.map(p => str(p.la)), ",")
+  let gLonStr = join(ggrid.map(p => str(p.lo)), ",")
+  source gwx = http("https://api.open-meteo.com/v1/forecast?latitude=${gLatStr}&longitude=${gLonStr}&current=temperature_2m,weather_code,wind_speed_10m,precipitation,cloud_cover,is_day&timezone=auto") every 20m timeout 25s json
+
+  // A denser grid around the selected point, spaced so it always fills the
+  // visible cap at the current zoom (so the weather reaches the limb).
+  let lcap0 = min(90, deg(atan2(1, sqrt(max(zoom * zoom - 1, 0.0001)))))
+  let ls = clamp(lcap0 / 3.2, 0.15, 20)
+  let loff = range(-3, 4)
+  let lgrid = loff.map(dy => loff.map(dx => {la: selLat + dy * ls, lo: selLon + dx * ls})).flatten()
+  let lLatStr = join(lgrid.map(p => str(round(p.la, 3))), ",")
+  let lLonStr = join(lgrid.map(p => str(round(p.lo, 3))), ",")
+  source lwx = http("https://api.open-meteo.com/v1/forecast?latitude=${lLatStr}&longitude=${lLonStr}&current=temperature_2m,weather_code,wind_speed_10m,precipitation,cloud_cover,is_day&timezone=auto") every 20m timeout 25s json
+
+  // The forecast at the selected point: now, the next hours and the next days.
+  source fwx = http("https://api.open-meteo.com/v1/forecast?latitude=${selLat}&longitude=${selLon}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,relative_humidity_2m,precipitation,cloud_cover,is_day&hourly=temperature_2m,weather_code,precipitation_probability,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=16&timezone=auto") every 20m timeout 25s json
+
+  // City search (only used by the screen).
+  let sq = q == "" ? "new york" : q
+  source sch = http("https://geocoding-api.open-meteo.com/v1/search?name=${sq}&count=6") every 30m timeout 15s json
+
+  // The first time IP geolocation answers, adopt it (until the user picks).
+  when geo != null && !picked {
+    selLat = geo.latitude
+    selLon = geo.longitude
+    selName = lower(trim(geo.city ?? geo.region ?? "here"))
+    picked = 1
+    refresh()
+  }
+
+  // ---------------------------------------------------------------- data
+  let wmo = {
+    "0": "clear sky", "1": "mainly clear", "2": "partly cloudy", "3": "overcast",
+    "45": "fog", "48": "icy fog",
+    "51": "light drizzle", "53": "drizzle", "55": "heavy drizzle",
+    "56": "freezing drizzle", "57": "freezing drizzle",
+    "61": "light rain", "63": "rain", "65": "heavy rain",
+    "66": "freezing rain", "67": "freezing rain",
+    "71": "light snow", "73": "snow", "75": "heavy snow", "77": "snow grains",
+    "80": "light showers", "81": "showers", "82": "heavy showers",
+    "85": "snow showers", "86": "snow showers",
+    "95": "thunderstorm", "96": "storm + hail", "99": "storm + hail"
+  }
+
+  // The sun's sub-point, so day and night are real.
+  let doy = (num(fmtTime(now, "M")) - 1) * 30.4 + num(fmtTime(now, "d"))
+  let decl = 23.44 * sin(rad((doy - 81) * 360 / 365))
+  let utcH = (now % 86400) / 3600
+  let subsolarLon = (12 - utcH) * 15
+
+  // ---------------------------------------------------------------- geography
+  // Coastlines packed as round((lon+180)*100)*18001 + round((lat+90)*100), split
+  // into short chunks: "CENTERS|CHUNKS", centres and chunks ';'-separated, points
+  // ' '-separated. Each chunk is culled by its centre before its points decode,
+  // and drawn only when fully on the near side (so no wrap spike crosses the
+  // disc). The set is embedded so the widget is self-contained.
+  let coastCoarse = "32024889;310639619;575356443;530246646;153601028;153547291;149425154;165067680;123377654;124169762;184665086;180237175;223856338;172483046;189764365;154482933;145104333;123251386;108472686;103792095;24334373;48113435;86059122;97759404;16720290;136806470;383865853;369681065;408701827;565797789;238064320;210468653;194286670;143487761;105631508;96847020;622265457;597983848;595427538;614400214;610530134;603275930;639904675;631155711;588313500;563599730;565903097;469871873;556905616;554421914;542847007;539785983;542522289;536617949;519913203;508159164;545566312;548770271;521319856;542165510;569834273;582057700;340249931;340070112;345579757;318362188;288769550;581428315;537195802;543568757;549076677;225992694;203469652;188224954;197006568;408765770;426946081;367345421;366139118;352170457;119088885;64008979;167496634;204595479;170463111;180109917;194655707;349700189;393785280;563677649;355028291;354794858;345255689;382104694;466116008;597163257;605136283;534569499;474786952;406527534;355797499;293732850;2229981;550262681;99438850;256677894;473644493;617759630;8134052;1474202;647296073;647197311;215925820;448769024;183675676;210013350;415980324;209509600;174102931;187424160;149172233;124673081;181538387;578046443;591025356;575922571;145014649;508761142;495656552;155959643;174086611;276241762;219628602;133403764|29324769 37425129 29324769;312871767 311809547 306067184 306589419 310405756 313843889 312871767;577840840 589811157 588982980 595283011 590278778 584572711 580774330 571737920 573646135 572314254 563403887 561621917 564700149 558975958 565222321 567868209 571432574 577840840;529598873 534153365 538563459 535197054 538238990 536096859 533108214 522433729 520399863 521426167 524144302 529598873;155527137 149748811 155527137;155113368 150433139 155113368;149875202 152017286 148867054 146491024 149875202;165355624 149208963 180332509 165355624;123755689 126293815 119669420 123755689;124295784 126635894 121451587 124295784;184395092 186861169 183008989 184395092;175935092 190497610 184053210 185259332 182325288 176781084 171074693 175935092;223946572 221786301 227762577 228500359 226394351 224306148 217339833 220778336 223946572;173041123 179845363 167028632 169440986 173041123;182240358 200205174 203481222 200168991 212697501 208971108 201590824 207620872 200222497 204920576 200042345 189331985 182617601 190898149 193256463 192068476 181898121 164401173 161647203 169531797 169639676 175850143 178676131 182240358;153924963 161107335 152286665 151188742 153924963;143232227 141252182 148740638 147534494 150252602 146976291 139560000 143232227;129947803 133763978 122027220 119057085 122801337 112144751 116303108 129947803;102892327 114863145 113224942 102892327;105250291 116104797 102459781 97347594 100929974 99165937 105250291;24370391 25972433 22588275 24370391;48203474 50165545 45881247 48203474;85141133 87895100 85141133;98263453 101701500 92827210 98263453;14902205 20374461 14902205;134142381 144618824 134700320 136446447 134142381;383343834 386278025 382515719 383343834;371355159 366350879 371355159;413202707 414714467 408809216 405766981 402059057 403157655 413202707;565617731 566139905 565617731;236426329 244958760 246020664 226525521 236426329;204690345 216787039 215724884 204690345;190956481 194286674 197563087 201019026 196068642 189102298 190956481;139815578 150850128 139815578;103291372 110311780 103291372;94902926 100753210 94902926;622445470 624857496 619295392 622445470;598793898 599135806 595229792 598793898;596381546 591017257 597893799 596381546;615066208 613086226 615066208;611394162 608820079 611394162;602609942 604625906 602609942;642442682 638410337 639454477 636916431 638500732 634792811 640768840 645377082 642442682;629445611 635080231 637690290 631155471 624063046 629445611;589879688 590275470 586927250 584569404 589879688;551106393 536471296 531089083 532475359 528047722 529649793 528768126 541585118 550280146 557354465 562287123 569721463 567939050 576435251 580576185 587541743 595353833 600465546 594038257 587413728 585091713 582535480 577189262 572815383;572815383 570331157 572095491 568819110 565723165 560430983 551106393;471257931 468665632 468305997 471257931;556905657 559533697 554259451 556905657;554314010 554619720 554314010;545313381 549471666 540110952 541730953 546051272 542756961 545726782 542720692 541784834 539678413 537824597 539732998 541641220 545313381;540578004 538183941 540578004;542450280 545258481 539894111 542450280;536905990 538472042 534169771 536905990;519319207 532315734 513702852 514927015 519319207;511903329 515035305 514512997 508680836 495559077 499501273 511903329;544702257 547384531 545440202 544702257;551524479 549760098 546538144 543495911 549778517 551524479;521103768 519573800 523462087 521103768;543245617 541391272 540239367 542741680 543245617;579429106 576494539 568465925 567187968 559825488 561643515 558403162 556981271 575018765 576603151 578511275 579429106;584343857 586017880 575973153 579591752 584343857;339709961 341690031 339889772 339709961;339782138 340646061 339782138;346299848 345795689 343905640 346299848;316454434 318614563 316706348 320504572 318416285 327056442 326642274 313627438 317893802 314545672 318722104 312962064 316454434;297914195 299534152 290443484 283063120 284827262 280903093 284017315 280237128 297914195;581284661 584416363 581752248 582363965 579807806 579070498 581284661;537339782 534945554 539158088 537339782;544253056 543154606 547150773 547384662 541174449 539896533 541336923 544253056;549940766 548680493 547726683 549940766;184790132 194871069 194960737 198129222 201279236 212637884 211719756 221151882 231682282 233319953 243184354 243778273 252058715 259942925 261508793 254415827 250328712 238249746 236017244 227160179 218843766 221885685 220067407 211804883;211804883 212146717 206800382 209788398 202893716 205863712 199563013 201344950 195440471 189104279;183835934 185185672 178344801 180432757 177768261 187199934 195390118 197730008 195424614 191553925 190221245 193119490 187862771 190580893 187916572 189104279;189626250 196016482 200480873 206925025 199400527 189626250;404769544 416776222 404769544;420357726 434146742 447971539 429304279 423795779 427611826 416919307 422013806 420357726;373375747 355302769 373375747;368533257 361350841 368533257;351288481 362809050 352674268 342828009 351288481;183835934 181603988 179263685 173701494 166537581 137718479 134136446 133164674 117414702 127044376 122094256 116910266 118530441 112878575 106902399 100098591 99577349 103357451 102907616 94627339 82675404 59220377 50921744 52902066;52902066 38842756 27393961 40120985 41345188 32470670 31480747 26386516 25702634 34631300 34613401 27088949 21418756 32993444 23849160 42174478 78320240 93369234 128038850 129317048 132953265 141413620 148218091 150990116;150990116 154410484 150378362 152646671 156840844 161034792 165589060 166794985 170089436 175309704 177721788 177523572 169639079 160764291 154391666 153599427 157883479 175938288 176190115 180186130 182544396 180330484 186252999 182689028;182689028 184813251 183427421 198764147 199303967 202256056 207782576 212786454 220832730 223802647 215972021 204505383 196044572 206917417 207979177 213289436 215089649 216385612 206376819 204936831 208051086 203172800 196854244 198078167;198078167 188069397 187331128 186593280 187708982 177610010 179337483 173343623 168501400 162759057 163082975 155090586 148754001 147853457 151399293 159481747 161516072 167330449 163945696 173882186 173071751 175429702;175429702 184790132;194943800 201046029 195501620 189993388 193827634 192279673 194943800;350600290 351212172 346406004 350600290;391607220 395963339;562309583 566629858 563461571 562309583;294759284 293481492 298036181 306821037 307289326 313355983 320124300 341149686 344011800 342643413 358393936 362804438 376070978 384819474 389122281 373785430 371139563 384352553 398825309 398645410 390059192 394451638 386963123 389429144;389429144 385018824 382444778 383974938 379384733 373840025 375891986 364767289 367305170 364514890 358970966 359205126 347684888 346694668 357296865 354398731 353012409 351770546 340034326 329611618 320160452 314346057 308009797 307128364;307128364 321547264 321889482 315769409 321115702 320557785 326444147 332510780 338649165 339405565 343077831 341403512 343725495 359422409 362320646 362878899 367451115 366047253 376451915 362411204 362807473 369756051 367055991 356165060;356165060 354850846 357856887 352618198 347325830 342681983 334239426 333015696 358559900 374742936 397945852 393121438 383760981 390655086 390961232 395299411 399799857 403148002 402248202 407288450 407468302 420735258 431931822 433984002;433984002 433030040 447358660 448564780 444514638 444082772 449933298 455081502 453371326 456647208 452344760 454396859 459131281 455621455 458429749 461489751 460661777 463685985 470742325 468960416 511875205 529479998 520965358 552611055;552611055 560369208 562097409 575814136 574518157 576894332 610249987 613742038 629294827 631526983 630861055 648051896;648051498 643389202 646665153 636674533 630644021 618421341 615685026 617791081 615864698 606269780 604686268 620095702 612265066 610789107 606144815 601644398 603120418 580007124 567279986 575866409 578530362 572841453 553597729 557071624;557071624 556405417 551725088 552391375 548521282 549619487 541932995 542995259 536514724 538080636 544290981 538512406 543480360 543065991 532642867 523462219 522832078 519376024 514623563 520851277 520599087 513326376 513182500 504218351;504218351 502633846 509365848 511651552 506539415 504199655 501049613 501806020 498926409 493580023 493814253 488594419 480601848 468612622 467784022 463607551 456389952 454770399 450882135 443502180 427355314 425717363 422531120 416770939;416770939 414251027 410380795 417256581 421252813 425483276 426365109 431693212 423520250 402296612 400802942 386367269 386889442 385089157 382389227 390398887 391496609 402008571 400928446 404330505 416031313 415923169 409964196 394590452;394590452 396893971 396191399 386650501 387856134 382653684 382455416 378134892 370430184 357109424 356821656 351403812 349694215 345248372 348669296 345465687 339867769 340948313 339328327 334648016 331822060 320499275 307826583 294128556;294128556 292292710 294759284;4426065 15896;550748752 553250894 546266322 550748752;529 18091617 39476656 66406185 47541272 48855510 41691206 60448324 44409561 38937474 51610127 61024742 60844842 63166989 118916235 130400726 143793501 137385370 186815981 199920805 203179082 200641174 202963587 219956892;219956892 212378318 212198169 205807638 212755747 214519547 196932277 184979605 191423843 183575280 219216856 272626111 270574105 259863490 259611588 292481735 295757980 294371966 296208140 311653220 323605813 337952785 343496999 348177345;348177345 372784663 384989537 393593887 422179871 434600348 448029096 449433044 446084750 448352839 446336610 449792761 456975399 482411178 496433839 503526247 509124727 515154925 528511772 539726256 566601855 567159976 571462051 585916857;585916857 591947045 632214951 618461733 620567656 624635825 615221261 611656884 628955557 648036529;15896 10204200 18196608 13462291 12688129 2373742 15498;16152 4372369 16083;648052083 645765983 648052152;648043344 645523196 648043393;213855695 220066070 213855695;448121032 451037131 447778898 448121032;183279702 184467623 183279702;208807303 212407443 208807303;408060129 412416550 419508989 419508830 414594492 419094395 420732584 422568569 418878272 420930080 412595678 411983768 414738065 408060129;207889535 212767730 207889535;172842846 176641102 172842846;188630222 184994035 188630222;150216312 151854346 144383960 150216312;132287656 142061849 120064523 112810262 121666795 109102216 116680812 126167304 129281346 128903469 132287656;180422302 178532286 186776658 180422302;575796323 582528681 575796323;590845357 595363581 587065129 590845357;573942497 585211065 570594223 573942497;146580801 147336684 139524306 146580801;509157212 513711408 503036736 509157212;492848480 504386997 500012652 488168152 492848480;151189458 157687885 169568353 156841546 154915480 156355623 149947345 151189458;159164030 181269382 212699078 185589241 188325314 179018562 162943698 166039941 165157964 171062256 165698041 170864426 167552332 176696861 159164030;239862587 275252642 286503188 266612030 302055908 287943013 292119240 288572905 290786852 285008495 288338627 286826449 289166493 281605974 283891988 279409754 284881891 278059589 276583387 283801778 252371565 246952986 245944672 237160260;237160260 231094200 226882322 232462906 225604493 226180646 231526918 223534582 225532787 218566693 200727756 195507561 203860062 192087474 205750368 201592210 211258912 243894714 239862587;132143700 135923892 132143700"
+  let coastRaw = coastCoarse
+  let coastSplit = split(coastRaw, "|")
+  let coastCent = split(coastSplit[0] ?? "", ";")
+  let coastChunks = split(coastSplit[1] ?? "", ";")
+
+  // The globe is centred on the chosen place; zoom decides how much of the
+  // world shows. A coarse planet-wide station net is always there; a dense
+  // local net fades in once you zoom close.
+  let nets = zoom > 2.5
+    ? [ {grid: lgrid, wx: lwx, rowLen: 7} ]
+    : [ {grid: ggrid, wx: gwx, rowLen: 12}, {grid: lgrid, wx: lwx, rowLen: 7} ]
+
+  // The selected point's current weather and the forecast rail.
+  let cur = fwx.current
+  let nowKey = sub(cur.time ?? "", 0, 13)
+  let hIdx = max(indexOf((fwx.hourly.time ?? []).map(t => sub(t, 0, 13)), nowKey), 0)
+  let hsteps = range(48).map(k => {
+    time: (fwx.hourly.time ?? [])[hIdx + k],
+    code: (fwx.hourly.weather_code ?? [])[hIdx + k],
+    temp: (fwx.hourly.temperature_2m ?? [])[hIdx + k],
+    lo: null,
+    pp: (fwx.hourly.precipitation_probability ?? [])[hIdx + k]
+  })
+  let dsteps = range(16).map(j => {
+    time: null,
+    code: (fwx.daily.weather_code ?? [])[j],
+    temp: (fwx.daily.temperature_2m_max ?? [])[j],
+    lo: (fwx.daily.temperature_2m_min ?? [])[j],
+    pp: (fwx.daily.precipitation_probability_max ?? [])[j]
+  })
+  let steps = span == "h" ? hsteps : dsteps
+
+  // ---------------------------------------------------------------- the globe
+  component Globe() {
+    Canvas {
+      fill: true
+      clip: true
+
+      let cx = width / 2
+      let cy = height / 2
+      let R = min(width, height) / 2 - 6
+      let lat0 = selLat
+      let lon0 = selLon
+      let S = R * zoom
+      let phi0 = rad(lat0)
+      let cap = min(90, deg(atan2(1, sqrt(max(zoom * zoom - 1, 0.0001)))))
+      let step = clamp(round(cap / 9), 1, 12)
+
+      // The limb and a faint disc, so the sphere reads.
+      circle(cx, cy, S, fill: alpha(accent, 0.035))
+      circle(cx, cy, S, stroke: alpha(accent, 0.35), width: 1)
+
+      // Dotted graticule, day side cyan and night side dim.
+      let latLo = ceil((lat0 - cap) / step) * step
+      let nlat = floor((lat0 + cap - latLo) / step)
+      for i in range(floor(layers / 2) % 2 == 1 ? nlat + 1 : 0) {
+        let la = latLo + i * step
+        if abs(la) <= 88 {
+          let cl = max(cos(rad(la)), 0.15)
+          let lonSpan = min(cap / cl, 180)
+          let lonLo = lon0 - lonSpan
+          let nlon = floor(2 * lonSpan / step)
+          for j in range(nlon + 1) {
+            let lo = lonLo + j * step
+            let phi = rad(la)
+            let dl = rad(((lo - lon0 + 540) % 360) - 180)
+            let cosc = sin(phi0) * sin(phi) + cos(phi0) * cos(phi) * cos(dl)
+            if cosc > 0 {
+              let x = cos(phi) * sin(dl)
+              let y = cos(phi0) * sin(phi) - sin(phi0) * cos(phi) * cos(dl)
+              let cz = sin(rad(decl)) * sin(phi) + cos(rad(decl)) * cos(phi) * cos(rad(((lo - subsolarLon + 540) % 360) - 180))
+              let dc = cz > 0 ? alpha(cyan, 0.28 + 0.42 * cz) : alpha(blue, 0.30)
+              circle(cx + x * S, cy - y * S, 1.3, fill: dc)
+            }
+          }
+        }
+      }
+
+      // Real coastlines. Each chunk is culled by its centre before its points
+      // are decoded, then drawn as one `path` only if every point is on the
+      // near side -- so nothing wraps or shoots across the disc.
+      for ci in range(floor(layers / 1) % 2 == 1 ? len(coastChunks) : 0) {
+        let cv = num(coastCent[ci] ?? 0, 0)
+        let cla = (cv % 18001) / 100 - 90
+        let clo = floor(cv / 18001) / 100 - 180
+        let hphi = rad(cla)
+        let hdl = rad(((clo - lon0 + 540) % 360) - 180)
+        let hcosc = sin(phi0) * sin(hphi) + cos(phi0) * cos(hphi) * cos(hdl)
+        if hcosc >= cos(rad(cap + 4)) {
+          let toks = split(coastChunks[ci] ?? "", " ")
+          let lats = toks.map(t => (num(t, 0) % 18001) / 100 - 90)
+          let lons = toks.map(t => floor(num(t, 0) / 18001) / 100 - 180)
+          let P = range(len(toks)).map(k => {
+            x: cos(rad(lats[k])) * sin(rad(((lons[k] - lon0 + 540) % 360) - 180)),
+            y: cos(phi0) * sin(rad(lats[k])) - sin(phi0) * cos(rad(lats[k])) * cos(rad(((lons[k] - lon0 + 540) % 360) - 180)),
+            iv: sin(phi0) * sin(rad(lats[k])) + cos(phi0) * cos(rad(lats[k])) * cos(rad(((lons[k] - lon0 + 540) % 360) - 180)) > 0
+          })
+          if len(P.filter(q => q.iv)) == len(P) {
+            path(P.map(q => [cx + q.x * S, cy - q.y * S]), stroke: alpha(cyan, 0.55), width: 1.1, cap: round)
+          }
+        }
+      }
+
+      // Weather swarms: a monitoring net, each station a swarm of viral weather.
+      for net in (floor(layers / 4) % 2 == 1 ? nets : []) {
+        let ngrid = net.grid
+        let nwx = net.wx
+        let nrow = net.rowLen
+        for p, i in ngrid {
+          let phi = rad(p.la)
+          let dl = rad(((p.lo - lon0 + 540) % 360) - 180)
+          let cosc = sin(phi0) * sin(phi) + cos(phi0) * cos(phi) * cos(dl)
+          if cosc > 0 {
+            let x = cos(phi) * sin(dl)
+            let y = cos(phi0) * sin(phi) - sin(phi0) * cos(phi) * cos(dl)
+            let px = cx + x * S
+            let py = cy - y * S
+            // Mesh lines to the station right and the one below.
+            if (i + 1) % nrow != 0 {
+              let q = ngrid[i + 1]
+              let qp = rad(q.la)
+              let qd = rad(((q.lo - lon0 + 540) % 360) - 180)
+              if sin(phi0) * sin(qp) + cos(phi0) * cos(qp) * cos(qd) > 0 {
+                line(px, py, cx + cos(qp) * sin(qd) * S, cy - (cos(phi0) * sin(qp) - sin(phi0) * cos(qp) * cos(qd)) * S, stroke: alpha(accent, 0.13 * (floor(layers / 8) % 2)), width: 0.7)
+              }
+            }
+            if i + nrow < len(ngrid) {
+              let q = ngrid[i + nrow]
+              let qp = rad(q.la)
+              let qd = rad(((q.lo - lon0 + 540) % 360) - 180)
+              if sin(phi0) * sin(qp) + cos(phi0) * cos(qp) * cos(qd) > 0 {
+                line(px, py, cx + cos(qp) * sin(qd) * S, cy - (cos(phi0) * sin(qp) - sin(phi0) * cos(qp) * cos(qd)) * S, stroke: alpha(accent, 0.13 * (floor(layers / 8) % 2)), width: 0.7)
+              }
+            }
+            let cur2 = nwx[i] == null ? null : nwx[i].current
+            if cur2 != null {
+              let code = num(cur2.weather_code)
+              let sev = code <= 2 ? 0 : code == 3 ? 1 : code <= 48 ? 1 : code <= 57 ? 2 : code <= 67 ? 3 : code <= 77 ? 3 : code <= 82 ? 4 : 5
+              let cold = (code >= 71 && code <= 77) || code == 85 || code == 86
+              let base = sev >= 5 ? magenta : sev == 4 ? (cold ? foreground : red) : sev == 3 ? (cold ? foreground : blue) : sev == 2 ? cyan : sev == 1 ? mix(cyan, background, 0.55) : accent
+              let col = cur2.is_day == 1 ? base : mix(base, background, 0.45)
+              let cc = num(cur2.cloud_cover ?? 0)
+              circle(px, py, 1.8, fill: alpha(col, 0.9))
+              circle(px, py, 3 + sev * 1.5, fill: alpha(col, 0.05 + cc / 900))
+              for k in range(sev + 1) {
+                let a = k * 2.399 + time * (0.7 + 0.13 * k) + i
+                let rr = 2.2 + sev * 1.6 + (k % 3)
+                rect(px + cos(a) * rr - 1.3, py + sin(a) * rr - 1.3, 2.6, 2.6, fill: col)
+              }
+              if sev >= 5 {
+                if (floor(time * 1.5) + i) % 3 == 0 {
+                  line(px, py, px - 3, py - 4, stroke: magenta, width: 1.2, cap: round)
+                  line(px - 3, py - 4, px + 2, py - 8, stroke: magenta, width: 1.2, cap: round)
+                  line(px + 2, py - 8, px + 1, py - 12, stroke: mix(magenta, foreground, 0.6), width: 1.2, cap: round)
+                  circle(px, py, 3 + sev, fill: alpha(magenta, 0.14))
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // The selected point, crosshaired.
+      let sphi = rad(selLat)
+      let sdl = rad(((selLon - lon0 + 540) % 360) - 180)
+      let scosc = sin(phi0) * sin(sphi) + cos(phi0) * cos(sphi) * cos(sdl)
+      if scosc > 0 {
+        let sx = cos(sphi) * sin(sdl)
+        let sy = cos(phi0) * sin(sphi) - sin(phi0) * cos(sphi) * cos(sdl)
+        let spx = cx + sx * S
+        let spy = cy - sy * S
+        circle(spx, spy, 5, stroke: orange, width: 1.5)
+        line(spx - 9, spy, spx - 5, spy, stroke: orange)
+        line(spx + 5, spy, spx + 9, spy, stroke: orange)
+        line(spx, spy - 9, spx, spy - 5, stroke: orange)
+        line(spx, spy + 5, spx, spy + 9, stroke: orange)
+      }
+    }
+  }
+
+  // A compact strip of the next day's temperature, to fill the rail.
+  component Spark() {
+    Canvas {
+      fill: true
+      let raw = (fwx.hourly.temperature_2m ?? [])
+      let n = clamp(len(raw) - hIdx, 1, 24)
+      let pts = range(n).map(k => raw[hIdx + k])
+      let srt = pts.filter(v => v != null).sort()
+      let lo = srt == [] ? 0 : first(srt)
+      let hi = srt == [] ? 1 : last(srt)
+      let rg = max(hi - lo, 1)
+      let co = range(n).map(k => [ (n == 1 ? 0 : k / (n - 1)) * width, height - 4 - (pts[k] - lo) / rg * (height - 8) ])
+      line(0, height - 1, width, height - 1, stroke: alpha(muted, 0.3), width: 1)
+      path(co, stroke: alpha(cyan, 0.85), width: 1.6, cap: round)
+    }
+  }
+
+  // ---------------------------------------------------------------- tile
+  onTap: screen()
+
+  Box {
+    fill: true
+    align: topStart
+    border: 1
+    borderColor: alpha(accent, 0.45)
+    radius: 6 * corners
+
+    Canvas {
+      fill: true
+      let m = 3
+      let L = 12
+      line(m, m, m + L, m, stroke: accent, width: 2, cap: round)
+      line(m, m, m, m + L, stroke: accent, width: 2, cap: round)
+      line(width - m, m, width - m - L, m, stroke: accent, width: 2, cap: round)
+      line(width - m, m, width - m, m + L, stroke: accent, width: 2, cap: round)
+      line(m, height - m, m + L, height - m, stroke: accent, width: 2, cap: round)
+      line(m, height - m, m, height - m - L, stroke: accent, width: 2, cap: round)
+      line(width - m, height - m, width - m - L, height - m, stroke: accent, width: 2, cap: round)
+      line(width - m, height - m, width - m, height - m - L, stroke: accent, width: 2, cap: round)
+      let sy = (time % 6) / 6 * height
+      rect(0, sy, width, 1, fill: alpha(cyan, 0.10))
+    }
+
+    Column {
+      fill: true
+      padding: 8
+      gap: 5
+
+      Row {
+        gap: 6
+        align: center
+        Text { text: "◢ EARTH.NET"; style: label; color: accent; bold: true; weight: 1; maxLines: 1 }
+        Text { text: "−"; style: label; color: cyan; background: alpha(cyan, 0.12); padding: [8, 2]; radius: 3 * corners; width: 26; maxLines: 1; onTap: { zoom = clamp(zoom / 1.5, 1, 120) } }
+        Text { text: "+"; style: label; color: cyan; background: alpha(cyan, 0.12); padding: [8, 2]; radius: 3 * corners; width: 26; maxLines: 1; onTap: { zoom = clamp(zoom * 1.5, 1, 120) } }
+        Text { text: "${round(zoom)}x"; style: label; color: muted; width: 42; align: center; maxLines: 1 }
+        Text { text: fmtTime(now, "HH:mm"); style: label; color: muted; width: 44; align: end; maxLines: 1 }
+      }
+
+      Row {
+        fill: true
+        gap: 6
+        Globe { weight: 1; fill: height }
+        Column {
+          weight: 1
+          fill: height
+          gap: 3
+
+          Row {
+            gap: 6
+            align: bottom
+            Text { text: lower(selName); style: body; color: accent; weight: 1; maxLines: 1 }
+            Text { text: "${round(selLat, 1)} ${round(selLon, 1)}"; style: label; color: muted; width: 66; align: end; maxLines: 1 }
+          }
+          Row {
+            gap: 8
+            align: center
+            Text { text: cur == null ? "…" : "${unit == "f" ? round(cur.temperature_2m * 9 / 5 + 32) : round(cur.temperature_2m)}°"; style: title; color: cyan; width: 62 }
+            Column {
+              weight: 1
+              gap: 0
+              Text { text: cur == null ? "reading…" : get(wmo, str(cur.weather_code), "weather"); style: small; maxLines: 1 }
+              Text { text: cur == null ? "" : "feels ${unit == "f" ? round(cur.apparent_temperature * 9 / 5 + 32) : round(cur.apparent_temperature)}° · wind ${round(cur.wind_speed_10m)} · ${round(cur.relative_humidity_2m)}%"; style: label; color: muted; maxLines: 1 }
+            }
+          }
+          Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
+          Row {
+            gap: 5
+            align: center
+            Text { text: span == "h" ? "NEXT HOURS" : "NEXT DAYS"; style: label; color: muted; weight: 1; maxLines: 1 }
+            Text { text: "−"; style: label; color: accent; background: alpha(accent, 0.12); padding: [7, 1]; radius: 3 * corners; width: 26; maxLines: 1; onTap: { chunks = max(chunks - 1, 1) } }
+            Text { text: "${chunks}"; style: label; color: foreground; width: 22; align: center; maxLines: 1 }
+            Text { text: "+"; style: label; color: accent; background: alpha(accent, 0.12); padding: [7, 1]; radius: 3 * corners; width: 26; maxLines: 1; onTap: { chunks = min(chunks + 1, span == "h" ? 48 : 16) } }
+            Text { text: span == "h" ? "H" : "D"; style: label; color: cyan; background: alpha(cyan, 0.12); padding: [7, 1]; radius: 3 * corners; width: 26; maxLines: 1; onTap: { span = span == "h" ? "d" : "h"; chunks = min(chunks, span == "h" ? 48 : 16) } }
+          }
+          Column {
+            scroll: true
+            weight: 2
+            gap: 1
+            for st, i in steps.take(chunks) {
+              let code = st.code
+              let t = st.temp
+              let tstr = t == null ? "…" : str(unit == "f" ? round(t * 9 / 5 + 32) : round(t))
+              let sev = code == null ? 0 : code <= 2 ? 0 : code == 3 ? 1 : code <= 48 ? 1 : code <= 57 ? 2 : code <= 67 ? 3 : code <= 77 ? 3 : code <= 82 ? 4 : 5
+              let tint = sev >= 5 ? magenta : sev == 4 ? red : sev == 3 ? blue : sev == 2 ? cyan : muted
+              Row {
+                gap: 5
+                align: center
+                Text { text: span == "h" ? (i == 0 ? "now" : sub(st.time ?? "", 11, 16)) : (i == 0 ? "today" : lower(fmtTime(now + 86400 * i, "EEE"))); style: label; color: i == 0 ? foreground : muted; width: 38; maxLines: 1 }
+                Text { text: tstr; width: 26; align: end; style: small; color: cyan; maxLines: 1 }
+                Text { text: get(wmo, str(code), "····"); weight: 1; style: small; color: tint; maxLines: 1 }
+                Text { text: (st.pp ?? 0) >= 20 ? "${round(st.pp)}%" : ""; width: 30; align: end; style: label; color: blue; maxLines: 1 }
+              }
+            }
+          }
+          Spark { weight: 1; fill: width }
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- screen
+  screen {
+    title: "earth.net"
+    Column {
+      gap: 8
+      Row {
+        gap: 6
+        align: center
+        Text { text: "◢ EARTH.NET"; style: title; color: accent; bold: true; weight: 1; maxLines: 1 }
+        Text { text: "−"; style: body; color: cyan; background: alpha(cyan, 0.12); padding: [12, 4]; radius: 3 * corners; width: 38; maxLines: 1; onTap: { zoom = clamp(zoom / 1.5, 1, 120) } }
+        Text { text: "+"; style: body; color: cyan; background: alpha(cyan, 0.12); padding: [12, 4]; radius: 3 * corners; width: 38; maxLines: 1; onTap: { zoom = clamp(zoom * 1.5, 1, 120) } }
+        Text { text: "${round(zoom)}x"; style: small; color: muted; width: 46; align: center; maxLines: 1 }
+        Spacer { weight: 1 }
+        Text { text: span == "h" ? "HOURS" : "DAYS"; style: label; color: cyan; background: alpha(cyan, 0.12); padding: [10, 4]; radius: 3 * corners; width: 72; maxLines: 1; onTap: { span = span == "h" ? "d" : "h"; chunks = min(chunks, span == "h" ? 48 : 16) } }
+        Text { text: "−"; style: body; color: accent; background: alpha(accent, 0.12); padding: [12, 4]; radius: 3 * corners; width: 38; maxLines: 1; onTap: { chunks = max(chunks - 1, 1) } }
+        Text { text: "${chunks}"; style: body; color: foreground; width: 32; align: center; maxLines: 1 }
+        Text { text: "+"; style: body; color: accent; background: alpha(accent, 0.12); padding: [12, 4]; radius: 3 * corners; width: 38; maxLines: 1; onTap: { chunks = min(chunks + 1, span == "h" ? 48 : 16) } }
+        Text { text: unit == "c" ? "°C" : "°F"; style: label; color: orange; background: alpha(orange, 0.12); padding: [10, 4]; radius: 3 * corners; width: 60; maxLines: 1; onTap: { unit = unit == "c" ? "f" : "c" } }
+      }
+
+      Row {
+        gap: 6
+        align: center
+        Text { text: "LAYERS"; style: label; color: muted; weight: 1; maxLines: 1 }
+        Text { text: "coast"; style: small; color: floor(layers / 1) % 2 == 1 ? cyan : muted; background: alpha(cyan, 0.10); padding: [10, 4]; radius: 3 * corners; maxLines: 1; onTap: { layers = floor(layers / 1) % 2 == 1 ? layers - 1 : layers + 1 } }
+        Text { text: "grid"; style: small; color: floor(layers / 2) % 2 == 1 ? cyan : muted; background: alpha(cyan, 0.10); padding: [10, 4]; radius: 3 * corners; maxLines: 1; onTap: { layers = floor(layers / 2) % 2 == 1 ? layers - 2 : layers + 2 } }
+        Text { text: "weather"; style: small; color: floor(layers / 4) % 2 == 1 ? cyan : muted; background: alpha(cyan, 0.10); padding: [10, 4]; radius: 3 * corners; maxLines: 1; onTap: { layers = floor(layers / 4) % 2 == 1 ? layers - 4 : layers + 4 } }
+        Text { text: "mesh"; style: small; color: floor(layers / 8) % 2 == 1 ? cyan : muted; background: alpha(cyan, 0.10); padding: [10, 4]; radius: 3 * corners; maxLines: 1; onTap: { layers = floor(layers / 8) % 2 == 1 ? layers - 8 : layers + 8 } }
+        Text { text: "BASE (all)"; style: small; color: accent; background: alpha(accent, 0.12); padding: [10, 4]; radius: 3 * corners; maxLines: 1; onTap: { layers = 15 } }
+      }
+
+      Row {
+        fill: width
+        gap: 10
+        Globe { weight: 1.2; height: 420; fill: width }
+        Column {
+          weight: 1
+          gap: 6
+          Row {
+            gap: 6
+            align: center
+            Text { text: lower(selName); style: title; color: accent; weight: 1; maxLines: 1 }
+            Text { text: "${round(selLat, 2)}, ${round(selLon, 2)}"; style: label; color: muted; width: 110; align: end; maxLines: 1 }
+          }
+          Text { text: cur == null ? "" : "${unit == "f" ? round(cur.temperature_2m * 9 / 5 + 32) : round(cur.temperature_2m)}° · ${get(wmo, str(cur.weather_code), "weather")} · wind ${round(cur.wind_speed_10m)} · ${round(cur.relative_humidity_2m)}%"; style: small; color: muted }
+          Flow {
+            gap: 6
+            for c in split(cities, "|") {
+              let parts = split(c, "@")
+              let ll = split(parts[1] ?? "", ",")
+              Text {
+                text: lower(parts[0] ?? "")
+                style: small
+                color: selName == lower(parts[0] ?? "") ? orange : cyan
+                background: alpha(cyan, 0.10)
+                padding: [9, 4]
+                radius: 3 * corners
+                maxLines: 1
+                onTap: { selLat = num(ll[0], selLat); selLon = num(ll[1], selLon); selName = lower(parts[0] ?? ""); picked = 1; zoom = max(zoom, 4); refresh() }
+              }
+            }
+          }
+          Input {
+            text: selName
+            placeholder: "city name, or lat,lon"
+            clear: true
+            onSubmit: {
+              q = trim(value)
+              selLat = len(split(trim(value), ",")) == 2 ? num(split(trim(value), ",")[0], selLat) : selLat
+              selLon = len(split(trim(value), ",")) == 2 ? num(split(trim(value), ",")[1], selLon) : selLon
+              selName = len(split(trim(value), ",")) == 2 ? "custom" : selName
+              picked = len(split(trim(value), ",")) == 2 ? 1 : picked
+              zoom = len(split(trim(value), ",")) == 2 ? max(zoom, 4) : zoom
+              refresh()
+            }
+          }
+          if sch.results != null {
+            Flow {
+              gap: 6
+              for r in sch.results {
+                Text {
+                  text: "${r.name}${r.country_code == null ? "" : " " + lower(r.country_code)}"
+                  style: small
+                  color: cyan
+                  background: alpha(cyan, 0.10)
+                  padding: [10, 5]
+                  radius: 3 * corners
+                  onTap: { selLat = r.latitude; selLon = r.longitude; selName = lower(r.name); picked = 1; refresh() }
+                }
+              }
+            }
+          }
+          Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
+          Column {
+            scroll: true
+            weight: 1
+            gap: 2
+            for st, i in steps.take(chunks) {
+              let code = st.code
+              let t = st.temp
+              let lo = st.lo
+              let sev = code == null ? 0 : code <= 2 ? 0 : code == 3 ? 1 : code <= 48 ? 1 : code <= 57 ? 2 : code <= 67 ? 3 : code <= 77 ? 3 : code <= 82 ? 4 : 5
+              let tint = sev >= 5 ? magenta : sev == 4 ? red : sev == 3 ? blue : sev == 2 ? cyan : muted
+              Row {
+                gap: 8
+                align: center
+                Text { text: span == "h" ? (i == 0 ? "now" : sub(st.time ?? "", 11, 16)) : (i == 0 ? "today" : lower(fmtTime(now + 86400 * i, "EEE"))); style: label; color: i == 0 ? foreground : muted; width: 60; maxLines: 1 }
+                Text { text: t == null ? "…" : "${unit == "f" ? round(t * 9 / 5 + 32) : round(t)}°"; style: body; color: cyan; width: 48; align: end }
+                Text { text: lo == null ? "" : "↓${unit == "f" ? round(lo * 9 / 5 + 32) : round(lo)}°"; style: label; color: muted; width: 50; align: end }
+                Text { text: get(wmo, str(code), "····"); style: body; color: tint; weight: 1; maxLines: 1 }
+                Text { text: (st.pp ?? 0) >= 1 ? "${round(st.pp)}%" : ""; style: label; color: blue; width: 44; align: end }
+              }
+            }
+          }
+          Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
+          Spark { height: 120; fill: width }
+        }
+      }
+    }
+  }
+}
