@@ -1,8 +1,8 @@
-widget "mossglass" {
+widget "Glass Happiness Widget" {
   // The Glass Happiness tank on home: the scene, its readout and each plant's moisture.
   // It watches the same tank as the Glass Happiness app; tap it to open the app and tend it.
 
-  meta { owl: 11; description: "Your Glass Happiness terrarium on home: the tank, the sky and weather in its window, each plant's moisture, and a note when one gets thirsty"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { owl: 11; description: "Your Glass Happiness terrarium on home: the tank, the sky and weather in its window, each plant's moisture, and a note when one gets thirsty"; version: "1.1"; license: "MIT"; category: "fun" }
   page: 2
   order: 2
   size: 6x7

@@ -2,7 +2,7 @@ app "Glass Happiness" {
   // A pixel terrarium where every grain, drop and wisp of mist is simulated on its own, by the Perl sim
   // below, which streams the tank here a frame per line.
 
-  meta { owl: 12; description: "A falling-sand terrarium: pour gravel, charcoal, perlite and soil, rake it level, water it and grow humidity-loving plants by a window with a day and night"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { owl: 12; description: "A falling-sand terrarium: pour gravel, charcoal, perlite and soil, rake it level, water it and grow humidity-loving plants by a window with a day and night"; version: "1.1"; license: "MIT"; category: "fun" }
   title: ""      // the title is drawn in the view instead, so it can be green
   icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
     <rect width="256" height="256" rx="56" fill="#2A241F"/>
