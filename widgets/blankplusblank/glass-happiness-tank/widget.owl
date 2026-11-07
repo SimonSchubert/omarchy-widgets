@@ -1,0 +1,1430 @@
+widget "mossglass" {
+  // The Glass Happiness tank on home: the scene, its readout and each plant's moisture.
+  // It watches the same tank as the Glass Happiness app; tap it to open the app and tend it.
+
+  meta { owl: 11; description: "Your Glass Happiness terrarium on home: the tank, the sky and weather in its window, each plant's moisture, and a note when one gets thirsty"; version: "1.0"; license: "MIT"; category: "fun" }
+  page: 2
+  order: 2
+  size: 6x7
+  minSize: 6x5
+  requires { pacman: ["perl"] }    // perl runs the sim
+
+  // The sim and the feed that shares it, written in Perl. They're kept here rather than as files, so the
+  // store's review covers them; the stream runs the feed with the sim's code as its argument.
+  // The tank is saved in ~/.local/share/mossglass/tank.txt and taps go through ~/.cache/mossglass/in.
+  let feed = """#!/usr/bin/perl
+# Glass Happiness feed: lets the app and the home widget watch one tank at once.
+# The sim's code comes as the first argument. Whoever holds ~/.cache/mossglass/run.lock runs it, passes its
+# frames on and keeps the latest in frame.txt; everyone else prints frame.txt as it changes, and takes over
+# the sim when the runner goes.
+use strict;
+use warnings;
+use Fcntl qw(:flock);
+use Time::HiRes qw(sleep stat);
+
+my $SIMCODE = shift // die "no sim code\n";
+my $HOME  = $ENV{HOME} // '/root';
+my $CACHE = "$HOME/.cache/mossglass";
+my $FRAME = "$CACHE/frame.txt";
+mkdir "$HOME/.cache";
+mkdir $CACHE;
+
+$| = 1;
+my ($quit, $child) = (0, 0);
+$SIG{PIPE} = 'IGNORE';
+$SIG{TERM} = $SIG{INT} = $SIG{HUP} = sub { $quit = 1; kill 'TERM', $child if $child };
+
+open my $lock, '>>', "$CACHE/run.lock" or die "run.lock: $!";
+my ($seen, $tries) = ('', 0);
+
+until ($quit) {
+  if ($tries-- <= 0 && flock($lock, LOCK_EX | LOCK_NB)) {
+    # the runner: the sim's stdout comes here
+    $child = open(my $sim, '-|', 'perl', '-e', $SIMCODE) or die "sim: $!";
+    while (my $line = <$sim>) {
+      unless (print $line) { kill 'TERM', $child; last }
+      if (open my $f, '>', "$FRAME.tmp") { print $f $line; close $f; rename "$FRAME.tmp", $FRAME }
+    }
+    close $sim;    # waits for the sim to save and exit
+    unlink $FRAME;
+    flock($lock, LOCK_UN);
+    last;
+  }
+  $tries = 10 if $tries < 0;    # a watcher tries for the lock about once a second
+  my @st = stat $FRAME;
+  my $stamp = @st ? "$st[9]:$st[7]:$st[1]" : "";
+  if ($stamp ne '' && $stamp ne $seen && open my $f, '<', $FRAME) {
+    my $line = <$f>;
+    close $f;
+    $seen = $stamp;
+    last if defined $line && !print $line;
+  }
+  sleep 0.08;
+}
+"""
+  let sim = """#!/usr/bin/perl
+# Mossglass: a falling-sand terrarium. Every grain, drop and wisp of mist is a cell of its own.
+# Prints one frame per line for the Glass Happiness app and widget:
+#   hour;rh;frame;lid;mode;plants;probe;row|row|...;plant/plant/...;days
+# where a plant is type,x,root moisture (-1 without soil),lo,hi,dead,left,top,right,bottom (its cells, in tank cells),
+# and days is how many days the tank has had a living plant in it
+# and reads commands appended to ~/.cache/mossglass/in.
+use strict;
+use warnings;
+use Time::HiRes qw(time sleep);
+use File::Path qw(make_path);
+use POSIX qw(mktime);
+
+$| = 1;
+my $HOME  = $ENV{HOME} // '/root';
+my $DATA  = "$HOME/.local/share/mossglass";
+my $CACHE = "$HOME/.cache/mossglass";
+make_path($DATA, $CACHE);
+my $IN   = "$CACHE/in";
+my $PIDF = "$CACHE/sim.pid";
+my $SAVE = "$DATA/tank.txt";
+my $BG   = "$CACHE/bg.txt";
+
+# Scene and tank geometry, in art pixels. The tank's inside is the simulated grid.
+my ($SW, $SH) = (160, 108);
+my ($X0, $Y0) = (9, 36);
+my ($W, $H)   = (142, 62);
+my $N = $W * $H;
+my $TPS = 12;
+my $FALL = 4;      # cells a grain or drop falls per tick through open air
+my $DRIFT = 6;     # steps a wisp of mist drifts per tick
+my $DAYLEN = 480;    # seconds per day in fast mode
+my $GROW = 0.005;   # growth per hour of full daylight: seedling to full grown in about two weeks of days
+
+# Materials
+use constant { AIR => 0, GRAVEL => 1, CHAR => 2, PERLITE => 3, SOIL => 4, WATER => 5, MIST => 6 };
+my %TOOLMAT = (gravel => GRAVEL, charcoal => CHAR, perlite => PERLITE, soil => SOIL, can => WATER, mister => MIST);
+my @MATNAME = ('air', 'gravel', 'charcoal', 'perlite', 'soil', 'water', 'mist');
+
+# Plants: soil moisture range, minimum humidity, how far creepers reach.
+my %SPEC = (
+  moss       => { name => 'Cushion moss', lo => 58, hi => 82, rh => 65, spread => 14 },
+  begonia    => { name => 'Mini begonia', lo => 45, hi => 70, rh => 60 },
+  babytears  => { name => 'Baby tears',   lo => 55, hi => 80, rh => 65, spread => 18 },
+  fittonia   => { name => 'Fittonia',     lo => 50, hi => 66, rh => 60 },
+  maidenhair => { name => 'Maidenhair',   lo => 55, hi => 72, rh => 70 },
+  sinningia  => { name => 'Micro sinningia', lo => 55, hi => 75, rh => 70 },
+  nertera    => { name => 'Bead plant',   lo => 55, hi => 75, rh => 60, spread => 12 },
+  orchid     => { name => 'Jewel orchid', lo => 50, hi => 70, rh => 65, grow => 0.5 },    # grows at half speed: about a month
+);
+
+# ---- single instance: a restarted stream takes over from the old process, which saves first ----
+# The pidfile outlives a sim that Android SIGKILLs along with proot, and its pid gets reused, so the TERM
+# only goes to a process that is perl running this sim: this same file, or (the store copy) perl -e with its code.
+sub cmdline { my $p = shift; open my $f, '<', "/proc/$p/cmdline" or return ''; local $/; my $c = <$f> // ''; close $f; $c }
+sub is_sim {
+  my $c = cmdline(shift);
+  return 0 unless $c =~ m{^(?:[^\0]*/)?perl\0};
+  return $c eq cmdline($$) || index($c, "\n# Mossglass: a falling-sand terrarium.") >= 0;
+}
+if (open my $pf, '<', $PIDF) {
+  my $old = <$pf> // '';
+  close $pf;
+  chomp $old;
+  if ($old =~ /^\d+$/ && $old != $$ && kill(0, $old) && is_sim($old)) {
+    kill 'TERM', $old;
+    for (1 .. 40) { last unless kill(0, $old); sleep 0.05 }
+  }
+}
+{ open my $pf, '>', $PIDF or die; print $pf $$; close $pf }
+
+# ---- state ----
+my (@mat, @sh, @mo, @dew, @mold, @stamp);
+my @plants;
+my $rh = 50;
+my $lid = 1;
+my $mode = 'fast';
+my $fh = 5.2;          # fast-mode hour; starts just before sunrise
+my $tick = 0;
+my $frame = 0;
+my $days = 0;        # days that had a living plant in the tank at some point
+my $had = 0;         # whether today has had one yet
+my $dayno = 0;       # in real time, the calendar day last seen, so days pass while the sim is off too
+my $last_hour;
+my $saved_at = 0;     # when the tank was last saved, so real time can catch up on the time it was closed
+
+sub clear_tank {
+  @mat = (0) x $N; @sh = (0) x $N; @mo = (0) x $N; @dew = (0) x $N; @mold = (0) x $N; @stamp = (0) x $N;
+  @plants = ();
+  $rh = 50;
+  $days = 0;
+  $had = 0;
+}
+clear_tank();
+
+sub save {
+  open my $f, '>', "$SAVE.tmp" or return;
+  printf $f "MG1 %.2f %d %s %.4f %d %d %d %d\n", $rh, $lid, $mode, $fh, $days, $had, $dayno, time;
+  print $f join('', @mat), "\n";
+  print $f join('', @sh), "\n";
+  print $f join(',', map { int($_ + 0.5) } @mo), "\n";
+  print $f join('', @dew), "\n";
+  print $f join('', @mold), "\n";
+  for my $p (@plants) {
+    printf $f "P %s %d %d %.4f %.4f %d %.2f\n", $p->{t}, $p->{x}, $p->{y}, $p->{g}, $p->{hp}, $p->{seed}, $p->{dead};
+  }
+  close $f;
+  rename "$SAVE.tmp", $SAVE;
+}
+
+sub load {
+  open my $f, '<', $SAVE or return;
+  my @l = <$f>;
+  close $f;
+  chomp @l;
+  return unless @l >= 6 && $l[0] =~ /^MG1 (\S+) (\d) (\w+) (\S+)(?: (\d+) (\d))?(?: (\d+))?(?: (\d+))?/;
+  my ($r, $li, $mo_, $h, $dy, $hd, $dn, $sa) = ($1, $2, $3, $4, $5 // 0, $6 // 0, $7 // 0, $8 // 0);
+  my @m = split //, $l[1];
+  my @s = split //, $l[2];
+  my @o = split /,/, $l[3];
+  my @d = split //, $l[4];
+  my @g = split //, $l[5];
+  return unless @m == $N && @s == $N && @o == $N && @d == $N && @g == $N;
+  @mat = @m; @sh = @s; @mo = @o; @dew = @d; @mold = @g;
+  ($rh, $lid, $mode, $fh) = ($r, $li, $mo_, $h);
+  ($days, $had, $dayno, $saved_at) = ($dy, $hd, $dn, $sa);
+  for my $line (@l[6 .. $#l]) {
+    my (undef, $t, $x, $y, $g_, $hp, $seed, $dead) = split / /, $line;
+    next unless $t && $SPEC{$t};
+    push @plants, { t => $t, x => $x + 0, y => $y + 0, g => $g_ + 0, hp => $hp + 0, seed => $seed + 0, dead => $dead + 0 };
+  }
+}
+load();
+
+my $quit = 0;
+$SIG{TERM} = $SIG{INT} = $SIG{HUP} = $SIG{PIPE} = sub { $quit = 1 };
+
+# ---- the room: written once, read by the app as a file ----
+# a hash of up to three integers to [0, 1), in 32-bit arithmetic so it never overflows into floats
+sub hsh { my ($a, $b, $c) = @_; my $v; { use integer; $v = (($a * 73856093) ^ ($b * 19349663) ^ (($c // 0) * 83492791)) & 0xffffffff; $v = (($v ^ ($v >> 13)) * 1274126177) & 0xffffffff } return (($v >> 8) & 0xffff) / 65536 }
+
+sub write_bg {
+  # Window: frame 16..64 x 5..57; glass 19..61 x 8..54; mullions at 40-41 and 30-31.
+  my @far  = ([16, 30], [24, 25], [30, 19], [36, 24], [41, 21], [47, 15], [53, 22], [58, 18], [66, 26]);
+  my @near = ([15, 40], [23, 35], [31, 38], [39, 33], [47, 38], [55, 34], [64, 39]);
+  my (@ftop, @fpk, @ntop, @npk);
+  for my $x (0 .. $SW - 1) {
+    my ($best, $bp) = (999, 0);
+    for my $p (@far) { my $v = $p->[1] + abs($x - $p->[0]) * 0.95; if ($v < $best) { $best = $v; $bp = $p->[0] } }
+    $ftop[$x] = int($best + (hsh($x, 3) < 0.3 ? 1 : 0)); $fpk[$x] = $bp;
+    ($best, $bp) = (999, 0);
+    for my $p (@near) { my $v = $p->[1] + abs($x - $p->[0]) * 0.7; if ($v < $best) { $best = $v; $bp = $p->[0] } }
+    $ntop[$x] = int($best + (hsh($x, 4) < 0.25 ? 1 : 0)); $npk[$x] = $bp;
+  }
+  my @rows;
+  for my $y (0 .. $SH - 1) {
+    my $r = '';
+    for my $x (0 .. $SW - 1) {
+      my $c;
+      if ($y >= 99) {
+        # the table the tank stands on
+        $c = $y == 99 ? 'u' : ($x % 47 == 13 ? 'w' : ($y == 100 || hsh($x, $y, 1) < 0.08) ? 'v' : 't');
+        $c = 'w' if $y == 107;
+      } elsif ($x >= 13 && $x <= 67 && $y >= 56 && $y <= 59) {
+        $c = $y == 56 ? 's' : $y == 59 ? 'Y' : 'S';    # sill
+      } elsif ($x >= 16 && $x <= 64 && $y >= 5 && $y <= 55) {
+        if ($x < 19 || $x > 61 || $y < 8 || $y > 53) {
+          $c = ($x == 19 - 1 && $y >= 8) || ($y == 7 && $x >= 18 && $x <= 62) ? 'F' : 'f';
+          $c = 'F' if $x == 16 || $x == 64 || $y == 5 || $y == 55;
+        } elsif ($y >= 48 + (hsh($x, 7) < 0.5 ? 0 : 1) - (($x * 7) % 5 == 0 ? 2 : 0)) {
+          $c = hsh($x, $y, 2) < 0.3 ? 'P' : 'p';      # pines along the valley
+        } elsif ($y >= $ntop[$x]) {
+          $c = $x <= $npk[$x] ? 'o' : 'O';             # near ridge, lit and shadow faces
+        } elsif ($y >= $ftop[$x]) {
+          my $snow = $y < 26 && $y - $ftop[$x] < 4 + hsh($x, 5) * 3;
+          $c = $x <= $fpk[$x] ? ($snow ? 'n' : 'm') : ($snow ? 'N' : 'M');
+        } else {
+          my $band = int(($y - 8) / 6); $band = 7 if $band > 7;
+          $c = substr('abcdefgh', $band, 1);
+          $c = (hsh($x, $y, 9) < 0.5 ? 'x' : 'y') if $y < 36 && hsh($x, $y, 8) < 0.045;
+        }
+      } else {
+        my $k = ($x + 3) % 12;
+        $c = $k == 0 ? 'Y' : (int(($x + 3) / 12) % 2 ? 'W' : 'X');
+        $c = 'Y' if $k != 0 && hsh($x, int($y / 3), 6) < 0.03;
+      }
+      $r .= $c;
+    }
+    push @rows, $r;
+  }
+  my $text = join("\n", @rows) . "\n";
+  my $old = '';
+  if (open my $f, '<', $BG) { local $/; $old = <$f> // ''; close $f }
+  return if $old eq $text;
+  open my $f, '>', "$BG.tmp" or return;
+  print $f $text;
+  close $f;
+  rename "$BG.tmp", $BG;
+}
+write_bg();
+
+# ---- clock ----
+# today as a count of local calendar days
+sub today { my @t = localtime; return int(mktime(0, 0, 12, @t[3, 4, 5]) / 86400) }
+sub hour {
+  return $fh if $mode eq 'fast';
+  my @t = localtime;
+  return $t[2] + $t[1] / 60 + $t[0] / 3600;
+}
+sub daylight { my $h = shift; my $d = (($h - 5) < (20 - $h) ? $h - 5 : 20 - $h) / 1.5; return $d < 0 ? 0 : $d > 1 ? 1 : $d }
+
+# ---- cell helpers ----
+# falls straight down: through open air up to $FALL cells, or into the mist just below
+sub fall {
+  my ($i, $y) = @_;
+  my $j = $i + $W;
+  for (2 .. $FALL) {
+    last if $mat[$j] != AIR || $y + $_ > $H - 1 || $mat[$j + $W] != AIR;
+    $j += $W;
+  }
+  swapc($i, $j);
+}
+sub swapc {
+  my ($i, $j) = @_;
+  @mat[$i, $j] = @mat[$j, $i];
+  @sh[$i, $j] = @sh[$j, $i];
+  @mo[$i, $j] = @mo[$j, $i];
+  @mold[$i, $j] = @mold[$j, $i];
+  $stamp[$i] = $stamp[$j] = $tick;
+}
+sub porous { my $m = $mat[$_[0]]; return $m >= 1 && $m <= 4 }
+sub soak { my $m = $mat[$_[0]]; return $m == SOIL || $m == PERLITE }
+sub coarse { my $m = $mat[$_[0]]; return $m == GRAVEL || $m == CHAR }
+
+sub put {
+  my ($i, $m) = @_;
+  $mat[$i] = $m;
+  $mold[$i] = 0;
+  $stamp[$i] = $tick;
+  if    ($m == GRAVEL)  { $sh[$i] = int(rand 3); $mo[$i] = 0 }
+  elsif ($m == CHAR)    { $sh[$i] = int(rand 2); $mo[$i] = 0 }
+  elsif ($m == PERLITE) { $sh[$i] = int(rand 2); $mo[$i] = 5 }
+  elsif ($m == SOIL)    { $sh[$i] = rand() < 0.07 ? 3 : int(rand 2); $mo[$i] = 30 }
+  else                  { $sh[$i] = int(rand 2); $mo[$i] = 0 }
+}
+
+# topmost substrate cell in a column, H when there is none
+sub surface {
+  my ($x, $from) = @_;
+  for (my $y = $from // 0; $y < $H; $y++) { my $m = $mat[$y * $W + $x]; return $y if $m >= 1 && $m <= 4 }
+  return $H;
+}
+
+my $evap = 0.02;
+my $wet  = 0;    # humidity gained this tick
+
+# ---- particles ----
+sub powder {
+  my ($i, $x, $y, $m) = @_;
+  if ($m == PERLITE && $y > 0 && $mat[$i - $W] == WATER && rand() < 0.08) { swapc($i, $i - $W); return }    # perlite floats
+  return if $y == $H - 1;
+  my $b = $i + $W;
+  my $mb = $mat[$b];
+  if ($mb == AIR || $mb == MIST) { fall($i, $y); return }
+  if ($mb == WATER) {
+    return if $m == PERLITE ? rand() > 0.04 : rand() > 0.55;
+    swapc($i, $b);
+    return;
+  }
+  my $rep = $m == GRAVEL ? 0.85 : $m == CHAR ? 0.6 : $m == PERLITE ? 0.55 : ($mo[$i] > 70 ? 0.1 : 0.32);
+  return if rand() > $rep;
+  my $d = rand() < 0.5 ? -1 : 1;
+  for my $dd ($d, -$d) {
+    my $nx = $x + $dd;
+    next if $nx < 0 || $nx >= $W;
+    my $ms = $mat[$i + $dd];
+    next unless $ms == AIR || $ms == WATER || $ms == MIST;
+    my $t = $b + $dd;
+    my $mt = $mat[$t];
+    next unless $mt == AIR || $mt == WATER || $mt == MIST;
+    swapc($i, $t);
+    return;
+  }
+}
+
+sub absorb {
+  my ($p, $w) = @_;
+  $mo[$p] += coarse($p) ? 50 : 25;
+  $mo[$p] = 100 if $mo[$p] > 100;
+  $mat[$w] = AIR; $mo[$w] = 0;
+}
+
+sub water {
+  my ($i, $x, $y) = @_;
+  if (($y == 0 || $mat[$i - $W] == AIR) && rand() < $evap * 0.02) { $mat[$i] = AIR; $wet += 0.25; return }
+  if ($y < $H - 1) {
+    my $b = $i + $W;
+    my $mb = $mat[$b];
+    if ($mb == AIR || $mb == MIST) { fall($i, $y); return }
+    if ($mb >= 1 && $mb <= 4 && $mo[$b] < 100 && rand() < 0.7) { absorb($b, $i); return }
+    my $d = rand() < 0.5 ? -1 : 1;
+    for my $dd ($d, -$d) {
+      my $nx = $x + $dd;
+      next if $nx < 0 || $nx >= $W;
+      my $mt = $mat[$b + $dd];
+      if (($mt == AIR || $mt == MIST) && $mat[$i + $dd] != GRAVEL) { swapc($i, $b + $dd); return }
+    }
+  }
+  for my $dd (-1, 1) {
+    my $nx = $x + $dd;
+    next if $nx < 0 || $nx >= $W;
+    my $s = $i + $dd;
+    my $ms = $mat[$s];
+    if ($ms >= 1 && $ms <= 4 && $mo[$s] < 100 && rand() < 0.25) { absorb($s, $i); return }
+  }
+  # spread sideways, a few cells at a time
+  my $d = rand() < 0.5 ? -1 : 1;
+  my ($j, $jx) = ($i, $x);
+  for (1 .. 3) {
+    my $nx = $jx + $d;
+    last if $nx < 0 || $nx >= $W;
+    my $mn = $mat[$j + $d];
+    last unless $mn == AIR || $mn == MIST;
+    $j += $d; $jx = $nx;
+  }
+  swapc($i, $j) if $j != $i;
+}
+
+sub mist {
+  my ($i, $x, $y) = @_;
+  if (rand() < 0.004) { $mat[$i] = AIR; $wet += 0.12; return }
+  for (1 .. $DRIFT) {
+    my $r = rand();
+    my ($dx, $dy) = $r < 0.36 ? (0, 1) : $r < 0.52 ? (0, -1) : $r < 0.76 ? (-1, 0) : (1, 0);
+    $dx = int(rand 3) - 1 if $dy && rand() < 0.4;
+    my ($nx, $ny) = ($x + $dx, $y + $dy);
+    if ($nx < 0 || $nx >= $W || $ny < 0) {
+      if (rand() < 0.3) { $mat[$i] = AIR; $dew[$i] = 1 }    # touched the glass
+      return;
+    }
+    return if $ny >= $H;
+    my $n = $ny * $W + $nx;
+    my $mn = $mat[$n];
+    if ($mn == AIR) { swapc($i, $n); ($i, $x, $y) = ($n, $nx, $ny); next }
+    if ($mn >= 1 && $mn <= 4) {
+      if ($mo[$n] < 100 && rand() < 0.35) { $mo[$n] += 4; $mo[$n] = 100 if $mo[$n] > 100; $mat[$i] = AIR }
+      return;
+    }
+    $mat[$i] = AIR if $mn == WATER && rand() < 0.3;
+    return;
+  }
+}
+
+# ---- moisture in the substrate ----
+sub moisture {
+  for (my $y = $H - 1; $y >= 0; $y--) {
+    my $row = $y * $W;
+    for my $x (0 .. $W - 1) {
+      my $i = $row + $x;
+      my $m = $mat[$i];
+      next unless $m >= 1 && $m <= 4;
+      my $v = $mo[$i];
+      my $open = $y == 0 || $mat[$i - $W] == AIR || $mat[$i - $W] == MIST;
+      if ($open && $v > 0) {
+        my $e = $evap * ($m <= 2 ? 0.5 : 1);
+        $e = $v if $e > $v;
+        $v -= $e; $wet += $e * 0.4;
+      }
+      my $b = $i + $W;
+      my $s = $i + (rand() < 0.5 ? -1 : 1);
+      $s = $i if $s < $row || $s >= $row + $W;
+      if ($m <= 2) {
+        # gravel and charcoal: water sits in the gaps and drains down, then sideways
+        next if $v <= 0 && $mo[$i] <= 0;
+        if ($y < $H - 1) {
+          my $mb = $mat[$b];
+          if (($mb == GRAVEL || $mb == CHAR) && $mo[$b] < 100) {
+            my $t = 100 - $mo[$b]; $t = $v if $t > $v; $t = 25 if $t > 25;
+            $v -= $t; $mo[$b] += $t;
+          } elsif ($mb == AIR && $v >= 50) {
+            put($b, WATER); $v -= 50;
+          } elsif (($mb == SOIL || $mb == PERLITE) && $mo[$b] < $v) {
+            my $t = ($v - $mo[$b]) * 0.2; $v -= $t; $mo[$b] += $t;
+          }
+        }
+        if ($s != $i) {
+          my $ms = $mat[$s];
+          if (($ms == GRAVEL || $ms == CHAR) && $mo[$s] < $v - 4) { my $t = ($v - $mo[$s]) * 0.3; $v -= $t; $mo[$s] += $t }
+          elsif ($ms == AIR && $v >= 70 && $y < $H - 1 && $mat[$b] != AIR) { put($s, WATER); $v -= 50 }
+        }
+        if ($y > 0 && $v > 8) {
+          my $a = $i - $W;
+          if (($mat[$a] == SOIL || $mat[$a] == PERLITE) && $mo[$a] < 55) { my $t = $v > 1.5 ? 1.5 : $v; $v -= $t; $mo[$a] += $t }    # wicks up
+        }
+      } else {
+        # soil and perlite hold water and pass it on slowly, mostly downwards
+        if ($y < $H - 1) {
+          my $mb = $mat[$b];
+          if (($mb == SOIL || $mb == PERLITE) && $mo[$b] < 100) {
+            my $t = ($v - $mo[$b]) * 0.2 + ($v > 4 ? 0.4 : 0);
+            if ($t > 0) { $t = 100 - $mo[$b] if $t > 100 - $mo[$b]; $t = $v if $t > $v; $v -= $t; $mo[$b] += $t }
+          } elsif (($mb == GRAVEL || $mb == CHAR) && $v > 78 && $mo[$b] < 100) {
+            my $t = ($v - 78) * 0.3; $t = 100 - $mo[$b] if $t > 100 - $mo[$b]; $v -= $t; $mo[$b] += $t;
+          } elsif ($mb == AIR && $v >= 97) {
+            put($b, WATER); $v -= 30;
+          }
+        }
+        if ($s != $i && ($mat[$s] == SOIL || $mat[$s] == PERLITE) && $v > $mo[$s] + 2) {
+          my $t = ($v - $mo[$s]) * 0.12; $v -= $t; $mo[$s] += $t;
+        }
+        if ($y > 0 && ($mat[$i - $W] == SOIL || $mat[$i - $W] == PERLITE) && $v > $mo[$i - $W] + 15) {
+          my $t = ($v - $mo[$i - $W]) * 0.03; $v -= $t; $mo[$i - $W] += $t;
+        }
+      }
+      $mo[$i] = $v < 0 ? 0 : $v > 100 ? 100 : $v;
+    }
+  }
+}
+
+# ---- dew on the glass, and mold on waterlogged soil ----
+sub glass {
+  if ($rh > 80) {
+    my $tries = int(($rh - 80) / 6) + 1;
+    for (1 .. $tries) {
+      next if rand() > 0.5;
+      my $x = rand() < 0.5 ? int(rand 3) * (rand() < 0.5 ? 1 : 0) : int(rand $W);
+      $x = $W - 1 - $x if rand() < 0.5 && $x < 3;
+      my $y = int(rand($H * 0.7));
+      my $i = $y * $W + $x;
+      next unless $mat[$i] == AIR;
+      $dew[$i] = 1; $rh -= 0.06;
+    }
+  }
+  for (my $i = $N - 1; $i >= 0; $i--) {
+    next unless $dew[$i];
+    if ($rh < 72 && rand() < 0.02) { $dew[$i] = 0; $rh += 0.05; next }
+    next unless rand() < 0.04;
+    my $b = $i + $W;
+    if ($b >= $N) { $dew[$i] = 0; next }
+    my $mb = $mat[$b];
+    if ($mb == AIR || $mb == MIST) {
+      $dew[$i] = 0;
+      if ($dew[$b]) { $dew[$b] = 0; put($b, WATER) if $mb == AIR && rand() < 0.5 } else { $dew[$b] = 1 }
+    } else {
+      $dew[$i] = 0;
+      if ($mb >= 1 && $mb <= 4) { $mo[$b] += 10; $mo[$b] = 100 if $mo[$b] > 100 }
+    }
+  }
+}
+
+my $charcoal = 0;
+sub moldy {
+  $charcoal = 0;
+  for (@mat) { $charcoal++ if $_ == CHAR }
+  for my $x (0 .. $W - 1) {
+    my $y = surface($x);
+    next if $y >= $H;
+    my $i = $y * $W + $x;
+    if ($mat[$i] == SOIL && $mo[$i] > 90 && $charcoal < 60) { $mold[$i] = 1 if rand() < 0.03 }
+    elsif ($mold[$i] && ($mo[$i] < 75 || $charcoal >= 60) && rand() < 0.08) { $mold[$i] = 0 }
+  }
+}
+
+# ---- plants ----
+sub roots {
+  my $p = shift;
+  my ($sum, $n) = (0, 0);
+  for my $dx (-2 .. 2) {
+    my $x = $p->{x} + $dx;
+    next if $x < 0 || $x >= $W;
+    for my $dy (1 .. 6) {
+      my $y = $p->{y} + $dy;
+      last if $y >= $H;
+      my $i = $y * $W + $x;
+      if ($mat[$i] == SOIL || $mat[$i] == PERLITE) { $sum += $mo[$i]; $n++ }
+    }
+  }
+  return $n ? $sum / $n : -1;
+}
+
+sub mold_near {
+  my $p = shift;
+  for my $dx (-3 .. 3) {
+    my $x = $p->{x} + $dx;
+    next if $x < 0 || $x >= $W;
+    my $y = surface($x);
+    return 1 if $y < $H && $mold[$y * $W + $x];
+  }
+  return 0;
+}
+
+sub plant_near {
+  my ($x, $r) = @_;
+  for my $p (@plants) { return $p if abs($p->{x} - $x) <= $r }
+  return undef;
+}
+
+# how wrong a living plant's spot is: 0 or less is happy, up to 3 for worst
+sub plant_bad {
+  my $p = shift;
+  my $spec = $SPEC{$p->{t}};
+  my $m = roots($p);
+  return 3 if $m < 0;
+  my $buried = $p->{y} > 0 && porous($p->{y} * $W + $p->{x}) && porous(($p->{y} - 1) * $W + $p->{x});
+  my $bad = 0;
+  $bad += ($spec->{lo} - $m) / 15 if $m < $spec->{lo};
+  $bad += ($m - $spec->{hi}) / 15 if $m > $spec->{hi};
+  $bad += ($spec->{rh} - $rh) / 20 if $rh < $spec->{rh};
+  $bad += 2 if $buried;
+  $bad += 1 if mold_near($p);
+  return $bad > 3 ? 3 : $bad;
+}
+
+# Plants live in tank hours, not seconds, so they take the same number of days in fast and real time.
+sub plants_step {
+  my $dt = shift;
+  my $dh = $dt * ($mode eq 'fast' ? 24 / $DAYLEN : 1 / 3600);
+  my $light = daylight(hour());
+  my @keep;
+  for my $p (@plants) {
+    my $spec = $SPEC{$p->{t}};
+    # settle onto whatever is below now
+    while ($p->{y} + 1 < $H) {
+      my $m = $mat[($p->{y} + 1) * $W + $p->{x}];
+      last if $m >= 1 && $m <= 4;
+      $p->{y}++;
+    }
+    if ($p->{dead}) {
+      $p->{dead} += $dh;
+      if ($p->{dead} > 24) {    # a dead plant stays a day, then rots into the soil
+        for my $c (plant_cells($p)) { my $i = $c->[1] * $W + $c->[0]; put($i, SOIL) if $mat[$i] == AIR }
+        next;
+      }
+      push @keep, $p;
+      next;
+    }
+    my $bad = plant_bad($p);
+    # a happy plant recovers in about a day; one in the worst spot dies in about two days, a slightly off one in a week
+    if ($bad <= 0) {
+      $p->{hp} += 0.04 * $dh; $p->{hp} = 1 if $p->{hp} > 1;
+      $p->{g} += $GROW * ($spec->{grow} // 1) * $dh * $light * (0.5 + $p->{hp} / 2); $p->{g} = 1 if $p->{g} > 1;
+    } else {
+      $p->{hp} -= 0.005 * $dh * (1 + $bad);
+    }
+    if ($p->{hp} <= 0) { $p->{hp} = 0; $p->{dead} = 0.01 }
+    # creepers spread across moist ground, about once every two days of light when full grown
+    if ($spec->{spread} && $p->{g} >= 1 && $p->{hp} > 0.85 && $light > 0.3 && @plants < 40 && rand() < 0.02 * $dh) {
+      my $nx = $p->{x} + (rand() < 0.5 ? -1 : 1) * ($spec->{spread} + 2 + int(rand 3));
+      if ($nx >= 0 && $nx < $W && !plant_near($nx, 3)) {
+        my $y = surface($nx);
+        if ($y < $H && ($mat[$y * $W + $nx] == SOIL || $mat[$y * $W + $nx] == PERLITE || $mat[$y * $W + $nx] == CHAR)) {
+          push @keep, { t => $p->{t}, x => $nx, y => $y - 1, g => 0.1, hp => 0.8, seed => int(rand 1e6), dead => 0 };
+        }
+      }
+    }
+    push @keep, $p;
+  }
+  @plants = @keep;
+}
+
+# Pixel art for a plant at its growth: a list of [x, y, letter], later cells over earlier ones.
+sub plant_cells {
+  my $p = shift;
+  my ($x, $y, $g, $s, $t) = ($p->{x}, $p->{y}, $p->{g}, $p->{seed}, $p->{t});
+  my @c;
+  my $ground = sub { my $cx = shift; my $sy = surface($cx, $y - 14 < 0 ? 0 : $y - 14); return $sy - 1 };
+  # Shading: light comes from the upper left. Letters: a/b moss, c moss shadow, p moss tips, d/e baby tears,
+  # R their shadow, f/w begonia leaf and its lit edge, s silver spots, g red undersides and nodes, h/X petals,
+  # q flower centers, i/x fittonia leaf and shadow, j its veins, k/l/z maidenhair stems and leaflets, m/W stems.
+  # Digits: 1/2/3 jewel orchid leaf, its sheen and pink veins, 4/5 sinningia flower and its throat, 6/7 berries.
+  if ($t eq 'moss') {
+    # a cushion that spreads into a wide, deep dome
+    my $r = 1 + int($g * 14 + hsh($s, 1) * 3);
+    for my $dx (-$r .. $r) {
+      my $cx = $x + $dx;
+      next if $cx < 0 || $cx >= $W;
+      my $by = $ground->($cx);
+      next if abs($by - $y) > 10;
+      my $f = 1 - ($dx / ($r + 0.5)) ** 2;
+      next if $f <= 0;
+      my $ht = 1 + int($g * 5 * sqrt($f) + 0.3);
+      $ht++ if $g > 0.5 && hsh($s, $dx, 2) < 0.3 && abs($dx) < $r - 1;
+      for my $k (0 .. $ht - 1) {
+        my $h = hsh($s, $dx, $k);
+        my $top = $k == $ht - 1;
+        my $lit = $dx < 0 ? 0.15 : -0.1;
+        my $l = $top ? ($h < 0.45 + $lit ? 'p' : 'a')
+              : $k == 0 && $ht > 1 ? ($h < 0.6 ? 'c' : 'b')
+              : ($h < 0.4 + $lit ? 'a' : $h < 0.85 ? 'b' : 'c');
+        push @c, [$cx, $by - $k, $l];
+      }
+      push @c, [$cx, $by - $ht, 'p'] if $g > 0.3 && hsh($s, $dx, 11) < 0.25;    # stray fronds above the cushion
+      if ($g >= 0.8 && hsh($s, $dx, 7) < 0.14) {    # spore capsules on tall stalks
+        my $sl = 1 + int(hsh($s, $dx, 8) * 3);
+        push @c, [$cx, $by - $ht - $_, $_ == 0 ? 'W' : 'm'] for 0 .. $sl - 1;
+        push @c, [$cx, $by - $ht - $sl, 'g'];
+        push @c, [$cx + ($dx < 0 ? -1 : 1), $by - $ht - $sl - 1, 'n'] if hsh($s, $dx, 9) < 0.3;    # a bent cap
+      }
+    }
+  } elsif ($t eq 'babytears') {
+    my $rw = 2 + int($g * 18);
+    my $hh = 1 + int($g * 8);
+    for my $dx (-$rw .. $rw) {
+      my $cx = $x + $dx;
+      next if $cx < 0 || $cx >= $W;
+      my $f = 1 - ($dx / ($rw + 0.5)) ** 2;
+      next if $f <= 0;
+      my $by = $ground->($cx);
+      next if abs($by - $y) > 10;
+      my $ht = int($hh * sqrt($f) + 0.6); $ht = 1 if $ht < 1;
+      for my $k (0 .. $ht - 1) {
+        next if $k > 0 && $k < $ht - 1 && hsh($s, $dx, $k) < 0.12;
+        my $h = hsh($s, $dx, $k + 9);
+        my $depth = ($ht - 1 - $k) / ($hh + 1);    # 0 at the surface of the mound, more inside
+        my $l = $depth < 0.15 ? ($h < 0.6 ? 'd' : 'e') : $depth < 0.5 ? ($h < 0.25 ? 'd' : $h < 0.8 ? 'e' : 'R') : ($h < 0.5 ? 'R' : 'e');
+        $l = 'd' if $dx < -$rw / 3 && $depth < 0.3 && $h < 0.8;
+        $l = 'R' if $dx > $rw / 3 && $depth > 0.2 && $h < 0.5;
+        push @c, [$cx, $by - $k, $l];
+      }
+      push @c, [$cx, $by - $ht, 'd'] if hsh($s, $dx, 30) < 0.22;
+      push @c, [$cx, $by - $ht - 1, 'j'] if $g > 0.9 && hsh($s, $dx, 31) < 0.05;    # a tiny white flower
+    }
+  } elsif ($t eq 'begonia') {
+    my $sh = 1 + int($g * 22);
+    for my $k (0 .. $sh - 1) { push @c, [$x, $y - $k, $k % 3 == 2 && $g > 0.3 ? 'g' : $k < 3 ? 'W' : 'm'] }    # red nodes up the stem
+    my $flip = hsh($s, 1) < 0.5 ? 1 : -1;
+    my $leaf = sub {
+      my ($ly, $side, $size) = @_;
+      my @shape;
+      if ($size >= 2) {    # a broad, pointed leaf: lit top edge, silver spots, a vein, red beneath
+        push @shape, [1, 0, 'W'];
+        push @shape, [$_, -2, 'w'] for 3 .. 4;
+        push @shape, [2, -1, 'w'], [5, -1, 'w'], [6, -1, 'w'];
+        push @shape, [$_, -1, 'f'] for 3 .. 4;
+        push @shape, [$_, 0, 'W'] for 2 .. 6;
+        push @shape, [7, 0, 'f'], [8, 0, 'f'], [9, 1, 'f'];
+        push @shape, [$_, 1, 'f'] for 2 .. 7;
+        push @shape, [8, 1, 'g'];
+        push @shape, [$_, 2, 'g'] for 3 .. 6;
+        for my $sp ([3, -1], [5, 1], [6, -1], [4, 1], [7, 1]) { push @shape, [$sp->[0], $sp->[1], 's'] if hsh($s, $ly, $sp->[0] * 7 + $sp->[1]) < 0.45 }
+      } elsif ($size >= 1) {
+        @shape = ([1, -1, 'w'], [2, -1, 'w'], [3, -1, 'f'], [1, 0, 'f'], [2, 0, 's'], [3, 0, 'f'], [4, 0, 'g'], [2, 1, 'g'], [3, 1, 'g']);
+      } else {
+        @shape = ([1, 0, 'f'], [2, 0, 'f'], [2, -1, 'w'], [3, 0, 'g']);
+      }
+      push @c, [$x + $_->[0] * $side, $ly + $_->[1], $_->[2]] for @shape;
+    };
+    my $flower = sub {
+      my ($fx, $fy) = @_;
+      push @c, [$fx, $fy, 'm'], [$fx - 1, $fy - 1, 'h'], [$fx + 1, $fy - 1, 'X'], [$fx, $fy - 2, 'h'], [$fx, $fy - 1, 'q'];
+      push @c, [$fx - 1, $fy - 2, 'h'], [$fx + 1, $fy - 2, 'X'], [$fx, $fy - 3, 'h'] if $g > 0.95;    # opened wide
+    };
+    $leaf->($y, $flip, $g > 0.5 ? 2 : $g > 0.25 ? 1 : 0) if $g > 0.12;
+    $leaf->($y, -$flip, $g > 0.55 ? 2 : $g > 0.35 ? 1 : 0) if $g > 0.2;
+    for (my $k = 2; $k < $sh; $k += 3) {
+      my $side = ($k / 3) % 2 ? -$flip : $flip;
+      my $size = $k > $sh - 4 ? 0 : $g > 0.6 && $k < $sh * 0.7 ? 2 : $g > 0.4 ? 1 : 0;
+      $leaf->($y - $k, $side, $size);
+      if ($size == 2 && $g > 0.85 && $p->{hp} > 0.6 && hsh($s, $k, 4) < 0.5) {    # a flowering side shoot
+        push @c, [$x + $side * $_, $y - $k - 2 - int($_ / 3), 'm'] for 2 .. 8;
+        $flower->($x + $side * 9, $y - $k - 4);
+      }
+    }
+    push @c, [$x, $y - $sh, 'w'], [$x - 1, $y - $sh + 1, 'f'], [$x + 1, $y - $sh + 1, 'f'];    # the growing tip
+    if ($g > 0.65 && $p->{hp} > 0.6) {
+      my $fy = $y - $sh - 1;
+      $flower->($x, $fy);
+      if ($g > 0.9) { $flower->($x + 3 * $flip, $fy + 1); $flower->($x - 3 * $flip, $fy + 2) }
+      push @c, [$x - 2 * $flip, $fy - 3, 'h'], [$x - 2 * $flip, $fy - 2, 'm'] if $g > 0.8;    # a bud
+    }
+  } elsif ($t eq 'fittonia') {
+    push @c, [$x, $y, 'W'], [$x, $y - 1, 'm'];
+    my $nl = 2 + int($g * 26);
+    my @small = ([-1, 0], [0, 0], [1, 0], [0, -1], [1, -1], [-1, 1], [0, 1]);
+    my @big = (@small, [-2, 0], [2, 0], [-1, -1], [2, -1], [0, -2], [1, -2], [1, 1], [-2, 1], [-1, 2], [0, 2]);
+    # leaves further back first, so the near ones (lower down) overlap them
+    my @leaves = sort { $a->[1] <=> $b->[1] } map {
+      my $lx = $x + int((hsh($s, $_, 1) - 0.5) * 2 * (2 + $g * 12));
+      [$lx, $y - 1 - int(hsh($s, $_, 2) * (1 + $g * 13) * (1 - abs($lx - $x) / (4 + $g * 24))), $_]
+    } 0 .. $nl - 1;
+    for my $lf (@leaves) {
+      my ($lx, $ly, $j) = @$lf;
+      push @c, [$lx + ($lx < $x ? 1 : -1), $ly + 2, 'm'] if $g > 0.45 && $ly < $y - 2;    # its stalk
+      for my $cell ($g > 0.45 ? @big : @small) {
+        my ($dx, $dy) = @$cell;
+        my ($cx, $cy) = ($lx + $dx, $ly + $dy);
+        next if $cy > $y;
+        my $h = hsh($s, $cx, $cy);
+        # a net of pale veins: the midrib, and side veins on alternate cells
+        my $l = $dx == 0 || ($dy == 0 && $h < 0.7) || (abs($dx) + abs($dy) == 2 && ($cx + $cy) % 2 == 0 && $h < 0.35) ? 'j'
+              : abs($dx) + abs($dy) >= 2 && ($dx > 0 || $dy > 0) ? 'x' : 'i';
+        push @c, [$cx, $cy, $l];
+      }
+    }
+  } elsif ($t eq 'maidenhair') {
+    my $nf = 1 + int($g * 9);
+    for my $f (0 .. $nf - 1) {
+      my $lean = (hsh($s, $f, 1) - 0.5) * 1.8;
+      my $fh = 3 + int($g * (12 + hsh($s, $f, 2) * 14));
+      my $dir = $lean < 0 ? -1 : 1;
+      for my $k (0 .. $fh) {
+        my $dx = int($lean * ($k / $fh) ** 2 * $fh * 0.7 + 0.5 * $dir);
+        push @c, [$x + $dx, $y - $k, 'k'];
+        if ($k >= $fh * 0.3 && $g > 0.2 && ($k + $f) % 2 == 0) {
+          # fan-shaped leaflets, lit on top and darker at their drooping tips
+          push @c, [$x + $dx - 1, $y - $k, 'l'], [$x + $dx + 1, $y - $k, 'l'];
+          push @c, [$x + $dx - 2, $y - $k + 1, 'z'], [$x + $dx + 2, $y - $k + 1, 'z'], [$x + $dx - 2, $y - $k, 'l'], [$x + $dx + 2, $y - $k, 'l'] if $g > 0.45;
+          push @c, [$x + $dx - 3, $y - $k + 1, 'l'], [$x + $dx + 3, $y - $k + 1, 'l'], [$x + $dx - 3, $y - $k + 2, 'z'], [$x + $dx + 3, $y - $k + 2, 'z'] if $g > 0.7 && $k < $fh - 2;
+        }
+        if ($k == $fh) { push @c, [$x + $dx + $dir, $y - $k + 1, 'z'], [$x + $dx + $dir, $y - $k, 'l'], [$x + $dx + 2 * $dir, $y - $k + 2, 'z'] }    # the curled tip
+      }
+    }
+  } elsif ($t eq 'sinningia') {
+    # a thumb-sized rosette of dark leaves, then lilac trumpets on thin stalks nearly all year
+    my $r = 1 + int($g * 4);
+    for my $dx (-$r .. $r) {
+      my $ht = $g > 0.4 && abs($dx) < $r ? 2 : 1;
+      push @c, [$x + $dx, $y, $ht > 1 ? 'f' : $dx < 0 ? 'a' : 'b'];
+      push @c, [$x + $dx, $y - 1, $dx < 0 ? 'a' : 'b'] if $ht > 1;
+    }
+    push @c, [$x, $y - ($g > 0.4 ? 2 : 1), 'a'];    # the heart of the rosette
+    if ($g > 0.6 && $p->{hp} > 0.6) {
+      my $nf = 1 + int(($g - 0.6) * 7.5);
+      for my $i (0 .. $nf - 1) {
+        my $fx = $x + int((hsh($s, $i, 1) - 0.5) * 2 * ($r + 1));
+        my $top = $y - 3 - int(hsh($s, $i, 2) * 3);
+        push @c, [$fx, $_, 'm'] for $top + 1 .. $y - 2;
+        push @c, [$fx, $top, '5'], [$fx - 1, $top - 1, '4'], [$fx, $top - 1, '5'], [$fx + 1, $top - 1, '4'], [$fx, $top - 2, '4'];
+      }
+    }
+  } elsif ($t eq 'nertera') {
+    # a low, flat mat of tiny round leaves, studded with orange berries once it's grown
+    my $rw = 2 + int($g * 16);
+    my $hh = 1 + int($g * 3);
+    for my $dx (-$rw .. $rw) {
+      my $cx = $x + $dx;
+      next if $cx < 0 || $cx >= $W;
+      my $f = 1 - ($dx / ($rw + 0.5)) ** 2;
+      next if $f <= 0;
+      my $by = $ground->($cx);
+      next if abs($by - $y) > 10;
+      my $ht = int($hh * sqrt($f) + 0.5); $ht = 1 if $ht < 1;
+      for my $k (0 .. $ht - 1) {
+        my $h = hsh($s, $dx, $k + 3);
+        push @c, [$cx, $by - $k, $k == $ht - 1 ? ($h < 0.5 + ($dx < 0 ? 0.2 : 0) ? 'a' : 'i') : ($h < 0.6 ? 'i' : 'x')];
+      }
+      if ($g > 0.7 && $p->{hp} > 0.6 && hsh($s, $dx, 40) < ($g - 0.7) * 0.8) {
+        push @c, [$cx, $by - $ht, hsh($s, $dx, 41) < 0.3 ? '7' : '6'];    # a berry, some catching the light
+      }
+    }
+  } elsif ($t eq 'orchid') {
+    # a creeping stem along the ground, an upright one with velvet leaves veined in pink, and in time a spike of white flowers
+    my $dir = hsh($s, 1) < 0.5 ? 1 : -1;
+    my $run = int($g * 6);
+    push @c, [$x + $dir * $_, $y, 'W'] for 0 .. $run;
+    my $sx = $x + $dir * $run;
+    my $sh = 2 + int($g * 7);
+    push @c, [$sx, $y - $_, 'm'] for 1 .. $sh;
+    my $nl = 1 + int($g * 5);
+    for my $i (0 .. $nl - 1) {
+      my $side = $i % 2 ? -$dir : $dir;
+      my $ly = $y - 1 - int($i * ($sh - 1) / $nl);
+      my $big = $g > 0.4 && $i < $nl - 1;
+      my @shape = $big
+        ? ([2, -1, '2'], [3, -1, '2'], [4, -1, '2'], [5, -1, '1'], [1, 0, '1'], [2, 0, '1'], [3, 0, '3'], [4, 0, '3'], [5, 0, '1'], [6, 0, '1'], [7, 0, '1'], [2, 1, '1'], [3, 1, '1'], [4, 1, '1'], [5, 1, '1'], [6, 1, '1'])
+        : ([1, 0, '1'], [2, 0, '1'], [3, 0, '1'], [2, -1, '2'], [2, 1, '1']);
+      push @c, [$sx + $_->[0] * $side, $ly + $_->[1], $_->[2]] for @shape;
+    }
+    if ($g > 0.8 && $p->{hp} > 0.6) {
+      my $spike = 4 + int(($g - 0.8) * 25);
+      for my $k (1 .. $spike) {
+        my $fy = $y - $sh - $k;
+        push @c, [$sx, $fy, 'g'];
+        if ($k > 1 && $k % 2 == 0 || $k == $spike) {    # a small white flower to alternate sides, its yellow lip below
+          my $fs = ($k / 2) % 2 ? 1 : -1;
+          push @c, [$sx + $fs, $fy, 'F'], [$sx + 2 * $fs, $fy, 'F'], [$sx + $fs, $fy - 1, 'F'], [$sx + 2 * $fs, $fy + 1, 'q'];
+        }
+      }
+    }
+  }
+  # yellowing and browning when unhappy
+  my $hp = $p->{hp};
+  if ($p->{dead}) { $_->[2] = 'n' for @c }
+  elsif ($hp < 0.6) {
+    for my $cc (@c) {
+      next if $cc->[2] eq 'm' || $cc->[2] eq 'k' || $cc->[2] eq 'W';
+      my $r = hsh($s, $cc->[0], $cc->[1] + 50);
+      if ($hp < 0.3 && $r < 0.6) { $cc->[2] = 'n' } elsif ($r < (0.6 - $hp)) { $cc->[2] = 'o' }
+    }
+  }
+  # one cell per place, the last one drawn there, so later cells cover earlier ones
+  my %seen;
+  @c = reverse grep { !$seen{"$_->[0],$_->[1]"}++ } reverse @c;
+  return @c;
+}
+
+# ---- tools ----
+my ($tool, $px, $py) = ('look', -1, -1);
+my $pour_until = 0;
+my ($msg, $msg_until) = ('', 0);
+sub say_ { ($msg, $msg_until) = ($_[0], time + 3) }
+
+sub pour {
+  my $m = $TOOLMAT{$tool} // return;
+  my $n = $m == MIST ? 9 : $m == WATER ? 3 : 4;
+  my $spread = $m == MIST ? 7 : $m == WATER ? 1 : 2;
+  my $cy = $py < 0 ? 0 : $py >= $H ? $H - 1 : $py;
+  $rh += 0.25 if $m == MIST;
+  for (1 .. $n) {
+    my $x = $px + int(rand(2 * $spread + 1)) - $spread;
+    next if $x < 0 || $x >= $W;
+    my $y = $cy + ($m == MIST ? int(rand 5) - 2 : int(rand 3) - 1);
+    $y = 0 if $y < 0;
+    $y = $H - 1 if $y >= $H;
+    # under the surface, pour onto it instead
+    while ($y > 0 && $mat[$y * $W + $x] != AIR && $mat[$y * $W + $x] != MIST) { $y-- }
+    my $i = $y * $W + $x;
+    next unless $mat[$i] == AIR || $mat[$i] == MIST;
+    put($i, $m);
+  }
+}
+
+sub rake {
+  my $cx = shift;
+  my @col;
+  for my $x ($cx - 6 .. $cx + 6) {
+    next if $x < 0 || $x >= $W;
+    next if plant_near($x, 1);
+    push @col, $x;
+  }
+  return if @col < 2;
+  my %s = map { $_ => surface($_) } @col;
+  for (1 .. 8) {
+    my ($hi, $lo) = ($col[0], $col[0]);
+    for my $x (@col) { $hi = $x if $s{$x} < $s{$hi}; $lo = $x if $s{$x} > $s{$lo} }
+    last if $s{$lo} - $s{$hi} <= 1 || $s{$hi} >= $H;
+    my $from = $s{$hi} * $W + $hi;
+    my $to = ($s{$lo} - 1) * $W + $lo;
+    last if $s{$lo} - 1 < 0 || ($mat[$to] != AIR && $mat[$to] != WATER && $mat[$to] != MIST);
+    swapc($from, $to);
+    $s{$hi} = surface($hi);
+    $s{$lo}--;
+  }
+}
+
+sub scoop {
+  my ($cx, $cy) = @_;
+  $cy = surface($cx) if $cy < 0 && $cx >= 0 && $cx < $W;
+  my $p = plant_near($cx, 3);
+  if ($p && abs($p->{y} - $cy) < 12) { @plants = grep { $_ != $p } @plants; say_("dug up the $SPEC{$p->{t}}{name}"); return }
+  for my $dy (-3 .. 3) {
+    for my $dx (-3 .. 3) {
+      next if $dx * $dx + $dy * $dy > 10;
+      my ($x, $y) = ($cx + $dx, $cy + $dy);
+      next if $x < 0 || $x >= $W || $y < 0 || $y >= $H;
+      my $i = $y * $W + $x;
+      $mat[$i] = AIR; $mo[$i] = 0; $mold[$i] = 0;
+    }
+  }
+}
+
+sub place {
+  my $t = shift;
+  return say_('tap inside the tank') if $px < 0 || $px >= $W;
+  my $y = surface($px);
+  return say_('pour some substrate first') if $y >= $H;
+  return say_('too close to another plant') if plant_near($px, $t eq 'moss' ? 2 : 3);
+  return say_('the tank is full of plants') if @plants >= 40;
+  push @plants, { t => $t, x => $px, y => $y - 1, g => 0.06, hp => 1, seed => int(rand 1e6), dead => 0 };
+  say_("planted $SPEC{$t}{name}");
+}
+
+sub command {
+  my @a = split ' ', shift;
+  return unless @a;
+  if ($a[0] eq 'use' && @a >= 4) {
+    ($tool, $px, $py) = ($a[1], $a[2] - $X0, $a[3] - $Y0);
+    my $tap = ($a[4] // '') eq 'tap';
+    if ($TOOLMAT{$tool}) { $pour_until = time + ($tap ? 0.9 : 0.35) }
+    elsif ($tool eq 'rake') { rake($px) }
+    elsif ($tool eq 'scoop') { scoop($px, $py) }
+    elsif ($SPEC{$tool} && $tap) { place($tool) }
+  } elsif ($a[0] eq 'mode' && @a > 1) {
+    $mode = $a[1] eq 'real' ? 'real' : 'fast';
+    $dayno = 0;
+  } elsif ($a[0] eq 'lid' && @a > 1) {
+    $lid = $a[1] ? 1 : 0;
+  } elsif ($a[0] eq 'skip') {
+    $fh = $fh + 3 - ($fh + 3 >= 24 ? 24 : 0) if $mode eq 'fast';
+  } elsif ($a[0] eq 'reset') {
+    clear_tank();
+    save();
+    say_('the tank is empty');
+  }
+}
+
+sub inputs {
+  return unless -s $IN;
+  rename $IN, "$IN.work" or return;
+  if (open my $f, '<', "$IN.work") {
+    while (my $l = <$f>) { chomp $l; command($l) }
+    close $f;
+  }
+  unlink "$IN.work";
+}
+
+# ---- what's under the finger ----
+my $probe = '';
+sub probe_text {
+  return $msg if time < $msg_until;
+  return '' if $px < 0 || $px >= $W || $py >= $H;
+  my $p = plant_near($px, 3);
+  if ($p && ($py < 0 || abs($p->{y} - $py) < 14)) {
+    my $spec = $SPEC{$p->{t}};
+    return "$spec->{name} · dead" if $p->{dead};
+    my $m = roots($p);
+    my $why = $m < 0 ? 'needs soil' : $m < $spec->{lo} ? 'thirsty' : $m > $spec->{hi} ? 'too wet' : $rh < $spec->{rh} ? 'wants humidity' : 'happy';
+    return sprintf("%s · %d%% grown · health %d%% · roots %s · %s", $spec->{name}, $p->{g} * 100, $p->{hp} * 100, $m < 0 ? '-' : int($m) . '%', $why);
+  }
+  return '' if $py < 0;
+  my $i = $py * $W + $px;
+  my $m = $mat[$i];
+  return 'air' . ($dew[$i] ? ' · dew on the glass' : '') if $m == AIR;
+  return $MATNAME[$m] if $m >= WATER;
+  return sprintf("%s · %s", $MATNAME[$m], $mo[$i] > 50 ? 'water in the gaps' : 'drained') if $m <= CHAR;
+  return sprintf("%s · moisture %d%%%s", $MATNAME[$m], $mo[$i], $mold[$i] ? ' · mold' : '');
+}
+
+# ---- drawing ----
+my @SOILC = (['H', 'I'], ['J', 'K'], ['L', 'M']);
+sub render {
+  my @o = ('.') x $N;
+  for my $i (0 .. $N - 1) {
+    my $m = $mat[$i];
+    if    ($m == AIR)     { $o[$i] = 'Q' if $dew[$i] }
+    elsif ($m == GRAVEL)  { $o[$i] = substr($mo[$i] > 50 ? 'STU' : 'ABC', $sh[$i], 1) }
+    elsif ($m == CHAR)    { $o[$i] = $mo[$i] > 50 ? 'V' : $sh[$i] ? 'E' : 'D' }
+    elsif ($m == PERLITE) { $o[$i] = $sh[$i] ? 'G' : 'F' }
+    elsif ($m == SOIL) {
+      if    ($mold[$i])    { $o[$i] = 'Z' }
+      elsif ($sh[$i] == 3) { $o[$i] = 'G' }
+      else                 { my $v = $mo[$i]; $o[$i] = $SOILC[$v < 35 ? 0 : $v < 70 ? 1 : 2][$sh[$i] & 1] }
+    }
+    elsif ($m == WATER) { $o[$i] = ($sh[$i] ^ ($tick >> 2 & 1)) ? 'O' : 'N' }
+    else                { $o[$i] = 'P' }
+  }
+  for my $p (@plants) {
+    for my $c (plant_cells($p)) {
+      my ($x, $y) = @$c;
+      next if $x < 0 || $x >= $W || $y < 0 || $y >= $H;
+      my $i = $y * $W + $x;
+      my $l = $o[$i];
+      $o[$i] = $c->[2] if $l eq '.' || $l eq 'P' || $l eq 'Q' || $l eq 'N' || $l eq 'O';
+    }
+  }
+  my $s = join('', @o);
+  return join('|', map { substr($s, $_ * $W, $W) } 0 .. $H - 1);
+}
+
+# each plant left to right, for the moisture meters
+sub plant_list {
+  my @out;
+  for my $p (sort { $a->{x} <=> $b->{x} } @plants) {
+    my $s = $SPEC{$p->{t}};
+    my ($x0, $y0, $x1, $y1) = ($p->{x}, $p->{y}, $p->{x}, $p->{y});
+    for my $c (plant_cells($p)) {
+      $x0 = $c->[0] if $c->[0] < $x0; $x1 = $c->[0] if $c->[0] > $x1;
+      $y0 = $c->[1] if $c->[1] < $y0; $y1 = $c->[1] if $c->[1] > $y1;
+    }
+    push @out, join(",", $p->{t}, $p->{x}, int(roots($p) + 0.5), $s->{lo}, $s->{hi}, $p->{dead} ? 1 : 0, $x0, $y0, $x1, $y1);
+  }
+  return join("/", @out);
+}
+
+# ---- catching up in real time: plants happy when the tank was closed grow by the daylight since ----
+if ($mode eq 'real' && $saved_at && time - $saved_at > 60) {
+  my ($from, $to) = ($saved_at, time);
+  $from = $to - 90 * 86400 if $to - $from > 90 * 86400;
+  my $lit = 0;    # hours of full daylight while closed, summed in six-minute steps
+  for (my $t = $from; $t < $to; $t += 360) {
+    my @lt = localtime $t;
+    $lit += daylight($lt[2] + $lt[1] / 60) * (($to - $t < 360 ? $to - $t : 360) / 3600);
+  }
+  for my $p (@plants) {
+    next if $p->{dead} || plant_bad($p) > 0;
+    $p->{g} += $GROW * ($SPEC{$p->{t}}{grow} // 1) * $lit * (0.5 + $p->{hp} / 2);
+    $p->{g} = 1 if $p->{g} > 1;
+  }
+}
+
+# ---- main loop ----
+my $last_save = time;
+my $last_out = 0;
+my $plist;    # the plant list, rebuilt with each plant step, so the meters update twice a second
+my $next = time;
+while (!$quit) {
+  my $now = time;
+  inputs();
+  $tick++;
+  if ($mode eq "fast") { $fh += 24 / $DAYLEN / $TPS; $fh -= 24 if $fh >= 24 }
+  my $hr = hour();
+  # a new day: in real time by the calendar, counting the days the sim was off; in fast days when the clock wraps
+  my $newdays = 0;
+  if ($mode eq "real") {
+    my $d = today();
+    $newdays = $d - $dayno if $dayno && $d > $dayno;
+    $dayno = $d;
+  } elsif (defined $last_hour && $hr < $last_hour - 12) {
+    $newdays = 1;
+  }
+  if ($newdays) { $days += $newdays if $had; $had = 0 }
+  $had = 1 if grep { !$_->{dead} } @plants;
+  $last_hour = $hr;
+  my $light = daylight($hr);
+  $evap = 0.012 * (1 + $light) * ($lid ? 0.6 : 1.6) * ($rh >= 99 ? 0.05 : (100 - $rh) / 50);
+  $wet = 0;
+  pour() if $now < $pour_until;
+
+  my $moved = 0;
+  my $flip = $tick & 1;
+  for (my $y = $H - 1; $y >= 0; $y--) {
+    my $row = $y * $W;
+    for my $k (0 .. $W - 1) {
+      my $x = $flip ? $k : $W - 1 - $k;
+      my $i = $row + $x;
+      my $m = $mat[$i] or next;
+      next if $stamp[$i] == $tick;
+      if    ($m <= SOIL)  { powder($i, $x, $y, $m) }
+      elsif ($m == WATER) { water($i, $x, $y) }
+      else                { mist($i, $x, $y) }
+      $moved++ if $stamp[$i] == $tick;
+    }
+  }
+  moisture() if $tick % 2 == 0;
+  glass() if $tick % 3 == 0;
+  moldy() if $tick % 30 == 0;
+  plants_step(0.5) if $tick % 6 == 0;
+
+  $rh += $wet * 0.03;
+  $rh -= ($rh - 38) * ($lid ? 0.00006 : 0.003);
+  $rh = 20 if $rh < 20;
+  $rh = 100 if $rh > 100;
+
+  if ($moved || $now - $last_out >= 0.5 || $tick % 6 == 0) {
+    $probe = probe_text() if $tick % 3 == 0 || $now < $msg_until;
+    my $p = $probe; $p =~ tr/;|//d;
+    my $alive = grep { !$_->{dead} } @plants;
+    $frame++;
+    print sprintf("%.3f;%d;%d;%d;%s;%d;%s;", hour(), $rh + 0.5, $frame, $lid, $mode, $alive, $p), render(), ";", ($plist = $tick % 6 == 0 || !defined $plist ? plant_list() : $plist), ";", $days, "\n" or last;
+    $last_out = $now;
+  }
+  if ($now - $last_save > 15) { save(); $last_save = $now }
+
+  $next += 1 / $TPS;
+  my $wait = $next - time;
+  if ($wait > 0 && !$ENV{MG_NOSLEEP}) { sleep $wait } else { $next = time }
+}
+save();
+if (open my $pf, "<", $PIDF) { my $p = <$pf> // ""; close $pf; unlink $PIDF if $p == $$ }
+exit 0;
+"""
+  source frame = stream("perl -e ${sh(feed)} ${sh(sim)}")
+  source room = file("~/.cache/mossglass/bg.txt")
+  source drawer = android.drawer
+
+  let me = find(drawer.apps ?? [], a => a.kind == "owl" && a.name == "Glass Happiness")
+  onTap: if me != null { open(me.key) } else { launcher("store") }
+
+  // hour;rh;frame;lid;mode;plants;probe;row|row|...;plant/plant/...;days  (a plant is type,x,moisture,lo,hi,dead,left,top,right,bottom)
+  let parts = split(frame ?? "", ";")
+  let h = num(parts[0], 9)
+  let rh = num(parts[1], 0)
+  let fr = num(parts[2], 0)
+  let alive = num(parts[5], 0)
+  let days = num(parts[9], 0)
+  let rows = len(parts) > 7 ? split(parts[7], "|") : []
+
+  // What changes rarely is copied into state, so the room, the sky and the list skip the frames.
+  let hstep = floor(h * 12) / 12
+  state hq = 9
+  state lid = true
+  state bg = []
+  on hstep first { hq = value }
+  let lidRaw = parts[3]
+  on lidRaw first { lid = value != "0" }
+  state mode = "fast"
+  let modeRaw = parts[4]
+  on modeRaw first { mode = value ?? "fast" }
+  on room first { bg = lines(value ?? "") }
+  let fogStep = clamp((rh - 50) / 50, 0, 1)
+  state fog = 0
+  on fogStep first { fog = value }
+  let plantRaw = parts[8] ?? ""
+  state plantList = []
+  on plantRaw first { plantList = value == "" ? [] : split(value, "/").map(s => split(s, ",")).map(f => {t: f[0], x: num(f[1], 0), m: num(f[2], -1), lo: num(f[3], 0), hi: num(f[4], 100), dead: f[5] == "1", key: "${f[0]}-${f[1]}"}) }
+  let plantNames = {moss: "Cushion moss", begonia: "Mini begonia", babytears: "Baby tears", fittonia: "Fittonia", maidenhair: "Maidenhair", sinningia: "Micro sinningia", nertera: "Bead plant", orchid: "Jewel orchid"}
+
+  // Thirsty notifications: one when a living plant's roots dry below its sweet spot. A plant stays warned
+  // about until it's 3 points back above its low line, so moisture wobbling at the line doesn't ring twice.
+  state warned = [] persist
+  on plantList first {
+    let fresh = value.filter(p => !p.dead && p.m >= 0 && p.m < p.lo && indexOf(warned, p.key) < 0)
+    if len(fresh) == 1 { notify("Glass Happiness", "${plantNames[fresh[0].t] ?? fresh[0].t} is thirsty (${fresh[0].m}%, likes ${fresh[0].lo}–${fresh[0].hi})") }
+    if len(fresh) > 1 { notify("Glass Happiness", "${len(fresh)} plants are thirsty: ${join(unique(fresh.map(p => plantNames[p.t] ?? p.t)), ", ")}") }
+    warned = value.filter(p => !p.dead && p.m >= 0 && (p.m < p.lo || (p.m < p.lo + 3 && indexOf(warned, p.key) >= 0))).map(p => p.key)
+  }
+  // stars: about one in three of the room picture's, picked by place so the same ones shine each night
+  let win = range(47).map(j => join(range(43).map(c => (c * 7 + j * 13) % 3 == 0 ? sub(bg[8 + j] ?? "", 19 + c, 20 + c) : "."), ""))
+  let wall = #8a8072
+  let wood = {W: wall, X: wall, Y: wall, F: #2e2219, f: #4a3826, S: #7a6a58, s: #a99a86, t: #8c4b2b, v: #7c4126, u: #b5683d, w: #5a2d18}
+
+  // The window looks out on the tank's city, picked in the app and kept in place.json: in real time it
+  // follows the city's clock, sunrise and sunset, and it always shows the weather there, from Open-Meteo.
+  // Without a city it's a generic day, sunrise at 6:00 and sunset at 19:00.
+  source now = clock every 1m
+  source placeRaw = file("~/.local/share/mossglass/place.json")
+  let place = parseJson(placeRaw ?? "")
+  source wx = http(place.lat == null ? null : "https://api.open-meteo.com/v1/forecast?latitude=${fixed(place.lat, 4)}&longitude=${fixed(place.lon, 4)}&current=weather_code,cloud_cover&daily=sunrise,sunset&timezone=auto&forecast_days=1") every 15m timeout 10s json
+  let real = mode == "real"
+  let off = wx.utc_offset_seconds
+  let cityH = real && off != null && now != null ? ((now + off) % 86400) / 3600 : null
+  // The sky moves in five-minute steps, so it only redraws now and then.
+  let wh = cityH != null ? floor(cityH * 12) / 12 : hq
+  let srS = wx.daily.sunrise[0] ?? ""
+  let ssS = wx.daily.sunset[0] ?? ""
+  let sr = real && srS != "" ? num(sub(srS, 11, 13), 6) + num(sub(srS, 14, 16), 0) / 60 : 6
+  let ss = real && ssS != "" ? num(sub(ssS, 11, 13), 19) + num(sub(ssS, 14, 16), 0) / 60 : 19
+  // WMO weather codes, as Open-Meteo gives them
+  let code = num(wx.current.weather_code, 1)
+  let wk = code >= 95 ? "storm" : (code >= 71 && code <= 77) || code == 85 || code == 86 ? "snow" : (code >= 51 && code <= 67) || (code >= 80 && code <= 82) ? "rain" : code == 45 || code == 48 ? "fog" : code == 3 ? "overcast" : code >= 1 ? "partly" : "clear"
+  let grey = wk == "rain" || wk == "storm" ? 0.6 : wk == "overcast" || wk == "fog" ? 0.5 : wk == "snow" ? 0.45 : wk == "partly" ? 0.12 : 0
+  let clear = clamp(1 - grey * 1.6, 0, 1)    // how much the sun, moon and stars show through
+  let haze = wk == "fog" ? 0.85 : wk == "snow" ? 0.5 : wk == "rain" || wk == "storm" ? 0.45 : wk == "overcast" ? 0.35 : 0
+  let nClouds = wk == "clear" ? 1 : wk == "partly" ? 3 : wk == "fog" ? 2 : 6
+  let weatherWord = {rain: "rain", storm: "storm", snow: "snow", fog: "fog", overcast: "overcast"}[wk]
+  let day = clamp(min(wh - (sr - 1), (ss + 1) - wh) / 1.5, 0, 1)
+  let rise = clamp(1 - abs(wh - sr) / 1.4, 0, 1) * (1 - grey)
+  let dusk = clamp(1 - abs(wh - ss) / 1.4, 0, 1) * (1 - grey)
+  let glow = min(rise + dusk, 1)
+  let sky = range(8).map(b => mix(mix(mix(mix(#070b1e, #1b2449, b / 7), mix(#a9d4f0, #eef8fc, b / 7), day), b < 4 ? mix(#3e2f78, #d9628a, b / 3) : mix(#e2688a, dusk > rise ? #ff6236 : #ffab52, (b - 4) / 3), glow * (0.3 + b * 0.1)), mix(#1c1f27, #a3a9b1, day), grey))
+  let sunT = (wh - (sr - 0.8)) / (ss - sr + 1.6)
+  let moonT = ((wh - (ss + 0.6) + 24) % 24) / (24 - (ss - sr) - 1.2)
+  // the moon's phase: 0 new, 0.5 full, from a known new moon on 6 January 2000
+  let moonP = (((now ?? 0) - 947182440) / 86400 % 29.530588) / 29.530588
+  let sunC = mix(#ff5a2a, #fff1c0, clamp(sin(sunT * 3.14159) * 2.2, 0, 1))
+  let cloudC = mix(mix(mix(#262c4a, #f3f5fa, day), #ffad88, glow * 0.65), mix(#2a2d36, #8e959e, day), grey)
+  let dark = (1 - day) * 0.62 + grey * 0.12 * day
+
+  let ridges = range(6).map(L => range(43).map(c => floor(13 + L * 5 + (4 + L * 0.3) * (sin(c * (0.09 + L * 0.025) + L * 1.7) * 0.6 + sin(c * (0.21 + L * 0.04) + L * 2.9) * 0.4)) - (L >= 3 && (c * 7 + L * 3) % 3 == 0 ? 1 : 0)))
+  let ridgeDay = [#c9e6f6, #a9d5f1, #84bce8, #5e9fd9, #3f82c8, #2766b2]
+  let ridgeNight = [#26325a, #1f2a4e, #192343, #141c38, #10172e, #0b1124]
+  let ridgeC = range(6).map(L => mix(mix(mix(ridgeNight[L], ridgeDay[L], day), #f2a8a8, glow * 0.3 * (1 - L / 6)), mix(#3a3f4a, #c8ccd2, day), haze * (1 - L / 8)))
+
+  let pal = {
+    A: #cfc8bc, B: #a29b91, C: #726c65, S: #94a8b6, T: #72889a, U: #536879,
+    D: #1d1e23, E: #36383f, V: #1b2433, F: #f3f0e8, G: #7a4c30,
+    H: #94603e, I: #84553a, J: #6d4329, K: #5f3a24, L: #46291a, M: #3b2216,
+    N: alpha(#4b8de0, 0.85), O: alpha(#74b4f2, 0.85), P: alpha(#eef6fa, 0.5), Z: #dcdccc,
+    a: #3d9b00, b: #267400, d: #71c22d, e: #3da900, f: #235808, g: #e90014, h: #ff7fae, q: #ffd84a,
+    i: #1f8303, j: #f2d4de, k: #2b1f1a, l: #74ba31, m: #2b7902, n: #a96000, o: #ffd414,
+    r: #a0703a, t: #b9b2a6, u: #4f8fd8, v: #bfe6f2, y: #ffd84a,
+    c: #145001, p: #83ba41, R: #238200, w: #38810b, s: #b9c9b4, X: #ff2a72, x: #075903, z: #469600, W: #254e05,
+    // jewel orchid velvet, its sheen and pink veins; sinningia lilac and its throat; bead plant berries
+    "1": #611c55, "2": #9e3485, "3": #f55991, "4": #a863f5, "5": #7015fb, "6": #ff7a2a, "7": #ffb878
+  }
+
+  let cream = #d9cdb8
+  let dim = #9a8c7a
+  let cw = (tileWidth ?? 400) - 25
+  let px = cw / 160
+  let ch = 108 * px
+  let tod = wh < sr - 1 ? "night" : wh < sr + 1.2 ? "sunrise" : wh < 11 ? "morning" : wh < 15 ? "midday" : wh < ss - 1 ? "afternoon" : wh < ss + 1.3 ? "sunset" : "night"
+  let ct = cityH ?? h    // the city's time in real time, else the tank's
+  let clockText = "${pad(floor(ct), 2, "0")}:${pad(floor((ct % 1) * 60), 2, "0")} ${tod}${weatherWord != null ? ", " + weatherWord : ""}"
+
+  // a plant's root moisture on a 0-100 track, with its sweet spot between two lines
+  component Meter(p) {
+    Row {
+      gap: 8
+      padding: [8, 5]
+      align: center
+      background: #2a241f
+      border: 1
+      borderColor: #463c33
+      radius: 0
+      Column {
+        gap: 0
+        width: 116
+        Text { text: plantNames[p.t] ?? p.t; font: mono; fontSize: 12; color: p.dead ? dim : cream; maxLines: 1 }
+        Text { text: p.dead ? "dead" : p.m < 0 ? "no soil" : "${p.m}% · ${p.lo}–${p.hi}"; font: mono; fontSize: 11; color: dim; maxLines: 1 }
+      }
+      Canvas {
+        weight: 1
+        height: 16
+        let ok = p.m >= p.lo && p.m <= p.hi
+        let sq = 10
+        rect(0, height / 2 - 2, width, 4, fill: #463c33)
+        rect(width * p.lo / 100 - 1, 0, 2, height, fill: cream)
+        rect(width * p.hi / 100 - 1, 0, 2, height, fill: cream)
+        if p.m >= 0 {
+          rect(clamp(width * p.m / 100 - sq / 2, 0, width - sq), (height - sq) / 2, sq, sq, fill: p.dead ? dim : ok ? #7fbf4d : #d0564a)
+        }
+      }
+    }
+  }
+
+  Column {
+    gap: 6
+    fill: true
+
+    // the scene, as in the app
+    Box {
+      width: cw
+      height: ch
+      Canvas {
+        width: cw
+        height: ch
+        for b in range(8) {
+          rect(19 * px, (8 + b * 6) * px, 43 * px, 6 * px + 1, fill: sky[b])
+          if b > 0 {
+            sprite([join(range(43).map(i => i % 2 == 0 ? "a" : "."), "")], 19 * px, (8 + b * 6) * px, px, palette: {a: sky[b - 1]})
+          }
+        }
+        sprite(win, 19 * px, 8 * px, px, palette: {x: alpha(#ffffff, (1 - day) * 0.9 * clear), y: alpha(#fff1d0, (1 - day) * 0.45 * clear)})
+        clip(19 * px, 8 * px, 43 * px, 46 * px) {
+          if sunT >= 0 && sunT <= 1 {
+            let sx = floor(16 + sunT * 46)
+            let sy = floor(48 - sin(sunT * 3.14159) * 34)
+            circle((sx + 3.5) * px, (sy + 3.5) * px, 15 * px, fill: alpha(sunC, (0.1 + glow * 0.12) * clear))
+            circle((sx + 3.5) * px, (sy + 3.5) * px, 8 * px, fill: alpha(sunC, 0.2 * clear))
+            sprite(["..sss..", ".sssss.", "sssssss", "sssssss", "sssssss", ".sssss.", "..sss.."], sx * px, sy * px, px, palette: {s: alpha(sunC, 0.15 + 0.85 * clear)})
+          }
+          if moonT >= 0 && moonT <= 1 {
+            let mx = floor(16 + moonT * 46)
+            let my = floor(46 - sin(moonT * 3.14159) * 30)
+            circle((mx + 2.5) * px, (my + 2.5) * px, 7 * px, fill: alpha(#dfe6ff, 0.1 * clear))
+            sprite([".mmm.", "mmMmm", "mmmmM", "mMmmm", ".mmm."], mx * px, my * px, px, palette: {m: alpha(#e9e6d6, 0.15 + 0.85 * clear), M: alpha(#c4c0ae, 0.15 + 0.85 * clear)})
+              // the dark part: a disc of night sky slid off the moon, to the left while it waxes and to the right as it wanes
+              let k = moonP < 0.5 ? -moonP * 12 : (1 - moonP) * 12
+              if abs(k) < 5.5 {
+                sprite([".mmm.", "mmmmm", "mmmmm", "mmmmm", ".mmm."], (mx + k) * px, my * px, px, palette: {m: alpha(sky[clamp(floor((my - 8) / 6), 0, 7)], 0.93)})
+              }
+          }
+          // under a grey sky, a ragged deck of cloud across the top of the window
+          if grey >= 0.45 {
+            for c in range(43) {
+              rect((19 + c) * px, 8 * px, px, (5 + floor(3 * sin(c * 0.37 + wh) + 2 * sin(c * 0.91))) * px, fill: alpha(cloudC, 0.9))
+            }
+          }
+          for i in range(nClouds) {
+            let cx = floor((wh * (5 + i * 2) + i * 23) % 70) + 5 - (i >= 3 ? 9 : 0)
+            let cy = 11 + (i % 3) * 7 + (i >= 3 ? 4 : 0)
+            sprite(i % 3 == 1 ? ["..ccc....", ".ccccccc.", "ccccccccc"] : ["...cc..", ".ccccc.", "ccccccc"], cx * px, cy * px, px, palette: {c: alpha(cloudC, 0.85)})
+          }
+        }
+        for L in range(6) {
+          for c in range(43) {
+            rect((19 + c) * px, (8 + ridges[L][c]) * px, px, (46 - ridges[L][c]) * px, fill: ridgeC[L])
+          }
+        }
+      }
+
+      // rain, snow and lightning in the window, on a Canvas of their own since they move with every frame
+      if wk == "rain" || wk == "storm" || wk == "snow" {
+        Canvas {
+          width: cw
+          height: ch
+          clip(19 * px, 8 * px, 43 * px, 46 * px) {
+            if wk == "snow" {
+              for i in range(30) {
+                rect((19 + (i * 7 + floor(fr / 3) + floor(sin(i + fr * 0.2) * 1.5) + 43) % 43) * px, (8 + (i * 11 + floor(fr / 2)) % 46) * px, px, px, fill: alpha(#f4f6fa, 0.85))
+              }
+            } else {
+              for i in range(24) {
+                rect((19 + (i * 7 + fr) % 43) * px, (8 + (i * 11 + fr * 4) % 46) * px, px / 2, 3 * px, fill: alpha(mix(#7f8fa8, #d8e4f4, day), 0.55))
+              }
+              if wk == "storm" && fr % 23 == 0 {
+                rect(19 * px, 8 * px, 43 * px, 46 * px, fill: alpha(#ffffff, 0.45))
+              }
+            }
+          }
+        }
+      }
+
+      // A Canvas draws at most 2000 runs of one colour a frame, so the room and the grainy tank go in strips.
+      Column {
+        gap: 0
+        for k in range(3) {
+          Canvas { width: cw; height: 36 * px; sprite(take(drop(bg, k * 36), 36), 0, 0, px, palette: wood) }
+        }
+      }
+      Column {
+        gap: 0
+        Spacer { height: 36 * px }
+        for k in range(6) {
+          Canvas { width: cw; height: 11 * px; sprite(take(drop(rows, k * 11), 11), 9 * px, 0, px, palette: pal) }
+        }
+      }
+
+      // glass, light and the dark of the room
+      Canvas {
+        width: cw
+        height: ch
+        let s = (0.5 - sunT) * 70
+        clip(0, 0, cw, ch) {
+          if day > 0 && sunT > 0 && sunT < 1 {
+            path([[19 * px, 54 * px], [62 * px, 54 * px], [(62 + s) * px, 99 * px], [(19 + s) * px, 99 * px]], closed: true, fill: alpha(mix(#fff2c8, #ffb070, glow), 0.07 * day * (1 - grey)))
+          }
+          let rays = day * clamp(1 - abs(wh - 10) / 1.8, 0, 1) * clamp(1 - grey * 1.6, 0, 1)
+          if rays > 0 && sunT > 0 && sunT < 1 {
+            let dx = s * 78 / 45
+            for r in [[22, 3, 1], [29, 5, 0.8], [37, 2, 1.2], [44, 4, 0.9], [53, 3, 0.7]] {
+              let x0 = r[0]
+              let x1 = r[0] + r[1]
+              let a = 0.2 * rays * r[2]
+              path([[x0 * px, 20 * px], [x1 * px, 20 * px], [(x1 + 2 + dx) * px, 98 * px], [(x0 + dx) * px, 98 * px]], closed: true,
+                fill: linear(x0 * px, 20 * px, (x0 + dx) * px, 98 * px, [alpha(#fff0c8, 0), alpha(#fff0c8, a), alpha(#fff0c8, a * 0.7), alpha(#fff0c8, 0)]))
+            }
+          }
+        }
+        rect(9 * px, 36 * px, 142 * px, 62 * px, fill: alpha(#9fd8d0, 0.035))
+        if fog > 0 {
+          clip(9 * px, 36 * px, 142 * px, 62 * px) {
+            scale(1, 62 / 142, 80 * px, 67 * px) {
+              rect(9 * px, -4 * px, 142 * px, 142 * px, fill: radial(80 * px, 67 * px, 80 * px, [alpha(#ffffff, 0), alpha(#ffffff, 0), alpha(#ffffff, fog * 0.1), alpha(#ffffff, fog * 0.4)]))
+            }
+          }
+        }
+        rect(8 * px, 34 * px, px, 65 * px, fill: alpha(#cfeee8, 0.45))
+        rect(151 * px, 34 * px, px, 65 * px, fill: alpha(#cfeee8, 0.45))
+        rect(7 * px, 98 * px, 146 * px, px, fill: alpha(#cfeee8, 0.5))
+        rect(7 * px, 34 * px, 146 * px, 2 * px, fill: alpha(#d8f0ec, 0.5))
+        path([[24 * px, 36 * px], [29 * px, 36 * px], [14 * px, 98 * px], [9 * px, 98 * px]], closed: true, fill: alpha(#ffffff, 0.04))
+        path([[118 * px, 36 * px], [120 * px, 36 * px], [104 * px, 98 * px], [102 * px, 98 * px]], closed: true, fill: alpha(#ffffff, 0.05))
+        if lid {
+          rect(7 * px, 32 * px, 146 * px, 2 * px, fill: alpha(#cfe8e4, 0.35))
+          rect(7 * px, 32 * px, 146 * px, px, fill: alpha(#ffffff, 0.25))
+          rect(74 * px, 30 * px, 12 * px, 2 * px, fill: #6b5a48)
+        }
+        rect(0, 0, cw, 8 * px, fill: alpha(#05070f, dark))
+        rect(0, 8 * px, 19 * px, 28 * px, fill: alpha(#05070f, dark))
+        rect(62 * px, 8 * px, cw - 62 * px, 28 * px, fill: alpha(#05070f, dark))
+        rect(0, 36 * px, cw, ch - 36 * px, fill: alpha(#05070f, dark))
+        rect(0, 0, cw, ch, fill: alpha(#05070f, 0.25))    // the whole scene a shade darker, day and night
+        rect(0, 0, cw, ch, fill: alpha(#ff9050, glow * 0.06))
+      }
+    }
+
+    Row {
+      gap: 8
+      align: center
+      Text { text: frame == null ? "Filling the tank…" : "RH ${rh}% · ${clockText} · ${alive} plant${alive == 1 ? "" : "s"}${lid ? "" : " · lid off"}"; font: mono; fontSize: 12; color: dim; maxLines: 1; weight: 1 }
+      Text { text: "Day ${days}"; font: mono; fontSize: 16; color: days > 0 ? #7fbf4d : dim; maxLines: 1 }
+    }
+
+    Column {
+      scroll: true
+      weight: 1
+      gap: 6
+      for p, i in plantList key p.key { Meter { p: p } }
+      if len(plantList) == 0 && frame != null {
+        Text { text: me == null ? "No plants yet. Get the Glass Happiness app from the store to plant some: tap here." : "No plants yet."; font: mono; fontSize: 12; color: dim }
+      }
+    }
+  }
+}
