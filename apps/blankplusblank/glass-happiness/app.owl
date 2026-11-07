@@ -130,11 +130,19 @@ my %SPEC = (
 );
 
 # ---- single instance: a restarted stream takes over from the old process, which saves first ----
+# The pidfile outlives a sim that Android SIGKILLs along with proot, and its pid gets reused, so the TERM
+# only goes to a process that is perl running this sim: this same file, or (the store copy) perl -e with its code.
+sub cmdline { my $p = shift; open my $f, '<', "/proc/$p/cmdline" or return ''; local $/; my $c = <$f> // ''; close $f; $c }
+sub is_sim {
+  my $c = cmdline(shift);
+  return 0 unless $c =~ m{^(?:[^\0]*/)?perl\0};
+  return $c eq cmdline($$) || index($c, "\n# Mossglass: a falling-sand terrarium.") >= 0;
+}
 if (open my $pf, '<', $PIDF) {
   my $old = <$pf> // '';
   close $pf;
   chomp $old;
-  if ($old =~ /^\d+$/ && $old != $$ && kill(0, $old)) {
+  if ($old =~ /^\d+$/ && $old != $$ && kill(0, $old) && is_sim($old)) {
     kill 'TERM', $old;
     for (1 .. 40) { last unless kill(0, $old); sleep 0.05 }
   }
