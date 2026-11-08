@@ -5,6 +5,12 @@ adjustable typography, paper/sepia/night themes and public OPDS 1/2 catalogs.
 
 Version 2.0 is an app, opened from the app drawer, instead of a home-screen face.
 
+Version 2.1 adds chapter navigation: the reading header shows the current
+chapter with arrows for the previous and next chapter, and tapping it opens a
+Contents list. The header now clears the screen's top cutout and corner curve,
+and page turns no longer draw the full-screen tap ripple that flashed in the
+night theme.
+
 Tap the page's right half to advance, its left half to go back. The gear opens
 Settings; the book button opens Library. The library scans files directly in
 `~/Books` by default; choose a different folder in Settings. Book titles and
