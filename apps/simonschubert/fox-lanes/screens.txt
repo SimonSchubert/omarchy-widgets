@@ -1,0 +1,4 @@
+# The store's screens of this app, one per line: the states set before each is drawn (scripts/store-previews.sh).
+seed = 7; t0 = 0; lane = 1; from = 1; lt = -9; pk = 0; ks = 0; ke = 0; dh = 0; ev = 0; got = 17; taken = []; final = 0; lastS = -99; brk = -99; shields = 60; g0 = -9; g1 = -9; m0 = -9; m1 = -9; gotPu = []; crashAt = 9999; best = 1500; mode = "play"
+seed = 7; t0 = -1000000; lane = 0; from = 0; lt = -9; pk = 0; ev = 40; got = 23; taken = []; final = 1029; lastS = -99; brk = -99; shields = 0; crashAt = 42.5; best = 1500; mode = "over"
+final = 0; t0 = 0; mode = "title"

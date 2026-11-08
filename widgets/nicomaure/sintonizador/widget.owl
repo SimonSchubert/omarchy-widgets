@@ -4,7 +4,7 @@ widget "sintonizador" {
   meta {
     owl: 13
     description: "Control remoto de cliamp: radios del mundo por país con un dial para sintonizar, favoritas y búsqueda en YouTube"
-    version: "1.7"
+    version: "1.9"
     license: "MIT"
     category: "media"
   }
@@ -420,6 +420,9 @@ if [ -x "$b" ] && v=$("$b" --version 2>/dev/null); then echo "$v propio"; else e
   state dialPos = 0
   state want = null                // lo que hay que poner a sonar (ver on want first)
   state reqNonce = 0               // identificador de toque para mostrar "cargando" al instante
+  state waitTicks = 0              // pasos de 5 s esperando respuesta de Linux / ctl.sh
+  state tapFailed = ""             // "linux" si el comando no llegó en ~20 s, "timeout" si tardó >45 s
+  state seekPos = null             // posición optimista en segundos al adelantar/atrasar o arrastrar la barra
   state ytq = ""
   state ytOut = null
   state ytBusy = false
@@ -481,7 +484,7 @@ D="$HOME/.cache/cliamp-sintonizador"; mkdir -p "$D"
 printf 'stop-%s' "$(date +%s%N)" > "$D/req.id"
 rm -f "$D/pause.id"
 pkill -x cliamp 2>/dev/null
-pkill -f 'yt-dlp.*--no-playlist' 2>/dev/null
+pkill -f '[y]t-dlp.*--no-playlist' 2>/dev/null   # [y]: si no, el patrón coincide con este mismo script y se mata solo
 sleep 0.3
 pkill -9 -x cliamp 2>/dev/null
 rm -f ~/.config/cliamp/cliamp.sock ~/.config/cliamp/cliamp.sock.pid
@@ -534,8 +537,11 @@ true
   let loading = pendingTap || (opLoading && !(live && st.state == "playing" && ours && !pendingTap))
   let playing = !loading && live && st.state == "playing"
   let paused = !loading && live && st.state == "paused"
-  let hasError = !loading && !playing && op != null && op.phase == "error" && (cur == null || op.url == cur.url)
-  let errMsg = hasError ? (op.err != null && op.err != "" ? op.err : "No se puede reproducir esta fuente.") : ""
+  let hasError = !loading && !playing && (tapFailed != "" || (op != null && op.phase == "error" && (cur == null || op.url == cur.url)))
+  let errMsg = !hasError ? ""
+    : tapFailed == "linux" ? "El comando no llegó a Linux. Tocá «↻ reintentar» o reiniciá el launcher."
+    : tapFailed == "timeout" ? "Tiempo de espera agotado al cargar el audio. Tocá «↻ reintentar»."
+    : (op != null && op.err != null && op.err != "" ? op.err : "No se puede reproducir esta fuente.")
   let loadingMsg = pendingTap
     ? (cur != null && cur.kind == "yt" ? "Espere, cargando audio de YouTube…" : "Espere, sintonizando ${cur != null ? cur.name : "emisora"}…")
     : (op != null && op.msg != null && op.msg != "" ? op.msg : "Espere, cargando audio…")
@@ -544,9 +550,15 @@ true
     ? cur.name
     : (tr != null ? (tr.title ?? (cur != null ? cur.name : "cliamp")) : (cur != null ? cur.name : "sintonizador"))
 
-  let posStr = st.duration != null && st.duration > 0
-    ? " · " + fmtTime(round(st.position ?? 0), st.duration >= 3600 ? "H:mm:ss" : "m:ss", "UTC") + " / " + fmtTime(round(st.duration), st.duration >= 3600 ? "H:mm:ss" : "m:ss", "UTC")
-    : ""
+  let durSec = (st.duration != null && st.duration > 0)
+    ? st.duration
+    : (ours && cur != null && cur.kind == "yt" && (cur.dur ?? 0) > 0 ? cur.dur : 0)
+  let hasDur = live && durSec > 0
+  let effPos = hasDur ? clamp(seekPos ?? (st.position ?? 0), 0, durSec) : 0
+  let posFmt = durSec >= 3600 ? "H:mm:ss" : "m:ss"
+  let curTimeStr = hasDur ? fmtTime(round(effPos), posFmt, "UTC") : ""
+  let durTimeStr = hasDur ? fmtTime(round(durSec), posFmt, "UTC") : ""
+  let posStr = hasDur ? " · ${curTimeStr} / ${durTimeStr}" : ""
 
   let line2 = loading ? loadingMsg
     : hasError ? errMsg
@@ -582,10 +594,45 @@ true
 
   // on want first corre también en el PRIMER toque (cuando want pasa de null al primer valor).
   on want first {
+    waitTicks = 0
+    tapFailed = ""
+    seekPos = null
     let act = value.fresh ? "fresh" : (value.queue ? "queue" : "play")
     let k = value.kind ?? "radio"
     let nm = value.name ?? ""
     run("bash ~/.cache/cliamp-sintonizador/ctl.sh ${sh(act)} ${sh(value.url)} ${sh(nm)} ${sh(k)} ${int(value.nonce ?? 0)}")
+  }
+
+  on op {
+    waitTicks = 0
+    tapFailed = ""
+  }
+
+  on st {
+    seekPos = null
+  }
+
+  // Si en ~20 s ctl.sh ni siquiera escribió el nonce en state.json, el comando no llegó a Linux;
+  // si quedó en "loading" más de ~45 s, cortamos la espera para no quedar en "sintonizando" para siempre.
+  every 5s {
+    if pendingTap {
+      let wt = waitTicks + 1
+      waitTicks = wt
+      if wt >= 4 {
+        tapFailed = "linux"
+        reqNonce = 0
+      }
+    } else if opLoading {
+      let wt = waitTicks + 1
+      waitTicks = wt
+      if wt >= 9 {
+        tapFailed = "timeout"
+        reqNonce = 0
+      }
+    } else {
+      if waitTicks != 0 { waitTicks = 0 }
+      if tapFailed != "" && (playing || paused) { tapFailed = "" }
+    }
   }
 
   onTap: screen()
@@ -780,9 +827,39 @@ true
       }
     }
     Spacer { weight: 1 }
-    // Franja del medio: avance del tema (YouTube) o el volumen (radio)
-    if live && st.duration != null && st.duration > 0 {
-      Progress { value: st.position ?? 0; max: st.duration; color: statusColor; height: 4; animate value: spring() }
+    // Franja del medio: avance del tema (YouTube, con -10s / +10s) o el volumen (radio)
+    if hasDur {
+      Row { gap: 6; align: center
+        Text {
+          text: "−10s"
+          style: label
+          bold: true
+          color: soft
+          padding: [5, 2]
+          radius: 5 * corners
+          background: alpha(foreground, 0.09)
+          onTap: {
+            let base = seekPos ?? (st.position ?? 0)
+            seekPos = clamp(round(base - 10), 0, round(durSec))
+            run("${pathFix}cliamp seek -- -10")
+          }
+        }
+        Progress { value: effPos; max: max(durSec, 1); color: statusColor; weight: 1; height: 4; animate value: spring() }
+        Text {
+          text: "+10s"
+          style: label
+          bold: true
+          color: soft
+          padding: [5, 2]
+          radius: 5 * corners
+          background: alpha(foreground, 0.09)
+          onTap: {
+            let base = seekPos ?? (st.position ?? 0)
+            seekPos = clamp(round(base + 10), 0, round(durSec))
+            run("${pathFix}cliamp seek -- 10")
+          }
+        }
+      }
     } else if live {
       Row { gap: 6; align: center
         Text { text: "🔊"; style: label; color: soft }
@@ -829,7 +906,7 @@ true
       }
       if live || loading {
         Box { weight: 1
-          onTap: { reqNonce = 0; run(stopCmd) }
+          onTap: { reqNonce = 0; waitTicks = 0; tapFailed = ""; seekPos = null; run(stopCmd) }
           Key { kind: "stop" }
         }
       }
@@ -908,6 +985,57 @@ true
             }
           }
         }
+        // Barra interactiva para recorrer la pista (YouTube) y saltar 10 s atrás o adelante
+        if hasDur {
+          Row {
+            gap: 6
+            align: center
+            Text {
+              text: "−10s"
+              style: label
+              bold: true
+              color: foreground
+              padding: [8, 4]
+              radius: 6 * corners
+              background: alpha(foreground, 0.1)
+              onTap: {
+                let base = seekPos ?? (st.position ?? 0)
+                seekPos = clamp(round(base - 10), 0, round(durSec))
+                run("${pathFix}cliamp seek -- -10")
+              }
+            }
+            Text { text: curTimeStr; font: mono; style: label; color: soft }
+            Slider {
+              weight: 1
+              height: 24
+              value: effPos
+              min: 0
+              max: max(round(durSec), 1)
+              step: 1
+              color: statusColor
+              onChange: {
+                let tgt = clamp(round(value), 0, round(durSec))
+                seekPos = tgt
+                run("${pathFix}p=$( (cliamp status --json 2>/dev/null || echo '{}') | jq -r '.position // 0 | round' ); cliamp seek -- $(( ${int(tgt)} - p ))")
+              }
+            }
+            Text { text: durTimeStr; font: mono; style: label; color: soft }
+            Text {
+              text: "+10s"
+              style: label
+              bold: true
+              color: foreground
+              padding: [8, 4]
+              radius: 6 * corners
+              background: alpha(foreground, 0.1)
+              onTap: {
+                let base = seekPos ?? (st.position ?? 0)
+                seekPos = clamp(round(base + 10), 0, round(durSec))
+                run("${pathFix}cliamp seek -- 10")
+              }
+            }
+          }
+        }
         if hasError && cur != null {
           Row {
             gap: 8
@@ -972,7 +1100,7 @@ true
         }
         if live || loading {
           Box { width: 52
-            onTap: { reqNonce = 0; run(stopCmd) }
+            onTap: { reqNonce = 0; waitTicks = 0; tapFailed = ""; seekPos = null; run(stopCmd) }
             Key { kind: "stop" }
           }
         }
@@ -1215,6 +1343,10 @@ true
             gap: 8; align: center; padding: [10, 10]; radius: 8 * corners; background: alpha(yellow, 0.12)
             Loader { anim: true }
             Text { text: "Espere, buscando “${ytq}” en YouTube…"; color: yellow; weight: 1 }
+            Text {
+              text: "✕"; style: label; bold: true; color: red; padding: [10, 4]; radius: 10 * corners; background: alpha(red, 0.12)
+              onTap: { ytBusy = false; run("pkill -f '[y]t-dlp --flat-playlist'") }
+            }
           }
         } else if ytBusy && len(ytRes) == 0 {
           Text { text: "⚠ Sin resultados para “${ytq}”. Probá con otras palabras."; color: red; padding: [4, 12] }
@@ -1237,7 +1369,7 @@ true
               radius: 6 * corners
               background: active ? (loading ? alpha(yellow, 0.16) : hasError ? alpha(red, 0.16) : rowPlaying ? alpha(green, 0.15) : alpha(accent, 0.15)) : null
               onTap: {
-                let it = {id: r.id, name: r.title, url: rUrl, sub: r.ch ?? "YouTube", cc: null, kind: "yt"}
+                let it = {id: r.id, name: r.title, url: rUrl, sub: r.ch ?? "YouTube", dur: r.dur, cc: null, kind: "yt"}
                 let rn = random(1000000) + 1
                 cur = it; queuedId = ""; reqNonce = rn; want = merge(it, {nonce: rn})
               }
@@ -1262,7 +1394,7 @@ true
               }
               Box { size: 34; align: center; radius: 8 * corners; background: queuedId == r.id ? alpha(green, 0.2) : alpha(foreground, 0.07)
                 onTap: {
-                  let it = {id: r.id, name: r.title, url: rUrl, sub: r.ch ?? "YouTube", cc: null, kind: "yt"}
+                  let it = {id: r.id, name: r.title, url: rUrl, sub: r.ch ?? "YouTube", dur: r.dur, cc: null, kind: "yt"}
                   let rn = random(1000000) + 1
                   queuedId = r.id
                   reqNonce = rn
@@ -1324,6 +1456,12 @@ true
               text: "⬆ actualizar"; style: label; color: accent; padding: [8, 3]; radius: 10 * corners; background: alpha(accent, 0.12)
               onTap: { clOut = null; clBusy = true; clOut = run(clInstCmd) }
             }
+          } else {
+            // Si la descarga se cuelga (o se perdió), se puede cortar y volver a intentar.
+            Text {
+              text: "✕ cancelar"; style: label; color: red; padding: [8, 3]; radius: 10 * corners; background: alpha(red, 0.12)
+              onTap: { clBusy = false; run("pkill -f '[c]liamp-sintonizador/bin/cliamp.part'; rm -f \"$HOME/.cache/cliamp-sintonizador/bin/cliamp.part\"") }
+            }
           }
         }
       }
@@ -1340,6 +1478,12 @@ true
           maxLines: 1
           weight: 1
         }
+        if updWait {
+          Text {
+            text: "✕ cancelar"; style: label; color: red; padding: [8, 3]; radius: 10 * corners; background: alpha(red, 0.12)
+            onTap: { updBusy = false; run("pkill -f '[c]liamp-sintonizador/bin/yt-dlp.part'; rm -f \"$HOME/.cache/cliamp-sintonizador/bin/yt-dlp.part\"") }
+          }
+        }
         if !updWait {
           Text {
             text: "⬆ actualizar"; style: label; color: accent; padding: [8, 3]; radius: 10 * corners; background: alpha(accent, 0.12)
@@ -1352,7 +1496,11 @@ true
             }
           }
         }
-        Text { text: "by nicomaure"; style: label; color: alpha(foreground, 0.38); padding: [4, 3]; onTap: url("https://github.com/nicomaure") }
+      }
+      // Firma discreta, en su propia línea para que la de yt-dlp no se corte
+      Row {
+        Spacer { weight: 1 }
+        Text { text: "by nicomaure"; style: label; color: alpha(foreground, 0.38); padding: [4, 0]; onTap: url("https://github.com/nicomaure") }
       }
     }
   }

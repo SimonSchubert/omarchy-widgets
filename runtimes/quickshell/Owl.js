@@ -2635,7 +2635,7 @@ var OPERATORS = {
 
 // ---------------------------------------------------------------- compiler
 
-var LEVEL = 18
+var LEVEL = 19
 var MAX_NODES = 500
 var MAX_SCREEN_NODES = 1000
 var MAX_ASSET_BYTES = 2097152
@@ -2787,6 +2787,10 @@ var HOME_LOCK = "lock"
 // events, each once a tap has asked for it.
 ;["Input.lines", HOME_LOCK, "Browser", "web", "android.location", "location", "android.airpods", "airpods",
   "android.calendar", "calendar"].forEach(function(k) { SINCE[k] = 18 })
+// owl 19: how many frames a second an animation needs, so a slow one costs the battery less.
+var FRAME_RATE = "fps"
+var MAX_FPS = 60
+SINCE[FRAME_RATE] = 19
 // The name a widget reads its strings { } by: str.feels.
 var STRINGS = "str"
 
@@ -2945,9 +2949,9 @@ function javaSetOrder(names) {
 }
 var TILE = ["cols", "rows", "tileWidth", "tileHeight", "screenWidth", "screenHeight", "screenInset", "screenTop", "screenLeft", "screenRight",
   "corners", "gapsIn", "gapsOut", "borderWidth", "tileOpacity", "tileFrost"]
-var WIDGET_PROPS = ["size", "minSize", "page", "order", "padding", "background", "lock"]
+var WIDGET_PROPS = ["size", "minSize", "page", "order", "padding", "background", "lock", "fps"]
 // A face has no tile's size; it says where it goes and whether the status bar stays over it.
-var FACE_PROPS = ["page", "order", "padding", "background", "statusBar", "edge", "lock"]
+var FACE_PROPS = ["page", "order", "padding", "background", "statusBar", "edge", "lock", "fps"]
 
 // An evaluator: `c` is set when the value is known at compile time.
 function Ev(f, constant, hasConst) {
@@ -3306,6 +3310,15 @@ Compiler.prototype = {
       lock = this.ex(props.lock.value, this.root)
       if (lock.k) this.fail("lock holds the home screen still while what it says is true, so it's something that changes, like lock: playing, not a fixed value", props.lock.pos)
     }
+    // How many frames a second its `time` animation needs, read as it changes. Checked as the launcher checks it; a
+    // shell draws at its own OwlHost.frameRate, so nothing reads it here.
+    var fps = null
+    if (props.fps) {
+      this.since(FRAME_RATE, props.fps.pos)
+      fps = this.ex(props.fps.value, this.root)
+      if (fps.k && (typeof fps.c !== "number" || fps.c < 1 || fps.c > MAX_FPS))
+        this.fail("fps is a number of frames a second, from 1 to " + MAX_FPS + ", like fps: 10 or fps: playing ? 30 : 10", props.fps.pos)
+    }
     // Drawn under the status bar and a camera cutout: fixed in the file, since the whole face moves when it changes.
     var edge = false
     if (props.edge) {
@@ -3331,6 +3344,7 @@ Compiler.prototype = {
       isFace: this.isFace,
       statusBar: statusBar,
       lock: lock,
+      fps: fps,
       edge: edge,
       kind: this.ast.kind,
       // A face goes left of page 1 by default: 0, and -1, -2, ... further left. A tile never does.

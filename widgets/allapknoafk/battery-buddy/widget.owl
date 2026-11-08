@@ -1,0 +1,84 @@
+widget "battery buddy" {
+  meta { owl: 11; description: "a battery companion whose water level tracks the charge and whose face follows it: calm when full, sleepy when low, lively while charging. also shows temperature, voltage and health."; version: "1.0"; license: "MIT"; category: "system" }
+  size: 3x2
+  minSize: 3x2
+
+  // Drawn once per change: nothing reads `time`, so the tile never animates.
+  source bat = android.battery
+
+  let lvl = bat.level ?? 0
+  let chg = bat.charging ?? false
+  let low = lvl < 20
+  let tint = low ? red : chg ? mix(green, foreground, 0.15) : lvl < 40 ? mix(yellow, foreground, 0.1) : mix(cyan, green, 0.5)
+  let mood = chg ? (lvl >= 95 ? "so full, so happy" : "mmm, energy!") : lvl >= 90 ? "feeling great" : lvl >= 60 ? "doing good" : lvl >= 40 ? "doing okay" : lvl >= 20 ? "getting hungry" : "feed me pls"
+
+  Row {
+    gap: 14
+    align: center
+    Canvas {
+      width: 64
+      height: 88
+      // body 8..56 x 12..84; water rises inside it
+      let top = 15 + 66 * (1 - lvl / 100)
+      let bob = 0
+      let dark = top < 40
+      let face = dark ? alpha(background, 0.85) : foreground
+      translate(0, bob) {
+        rect(25, 3, 14, 10, fill: alpha(foreground, 0.55), radius: 4)
+        rect(8, 12, 48, 72, fill: alpha(tint, 0.12), radius: 14)
+        clip(10, 14, 44, 68) {
+          // the water's bottom corners follow the body's rounding
+          let br = range(0, 7).map(k => [42 + 11.5 * sin((6 - k) * pi / 12), 70 + 11.5 * cos((6 - k) * pi / 12)])
+          let bl = range(0, 7).map(k => [22 - 11.5 * cos((6 - k) * pi / 12), 70 + 11.5 * sin((6 - k) * pi / 12)])
+          let wave = range(0, 46, 2).map(i => [10 + i, top + sin(i * 0.28 + 1.2) * 2.2]) + br + bl
+          path(wave, closed: true, fill: alpha(tint, 0.85))
+          let wave2 = range(0, 46, 2).map(i => [10 + i, top + 3 + sin(i * 0.22 - 0.6) * 2]) + br + bl
+          path(wave2, closed: true, fill: alpha(tint, 0.4))
+        }
+        rect(8, 12, 48, 72, stroke: alpha(foreground, 0.55), width: 5, radius: 14)
+        // cheeks
+        circle(18, 52, 4, fill: alpha(red, low ? 0.15 : 0.45))
+        circle(46, 52, 4, fill: alpha(red, low ? 0.15 : 0.45))
+        // eyes
+        if chg {
+          arc(23, 42, 4, 270, 180, stroke: face, width: 2.5, cap: round)
+          arc(41, 42, 4, 270, 180, stroke: face, width: 2.5, cap: round)
+        } else if low {
+          line(19, 42, 27, 42, stroke: face, width: 2.5, cap: round)
+          line(37, 42, 45, 42, stroke: face, width: 2.5, cap: round)
+        } else {
+          circle(23, 41, 3.5, fill: face)
+          circle(41, 41, 3.5, fill: face)
+          circle(24.2, 39.8, 1.2, fill: alpha(foreground, 0.9))
+          circle(42.2, 39.8, 1.2, fill: alpha(foreground, 0.9))
+        }
+        // mouth
+        if chg {
+          arc(32, 51, 6, 90, 180, fill: face)
+        } else if low {
+          arc(32, 61, 5, 270, 180, stroke: face, width: 2.5, cap: round)
+        } else {
+          arc(32, 52, 5, 90, 180, stroke: face, width: 2.5, cap: round)
+        }
+      }
+      if chg {
+        let p = 0.35
+        text("⚡", 56, 22 - p * 6, size: 15, align: center, color: yellow)
+        layer(1 - p) { text("✦", 6, 30 - p * 14, size: 11, align: center, color: mix(yellow, foreground, 0.3)) }
+      }
+      if low {
+        let p = 0.3
+        layer(1 - p) { text("z", 54, 24 - p * 10, size: 12 + p * 4, align: center, color: muted) }
+      }
+    }
+    Column {
+      weight: 1
+      gap: 1
+      Text { text: mood; font: mono; fontSize: 11; color: muted; maxLines: 1 }
+      Text { text: "${bat.level ?? "…"}%"; font: mono; fontSize: 30; bold: true; color: tint; animate color: tween(400ms) }
+      Text { text: lower(bat.status ?? "…"); font: mono; fontSize: 12; color: foreground }
+      Text { text: "${round(bat.temp ?? 0, 1)}°C · ${round(bat.voltage ?? 0, 2)}V"; font: mono; fontSize: 11; color: mix(cyan, foreground, 0.15) }
+      Text { text: lower("${bat.health ?? ""}${(bat.cycles ?? 0) > 0 ? " · ${bat.cycles} cycles" : ""}"); font: mono; fontSize: 10; color: muted; maxLines: 1 }
+    }
+  }
+}

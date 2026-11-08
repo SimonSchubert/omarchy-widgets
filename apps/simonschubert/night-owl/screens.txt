@@ -1,0 +1,3 @@
+# The store's screens of this app, one per line: the states set before each is drawn (scripts/store-previews.sh).
+wait = 0
+seed = 42; jt = 24; jh = 0; jv = 0; air = 0; got = 15; taken = []; final = 323; best = 410; t0 = -1000000; mode = "over"

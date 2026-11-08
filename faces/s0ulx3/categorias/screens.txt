@@ -1,0 +1,4 @@
+# The store's screens of this face, one per line: the states set before each is drawn (scripts/store-previews.sh).
+cats = [{"id":"1","name":"Diario","apps":["a:com.android.chrome/com.google.android.apps.chrome.Main","a:com.google.android.gm/.ConversationListActivityGmail","a:com.google.android.apps.messaging/.ui.ConversationListActivity","a:com.google.android.calendar/com.android.calendar.AllInOneActivity","a:com.google.android.deskclock/com.android.deskclock.DeskClock"]},{"id":"2","name":"Fotos y mapas","apps":["a:com.android.camera2/com.android.camera.CameraLauncher","a:com.google.android.apps.photos/.home.HomeActivity","a:com.google.android.apps.maps/com.google.android.maps.MapsActivity"]}]
+editId = "1"; view = "cat"
+view = "pick"

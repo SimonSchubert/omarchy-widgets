@@ -1,0 +1,131 @@
+widget "kiwix" {
+  meta { owl: 11; description: "offline libraries from kiwix, such as wikipedia, the arch wiki and devdocs. search all of them or a single book; everything is served from 127.0.0.1 only."; version: "1.0"; license: "MIT"; category: "productivity" }
+  size: 6x3
+  minSize: 3x3
+  padding: 8
+
+  requires { pacman: ["kiwix-tools", "python"] }
+
+  let port = 8481
+  let base = "http://127.0.0.1:8481"
+
+  state q = ""
+  state recent = [] persist
+
+  // Keeps ~/kiwix/library.xml in step with the .zim files there, and starts kiwix-serve (loopback only) if nothing answers.
+  // The local server is only started or contacted by a tap: a link sets `pending` and asks for a check,
+  // and the link opens once the check says the server is up.
+  state nonce = 0
+  state pending = ""
+  state srv = ""
+  on srv { if pending != "" && startsWith(srv, "up") { url(pending); pending = "" } }
+  on nonce { srv = run("cd ~/kiwix 2>/dev/null || exit 0; if [ ! -f library.xml ] || [ -n \"$(find . -maxdepth 1 -name '*.zim' -newer library.xml)\" ]; then rm -f library.xml; for z in *.zim; do kiwix-manage library.xml add \"$z\" >/dev/null 2>&1; done; fi; (exec 3<>/dev/tcp/127.0.0.1/8481) 2>/dev/null || { setsid nohup kiwix-serve --address 127.0.0.1 --port 8481 --library library.xml --monitorLibrary >/dev/null 2>&1 </dev/null & sleep 1; }; (exec 3<>/dev/tcp/127.0.0.1/8481) 2>/dev/null && echo up $RANDOM || echo down") }
+
+  // One map per book: id (for scoped search), stem (its /content/ path), title and size in MB.
+  source books = cmd("""python3 - <<'PY'
+import json, os, re
+p = os.path.expanduser('~/kiwix/library.xml')
+out = []
+try:
+    for b in re.findall(r'<book [^>]*>', open(p).read()):
+        a = dict(re.findall(r'(\w+)="([^"]*)"', b))
+        stem = os.path.basename(a.get('path', '')).removesuffix('.zim')
+        mb = round(int(a.get('size', 0)) / 1024)
+        out.append({'id': a['id'], 'stem': stem, 'title': a.get('title', stem), 'mb': mb})
+except OSError:
+    pass
+print(json.dumps(sorted(out, key=lambda b: -b['mb'])))
+PY""") every 100000h json
+  let list = books ?? []
+  let up = startsWith(srv, "up")
+  let query = trim(q)
+  let ordered = sortBy(list, b => contains(recent, b.id) ? 0 : 1)
+
+  Column {
+    gap: 5
+    Row {
+      align: center
+      Text { text: "kiwix"; font: mono; fontSize: 12; color: accent }
+      Spacer { weight: 1 }
+      Text { text: up ? "● 127.0.0.1:${port} · ${len(list)} books" : "○ server off · tap to start"; font: mono; fontSize: 9; color: up ? green : red; onTap: nonce = nonce + 1 }
+    }
+    Row {
+      align: center
+      gap: 6
+      padding: [8, 6]
+      border: 1
+      borderColor: alpha(accent, 0.35)
+      radius: 6 * corners
+      onTap: { nonce = nonce + 1; screen() }
+      Text { text: "⌕"; font: mono; fontSize: 12; color: accent }
+      Text { text: "search ${len(list)} books …"; font: mono; fontSize: 12; color: alpha(muted, 0.8); weight: 1 }
+    }
+    Row {
+      wrap: true
+      gap: 5
+      for b in ordered key b.id {
+        Text {
+          text: "${replace(b.title, " Docs", "")}${b.mb >= 1024 ? " ${round(b.mb / 102.4) / 10}G" : (b.mb >= 10 ? " ${b.mb}M" : "")}"
+          font: mono; fontSize: 10; maxLines: 1
+          color: contains(recent, b.id) ? accent : muted
+          padding: [8, 4]
+          background: alpha(contains(recent, b.id) ? accent : muted, 0.12)
+          border: 1
+          borderColor: alpha(contains(recent, b.id) ? accent : muted, 0.4)
+          radius: 6 * corners
+          onTap: {
+            recent = take(unique(flatten([[b.id], recent])), 4)
+            pending = "${base}/content/${b.stem}"; nonce = nonce + 1
+          }
+        }
+      }
+      if len(list) == 0 { Text { text: "— no books: put .zim files in ~/kiwix (library.kiwix.org)"; font: mono; fontSize: 9; color: mix(yellow, foreground, 0.1) } }
+    }
+    Spacer { weight: 1 }
+    Text { text: "tap a book to open it · tap the bar to search"; font: mono; fontSize: 9; color: alpha(muted, 0.8) }
+  }
+
+  // Typing happens full screen: a text field on a home tile fights the keyboard.
+  screen {
+    title: "kiwix"
+    Column {
+      gap: 8
+      padding: 12
+      Row {
+        align: center
+        gap: 8
+        padding: [10, 4]
+        border: 1
+        borderColor: alpha(accent, 0.35)
+        radius: 6 * corners
+        Text { text: "⌕"; font: mono; fontSize: 14; color: accent }
+        Input {
+          weight: 1
+          focus: true
+          underline: false
+          fontSize: 14
+          placeholder: "search ${len(list)} books"
+          onChange: q = value
+          onSubmit: { if trim(value) != "" { pending = "${base}/search?pattern=${enc(trim(value))}"; nonce = nonce + 1 } }
+        }
+      }
+      Text { text: query == "" ? "— books" : "— enter searches all · or just one:"; font: mono; fontSize: 9; color: mix(yellow, foreground, 0.1) }
+      Column {
+        weight: 1
+        gap: 6
+        scroll: true
+        for b in ordered key b.id {
+          Column {
+            gap: 0
+            onTap: {
+              recent = take(unique(flatten([[b.id], recent])), 4)
+              if query != "" { pending = "${base}/search?pattern=${enc(query)}&books.id=${b.id}"; nonce = nonce + 1 } else { pending = "${base}/content/${b.stem}"; nonce = nonce + 1 }
+            }
+            Text { text: b.title; font: mono; fontSize: 12; color: contains(recent, b.id) ? accent : foreground; maxLines: 1 }
+            Text { text: "${b.mb >= 1024 ? "${round(b.mb / 102.4) / 10} GB" : "${b.mb} MB"} · ${query != "" ? "search '${query}' here" : "open"}"; font: mono; fontSize: 9; color: muted }
+          }
+        }
+      }
+    }
+  }
+}

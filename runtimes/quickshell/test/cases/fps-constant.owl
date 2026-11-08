@@ -1,0 +1,6 @@
+widget "x" {
+  meta { owl: 19 }
+  state tapped = false
+  fps: 10
+  Button { text: "a"; onTap: tapped = !tapped }
+}

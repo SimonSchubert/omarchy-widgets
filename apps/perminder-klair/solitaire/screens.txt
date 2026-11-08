@@ -1,0 +1,4 @@
+# The store's screens of this app, one per line: the states set before each is drawn (scripts/store-previews.sh).
+wait = 0
+sel = null; down = [0,1,2,3,4,3,2]; found = [3,2,5,1]; tab = [[12,24,10,35,47,20,6],[25,8,33,45],[51,16,37,49,22],[38,3,40,31],[11,15,41,23,46,19],[50,17,42,34,7],[48,21,36]]; waste = [18,43]; stock = [4,9,32,44,5]; hist = [{"s":[],"w":[],"f":[0,0,0,0],"t":[],"d":[],"m":0}]; moves = 87; wins = 12; counted = false; draw3 = false; sure = false; sel = {"k":"tab","c":3,"i":3}
+sel = null; counted = true; wins = 13; found = [13,13,13,13]; tab = [[],[],[],[],[],[],[]]; down = [0,0,0,0,0,0,0]; stock = []; waste = []; moves = 214; sure = false

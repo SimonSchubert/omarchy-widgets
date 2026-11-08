@@ -517,7 +517,6 @@ def parse_widget(path):
     if m:
         w["name"] = m.group(1)
 
-
     for line, stmt in statements(body):
         head = stmt.split("(", 1)[0]
         if stmt.startswith("source "):
@@ -572,7 +571,7 @@ def parse_widget(path):
     w["webImages"] = len(re.findall(r"Image\s*\{[^}]*https?://", text, re.S))
     # a live `time` read is what makes a tile redraw at frame rate; the same read
     # inside a handler or trigger body runs only when the handler fires, so blank
-    # those bodies out first (1.8's tapGate/screenAnim gate the rest below).
+    # those bodies out first (the tapGate/screenAnim models below gate the rest).
     live = masked
     for t in w["triggers"]:
         if t["kind"] in ("on", "every", "at", "when"):

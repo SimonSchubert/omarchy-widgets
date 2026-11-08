@@ -1,0 +1,6 @@
+face "x" {
+  meta { owl: 19 }
+  state tapped = false
+  fps: 20
+  Button { text: "a"; onTap: tapped = !tapped }
+}

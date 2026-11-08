@@ -1,0 +1,276 @@
+widget "ipod" {
+  page: 1
+  order: 1
+  size: 3x5
+  minSize: 3x4
+  padding: 0
+  requires { pacman: [] }
+  meta { description: "What's playing, as an iPod: album art on the screen, a click wheel that skips, plays and pauses, and turns to set the volume. The body takes its color from the album art"; version: "1.0"; license: "MIT"; category: "media"; owl: 16 }
+
+  // {available, playing, title, artist, album, app, package, position, duration, art}
+  source m = android.media
+  source v = android.volume
+  source bat = android.battery
+  source now = clock every 1s
+
+  strings {
+    en {
+      nowPlaying: "Now Playing"
+      needAccess: "Allow notification access to see what's playing. Tap here."
+      nothing: "Nothing playing"
+      resume: "press ▶︎❚❚ to resume"
+      menu: "MENU"
+    }
+  }
+
+  // The wheel: what's pressed (for its shading), how far it has turned since the last
+  // volume step, the volume as the wheel has set it, and until when the screen shows it.
+  state pressed = ""
+  state turn = 0
+  state vol = 50
+  state volUntil = 0
+
+  let has = m != null && m.title != null
+  let allowed = m == null || m.available != false
+  let dur = num(m.duration, 0)
+  let pos = dur > 0 ? clamp(num(m.position, 0), 0, dur) : 0
+  let showVol = now < volUntil
+
+  let W = tileWidth ?? 180
+  let H = tileHeight ?? 300
+  let pad = clamp(W * 0.07, 8, 18)
+  let screenH = (H - pad * 3) * 0.52
+  let wheelD = max(60, min(W - pad * 2.6, H - screenH - pad * 3))
+  let wheelR = wheelD / 2
+  let centerR = wheelR * 0.38
+  // Degrees of turning per volume step, as the iPod's wheel clicks.
+  let stepDeg = 15
+  let volStep = 100 / num(v.steps, 15)
+
+  component Clock(s, left = false) {
+    Text { text: "${left ? "-" : ""}${floor(s / 60)}:${pad(floor(s % 60), 2, "0")}"; fontSize: 9; font: mono; color: alpha(#ffffff, 0.75); maxLines: 1 }
+  }
+
+  Box {
+    fill: true
+
+    // The body: the album art drawn so large that only its colors show, smoothed by the scaling.
+    // Three spots of it are layered (each layer weighs so they average), then a sheen on top.
+    Canvas {
+      let S = max(width, height) * 24
+      if m.art != null {
+        image(m.art, width / 2 - S * 0.5, height / 2 - S * 0.5, S, S)
+        layer(0.5) { image(m.art, width / 2 - S * 0.32, height * 0.3 - S * 0.3, S, S) }
+        layer(0.34) { image(m.art, width / 2 - S * 0.68, height * 0.7 - S * 0.7, S, S) }
+      } else {
+        rect(0, 0, width, height, fill: linear(0, 0, width, height, [mix(accent, background, 0.45), mix(accent, background, 0.75)]))
+      }
+      rect(0, 0, width, height, fill: linear(0, 0, 0, height, [alpha(#ffffff, 0.12), alpha(#ffffff, 0), alpha(#000000, 0.08), alpha(#000000, 0.3)]))
+      // A thin edge, like the metal back showing round the front.
+      rect(1, 1, width - 2, height - 2, radius: 8 * corners, stroke: alpha(#ffffff, 0.25), width: 1)
+    }
+
+    Column {
+      padding: pad
+      gap: pad
+
+      // The screen, in a black bezel.
+      Box {
+        fill: width
+        height: screenH
+        radius: 6
+        background: #000000
+        padding: 3
+        Box {
+          fill: true
+          radius: 4
+          clip: true
+          background: #111216
+          onTap: media("open")
+
+          if has && m.art != null {
+            Image { src: m.art; fit: cover; fill: true }
+          } else {
+            Canvas {
+              rect(0, 0, width, height, fill: linear(0, 0, width, height, [#3a3d44, #16171b]))
+              text("♪", width / 2, height / 2 + 4, size: min(width, height) * 0.32, align: center, color: alpha(#ffffff, 0.35))
+            }
+          }
+
+          Column {
+            fill: true
+            gap: 0
+
+            // The iPod's silver title bar.
+            Row {
+              fill: width
+              height: 15
+              padding: [5, 0]
+              align: center
+              gap: 4
+              background: linear(0, 0, 0, 1, [#fbfbfc, #d9dce1, #c4c8ce])
+              Canvas {
+                width: 8
+                height: 8
+                if m.playing == true {
+                  path([[0, 0], [8, 4], [0, 8]], closed: true, fill: #2f6fd6)
+                } else {
+                  rect(0.5, 0, 2.6, 8, fill: #4a4d55)
+                  rect(4.9, 0, 2.6, 8, fill: #4a4d55)
+                }
+              }
+              Text { text: str.nowPlaying; fontSize: 9; bold: true; color: #1a1b1e; align: center; maxLines: 1; weight: 1; font: sans }
+              Canvas {
+                width: 15
+                height: 8
+                let lvl = clamp(num(bat.level, 100), 0, 100) / 100
+                rect(0.5, 0.5, 12.5, 7, radius: 1.5, stroke: #4a4d55, width: 1)
+                rect(13.2, 2.5, 1.5, 3, fill: #4a4d55)
+                rect(2, 2, 9.5 * lvl, 4, radius: 0.8, fill: lvl < 0.2 ? #d94a3d : #3cb34a)
+              }
+            }
+
+            Spacer { weight: 1 }
+
+            Column {
+              fill: width
+              padding: [7, 14, 7, 6]
+              gap: 1
+              background: linear(0, 0, 0, 1, [alpha(#000000, 0), alpha(#000000, 0.6), alpha(#000000, 0.85)])
+              if !allowed {
+                Text { text: str.needAccess; fontSize: 10; color: #ffffff; maxLines: 3; font: sans }
+              } else if !has {
+                Text { text: str.nothing; fontSize: 12; bold: true; color: #ffffff; maxLines: 1; font: sans }
+                Text { text: str.resume; fontSize: 10; color: alpha(#ffffff, 0.7); maxLines: 1; font: sans }
+              } else {
+                Text { text: m.title; fontSize: 12; bold: true; color: #ffffff; maxLines: 1; font: sans }
+                Text { text: m.artist ?? m.album ?? lower(m.app ?? ""); fontSize: 10; color: alpha(#ffffff, 0.75); maxLines: 1; font: sans }
+                Spacer { height: 3 }
+                if showVol {
+                  Row {
+                    fill: width
+                    align: center
+                    gap: 5
+                    Canvas {
+                      width: 9
+                      height: 8
+                      path([[0, 2.5], [2.5, 2.5], [5.5, 0], [5.5, 8], [2.5, 5.5], [0, 5.5]], closed: true, fill: #ffffff)
+                      arc(5.5, 4, 3, 50, 80, stroke: #ffffff, width: 1)
+                    }
+                    Progress { value: vol; max: 100; color: #ffffff; track: alpha(#ffffff, 0.25); height: 4; weight: 1; animate value: spring() }
+                  }
+                } else {
+                  Progress { value: pos; max: dur > 0 ? dur : 1; color: #ffffff; track: alpha(#ffffff, 0.25); height: 4; fill: width; animate value: tween(900ms, "linear") }
+                  Row {
+                    fill: width
+                    Clock { s: pos }
+                    Spacer { weight: 1 }
+                    if dur > 0 {
+                      Clock { s: dur - pos; left: true }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // The click wheel.
+      Box {
+        fill: width
+        weight: 1
+        align: center
+        Box {
+          size: wheelD
+          ripple: false
+          onPress: {
+            let px = x - wheelR
+            let py = y - wheelR
+            let pr = sqrt(px * px + py * py)
+            vol = v.muted == true ? 0 : num(v.level, vol)
+            turn = 0
+            pressed = pr < centerR ? "center" : pr > wheelR ? "" : abs(py) > abs(px) ? (py < 0 ? "menu" : "play") : (px < 0 ? "prev" : "next")
+          }
+          onRelease: pressed = ""
+          onTap: {
+            let tx = x - wheelR
+            let ty = y - wheelR
+            let tr = sqrt(tx * tx + ty * ty)
+            pressed = ""
+            if tr <= wheelR {
+              haptic()
+              if tr < centerR {
+                media("toggle")
+              } else if abs(ty) > abs(tx) {
+                if ty < 0 { media("open") } else { media("toggle") }
+              } else {
+                if tx < 0 { media("previous") } else { media("next") }
+              }
+            }
+          }
+          // Turning: the finger's move across the radius is the angle turned. Clockwise is louder.
+          onDrag: {
+            let gx = x - wheelR
+            let gy = y - wheelR
+            let g2 = max(gx * gx + gy * gy, 1)
+            pressed = ""
+            turn = turn + deg((gx * dy - gy * dx) / g2)
+            if turn >= stepDeg {
+              turn = turn - stepDeg
+              vol = clamp(vol + volStep, 0, 100)
+              volume(round(vol))
+              haptic()
+              volUntil = now + 2
+            } else if turn <= 0 - stepDeg {
+              turn = turn + stepDeg
+              vol = clamp(vol - volStep, 0, 100)
+              volume(round(vol))
+              haptic()
+              volUntil = now + 2
+            }
+          }
+          onDragEnd: {
+            pressed = ""
+            volUntil = now + 2
+          }
+
+          Canvas {
+            let c = width / 2
+            let R = c - 1.5
+            let cr = centerR
+            let ink = #a3a6ad
+            let g = R * 0.69
+            let k = R * 0.075
+            // The wheel, lit from above.
+            circle(c, c + 1, R, fill: alpha(#000000, 0.18))
+            circle(c, c, R, fill: radial(c, c * 0.55, R * 1.5, [#ffffff, #eceef1, #d6d9de]))
+            if pressed == "menu" { arc(c, c, R, -45, 90, fill: alpha(#000000, 0.07)) }
+            if pressed == "next" { arc(c, c, R, 45, 90, fill: alpha(#000000, 0.07)) }
+            if pressed == "play" { arc(c, c, R, 135, 90, fill: alpha(#000000, 0.07)) }
+            if pressed == "prev" { arc(c, c, R, 225, 90, fill: alpha(#000000, 0.07)) }
+            circle(c, c, R, stroke: alpha(#000000, 0.1), width: 1)
+
+            text(str.menu, c, c - g, size: max(8, R * 0.15), bold: true, align: center, color: ink, letterSpacing: 0.5)
+            // ⏭ and ⏮: two triangles and a bar.
+            path([[c + g - k * 2, c - k], [c + g - k * 0.6, c], [c + g - k * 2, c + k]], closed: true, fill: ink)
+            path([[c + g - k * 0.8, c - k], [c + g + k * 0.6, c], [c + g - k * 0.8, c + k]], closed: true, fill: ink)
+            rect(c + g + k * 0.6, c - k, k * 0.35, k * 2, fill: ink)
+            path([[c - g + k * 2, c - k], [c - g + k * 0.6, c], [c - g + k * 2, c + k]], closed: true, fill: ink)
+            path([[c - g + k * 0.8, c - k], [c - g - k * 0.6, c], [c - g + k * 0.8, c + k]], closed: true, fill: ink)
+            rect(c - g - k * 0.95, c - k, k * 0.35, k * 2, fill: ink)
+            // ▶❚❚
+            path([[c - k * 1.7, c + g - k], [c - k * 0.2, c + g], [c - k * 1.7, c + g + k]], closed: true, fill: ink)
+            rect(c + k * 0.3, c + g - k, k * 0.45, k * 2, fill: ink)
+            rect(c + k * 1.1, c + g - k, k * 0.45, k * 2, fill: ink)
+
+            // The center button, a little sunk into the wheel.
+            circle(c, c, cr + 1.5, fill: alpha(#000000, 0.08))
+            circle(c, c, cr, fill: pressed == "center" ? linear(0, c - cr, 0, c + cr, [#d9dbe0, #eceef1]) : linear(0, c - cr, 0, c + cr, [#fdfdfe, #e1e3e8]))
+            circle(c, c, cr, stroke: alpha(#000000, 0.12), width: 1)
+          }
+        }
+      }
+    }
+  }
+}

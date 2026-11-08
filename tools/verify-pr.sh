@@ -65,9 +65,12 @@ for dir in $(echo "$folders" | tr ' ' '\n' | sort -u); do
   while read -r mode type _ path; do
     case "$path" in
       */$kind.owl|*/preview.png|*/README.md|*/previews/*.webp) ;;
-      # A face's other pages, and their pictures in each theme.
-      faces/*/page-[2-9].owl|faces/*/page-[1-9][0-9].owl|faces/*/screens/[0-9]*/*.webp) ;;
-      faces/*) fail "$path" "a face folder holds only face.owl, page-2.owl, page-3.owl, ..., preview.png, README.md, previews/<theme>.webp and screens/<page>/<theme>.webp"; continue ;;
+      # An app's or a face's other screens: what to draw, and their pictures in each theme.
+      apps/*/screens.txt|faces/*/screens.txt|apps/*/screens/[0-9]*/*.webp|faces/*/screens/[0-9]*/*.webp) ;;
+      # A face's other pages.
+      faces/*/page-[2-9].owl|faces/*/page-[1-9][0-9].owl) ;;
+      faces/*) fail "$path" "a face folder holds only face.owl, page-2.owl, page-3.owl, ..., preview.png, README.md, previews/<theme>.webp, screens.txt and screens/<n>/<theme>.webp"; continue ;;
+      apps/*) fail "$path" "an app folder holds only app.owl, preview.png, README.md, previews/<theme>.webp, screens.txt and screens/<n>/<theme>.webp"; continue ;;
       *) fail "$path" "a $kind folder holds only $kind.owl, preview.png, README.md and previews/<theme>.webp"; continue ;;
     esac
     # Symlinks and submodules would publish whatever they point at.

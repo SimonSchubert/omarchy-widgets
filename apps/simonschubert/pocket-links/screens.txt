@@ -1,2 +1,8 @@
 # The store's preview: hole 6, Pinball, one stroke in, with five holes on the card (scripts/store-previews.sh).
 mode = "play"; started = true; hole = 5; strokes = 1; cards = [2,3,2,4,2,0,0,0,0]; best = 31; bx = 62; by = 84; shot = null; rolling = false
+# Hole 8, Island Green: the first putt has stopped short of the water.
+mode = "play"; started = true; hole = 7; strokes = 1; cards = [2,3,2,4,2,3,4,0,0]; bx = 44; by = 76; shot = null; rolling = false
+# A birdie on hole 4, The Creek.
+mode = "holed"; hole = 3; strokes = 2; cards = [2,3,2,2,0,0,0,0,0]
+# The scorecard after the ninth: a new best round, three under.
+mode = "round"; hole = 8; strokes = 3; started = false; cards = [2,3,2,4,2,3,4,2,3]; best = 25

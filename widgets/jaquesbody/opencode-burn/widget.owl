@@ -15,7 +15,7 @@ widget "opencode-burn" {
   meta {
     owl: 10
     description: "Paces your OpenCode free-model request quota from opencode's own session database, flags 5-hour window bursts, and says which free model to switch to."
-    version: "1.5.0"
+    version: "1.5.1"
     license: "MIT"
     category: "dev"
   }
@@ -133,8 +133,8 @@ widget "opencode-burn" {
       'currentAt', (SELECT max(time_created) FROM $tbl
                   WHERE $where
                     AND $mid IS NOT NULL),
-      'models', (SELECT json_group_array(json_object(
-                   'm', mid, 'used', u, 'tok', t, 'r1h', r, 'r5h', w, 'slots', json(sl))) FROM per));"
+      'models', json((SELECT json_group_array(json_object(
+                   'm', mid, 'used', u, 'tok', t, 'r1h', r, 'r5h', w, 'slots', json(sl))) FROM per)));"
   """) every 60s json timeout 20s
 
   // ---- usage from other machines, if you ask for it --------------------

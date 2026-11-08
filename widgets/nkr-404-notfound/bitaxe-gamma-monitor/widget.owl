@@ -1,0 +1,143 @@
+widget "bitaxe gamma monitor" {
+  size: 6x3
+  minSize: 4x3
+  meta { description: "Monitor a Bitaxe Gamma miner's hashrate, temperature, fan speed, uptime and best difficulty over your local network"; version: "1.1"; license: "MIT"; category: "system"; owl: 16 }
+
+  strings {
+    en {
+      connecting: "Connecting…"
+      setAddress: "Tap to set address"
+      online: "● Online"
+      offline: "● Offline"
+      currentHashrate: "Current hashrate"
+      seconds30: "30 sec"
+      temperature: "Temperature"
+      fan: "Fan (%/RPM)"
+      uptime: "Uptime"
+      bestDifficulty: "Best difficulty"
+      minerAddress: "Miner address"
+      addressPlaceholder: "e.g. 192.168.3.222"
+      addressHelp: "Enter an IP address or hostname, then press Send to save. The widget refreshes every 3 seconds."
+      unableToRead: host => "Unable to read ${host}:"
+      checkDevice: "Check that the device is online and the address is correct"
+      refreshNow: "Refresh now"
+    }
+    zh {
+      connecting: "连接中…"
+      setAddress: "点击设置"
+      online: "● 在线"
+      offline: "● 离线"
+      currentHashrate: "当前算力"
+      seconds30: "30 秒"
+      temperature: "温度"
+      fan: "风扇（%/RPM）"
+      uptime: "累计启动"
+      bestDifficulty: "最佳难度"
+      minerAddress: "矿机地址"
+      addressPlaceholder: "例如 192.168.3.222"
+      addressHelp: "输入 IP 或主机名后按发送键保存。小组件每 3 秒刷新一次。"
+      unableToRead: host => "无法读取 ${host}："
+      checkDevice: "请确认设备在线且地址正确"
+      refreshNow: "立即刷新"
+    }
+  }
+
+  // The address is kept on the phone. Tap the tile to change it.
+  state host = "" persist
+  let configured = trim(host) != ""
+  // Bitaxe's axeOS exposes all of these readings at this local endpoint.
+  source miner = http(configured ? "http://${enc(trim(host))}/api/system/info" : null) every 3s json timeout 6s status
+
+  let data = miner.out
+  let online = configured && miner != null && miner.ok
+  let rate = data == null ? null : num(data.hashRate)
+  let temp = data == null ? null : num(data.temp)
+  let fanPct = data == null ? null : num(data.fanspeed)
+  let fanRpm = data == null ? null : num(data.fanrpm)
+  let uptime = data == null ? null : num(data.totalUptimeSeconds)
+  let best = data == null ? null : num(data.bestDiff)
+  let tempColor = temp == null ? muted : temp >= 75 ? red : temp >= 65 ? yellow : green
+  // The source updates every 3 seconds, so ten readings cover 30 seconds.
+  let rateHistory = history(rate, 10)
+  let tempHistory = history(temp, 10)
+
+  onTap: screen()
+
+  component Stat(label, value, tint = foreground, size = 14) {
+    Column {
+      gap: 1
+      weight: 1
+      Text { text: label; style: label; color: muted; maxLines: 1 }
+      Text { text: value; font: mono; fontSize: size; color: tint; maxLines: 1 }
+    }
+  }
+
+  Column {
+    gap: 5
+    Row {
+      align: center
+      Text { text: "BITAXE γ 601"; style: label; color: accent; weight: 1 }
+      Text { text: !configured ? str.setAddress : online ? str.online : miner == null ? str.connecting : str.offline; style: small; color: !configured || miner == null ? muted : online ? green : red }
+    }
+    Row {
+      align: bottom
+      Text { text: rate == null ? "—" : "${fixed(rate / 1000, 2)} TH/s"; fontSize: 30; fontWeight: 650; color: online ? foreground : muted; weight: 1; maxLines: 1 }
+      Text { text: str.currentHashrate; style: small; color: muted; align: end; width: 64 }
+    }
+    // Blue left axis: hash rate in TH/s. Orange right axis: temperature in °C.
+    Canvas {
+      height: 72
+      fill: width
+      let left = 42
+      let right = width - 42
+      let top = 8
+      let bottom = height - 15
+      let rateValues = rateHistory.filter(v => v != null).map(v => v / 1000)
+      let tempValues = tempHistory.filter(v => v != null)
+      let rateMin = floor((min(rateValues) ?? 0) * 10) / 10
+      let rateMax = ceil((max(rateValues) ?? 0) * 10) / 10
+      let tempMin = floor(min(tempValues) ?? 0)
+      let tempMax = ceil(max(tempValues) ?? 0)
+      let rateSpan = max(rateMax - rateMin, 0.1)
+      let tempSpan = max(tempMax - tempMin, 1)
+      let ratePoints = rateValues.map((v, i) => [left + i / max(len(rateValues) - 1, 1) * (right - left), bottom - (v - rateMin) / rateSpan * (bottom - top)])
+      let tempPoints = tempValues.map((v, i) => [left + i / max(len(tempValues) - 1, 1) * (right - left), bottom - (v - tempMin) / tempSpan * (bottom - top)])
+      for i in range(3) {
+        let y = top + i / 2 * (bottom - top)
+        line(left, y, right, y, stroke: alpha(muted, 0.25), width: 1)
+      }
+      line(left, top, left, bottom, stroke: alpha(accent, 0.55), width: 1)
+      line(right, top, right, bottom, stroke: alpha(orange, 0.55), width: 1)
+      if len(ratePoints) > 1 { path(ratePoints, stroke: accent, width: 2, cap: round) }
+      if len(tempPoints) > 1 { path(tempPoints, stroke: orange, width: 2, cap: round) }
+      if len(ratePoints) > 0 { circle(ratePoints[-1][0], ratePoints[-1][1], 2.5, fill: accent) }
+      if len(tempPoints) > 0 { circle(tempPoints[-1][0], tempPoints[-1][1], 2.5, fill: orange) }
+      text("${fixed(rateMax, 1)}T", left - 5, top + 4, size: 9, align: end, color: accent)
+      text("${fixed(rateMin, 1)}T", left - 5, bottom - 2, size: 9, align: end, color: accent)
+      text("${tempMax}°", right + 5, top + 4, size: 9, align: start, color: orange)
+      text("${tempMin}°", right + 5, bottom - 2, size: 9, align: start, color: orange)
+      text(str.seconds30, width / 2, height - 5, size: 9, align: center, color: muted)
+    }
+    Row {
+      gap: 14
+      Stat { label: str.temperature; value: temp == null ? "—" : "${fixed(temp, 1)} °C"; tint: tempColor }
+      Stat { label: str.fan; value: fanPct == null ? "—" : "${round(fanPct)}% / ${round(fanRpm)}"; tint: fanPct == null || fanPct == 0 ? muted : cyan; size: 12 }
+      Stat { label: str.uptime; value: uptime == null ? "—" : fmtDuration(uptime) }
+      Stat { label: str.bestDifficulty; value: best == null ? "—" : fmtNum(best, {compact: true}) }
+    }
+  }
+
+  screen {
+    title: "Bitaxe Gamma monitor"
+    Column {
+      gap: 14
+      Text { text: str.minerAddress; style: label; color: muted }
+      Input { text: host; placeholder: str.addressPlaceholder; focus: true; onSubmit: { host = trim(value); refresh(); close() } }
+      Text { text: str.addressHelp; style: small; color: muted }
+      if configured && miner != null && !online {
+        Text { text: "${str.unableToRead(host)} ${miner.err ?? str.checkDevice}"; color: red; style: small }
+      }
+      Button { text: str.refreshNow; onTap: refresh() }
+    }
+  }
+}
