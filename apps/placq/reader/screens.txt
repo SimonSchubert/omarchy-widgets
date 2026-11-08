@@ -3,3 +3,4 @@ wait = 0
 pane = "library"; tab = "local"
 tab = "catalogs"
 pane = "settings"; preferredTheme = "night"; folderText = "~/Books"
+pane = "stats"

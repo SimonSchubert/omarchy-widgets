@@ -3,7 +3,28 @@
 A quiet EPUB, MOBI and TXT reader with a local library, saved reading progress,
 adjustable typography, paper/sepia/night themes and public OPDS 1/2 catalogs.
 
-Version 2.0 is an app, opened from the app drawer, instead of a home-screen face.
+## New in 3.0
+
+- **Bookmarks, quotes and notes.** Hold a word to select it, *Extend* to a
+  longer passage, then save it as a quote with an optional note. Quotes can be
+  edited, deleted, jumped to and exported to Markdown.
+- **Offline dictionary and translation.** An optional WordNet dictionary
+  (downloaded once, checksummed, verified) looks words up without a network;
+  *Google Translate* opens the selection in the browser in a chosen language.
+- **Search in the book**, a chapter list, a progress screen with a page slider,
+  and time left in the book from your own measured reading pace.
+- **Reading stats.** Minutes read today against a daily goal, current and best
+  streak, the last 14 days as a chart, all-time totals and the most-read books,
+  all derived from the saved page history, so earlier reading counts too.
+- **Durable progress.** Positions, bookmarks and quotes live in a SQLite journal
+  with full synchronisation; backups can be created and restored in Settings.
+- **Private OPDS catalogs.** Sign-in happens in a terminal with a hidden password
+  prompt; credentials are encrypted locally (`python-cryptography`).
+- Background downloads with progress and cancel, typography preview, sans or
+  serif text, justified alignment and paragraph spacing.
+
+Updating from 2.0 keeps the library, positions and settings: 3.0 uses the same
+`-store` folders and migrates them on first start.
 
 Tap the page's right half to advance, its left half to go back. The gear opens
 Settings; the book button opens Library. The library scans files directly in
@@ -16,7 +37,10 @@ catalogs can be added. Authentication and DRM are not supported.
 
 `app.owl` includes the Python reader and its separate KindleUnpack process as
 an **offline source bundle**: base64-encoded, XZ-compressed JSON mapping relative
-filenames to complete UTF-8 source/notice text. It includes no bytecode, private
+filenames to complete UTF-8 source/notice text. The launcher passes each command
+to the shell as one argument, which Linux caps at 128 KiB, so the bundle is split
+into two literals, `readerBundle` and `readerBundleRest`, installed by two runs
+of the same bootstrap. It includes no bytecode, private
 settings, books, tokens, or downloaded executable code. Encoding is packaging,
 not encryption; the full source can be recovered using the instructions below.
 
@@ -26,23 +50,28 @@ literals in this reviewed app, not server responses or user inputs. This is
 necessary because store folders cannot contain companion Python files. No
 network access is used to install the helper code, and no root access is needed.
 
-The bootstrap bounds decompression, checks the bundle's SHA-256, rejects unsafe
-relative paths, installs atomically under
-`~/.local/share/owl-reader-store/<source-sha256>/`, and verifies installed sources
-before initialization. Reader state and caches live separately under
+The bootstrap stores the first half until the second arrives, bounds
+decompression, checks the bundle's SHA-256, rejects unsafe relative paths,
+installs atomically under `~/.local/share/owl-reader-store/<source-sha256>/`, and
+on every start verifies each installed source against a manifest whose own
+SHA-256 is fixed in the bootstrap. Reader state and caches live separately under
 `~/.local/state/owl-reader-store/` and `~/.cache/owl-reader-store/`. These locations
 are separate from a manually installed Reader, so installing this app does not
 overwrite its helpers, settings, or reading progress. Removing the app does not
 delete books; generated source/state/cache directories can be removed manually.
 
-Every external runtime package is declared in `requires`; the compressed bundle
-uses only Python's standard library. Package installation uses the launcher's
+Every external runtime package is declared in `requires`; the bootstrap uses
+only Python's standard library. Package installation uses the launcher's
 normal approval flow. Fonts come from `ttf-dejavu`.
 
 ## Reading and file/network behavior
 
 - Reads EPUB/TXT/MOBI books from the selected folder. Defaults to `~/Books`.
 - Stores settings, reading offsets, book statuses and page/text/metadata caches.
+- Downloads the optional WordNet dictionary only when asked, from
+  `raw.githubusercontent.com/nltk/nltk_data` (data, not code), and checks it.
+- Opens Google Translate in the browser only when *Google Translate* is tapped;
+  the selected text is then part of that URL. Offline lookup sends nothing.
 - Contacts public or user-selected OPDS servers only for catalog operations and
   book downloads. OPDS feeds may refer to additional hosts; HTTP and HTTPS are
   supported by the helper. Default catalog endpoints are visible in the sources.
@@ -53,8 +82,10 @@ normal approval flow. Fonts come from `ttf-dejavu`.
   descriptor and wall-time limits. Temporary extraction directories are cleaned.
 - No DRM removal. No PDF, KFX, Topaz, book images, original CSS or image-only
   books. Text is reflowed into plain paragraphs. Input books are limited to 40 MB.
-- Progress is coalesced after approximately one second; abrupt termination may
-  lose the latest second of progress. Reflow preserves text position.
+- Every page turn is committed to the SQLite journal in order; an abrupt kill can
+  lose at most the turn being saved. Reflow preserves the exact text position.
+- Backups (Settings → Files) are checksummed JSON files of positions, notes,
+  quotes and settings; they exclude books, keys and passwords.
 
 ## Licenses and provenance
 
@@ -91,7 +122,7 @@ def literal(name):
                 if line.startswith('  let ' + name + ' = '))
     return json.loads(line.split(' = ', 1)[1])
 bootstrap = literal('readerBootstrap')
-payload = literal('readerBundle')
+payload = literal('readerBundle') + literal('readerBundleRest')
 decoder = lzma.LZMADecompressor(memlimit=64*1024*1024)
 raw = decoder.decompress(base64.b64decode(payload, validate=True),
                          max_length=2*1024*1024)
@@ -104,8 +135,10 @@ PY
 
 ## Validation
 
-The packaged sources pass the existing 31 Reader tests, including MOBI fixtures.
-Fresh installation and repeat initialization were tested with an isolated HOME.
+The packaged sources pass the Reader's 175 tests, including MOBI fixtures,
+dictionary, backup, credential, pace and statistics tests. Fresh installation,
+repeat start, a modified installed file, and an update from 2.0's state (library,
+position and settings kept) were tested with an isolated HOME and in the launcher.
 The app is checked with `owl-check` and the store's
 `java -jar tools/owl.jar review . apps/placq/reader/app.owl`.
 
