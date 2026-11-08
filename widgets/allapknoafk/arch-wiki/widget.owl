@@ -1,0 +1,136 @@
+widget "arch wiki" {
+  meta { owl: 11; description: "the arch wiki, offline: browse by topic or search the local copy. pages are served from 127.0.0.1 only, so nothing leaves the phone."; version: "1.2"; license: "MIT"; category: "system" }
+  size: 6x3
+  minSize: 3x3
+  padding: 8
+
+  requires { pacman: ["arch-wiki-docs", "python"] }
+
+  let port = 8480
+  let base = "http://127.0.0.1:8480"
+
+  // Starts the local server if nothing answers on the port; says "up" or "down".
+  // The local server is only started or contacted by a tap: a link sets `pending` and asks for a check,
+  // and the link opens once the check says the server is up.
+  state nonce = 0
+  state pending = ""
+  state srv = ""
+  on srv { if pending != "" && startsWith(srv, "up") { url(pending); pending = "" } }
+  on nonce { srv = run("(exec 3<>/dev/tcp/127.0.0.1/8480) 2>/dev/null || { setsid nohup python3 -m http.server 8480 --bind 127.0.0.1 --directory /usr/share/doc/arch-wiki/html >/dev/null 2>&1 </dev/null & sleep 0.7; }; (exec 3<>/dev/tcp/127.0.0.1/8480) 2>/dev/null && echo up $RANDOM || echo down") }
+
+  // Typing happens in the full-screen view: a text field on a home tile fights the keyboard.
+  state q = ""
+  state recent = [] persist
+  let query = trim(q)
+
+  // Page names matching every typed word, shortest first ("Pacman/Tips_and_tricks" for a subpage); filtered in the shell, since a list in here tops out at 1000 items.
+  source found = cmd("q=${sh(query)}; [ -z \"$q\" ] && exit 0; cd /usr/share/doc/arch-wiki/html/en && find . -name '*.html' | sed 's|^\\./||; s|\\.html$||' | grep -v -E '^[0-9a-f]{32}$' | awk -v q=\"$q\" 'BEGIN { n = split(tolower(q), w, \" \") } { l = tolower($0); gsub(/_/, \" \", l); for (i = 1; i <= n; i++) if (index(l, w[i]) == 0) next; print length($0), $0 }' | sort -n | cut -d' ' -f2- | head -12") every 100000h
+  source total = cmd("cd /usr/share/doc/arch-wiki/html/en && find . -name '*.html' | grep -v -E '/[0-9a-f]{32}[.]html$' | wc -l") every 100000h
+  source snap = cmd("pacman -Q arch-wiki-docs | awk '{ d = $2; print substr(d, 1, 4) \"-\" substr(d, 5, 2) \"-\" substr(d, 7, 2) }'") every 100000h
+  let hits = lines(found ?? "")
+  let up = startsWith(srv, "up")
+
+  let topics = [
+    {h: "start", p: ["Installation_guide", "General_recommendations", "Main_page"]},
+    {h: "packages", p: ["Pacman", "Pacman/Tips_and_tricks", "Makepkg", "AUR_helpers", "PKGBUILD"]},
+    {h: "system", p: ["Systemd", "Systemd/Timers", "Fstab", "Users_and_groups", "Mkinitcpio", "Kernel_parameters"]},
+    {h: "network", p: ["NetworkManager", "OpenSSH", "WireGuard", "Nftables"]},
+    {h: "shell", p: ["Bash", "Zsh", "Tmux", "Vim", "Git"]}
+  ]
+  let sections = len(recent) > 0 ? flatten([[{h: "recent", p: recent}], topics]) : topics
+
+  onTap: { nonce = nonce + 1; screen() }
+
+  Column {
+    gap: 5
+    Row {
+      align: center
+      Text { text: "arch wiki"; font: mono; fontSize: 12; color: accent }
+      Spacer { weight: 1 }
+      Text { text: up ? "● 127.0.0.1:${port} · ${total ?? "…"} pages · ${snap ?? "…"}" : "○ server off · tap to start"; font: mono; fontSize: 9; color: up ? green : red; onTap: nonce = nonce + 1 }
+    }
+    Row {
+      align: center
+      gap: 6
+      padding: [8, 6]
+      border: 1
+      borderColor: alpha(accent, 0.35)
+      radius: 6 * corners
+      onTap: { nonce = nonce + 1; screen() }
+      Text { text: "⌕"; font: mono; fontSize: 12; color: accent }
+      Text { text: "search the wiki …"; font: mono; fontSize: 12; color: alpha(muted, 0.8); weight: 1 }
+    }
+    Column {
+      weight: 1
+      gap: 4
+      scroll: true
+      for s in sections key s.h {
+        Text { text: "— ${s.h}"; font: mono; fontSize: 9; color: s.h == "recent" ? accent : mix(yellow, foreground, 0.1) }
+        Row {
+          wrap: true
+          gap: 5
+          for p in s.p key p {
+            Text {
+              text: replace(replace(p, "_", " "), "/", " › "); font: mono; fontSize: 10; maxLines: 1
+              color: s.h == "recent" ? accent : muted
+              padding: [8, 4]
+              background: alpha(s.h == "recent" ? accent : muted, 0.12)
+              border: 1
+              borderColor: alpha(s.h == "recent" ? accent : muted, 0.4)
+              radius: 6 * corners
+              onTap: { pending = "${base}/en/${p}.html"; nonce = nonce + 1; recent = take(unique(flatten([[p], recent])), 6) }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "arch wiki"
+    Column {
+      gap: 8
+      padding: 12
+      Row {
+        align: center
+        gap: 8
+        padding: [10, 4]
+        border: 1
+        borderColor: alpha(accent, 0.35)
+        radius: 6 * corners
+        Text { text: "⌕"; font: mono; fontSize: 14; color: accent }
+        Input {
+          weight: 1
+          focus: true
+          underline: false
+          fontSize: 14
+          placeholder: "search ${total ?? "…"} pages"
+          onChange: q = value
+          onSubmit: { if len(hits) > 0 { pending = "${base}/en/${hits[0]}.html"; nonce = nonce + 1; recent = take(unique(flatten([[hits[0]], recent])), 6) } }
+        }
+      }
+      Column {
+        weight: 1
+        gap: 6
+        scroll: true
+        if query == "" {
+          Text { text: "— recent"; font: mono; fontSize: 9; color: accent }
+          for r in recent key r {
+            Text { text: replace(replace(r, "_", " "), "/", " › "); font: mono; fontSize: 12; onTap: { pending = "${base}/en/${r}.html"; nonce = nonce + 1 } }
+          }
+          if len(recent) == 0 { Text { text: "type to search; enter opens the first match"; font: mono; fontSize: 10; color: muted } }
+        } else {
+          for h in hits key h {
+            Column {
+              gap: 0
+              onTap: { pending = "${base}/en/${h}.html"; nonce = nonce + 1; recent = take(unique(flatten([[h], recent])), 6) }
+              Text { text: replace(replace(h, "_", " "), "/", " › "); font: mono; fontSize: 12; maxLines: 1 }
+              Text { text: contains(h, "/") ? "subpage of ${replace(split(h, "/")[0], "_", " ")}" : "page"; font: mono; fontSize: 9; color: muted }
+            }
+          }
+          if len(hits) == 0 { Text { text: "— nothing for '${query}'"; font: mono; fontSize: 10; color: mix(yellow, foreground, 0.1) } }
+        }
+      }
+    }
+  }
+}
