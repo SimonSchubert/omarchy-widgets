@@ -1,14 +1,52 @@
 widget "bitaxe gamma monitor" {
   size: 6x3
   minSize: 4x3
-  meta { description: "Monitor a Bitaxe Gamma miner's hashrate, temperature, fan speed, uptime and best difficulty over your local network"; version: "1.1"; license: "MIT"; category: "system"; owl: 10 }
+  meta { description: "Monitor a Bitaxe Gamma miner's hashrate, temperature, fan speed, uptime and best difficulty over your local network"; version: "1.1"; license: "MIT"; category: "system"; owl: 16 }
 
-  requires { pacman: ["curl"] }
+  strings {
+    en {
+      connecting: "Connecting…"
+      setAddress: "Tap to set address"
+      online: "● Online"
+      offline: "● Offline"
+      currentHashrate: "Current hashrate"
+      seconds30: "30 sec"
+      temperature: "Temperature"
+      fan: "Fan (%/RPM)"
+      uptime: "Uptime"
+      bestDifficulty: "Best difficulty"
+      minerAddress: "Miner address"
+      addressPlaceholder: "e.g. 192.168.3.222"
+      addressHelp: "Enter an IP address or hostname, then press Send to save. The widget refreshes every 3 seconds."
+      unableToRead: host => "Unable to read ${host}:"
+      checkDevice: "Check that the device is online and the address is correct"
+      refreshNow: "Refresh now"
+    }
+    zh {
+      connecting: "连接中…"
+      setAddress: "点击设置"
+      online: "● 在线"
+      offline: "● 离线"
+      currentHashrate: "当前算力"
+      seconds30: "30 秒"
+      temperature: "温度"
+      fan: "风扇（%/RPM）"
+      uptime: "累计启动"
+      bestDifficulty: "最佳难度"
+      minerAddress: "矿机地址"
+      addressPlaceholder: "例如 192.168.3.222"
+      addressHelp: "输入 IP 或主机名后按发送键保存。小组件每 3 秒刷新一次。"
+      unableToRead: host => "无法读取 ${host}："
+      checkDevice: "请确认设备在线且地址正确"
+      refreshNow: "立即刷新"
+    }
+  }
 
-  // Tap the tile to enter this Bitaxe's IP address or local host name.
+  // The address is kept on the phone. Tap the tile to change it.
   state host = "" persist
   let configured = trim(host) != ""
-  source miner = cmd(configured ? "curl -fsS --connect-timeout 2 --max-time 4 http://${sh(host)}/api/system/info" : "printf '{}'") every 3s json timeout 6s status
+  // Bitaxe's axeOS exposes all of these readings at this local endpoint.
+  source miner = http(configured ? "http://${enc(trim(host))}/api/system/info" : null) every 3s json timeout 6s status
 
   let data = miner.out
   let online = configured && miner != null && miner.ok
@@ -38,13 +76,13 @@ widget "bitaxe gamma monitor" {
     gap: 5
     Row {
       align: center
-      Text { text: "BITAXE γ"; style: label; color: accent; weight: 1 }
-      Text { text: !configured ? "点击设置" : online ? "● 在线" : miner == null ? "连接中…" : "● 离线"; style: small; color: !configured || miner == null ? muted : online ? green : red }
+      Text { text: "BITAXE γ 601"; style: label; color: accent; weight: 1 }
+      Text { text: !configured ? str.setAddress : online ? str.online : miner == null ? str.connecting : str.offline; style: small; color: !configured || miner == null ? muted : online ? green : red }
     }
     Row {
       align: bottom
       Text { text: rate == null ? "—" : "${fixed(rate / 1000, 2)} TH/s"; fontSize: 30; fontWeight: 650; color: online ? foreground : muted; weight: 1; maxLines: 1 }
-      Text { text: "当前算力"; style: small; color: muted; align: end; width: 64 }
+      Text { text: str.currentHashrate; style: small; color: muted; align: end; width: 64 }
     }
     // Blue left axis: hash rate in TH/s. Orange right axis: temperature in °C.
     Canvas {
@@ -78,14 +116,14 @@ widget "bitaxe gamma monitor" {
       text("${fixed(rateMin, 1)}T", left - 5, bottom - 2, size: 9, align: end, color: accent)
       text("${tempMax}°", right + 5, top + 4, size: 9, align: start, color: orange)
       text("${tempMin}°", right + 5, bottom - 2, size: 9, align: start, color: orange)
-      text("30 秒", width / 2, height - 5, size: 9, align: center, color: muted)
+      text(str.seconds30, width / 2, height - 5, size: 9, align: center, color: muted)
     }
     Row {
       gap: 14
-      Stat { label: "温度"; value: temp == null ? "—" : "${fixed(temp, 1)} °C"; tint: tempColor }
-      Stat { label: "风扇（%/RPM）"; value: fanPct == null ? "—" : "${round(fanPct)}% / ${round(fanRpm)}"; tint: fanPct == null || fanPct == 0 ? muted : cyan; size: 12 }
-      Stat { label: "累计启动"; value: uptime == null ? "—" : fmtDuration(uptime) }
-      Stat { label: "最佳难度"; value: best == null ? "—" : fmtNum(best, {compact: true}) }
+      Stat { label: str.temperature; value: temp == null ? "—" : "${fixed(temp, 1)} °C"; tint: tempColor }
+      Stat { label: str.fan; value: fanPct == null ? "—" : "${round(fanPct)}% / ${round(fanRpm)}"; tint: fanPct == null || fanPct == 0 ? muted : cyan; size: 12 }
+      Stat { label: str.uptime; value: uptime == null ? "—" : fmtDuration(uptime) }
+      Stat { label: str.bestDifficulty; value: best == null ? "—" : fmtNum(best, {compact: true}) }
     }
   }
 
@@ -93,13 +131,13 @@ widget "bitaxe gamma monitor" {
     title: "Bitaxe Gamma monitor"
     Column {
       gap: 14
-      Text { text: "矿机地址"; style: label; color: muted }
-      Input { text: host; placeholder: "例如 192.168.1.100"; focus: true; onSubmit: { host = trim(value); refresh(); close() } }
-      Text { text: "输入 Bitaxe 的 IP 或局域网主机名后按发送键保存。每 3 秒刷新一次。"; style: small; color: muted }
+      Text { text: str.minerAddress; style: label; color: muted }
+      Input { text: host; placeholder: str.addressPlaceholder; focus: true; onSubmit: { host = trim(value); refresh(); close() } }
+      Text { text: str.addressHelp; style: small; color: muted }
       if configured && miner != null && !online {
-        Text { text: "无法读取 ${host}：${miner.err ?? "请确认设备在线且地址正确"}"; color: red; style: small }
+        Text { text: "${str.unableToRead(host)} ${miner.err ?? str.checkDevice}"; color: red; style: small }
       }
-      Button { text: "立即刷新"; onTap: refresh() }
+      Button { text: str.refreshNow; onTap: refresh() }
     }
   }
 }
