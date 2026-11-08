@@ -1,0 +1,238 @@
+widget "vault" {
+  meta { owl: 12; description: "a password vault built on pass and gnupg: entries are encrypted files, one master passphrase unlocks them for 15 minutes, and a tap copies one and wipes the clipboard after 30 seconds."; version: "1.0"; license: "MIT"; category: "system" }
+  size: 6x3
+  minSize: 3x2
+  padding: 8
+
+  requires { pacman: ["pass", "gnupg", "pinentry"] }
+
+  // The store exists once setup has made the key and run pass init; read again the moment that file appears.
+  source gpgid = file("~/.password-store/.gpg-id")
+  // Entry names are the file names in the store (the passwords inside are encrypted).
+  source names = cmd(": ${int(nonce)}; cd ~/.password-store 2>/dev/null && find . -name '*.gpg' | sed 's|^\\./||; s|\\.gpg$||' | sort") every 100000h
+  // on while gpg-agent holds the master passphrase.
+  // gpg-agent is only contacted by a tap: "on" or "off" is what the last tap or unlock found, "" before any.
+  state unlocked = ""
+  // The unlock terminal writes what it found here.
+  source unlockFile = file("~/.cache/vault/unlocked")
+  on unlockFile { if trim(unlockFile ?? "") != "" { unlocked = trim(unlockFile) } }
+
+  // The two terminals: setup makes a GnuPG key guarded by the master passphrase and points pass at it;
+  // unlock asks for the passphrase once, and gpg-agent then remembers it (15 minutes, an hour at most).
+  let setupCmd = "export GPG_TTY=$(tty); gpg -k >/dev/null 2>&1; mkdir -p ~/.cache/vault; c=~/.gnupg/gpg-agent.conf; grep -q '^pinentry-program' $c 2>/dev/null || printf 'pinentry-program /usr/bin/pinentry-curses\\ndefault-cache-ttl 900\\nmax-cache-ttl 3600\\n' >> $c; gpgconf --kill gpg-agent; gpg --list-secret-keys phone-vault >/dev/null 2>&1 || { echo 'choose a master passphrase for the vault. it cannot be recovered if you forget it.'; echo; gpg --quick-generate-key phone-vault default default never || exit 1; }; [ -f ~/.password-store/.gpg-id ] || pass init phone-vault; echo; echo 'vault ready. back up ~/.gnupg and ~/.password-store somewhere safe.'; sleep 4"
+  let unlockCmd = "export GPG_TTY=$(tty); mkdir -p ~/.cache/vault; if echo vault | gpg -q -e -r phone-vault | gpg -q -d >/dev/null; then echo unlocked; echo on > ~/.cache/vault/unlocked; else echo 'not unlocked'; echo off > ~/.cache/vault/unlocked; fi; sleep 1"
+  let lockCmd = "gpgconf --kill gpg-agent; mkdir -p ~/.cache/vault; echo off > ~/.cache/vault/unlocked; echo $RANDOM"
+
+  // Typed in the full-screen view; the password is wiped as soon as it is saved.
+  // Sources only run on page entry and when something changes here (nonce), not on a timer.
+  state nonce = 0
+  state act = null
+  on act { nonce = nonce + 1 }
+  state nm = ""
+  state pw = ""
+  state got = null
+  state clearAt = 0
+  state flashEnd = 0
+  state flash = false
+  state copiedName = ""
+  state delArm = ""
+
+  let setup = trim(gpgid ?? "") == ""
+  let open = unlocked == "on"
+  let known = unlocked != ""
+  let all = lines(names ?? "")
+  let entries = map(all, n => {full: n, folder: contains(n, "/") ? split(n, "/")[0] : "misc", leaf: contains(n, "/") ? join(drop(split(n, "/"), 1), "/") : n})
+  let folders = sort(unique(map(entries, e => e.folder)))
+  let flashed = flash
+  let q = lower(trim(nm))
+  let shown = q == "" ? entries : filter(entries, e => contains(lower(e.full), q))
+
+  // A tap fetches the time and then the first line of the entry; the line is copied the moment it arrives and cleared from here at once.
+  // The time comes from the command, so no clock source ticks (and redraws the tile) every second.
+  on got {
+    if value != null && len(lines(value)) > 1 && lines(value)[1] != "" {
+      copy(lines(value)[1]); flash = true
+      flashEnd = num(lines(value)[0], 0) + 2
+      clearAt = num(lines(value)[0], 0) + 30
+    }
+    // Nothing came back: the vault is locked, so ask for the passphrase.
+    if value != null {
+      if len(lines(value)) > 1 && lines(value)[1] != "" { unlocked = "on" } else { unlocked = "off"; terminal(unlockCmd, "unlock vault") }
+    }
+    got = null
+  }
+  at flashEnd { flash = false; flashEnd = 0 }
+  // Best effort: overwrite whatever is on the clipboard after 30 seconds.
+  at clearAt { copy(" "); clearAt = 0 }
+
+  screen {
+    title: "vault"
+    Column {
+      gap: 8
+      padding: 12
+      Row {
+        align: center
+        gap: 8
+        padding: [10, 4]
+        border: 1
+        borderColor: alpha(accent, 0.35)
+        radius: 6 * corners
+        Text { text: "⌕"; font: mono; fontSize: 14; color: accent }
+        Input {
+          weight: 1
+          focus: true
+          underline: false
+          fontSize: 14
+          text: nm
+          placeholder: "name, e.g. web/github"
+          onChange: nm = value
+        }
+      }
+      Row {
+        align: center
+        gap: 8
+        padding: [10, 4]
+        border: 1
+        borderColor: alpha(muted, 0.35)
+        radius: 6 * corners
+        Text { text: "🔑"; font: mono; fontSize: 12 }
+        Input {
+          weight: 1
+          underline: false
+          fontSize: 14
+          password: true
+          clear: true
+          placeholder: "password, blank = make one"
+          onChange: pw = value
+          onSubmit: {
+            if trim(nm) != "" {
+              if value == "" { act = run("pass generate -n ${sh(trim(nm))} 24 >/dev/null; echo $RANDOM") } else { act = run("printf %s ${sh(value)} | pass insert -m -f ${sh(trim(nm))}; echo $RANDOM") }
+              pw = ""
+              nm = ""
+            }
+          }
+        }
+        Text {
+          text: pw == "" ? "make" : "save"
+          font: mono; fontSize: 11; color: trim(nm) == "" ? muted : accent; padding: [8, 6]
+          onTap: {
+            if trim(nm) != "" {
+              if pw == "" { act = run("pass generate -n ${sh(trim(nm))} 24 >/dev/null; echo $RANDOM") } else { act = run("printf %s ${sh(pw)} | pass insert -m -f ${sh(trim(nm))}; echo $RANDOM") }
+              pw = ""
+              nm = ""
+              haptic()
+            }
+          }
+        }
+      }
+      Text {
+        text: setup ? "— not set up yet" : (open ? "● unlocked: tap an entry to copy it" : "○ tap an entry to copy it, or unlock first")
+        font: mono; fontSize: 9; color: setup ? mix(yellow, foreground, 0.1) : (open ? green : muted)
+      }
+      Column {
+        weight: 1
+        gap: 8
+        scroll: true
+        for e in shown key e.full {
+          Row {
+            gap: 6
+            align: center
+            Column {
+              weight: 1
+              gap: 0
+              onTap: {
+                copiedName = e.full; got = run("date +%s; pass show ${sh(e.full)} 2>/dev/null | head -n 1")
+              }
+              Text { text: e.leaf; font: mono; fontSize: 13; color: flashed && copiedName == e.full ? green : foreground; maxLines: 1 }
+              Text { text: flashed && copiedName == e.full ? "✓ copied, wipes in 30s" : e.folder; font: mono; fontSize: 9; color: flashed && copiedName == e.full ? green : muted }
+            }
+            Text {
+              text: delArm == e.full ? "remove?" : "✕"
+              font: mono; fontSize: 12; color: delArm == e.full ? red : muted; padding: [10, 8]
+              onTap: { if delArm == e.full { act = run("pass rm -f ${sh(e.full)}; echo $RANDOM"); delArm = "" } else { delArm = e.full } }
+            }
+          }
+        }
+        if len(all) == 0 && !setup { Text { text: "no entries yet. type a name above, a password (or leave it blank to make a 24-character one), then save."; font: mono; fontSize: 10; color: muted } }
+        Row {
+          gap: 12
+          padding: [10, 0]
+          Text { text: open ? "lock now" : "unlock"; font: mono; fontSize: 11; color: accent; onTap: { if open { unlocked = "off"; act = run(lockCmd) } else { terminal(unlockCmd, "unlock vault") } } }
+          Text { text: "back up: ~/.gnupg + ~/.password-store"; font: mono; fontSize: 9; color: muted }
+        }
+      }
+    }
+  }
+
+  Column {
+    gap: 5
+    Row {
+      align: center
+      Text { text: "vault"; font: mono; fontSize: 12; color: accent }
+      Spacer { weight: 1 }
+      Text {
+        text: setup ? "○ not set up" : (flashed ? "✓ copied · wipes in 30s" : (open ? "● unlocked · tap to lock" : "○ locked · tap to unlock"))
+        font: mono; fontSize: 9; color: setup ? alpha(muted, 0.8) : (flashed ? green : (open ? green : alpha(muted, 0.8)))
+        onTap: {
+          if !setup {
+            if open { unlocked = "off"; act = run(lockCmd); haptic() } else { terminal(unlockCmd, "unlock vault") }
+          }
+        }
+      }
+    }
+    if setup {
+      Column {
+        gap: 6
+        weight: 1
+        padding: [10, 8]
+        border: 1
+        borderColor: alpha(yellow, 0.4)
+        radius: 6 * corners
+        onTap: terminal(setupCmd, "vault setup")
+        Text { text: "— first time"; font: mono; fontSize: 9; color: mix(yellow, foreground, 0.1) }
+        Text { text: "tap to create the vault"; font: mono; fontSize: 12; color: accent }
+        Text { text: "you'll choose a master passphrase in a terminal. It can't be recovered, so write it down somewhere safe."; font: mono; fontSize: 9; color: muted }
+      }
+    } else {
+      Row {
+        align: center
+        gap: 6
+        padding: [8, 6]
+        border: 1
+        borderColor: alpha(accent, 0.35)
+        radius: 6 * corners
+        onTap: screen()
+        Text { text: "+"; font: mono; fontSize: 12; color: accent }
+        Text { text: "search or add an entry …"; font: mono; fontSize: 12; color: alpha(muted, 0.8); weight: 1 }
+      }
+      Column {
+        weight: 1
+        gap: 4
+        scroll: true
+        for f in folders key f {
+          Text { text: "— ${f}"; font: mono; fontSize: 9; color: mix(yellow, foreground, 0.1) }
+          Row {
+            wrap: true
+            gap: 5
+            for e in filter(entries, x => x.folder == f) key e.full {
+              Text {
+                text: e.leaf; font: mono; fontSize: 10; maxLines: 1
+                color: flashed && copiedName == e.full ? green : (open ? foreground : muted)
+                padding: [8, 4]
+                background: alpha(flashed && copiedName == e.full ? green : (open ? accent : muted), 0.12)
+                border: 1
+                borderColor: alpha(flashed && copiedName == e.full ? green : (open ? accent : muted), 0.4)
+                radius: 6 * corners
+                onTap: {
+                  haptic()
+                  copiedName = e.full; got = run("date +%s; pass show ${sh(e.full)} 2>/dev/null | head -n 1")
+                }
+              }
+            }
+          }
+        }
+        if len(all) == 0 { Text { text: "— empty. tap the bar to add your first entry."; font: mono; fontSize: 9; color: mix(yellow, foreground, 0.1) } }
+      }
+    }
+  }
+}
