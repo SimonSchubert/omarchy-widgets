@@ -1,5 +1,5 @@
 widget "fortune" {
-  meta { owl: 11; description: "a terminal one-liner of the day beside a rotating text-art logo; tap for another. fully offline, with no commands or packages."; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { owl: 11; description: "A terminal one-liner of the day with a rotating text-art logo. Tap for another."; version: "1.1"; license: "MIT"; category: "fun" }
   size: 3x2
   minSize: 3x2
 
