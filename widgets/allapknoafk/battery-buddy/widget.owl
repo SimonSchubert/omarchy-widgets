@@ -1,5 +1,5 @@
 widget "battery buddy" {
-  meta { owl: 11; description: "A lightweight battery buddy: its water level is your charge, its face its mood. It only redraws when the battery changes. Shows %, temperature, voltage and health."; version: "1.1"; license: "MIT"; category: "system" }
+  meta { owl: 11; description: "An expressive lightweight battery buddy. It only redraws when the battery changes. Shows %, temperature, voltage and health."; version: "1.1"; license: "MIT"; category: "system" }
   size: 3x2
   minSize: 3x2
 
