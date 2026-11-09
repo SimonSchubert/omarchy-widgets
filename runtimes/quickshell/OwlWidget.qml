@@ -233,7 +233,7 @@ Item {
     },
     act: function(name, args) { root.act(name, args) },
     runInto: function(command, slot) { root.runInto(command, slot) },
-    post: function(url, body, headers, slot, method) { root.post(url, body, headers, slot, method) },
+    post: function(url, body, headers, slot, method, pin) { root.post(url, body, headers, slot, method, pin) },
     report: function(message) { root.report(message) },
     changed: function() { root.changed() }
   })
@@ -599,7 +599,7 @@ Item {
   // its text, with method: PUT, PATCH or DELETE (owl 12) instead of POST. With a
   // slot, the answer lands there as {code, ok, out}; a 2xx refreshes the widget's
   // sources, since what it changed shows in them.
-  function post(url, body, headers, slot, method) {
+  function post(url, body, headers, slot, method, pin) {
     var json = Array.isArray(body) || body instanceof Map
     var where = url.replace(/\?.*/, "?…")
     var typed = false
@@ -615,7 +615,7 @@ Item {
         root.instance.setState(slot, new Map([["code", code], ["ok", ok], ["out", out]]))
       }
       if (ok) root.refresh()
-    })
+    }, pin)
   }
 
   // HTTP goes through curl, not XMLHttpRequest: that reads an answer whole into
@@ -637,7 +637,11 @@ Item {
     return '"' + String(s).replace(/[\\"]/g, "\\$&").replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t") + '"'
   }
 
-  function http(method, url, headers, body, seconds, done) {
+  function http(method, url, headers, body, seconds, done, pin) {
+    // pin: names the one certificate a server may show. curl can only pin a
+    // public key, so this runtime cannot make that check, and a request that
+    // asked for it (its secrets included) is not sent without it.
+    if (pin !== null && pin !== undefined) return done(0, "", "pin: can't be checked on this shell, request not sent")
     var from = root.origin(url)
     var deadline = Date.now() + seconds * 1000
     var hop = function(target, method, body, redirects) {

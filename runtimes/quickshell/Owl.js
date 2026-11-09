@@ -6147,6 +6147,11 @@ Instance.prototype = {
           if (!g.headers) return {}
           var h = self.guard(g.name, function() { return run(g.headers, self.env) }, null)
           return h instanceof Map ? toJson(h) : {}
+        },
+        // null without a pin; one that failed to evaluate is still a pin, and nothing to match it.
+        pin: function() {
+          if (!g.pin) return null
+          return self.guard(g.name, function() { var p = run(g.pin, self.env); return p === null ? null : show(p, self.hostBridge) }, "")
         }
       })
     })
@@ -6191,7 +6196,7 @@ Instance.prototype = {
     this.guard("render", function() { self.nodes(nodes || [], self.env, out) }, null)
     var result = {
       children: out,
-      readsTime: this.readsTime,
+      readsTime: false,
       padding: this.program.padding,
       background: this.program.background ? this.prop("background", this.program.background, this.env) : null,
       // A face's status bar: this shell has none to hide, but a host with one can follow it.
@@ -6199,6 +6204,8 @@ Instance.prototype = {
       onTap: this.program.onTap ? this.handlerFor(this.program.onTap, this.env) : null
     }
     if (screen) result.title = this.program.screenTitle ? text(this.evalSafe(this.program.screenTitle, this.env)) : this.program.name
+    // Last: the background and title above can be what reads `time`.
+    result.readsTime = this.readsTime
     // The screen's reads count with the tile's: either on show is reason to draw again.
     if (screen && this.renderReads) for (var k in this.renderReads) this.reads[k] = true
     this.renderReads = this.reads

@@ -156,7 +156,7 @@ Item {
       if (root.spec.status) root.widget.sourceStatus(root.spec.slot, code, text, err, root.spec.json, ok)
       else if (ok) root.push(text)
       else root.widget.report(root.spec.name + ": " + (err || "HTTP " + code + " from " + url))
-    })
+    }, root.spec.pin())
   }
 
   // ------------------------------------------------------------- stream
