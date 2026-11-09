@@ -1,0 +1,398 @@
+widget "parliament" {
+  size: 6x1
+  minSize: 3x1
+  meta { description: "Listen to Commons and Lords live audio and seek through replays"; version: "1.2"; license: "MIT"; category: "media"; owl: 16 }
+  requires { pacman: ["python", "ffmpeg", "pulseaudio"] }
+  // Materialize only this bundled source; never download executable code.
+  let bootstrap = """import os, sys, tempfile
+from pathlib import Path
+folder = Path.home() / '.cache/owl-parliament'
+folder.mkdir(parents=True, exist_ok=True)
+target = folder / 'player.py'
+if not target.exists() or target.read_text() != sys.argv[1]:
+    with tempfile.NamedTemporaryFile(mode='w', dir=folder, delete=False) as temporary:
+        temporary.write(sys.argv[1])
+    os.replace(temporary.name, target)
+os.execv(sys.executable, [sys.executable, str(target)] + sys.argv[2:])"""
+  let backend = """#!/usr/bin/env python3
+# Official Parliament audio discovery and background playback (no daemon).
+import concurrent.futures
+import fcntl
+import html
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import subprocess
+import sys
+import urllib.request
+import uuid
+from urllib.parse import urljoin
+
+CACHE = Path.home() / '.cache/owl-parliament'
+CACHE.mkdir(parents=True, exist_ok=True)
+BASE = 'https://videoplayback.parliamentlive.tv'
+API = 'https://exposure.api.redbee.live/v2/customer/UKParliament/businessunit/ParliamentLive'
+
+def fetch(url, data=None, token=None):
+    headers = {'User-Agent': 'Omalauncher Parliament Audio', 'Content-Type': 'application/json'}
+    if token:
+        headers['Authorization'] = 'Bearer ' + token
+    req = urllib.request.Request(url, data=json.dumps(data).encode() if data else None, headers=headers)
+    with urllib.request.urlopen(req, timeout=15) as response:
+        return response.read().decode()
+
+def save(name, value):
+    path = CACHE / name
+    tmp = path.with_suffix('.tmp')
+    tmp.write_text(json.dumps(value))
+    tmp.replace(path)
+
+def read(name):
+    try:
+        return json.loads((CACHE / name).read_text())
+    except (OSError, ValueError):
+        return {}
+
+def plain(text):
+    return ' '.join(html.unescape(re.sub('<[^>]+>', '', text)).split())
+
+def state(event):
+    page = fetch(f'{BASE}/Player/Index/{event}?audioOnly=True')
+    match = re.search(r"stateChanged[(]'([^']*)', '([^']*)', '([^']*)', '([^']*)'", page)
+    if not match:
+        raise RuntimeError('Parliament player is unavailable')
+    return match[4]
+
+def house_events(house):
+    page = fetch('https://parliamentlive.tv/' + house)
+    found = {}
+    for event, body in re.findall(r'<a[^>]+href="(?:https://parliamentlive.tv)?/Event/Index/([a-f0-9-]+)"[^>]*>(.*?)</a>', page, re.S):
+        title = re.search(r'<p[^>]*>(.*?)</p>', body, re.S)
+        date = re.search(r'<h[35][^>]*>(.*?)</h[35]>', body, re.S)
+        if not title or plain(title[1]) != 'House of ' + house or not date or event in found:
+            continue
+        recorded = 'thumbnail' in body
+        found[event] = {'id': event, 'house': house, 'date': plain(date[1]), 'status': 'Replay' if recorded else 'Scheduled'}
+    events = list(found.values())[:6]
+    # The page includes today's sitting in its guide, even after it starts.
+    for event in events:
+        if event['status'] == 'Scheduled':
+            status = state(event['id'])
+            event['status'] = {'LIVE': 'LIVE', 'ARCHIVE': 'Replay', 'PRELIVE': 'Scheduled'}.get(status, 'Unavailable')
+    return events
+
+def refresh():
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            events = sum(list(pool.map(house_events, ['Commons', 'Lords'])), [])
+        save('events.json', {'events': events, 'error': ''})
+    except Exception:
+        old = read('events.json')
+        old['error'] = 'Could not update sittings — check connection'
+        save('events.json', old)
+
+def running(info):
+    try:
+        pid = info['pid']
+        return Path(f'/proc/{pid}/stat').read_text().split()[21] == info['start']
+    except (KeyError, OSError):
+        return False
+
+def stop():
+    info = read('process.json')
+    if running(info):
+        os.killpg(info['pid'], signal.SIGTERM)
+    save('process.json', {})
+    save('now.json', {'status': 'Stopped', 'playing': False})
+
+def position(info):
+    offset = info.get('offset', 0)
+    try:
+        progress = Path(info['progress']).read_text()
+        times = re.findall(r'^out_time_us=([0-9]+)$', progress, re.M)
+        offset += int(times[-1]) / 1000000 if times else 0
+    except (KeyError, OSError):
+        pass
+    return min(offset, info.get('duration') or offset)
+
+def duration(url):
+    # Follow the audio-only HLS master to its media playlist.
+    for _ in range(4):
+        playlist = fetch(url)
+        segments = re.findall(r'^#EXTINF:([0-9.]+)', playlist, re.M)
+        if segments:
+            return sum(map(float, segments))
+        links = [line.strip() for line in playlist.splitlines() if line.strip() and not line.startswith('#')]
+        if not links:
+            return 0
+        url = urljoin(url, links[0])
+    return 0
+
+def play(event, house, offset=0):
+    pid = os.getpid()
+    save('process.json', {'pid': pid, 'start': Path(f'/proc/{pid}/stat').read_text().split()[21]})
+    details = {'offset': offset, 'position': offset}
+    def update(status, playing=False):
+        save('now.json', dict(details, id=event, house=house, status=status, playing=playing))
+    update('Connecting…')
+    try:
+        cached = read('replay.json') if offset else {}
+        reuse = cached.get('id') == event
+        status = 'ARCHIVE' if reuse else state(event)
+        if status not in ('LIVE', 'ARCHIVE'):
+            update('Sitting has not started' if status == 'PRELIVE' else 'Audio unavailable')
+            return
+        if reuse:
+            url = cached['url']
+            length = cached['duration']
+        else:
+            part = 'Live' if status == 'LIVE' else 'Recorded'
+            page = fetch(f'{BASE}/Player/{part}/{event}?audioOnly=True&autoStart=True')
+            asset = re.search(r'source:[ ]*"([^"]+)"', page)
+            if not asset:
+                raise RuntimeError('No audio source')
+            session = json.loads(fetch(API + '/auth/anonymous', {'deviceId': str(uuid.uuid4()), 'device': {'type': 'WEB', 'name': 'Parliament audio'}}))
+            entitlement = json.loads(fetch(API + '/entitlement/' + asset[1] + '/play?audioOnly=true', token=session['sessionToken']))
+            url = next(f['mediaLocator'] for f in entitlement['formats'] if f['format'] == 'HLS')
+            length = duration(url) if status == 'ARCHIVE' else 0
+        if status == 'ARCHIVE':
+            save('replay.json', {'id': event, 'house': house, 'url': url, 'duration': length})
+        progress = CACHE / f'progress-{pid}'
+        details.update(duration=length, replay=status == 'ARCHIVE', progress=str(progress))
+        # Audio-only HLS: no video is downloaded or decoded.
+        with (CACHE / 'player.log').open('w') as log:
+            seek = ['-ss', str(offset)] if offset else []
+            decoder = subprocess.Popen(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'warning', '-stats_period', '1', '-progress', str(progress)] + seek + ['-i', url, '-vn', '-f', 's16le', '-ac', '2', '-ar', '48000', 'pipe:1'], stdout=subprocess.PIPE, stderr=log)
+            output = subprocess.Popen(['pacat', '--playback', '--latency-msec=200', '--raw', '--format=s16le', '--rate=48000', '--channels=2', '--client-name=Parliament', '--stream-name=House of ' + house], stdin=decoder.stdout, stderr=log)
+            decoder.stdout.close()
+            update('Live audio' if status == 'LIVE' else 'Playing replay', True)
+            result = output.wait()
+            decoder.wait()
+            details['position'] = position(dict(details))
+            update('Sitting ended' if result == 0 and decoder.returncode == 0 else 'Playback failed — tap to retry')
+    except Exception:
+        update('Could not play audio — tap to retry')
+    finally:
+        if read('process.json').get('pid') == pid:
+            save('process.json', {})
+
+if __name__ == '__main__':
+    action = sys.argv[1]
+    if action == 'refresh':
+        refresh()
+    elif action == 'status':
+        info = read('now.json')
+        if info.get('playing') and not running(read('process.json')):
+            info.update(playing=False, status='Stopped')
+        if info.get('playing'):
+            info['position'] = position(info)
+        print(json.dumps(info))
+    elif action == 'stop':
+        with (CACHE / 'control.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            stop()
+    elif action in ('start', 'seek'):
+        with (CACHE / 'control.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            offset = 0
+            if action == 'seek':
+                info = read('now.json')
+                if not info.get('replay') or not info.get('playing'):
+                    sys.exit(0)
+                event, house = info['id'], info['house']
+                requested = float(sys.argv[2])
+                offset = position(info) + requested if sys.argv[2].startswith(('+', '-')) else requested
+                offset = max(0, min(offset, max(0, info.get('duration', 0) - 1)))
+            else:
+                event, house = sys.argv[2:4]
+            stop()
+            child = subprocess.Popen([sys.executable, __file__, 'play', event, house, str(offset)], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Register immediately so a rapid second tap can cancel discovery too.
+            save('process.json', {'pid': child.pid, 'start': Path(f'/proc/{child.pid}/stat').read_text().split()[21]})
+    elif action == 'play':
+        play(sys.argv[2], sys.argv[3], float(sys.argv[4]) if len(sys.argv) > 4 else 0)
+"""
+  strings {
+    en {
+      name: "parliament"
+      houseName: h => "House of ${h}"
+      compactName: h => "parliament · ${h}"
+      commons: "Commons"
+      lords: "Lords"
+      liveAvailable: "Live sitting available"
+      noLive: "No live sitting · recent audio below"
+      tapSittings: "Tap for sittings"
+      screenTitle: "parliament · audio"
+      refresh: "Refresh"
+      loading: "Loading sittings…"
+      audioPlayer: "Audio player"
+      chooseSitting: "Choose a sitting to listen"
+      back30: "−30 sec"
+      forward30: "+30 sec"
+      volume: "Volume"
+      stop: "Stop audio"
+      website: "Open Parliament website"
+      live: "LIVE"
+      replay: "Replay"
+      scheduled: "Scheduled"
+      unavailable: "Unavailable"
+      stopped: "Stopped"
+      connecting: "Connecting…"
+      notStarted: "Sitting has not started"
+      audioUnavailable: "Audio unavailable"
+      liveAudio: "Live audio"
+      playingReplay: "Playing replay"
+      ended: "Sitting ended"
+      failed: "Playback failed — tap to retry"
+      couldNotPlay: "Could not play audio — tap to retry"
+      updateFailed: "Could not update sittings — check connection"
+    }
+  }
+  state house = "Commons" persist
+  state selected = null persist
+  source listing = cmd("python -c ${sh(bootstrap)} ${sh(backend)} refresh") every 5m timeout 90s
+  source data = file("~/.cache/owl-parliament/events.json") json
+  source now = cmd("python -c ${sh(bootstrap)} ${sh(backend)} status") every 5s json
+  source vol = android.volume
+  let events = (data.events ?? []).filter(e => e.house == house)
+  let live = events.find(e => e.status == "LIVE")
+  let replay = events.find(e => e.status == "Replay")
+  let choice = selected != null && selected.house == house ? selected : (live ?? replay)
+  let playing = now.playing ?? false
+  let busy = playing || now.status == "Connecting…"
+  let statusLabels = {"Stopped": str.stopped, "Connecting…": str.connecting, "Sitting has not started": str.notStarted, "Audio unavailable": str.audioUnavailable, "Live audio": str.liveAudio, "Playing replay": str.playingReplay, "Sitting ended": str.ended, "Playback failed — tap to retry": str.failed, "Could not play audio — tap to retry": str.couldNotPlay}
+  let nowLabel = get(statusLabels, now.status, now.status)
+  let sittingLabels = {LIVE: str.live, Replay: str.replay, Scheduled: str.scheduled, Unavailable: str.unavailable}
+  let active = now.house == house && playing
+  let status = active ? nowLabel : live != null ? str.liveAvailable : str.noLive
+  let elapsed = fmtTime(now.position ?? 0, "H:mm:ss", "UTC")
+  let total = fmtTime(now.duration ?? 0, "H:mm:ss", "UTC")
+  onTap: screen()
+  component TransportIcon(on) {
+    Canvas {
+      size: 36
+      circle(18, 18, 18, fill: accent)
+      if on {
+        rect(12, 12, 12, 12, radius: 2, fill: background)
+      } else {
+        path([[14, 10], [25, 18], [14, 26]], closed: true, fill: background)
+      }
+    }
+  }
+  component PlayButton() {
+    Box {
+      size: 36
+      onTap: {
+        if busy { run("python -c ${sh(bootstrap)} ${sh(backend)} stop") }
+        else if choice != null { run("python -c ${sh(bootstrap)} ${sh(backend)} start ${sh(choice.id)} ${sh(choice.house)}") }
+        else { screen() }
+      }
+      TransportIcon { on: busy }
+    }
+  }
+  if (rows ?? 2) < 2 {
+    Row {
+      fill: true
+      align: center
+      gap: 8
+      Column {
+        weight: 1
+        gap: 0
+        Text { text: str.compactName(house); bold: true; maxLines: 1 }
+        Text { text: now.house == house ? nowLabel : live != null ? str.liveAvailable : str.tapSittings; style: small; color: muted; maxLines: 1 }
+      }
+      PlayButton { }
+    }
+  } else if (tileWidth ?? 400) < 260 {
+    Column {
+      fill: true
+      gap: 4
+      Text { text: str.name; style: label; color: accent }
+      Text { text: house == "Commons" ? str.commons : str.lords; style: title; maxLines: 1 }
+      Text { text: now.house == house ? nowLabel : live != null ? str.liveAvailable : str.tapSittings; style: small; color: muted; maxLines: 2 }
+      Spacer { weight: 1 }
+      PlayButton { }
+    }
+  } else {
+  Row {
+    align: center
+    gap: 10
+    fill: true
+    Column {
+      weight: 1
+      gap: 3
+      Text { text: str.name; style: label; color: accent }
+      Text { text: str.houseName(house); style: title; maxLines: 1 }
+      Text { text: now.house == house ? nowLabel : status; style: small; color: muted; maxLines: 2 }
+    }
+    PlayButton { }
+  }
+  }
+  screen {
+    title: str.screenTitle
+    Column {
+      gap: 12
+      Row {
+        Button { text: str.commons; color: house == "Commons" ? accent : muted; onTap: { house = "Commons"; selected = null } }
+        Button { text: str.lords; color: house == "Lords" ? accent : muted; onTap: { house = "Lords"; selected = null } }
+        Spacer { weight: 1 }
+        Button { text: str.refresh; onTap: refresh() }
+      }
+      Text { text: str.houseName(house); style: title }
+      Text { text: status; color: live != null ? accent : muted; style: small }
+      if data.error != null && data.error != "" { Text { text: str.updateFailed; color: red; style: small } }
+      Column {
+        weight: 1
+        scroll: true
+        gap: 8
+        if len(events) == 0 { Text { text: str.loading; color: muted } }
+        for e in events key e.id {
+          Row {
+            padding: 12
+            background: surface
+            radius: 8 * corners
+            gap: 8
+            align: center
+            Column {
+              weight: 1
+              Text { text: get(sittingLabels, e.status, e.status); color: e.status == "LIVE" ? accent : muted; style: label }
+              Text { text: e.date; maxLines: 2 }
+            }
+            if e.status == "LIVE" || e.status == "Replay" {
+              Box { size: 36; onTap: {
+                selected = e
+                if playing && now.id == e.id { run("python -c ${sh(bootstrap)} ${sh(backend)} stop") }
+                else { run("python -c ${sh(bootstrap)} ${sh(backend)} start ${sh(e.id)} ${sh(e.house)}") }
+              }
+                TransportIcon { on: busy && now.id == e.id }
+              }
+            }
+          }
+        }
+      }
+      Column {
+        padding: 12
+        background: surface
+        radius: 8 * corners
+        Text { text: now.house != null ? str.houseName(now.house) : str.audioPlayer; bold: true }
+        Text { text: nowLabel ?? str.chooseSitting; style: small; color: muted }
+        if playing && now.replay && now.duration > 0 {
+          Text { text: "${elapsed} / ${total}"; style: label; color: accent }
+          Slider { value: now.position ?? 0; max: now.duration; step: 1; fill: width; height: 32; onChange: run("python -c ${sh(bootstrap)} ${sh(backend)} seek ${int(value)}") }
+          Row {
+            Button { text: str.back30; onTap: run("python -c ${sh(bootstrap)} ${sh(backend)} seek -30") }
+            Button { text: str.forward30; onTap: run("python -c ${sh(bootstrap)} ${sh(backend)} seek +30") }
+          }
+        }
+        Text { text: str.volume; style: label; color: muted }
+        Slider { value: vol.level ?? 0; fill: width; height: 28; onChange: volume(value) }
+        if busy { Button { text: str.stop; onTap: run("python -c ${sh(bootstrap)} ${sh(backend)} stop") } }
+      }
+      Button { text: str.website; onTap: url("https://parliamentlive.tv/${enc(house)}") }
+    }
+  }
+}
+
+// Replay seeking controls.
