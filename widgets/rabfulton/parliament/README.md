@@ -2,12 +2,16 @@
 
 Listen to official House of Commons and House of Lords audio in the background.
 Tap the tile to choose a house and a sitting. The round play button becomes a
-stop button while connecting or playing. The tile supports one-row layouts
+pause button while playing. Tap play again to resume a paused sitting; a separate
+Stop audio control is available in the expanded view. The tile supports one-row layouts
 (minimum 3×1), wider tiles, and narrow, taller tiles.
 
 The sitting list distinguishes live, scheduled and recorded events. Replays
 include elapsed/total time, a seek slider, and −30/+30 second buttons. Seeking
-reconnects at the requested position, so allow a short buffering pause. Volume
+reconnects at the requested position, so allow a short buffering pause. Pausing
+a replay saves its position and closes the stream; resuming reconnects at that
+position. Seeking while paused keeps it paused. Live audio resumes at the current
+broadcast, without a time-shift buffer. Volume
 uses Android's media volume. The website button opens Parliamentlive.tv.
 
 ## Dependencies and implementation

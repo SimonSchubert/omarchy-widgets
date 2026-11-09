@@ -1,7 +1,7 @@
 widget "parliament" {
   size: 6x1
   minSize: 3x1
-  meta { description: "Listen to Commons and Lords live audio and seek through replays"; version: "1.3"; license: "MIT"; category: "media"; owl: 16 }
+  meta { description: "Listen to Commons and Lords live audio and seek through replays"; version: "1.4"; license: "MIT"; category: "media"; owl: 16 }
   requires { pacman: ["python", "ffmpeg", "pulseaudio"] }
   // Materialize only this bundled source; never download executable code.
   let bootstrap = """import os, sys, tempfile
@@ -184,28 +184,50 @@ if __name__ == '__main__':
     if action == 'refresh':
         refresh()
     elif action == 'status':
-        info = read('now.json')
-        if info.get('playing') and not running(read('process.json')):
-            info.update(playing=False, status='Stopped')
-            save('now.json', info)
-        if info.get('playing'):
-            save('position.json', {'position': position(info)})
+        with (CACHE / 'control.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            info = read('now.json')
+            if info.get('playing') and not running(read('process.json')):
+                info.update(playing=False, status='Stopped')
+                save('now.json', info)
+            if info.get('playing'):
+                save('position.json', {'position': position(info)})
+    elif action == 'pause':
+        with (CACHE / 'control.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            info = read('now.json')
+            if info.get('playing'):
+                info['position'] = position(info)
+                stop()
+                info.update(playing=False, paused=True, status='Paused')
+                save('now.json', info)
     elif action == 'stop':
         with (CACHE / 'control.lock').open('w') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             stop()
-    elif action in ('start', 'seek'):
+    elif action in ('start', 'seek', 'resume'):
         with (CACHE / 'control.lock').open('w') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             offset = 0
             if action == 'seek':
                 info = read('now.json')
-                if not info.get('replay') or not info.get('playing'):
+                if not info.get('replay') or not (info.get('playing') or info.get('paused')):
                     sys.exit(0)
                 event, house = info['id'], info['house']
                 requested = float(sys.argv[2])
-                offset = position(info) + requested if sys.argv[2].startswith(('+', '-')) else requested
+                current = info.get('position', 0) if info.get('paused') else position(info)
+                offset = current + requested if sys.argv[2].startswith(('+', '-')) else requested
                 offset = max(0, min(offset, max(0, info.get('duration', 0) - 1)))
+                if info.get('paused'):
+                    info.update(position=offset, offset=offset)
+                    save('now.json', info)
+                    sys.exit(0)
+            elif action == 'resume':
+                info = read('now.json')
+                if not info.get('paused'):
+                    sys.exit(0)
+                event, house = info['id'], info['house']
+                offset = info.get('position', 0) if info.get('replay') else 0
             else:
                 event, house = sys.argv[2:4]
             stop()
@@ -240,6 +262,9 @@ if __name__ == '__main__':
       scheduled: "Scheduled"
       unavailable: "Unavailable"
       stopped: "Stopped"
+      paused: "Paused"
+      pause: "Pause"
+      resume: "Resume"
       connecting: "Connecting…"
       notStarted: "Sitting has not started"
       audioUnavailable: "Audio unavailable"
@@ -265,13 +290,14 @@ if __name__ == '__main__':
   let replay = events.find(e => e.status == "Replay")
   let choice = selected != null && selected.house == house ? selected : (live ?? replay)
   let playing = now.playing ?? false
+  let paused = now.paused ?? false
   let busy = playing || now.status == "Connecting…"
-  let statusLabels = {"Stopped": str.stopped, "Connecting…": str.connecting, "Sitting has not started": str.notStarted, "Audio unavailable": str.audioUnavailable, "Live audio": str.liveAudio, "Playing replay": str.playingReplay, "Sitting ended": str.ended, "Playback failed — tap to retry": str.failed, "Could not play audio — tap to retry": str.couldNotPlay}
+  let statusLabels = {"Paused": str.paused,"Stopped": str.stopped, "Connecting…": str.connecting, "Sitting has not started": str.notStarted, "Audio unavailable": str.audioUnavailable, "Live audio": str.liveAudio, "Playing replay": str.playingReplay, "Sitting ended": str.ended, "Playback failed — tap to retry": str.failed, "Could not play audio — tap to retry": str.couldNotPlay}
   let nowLabel = get(statusLabels, now.status, now.status)
   let sittingLabels = {LIVE: str.live, Replay: str.replay, Scheduled: str.scheduled, Unavailable: str.unavailable}
-  let active = now.house == house && playing
+  let active = now.house == house && (playing || paused)
   let status = active ? nowLabel : live != null ? str.liveAvailable : str.noLive
-  let heard = progress.position ?? now.position ?? 0
+  let heard = paused ? (now.position ?? 0) : (progress.position ?? now.position ?? 0)
   let elapsed = fmtTime(heard, "H:mm:ss", "UTC")
   let total = fmtTime(now.duration ?? 0, "H:mm:ss", "UTC")
   onTap: screen()
@@ -280,7 +306,8 @@ if __name__ == '__main__':
       size: 36
       circle(18, 18, 18, fill: accent)
       if on {
-        rect(12, 12, 12, 12, radius: 2, fill: background)
+        rect(12, 10, 4, 16, radius: 1, fill: background)
+        rect(20, 10, 4, 16, radius: 1, fill: background)
       } else {
         path([[14, 10], [25, 18], [14, 26]], closed: true, fill: background)
       }
@@ -290,11 +317,13 @@ if __name__ == '__main__':
     Box {
       size: 36
       onTap: {
-        if busy { run("python -c ${sh(bootstrap)} ${sh(backend)} stop") }
+        if playing { run("python -c ${sh(bootstrap)} ${sh(backend)} pause") }
+        else if paused && now.house == house { run("python -c ${sh(bootstrap)} ${sh(backend)} resume") }
+        else if busy { run("python -c ${sh(bootstrap)} ${sh(backend)} stop") }
         else if choice != null { run("python -c ${sh(bootstrap)} ${sh(backend)} start ${sh(choice.id)} ${sh(choice.house)}") }
         else { screen() }
       }
-      TransportIcon { on: busy }
+      TransportIcon { on: playing }
     }
   }
   if (rows ?? 2) < 2 {
@@ -368,10 +397,11 @@ if __name__ == '__main__':
             if e.status == "LIVE" || e.status == "Replay" {
               Box { size: 36; onTap: {
                 selected = e
-                if playing && now.id == e.id { run("python -c ${sh(bootstrap)} ${sh(backend)} stop") }
+                if playing && now.id == e.id { run("python -c ${sh(bootstrap)} ${sh(backend)} pause") }
+                else if paused && now.id == e.id { run("python -c ${sh(bootstrap)} ${sh(backend)} resume") }
                 else { run("python -c ${sh(bootstrap)} ${sh(backend)} start ${sh(e.id)} ${sh(e.house)}") }
               }
-                TransportIcon { on: busy && now.id == e.id }
+                TransportIcon { on: playing && now.id == e.id }
               }
             }
           }
@@ -383,7 +413,7 @@ if __name__ == '__main__':
         radius: 8 * corners
         Text { text: now.house != null ? str.houseName(now.house) : str.audioPlayer; bold: true }
         Text { text: nowLabel ?? str.chooseSitting; style: small; color: muted }
-        if playing && now.replay && now.duration > 0 {
+        if (playing || paused) && now.replay && now.duration > 0 {
           Text { text: "${elapsed} / ${total}"; style: label; color: accent }
           Slider { value: heard; max: now.duration; step: 1; fill: width; height: 32; onChange: run("python -c ${sh(bootstrap)} ${sh(backend)} seek ${int(value)}") }
           Row {
@@ -393,7 +423,9 @@ if __name__ == '__main__':
         }
         Text { text: str.volume; style: label; color: muted }
         Slider { value: vol.level ?? 0; fill: width; height: 28; onChange: volume(value) }
-        if busy { Button { text: str.stop; onTap: run("python -c ${sh(bootstrap)} ${sh(backend)} stop") } }
+        if playing { Button { text: str.pause; onTap: run("python -c ${sh(bootstrap)} ${sh(backend)} pause") } }
+        if paused { Button { text: str.resume; onTap: run("python -c ${sh(bootstrap)} ${sh(backend)} resume") } }
+        if busy || paused { Button { text: str.stop; onTap: run("python -c ${sh(bootstrap)} ${sh(backend)} stop") } }
       }
       Button { text: str.website; onTap: url("https://parliamentlive.tv/${enc(house)}") }
     }
