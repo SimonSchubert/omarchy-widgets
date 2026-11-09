@@ -1,53 +1,80 @@
 # Parliament audio
 
-Listen to official House of Commons and House of Lords audio in the background.
-Tap the tile to choose a house and a sitting. The round play button becomes a
-pause button while playing. Tap play again to resume a paused sitting; a separate
-Stop audio control is available in the expanded view. The tile supports one-row layouts
-(minimum 3×1), wider tiles, and narrow, taller tiles.
+Listen to official UK Parliament audio: the Commons, Lords, committees,
+Westminster Hall and other proceedings listed on Parliamentlive.tv.
 
-The sitting list distinguishes live, scheduled and recorded events. Replays
-include elapsed/total time, a seek slider, and −30/+30 second buttons. Seeking
-reconnects at the requested position, so allow a short buffering pause. Pausing
-a replay saves its position and closes the stream; resuming reconnects at that
-position. Seeking while paused keeps it paused. Live audio resumes at the current
-broadcast, without a time-shift buffer. Volume
-uses Android's media volume. The website button opens Parliamentlive.tv.
+Open the widget to browse **All**, **Commons**, **Lords** or **Committees** and
+filter sessions by title or date. The timeline opens near the live sessions:
+recent recordings above, upcoming sessions below. **Earlier recordings** expands
+history upward and fetches further pages of the official archive when needed.
+Live sessions have a subtle highlight.
 
-## Dependencies and implementation
+The compact player has play/pause, stop, a replay timeline and ±30-second media
+buttons. Tapping play immediately shows a connecting indicator. The button
+switches to pause when audio actually starts, independently of cache filling.
+Use Android's system controls for volume. The external-link icons open the
+website or the current session. Tiles can shrink to 3×1 and work at larger sizes.
 
-Requires Arch Linux with `python`, `ffmpeg` and `pulseaudio`. No systemd service,
-cron job, Docker container, kernel module or privileged helper is used.
+## Playback and dependencies
+
+Requires Arch Linux with `python`, `mpv` and `pulseaudio`. This replaces the old
+FFmpeg-to-pacat pipeline with mpv's audio player and local JSON IPC controls.
+No systemd service, cron job, Docker container or privileged helper is used.
+
+Pause keeps the player and its network/audio buffers intact; resume uses the
+same process. Seeking also uses that player and works while paused. A seek
+outside the buffered range can need network data. Playback continues while the
+widget screen is closed; stop releases the player process group. The network
+cache reads ahead for up to 60 seconds within a 32 MiB forward/8 MiB backward
+memory budget. Video is neither downloaded nor decoded: the official playback
+request asks for audio-only HLS and mpv has video disabled.
+
+## Bundled backend and network access
 
 The OWL file includes the entire readable Python backend. A small bundled
 bootstrap atomically writes that source to `~/.cache/owl-parliament/player.py`
-and runs it with Python. It never downloads executable code, decodes a hidden
-payload, or evaluates server-provided commands. Dynamic values use OWL's
-`sh()`; Python launches subprocesses with argument lists, without a shell.
+and runs it locally. It never downloads executable code or evaluates server
+content as commands. Dynamic shell arguments use OWL's `sh()`; subprocesses
+inside Python use argument lists, without a shell.
 
-The backend reads sitting listings from `parliamentlive.tv`, resolves the
-official player at `videoplayback.parliamentlive.tv`, and requests an anonymous
-playback session from `exposure.api.redbee.live`. No user account or API key is
-required. The session token stays in the player process's memory. Audio-only
-HLS comes from Parliament's Red Bee CDN. FFmpeg decodes audio into `pacat` for
-PulseAudio; video is neither downloaded nor decoded.
+The backend reads listings/archive pages from `parliamentlive.tv`, resolves
+player configuration at `videoplayback.parliamentlive.tv`, and requests an
+anonymous playback session from `exposure.api.redbee.live`. No user account or
+API key is needed. The session token stays in process memory. Audio comes from
+Parliament's Red Bee CDN. Recently resolved recording URLs are cached for ten
+minutes. Known recordings skip an extra player-state lookup; duration comes
+from the player rather than a duplicate manifest fetch, and authentication
+runs in parallel with configuration lookup.
 
-Cache files, playback metadata, process identity, progress and a diagnostic log
-are kept only under `~/.cache/owl-parliament/`. Stop targets only the process
-group recorded by this widget, after checking its Linux process start time.
-Playback is started only by a tap and continues while the widget screen is
-closed. Listings refresh every five minutes and status every five seconds while audio plays
-while the launcher keeps the widget's sources active.
+To avoid slow parallel A/AAAA DNS replies observed under Android/proot, the
+helper adds `single-request-reopen` to its own `RES_OPTIONS`. The player child
+inherits that setting. System DNS configuration and nameservers are unchanged.
 
-## Limitations and validation
+All cache files, player metadata, local IPC sockets, process identities and the
+player log live under `~/.cache/owl-parliament/`. Stop checks the recorded Linux
+process start time before signaling its group. The player reports buffering,
+audio-start and position events directly; Python is not repeatedly spawned to
+poll new playback. A five-second status tick supports an already-running
+player from an older version until the next stream starts. Listings refresh
+every five minutes while the launcher keeps their source active.
 
-This is an unofficial client for Parliament's public website, whose page/player
-structure may change. It shows the recent sittings listed by that site, rather
-than a complete searchable archive. Live playback can only be checked while a
-house is sitting; recorded Commons and Lords decoding, background output,
-stopping, absolute seeking and 30-second backward seeking were checked on
-Arch Linux ARM under Omalauncher/proot. The packaged backend was also checked
-through the launcher's live sources.
+## Validation and limitations
 
-Licensed under MIT. The widget's license does not change Parliament's rights
-or terms for its recordings. See [Parliament Live help](https://www.parliament.uk/business/parliament-tv/parliament-live-help/).
+This is an unofficial client of Parliament's public website, whose page/player
+structure may change. It initially combines the public listing pages and the
+first archive page; earlier pages can be loaded rather than downloading the
+whole archive. House metadata is available for the landing-page entries;
+archive-only committee entries can appear under All/Committees until their
+house is known. Session dates/titles are supplied by Parliament in English.
+
+Checked with `owl-check` and the store's OWL review tool. Muted playback tests on
+Arch Linux ARM under Omalauncher/proot covered Commons and Lords recordings,
+duration discovery, first-audio timing, retained-buffer pause/resume, seeking
+while paused, stopping and event-driven progress updates. A simulated IPC event
+sequence checks that actual audio start ends the initial loading indicator even
+when cache notifications arrive later. Listing/archive pagination and the
+live-centred timeline were checked with current data and rendered previews.
+The owner tested the local UI/playback changes before this submission.
+
+Licensed under MIT. This license does not change Parliament's rights or terms
+for its recordings. See [Parliament Live help](https://www.parliament.uk/business/parliament-tv/parliament-live-help/).
