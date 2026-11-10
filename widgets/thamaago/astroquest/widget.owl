@@ -7,22 +7,613 @@ widget "AstroQuest" {
   background: theme_mode == "cosmic" ? #080D20 : #000000
 
   meta {
-    description: "Location-based sky explorer with calculated sky positions, Cosmic/Red modes, time preview, discovery logbook, and astronomy quiz"
-    version: "3.6"
+    description: "Offline naked-eye astronomy instrument: real-time overhead sky chart, azimuth/altitude finder, 24h observability planner, Sun/Moon almanac, and observation logbook"
+    version: "4.6"
     license: "MIT"
     category: "world"
-    owl: 13
+    owl: 18
   }
 
-  // [1. LINUX DEPENDENCIES & SETUP]
   requires {
-    pacman: ["python", "python-astropy"]
+    pacman: ["python", "python-astropy", "python-numpy"]
   }
 
-  // [2. STATE DECLARATIONS (OWL REACTIVITY)]
+  strings {
+    en {
+      subtitle: "SKY INSTRUMENT"
+      whereObserving: "Set your observing location"
+      setLocationBtn: "◎ Set location"
+      chooseSite: "Observing location"
+      siteIntro: "Star, planet, Sun, and Moon positions are computed locally for your coordinates and time."
+      usePhoneLoc: "◎ Use phone location (GPS/network)"
+      applyPhoneLoc: (lat, lon) => "◎ Use phone location (${lat}°, ${lon}°)"
+      phoneLocName: "Phone location"
+      privacyNote: "Ephemeris calculations run offline via Astropy. City search sends the city name to Open-Meteo. Optional cloud forecasts query Open-Meteo with coordinates rounded to 2 decimals."
+      cityPlaceholder: "Search city"
+      searchCities: "Search city"
+      searching: "Searching…"
+      searchOffline: "Search offline. Use phone location or coordinates below."
+      noCityMatch: "No matching city found. Try another name or coordinates."
+      orCoords: "Manual coordinates (offline)"
+      coordsHint: "Decimal degrees: Latitude (−90 to 90), Longitude (−180 to 180). South and West are negative."
+      latPlaceholder: "Latitude"
+      lonPlaceholder: "Longitude"
+      useCoords: "Apply coordinates"
+      cityErr: "Enter a city name between 2 and 80 characters"
+      coordsErr: "Enter valid latitude (−90 to 90) and longitude (−180 to 180)"
+      keepLocation: "Cancel"
+      forgetLocation: "Clear saved location"
+      selectedCoords: "Coordinates"
+      settingsTitle: "INSTRUMENT SETTINGS"
+      changeSite: "Change"
+      cloudWeatherOn: "Open-Meteo cloud forecast · ON"
+      cloudWeatherOff: "Open-Meteo cloud forecast · OFF"
+      refreshBtn: "↻ Recalculate now"
+      closeSettings: "Done"
+      redBtn: "☾ Red"
+      cosmicBtn: "✦ Night"
+      torchOn: "☼ On"
+      torchOff: "☼ Torch"
+      tabObserve: "Sky Map"
+      tabTonight: "Planner"
+      tabAlmanac: "Almanac"
+      tabJournal: "Logbook"
+      tileObserve: "◎ Sky Map"
+      tileTonight: "☾ Planner"
+      tileAlmanac: "☼ Almanac"
+      autoOn: "Auto ✓"
+      bestNow: "Best target"
+      loadingSky: "Computing ephemeris…"
+      checkLocationHint: "Check location or tap to refresh"
+      lookLater: "Daytime · Wait for dusk"
+      belowHorizonShort: "Below horizon"
+      daylight: "Daylight"
+      twilight: "Twilight"
+      darkSky: "Dark sky"
+      cloudsOff: "clouds off"
+      cloudsNA: "clouds n/a"
+      skyUnavailable: "Sky data unavailable"
+      tapRefresh: "Tap to recalculate"
+      chartCaption: "Zenith projection · Center = 90° overhead · Outer ring = 0° horizon"
+      nowLabel: "Now"
+      waitingSky: "Computing…"
+      noneUp: "No catalogue targets above horizon"
+      directionsUnavailable: "Ephemeris unavailable"
+      notePlaceholder: "Field note (seeing, color, equipment, sky clarity…)"
+      journalFullBtn: "Logbook full (500) · Export in Logbook"
+      justLoggedBtn: "✓ Logged <1m ago"
+      previewOnlyBtn: "Preview time active · Tap to return to Now"
+      daylightWaitBtn: "☀ Sun is up · Tap to view tonight's peak window →"
+      unavailableLogBtn: "Below horizon or <30° from Sun"
+      logAgainBtn: "✓ Log observation"
+      logFirstBtn: "+ Log observation"
+      moreOpen: "− Hide 4h table & details"
+      moreClosed: "+ 4h altitude table & info"
+      planLink: "24h curve →"
+      jumpPeakBtn: "Jump to peak →"
+      nextHoursTitle: "NEXT 4 HOURS (1H STEPS)"
+      safetyNote: "Solar safety lock: targets within 30° of the Sun cannot be logged."
+      tonightTitle: "24-HOUR OBSERVING PLANNER"
+      noDarkness: "No astronomical darkness (Sun > −18°) in this 24h window"
+      noDarknessHint: "Bright planets and 1st-magnitude stars remain visible during twilight."
+      darkAllPeriod: "Astronomical darkness throughout 24h window"
+      noMoonCross: "No Moon rise/set crossing in this 24h window"
+      altitudeHeader: "24H ALTITUDE CURVE (0°–90°) · tap graph or drag slider"
+      goodWindow: "Optimal window ✓"
+      outsideWindow: "Low / bright sky"
+      moonWashHint: "Moon >50% illuminated above horizon reduces faint-star contrast."
+      bestWindowsHeader: "OPTIMAL WINDOWS (Sun ≤ −6°, Alt ≥ 20°)"
+      noWindowTarget: "Does not reach ≥20° altitude during dark sky in the next 24h."
+      observeNowBtn: "Open on Sky Map (Now) →"
+      previewObserveBtn: "Preview this time on Sky Map →"
+      newOnlyOn: "Unlogged only ✓"
+      allTargetsBtn: "All 15"
+      rankedSub: "Ranked by peak altitude, magnitude, and dark-sky duration."
+      noRankedNew: "All qualifying targets tonight have been logged. Tap All 15."
+      noRankedAny: "No targets meet dark-sky criteria (Alt ≥20°, Sun ≤−6°) in 24h."
+      showTop6: "Show top 6"
+      almanacMoonTitle: "LUNAR PHASE & POSITION"
+      almanacSunTitle: "SUN & TWILIGHT ALMANAC (NEXT 24H)"
+      almanacHourlyTitle: "HOURLY SKY & CLOUD CONDITIONS"
+      almanacRulerTitle: "ANGULAR FIELD RULER (ARM'S LENGTH)"
+      ruler1: "1° · Pinky fingertip width (2 Moon diameters)"
+      ruler5: "5° · Three middle fingers together"
+      ruler10: "10° · Clenched fist (1 fist = 10° altitude)"
+      ruler20: "20° · Outstretched handspan (thumb to pinky)"
+      noSunMoonEvents: "No horizon/twilight crossings in the next 24 hours."
+      enableCloudsPrompt: "Enable Open-Meteo cloud forecast in ⚙ for hourly cloud cover"
+      journalTitle: "OBSERVATION LOGBOOK"
+      emptyJournalTitle: "No observations logged yet."
+      emptyJournalSub: "Select a visible target in Sky Map, verify it in the sky, and log it to record its exact timestamp, azimuth, altitude, and sky conditions."
+      findTargetLink: "Open Sky Map →"
+      saveNote: "Save"
+      cancelBtn: "Cancel"
+      addNote: "+ Note"
+      editNoteBtn: "Edit note"
+      removeBtn: "Delete"
+      confirmRemovePrompt: "Delete this observation record?"
+      confirmRemoveBtn: "Delete"
+      keepEntryBtn: "Cancel"
+      newerBtn: "‹ Newer"
+      olderBtn: "Older ›"
+      exportTitle: "DATA EXPORT (JSON)"
+      exportLocOn: "Include coordinates in JSON · ON"
+      exportLocOff: "Include coordinates in JSON · OFF"
+      copyJson: "Copy JSON"
+      shareJson: "Share JSON"
+      copiedNotice: "Copied JSON to clipboard ✓"
+      foundBadge: done => "${done}/15 logged"
+      cloudPct: pct => "${pct}% cloud"
+      nextWindowAt: (time, name, alt) => "Next: ${name} ~${time} (peaks ${alt}°)"
+      upSummary: (az, dir, alt, trend) => "Az ${az}° ${dir} · Alt ${alt}° ${trend}"
+      skyPreviewHeader: dur => "SKY MAP · +${dur}"
+      skyNowHeader: n => "LIVE SKY MAP · ${n}/15 ABOVE HORIZON"
+      targetsUpHeader: n => "CATALOGUE (${n}/15 ABOVE HORIZON)"
+      rankedHeader: n => "TONIGHT'S TARGETS (${n})"
+      showAllTargets: n => "Show all ${n} targets"
+      peakBest: alt => "peak ${alt}°"
+      bestWindowRange: (s, e, mag) => "Window ~${s}–${e} · mag ${mag}"
+      windowPeakRange: (s, e, alt) => "~${s}–${e} · peak ${alt}°"
+      atTime: t => "${t}"
+      darkUntil: e => "Astronomical darkness until ~${e}"
+      darkFrom: s => "Astronomical darkness from ~${s}"
+      darkRange: (s, e) => "Astronomical darkness ~${s}–${e}"
+      moonNow: (lit, alt) => "Moon ${lit}% illuminated · " + (alt >= 0 ? "Alt ${alt}°" : "below horizon")
+      moonPhaseLabel: (lit, waxing) => lit >= 97 ? "Full Moon" : lit <= 3 ? "New Moon" : lit >= 45 && lit <= 55 ? (waxing ? "First Quarter" : "Last Quarter") : lit > 55 ? (waxing ? "Waxing Gibbous" : "Waning Gibbous") : (waxing ? "Waxing Crescent" : "Waning Crescent")
+      sunStatusLine: (alt, cond) => "Sun altitude ${alt}° · ${cond}"
+      planMoonStatus: (cond, lit, alt) => "${cond} · Moon ${lit}% (" + (alt >= 0 ? "Alt ${alt}°" : "down") + ")"
+      cloudForecast: (enabled, pct, hr) => !enabled ? "Cloud forecast off (enable in ⚙)" : pct == null ? "Cloud forecast unavailable" : "Clouds ~${pct}% (${hr})"
+      journalCounts: (obs, found) => "${obs} " + (obs == 1 ? "entry" : "entries") + " · ${found}/15 objects observed"
+      compass: idx => ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"][idx]
+      directionName: idx => ["North", "NNE", "Northeast", "ENE", "East", "ESE", "Southeast", "SSE", "South", "SSW", "Southwest", "WSW", "West", "WNW", "Northwest", "NNW"][idx]
+      lookGuide: (az, dir, alt, rising) => "Az ${az}° (${dir}) · Alt ${alt}° " + (rising ? "↑ rising" : "↓ setting") + " (~" + str(max(1, round(alt / 10))) + (max(1, round(alt / 10)) == 1 ? " fist up)" : " fists up)")
+      belowGuide: (alt, peakTime, peakAlt) => "Below horizon (${alt}°) · Peaks at ${peakTime} (${peakAlt}°)"
+      scheduleLine: (rise, peak, peakAlt, set) => (rise != "" ? "Rise ${rise} · " : "") + "Peak ${peak} (${peakAlt}°)" + (set != "" ? " · Set ${set}" : "")
+      conditionsSummary: (preview, sunAlt, wEnabled, clouds) => (preview ? "Preview · " : "") + (sunAlt >= 0 ? "Daylight (Sun +${round(sunAlt)}°)" : sunAlt > -6 ? "Civil twilight (Sun ${round(sunAlt)}°)" : sunAlt > -12 ? "Nautical twilight (Sun ${round(sunAlt)}°)" : sunAlt > -18 ? "Astro twilight (Sun ${round(sunAlt)}°)" : "Dark sky (Sun ${round(sunAlt)}°)") + (preview || !wEnabled || clouds == null ? "" : " · Clouds ${round(clouds)}%")
+      bestToast: (ready, sunAlt, idx, name, clouds) => !ready ? "Computing sky…" : sunAlt == null || sunAlt >= 0 ? "Daytime · Showing tonight's planner" : idx == null ? "No bright target ≥20° right now" : "Selected ${name}" + (clouds != null && clouds >= 70 ? " · ${round(clouds)}% cloud" : "")
+      loggedToast: name => "✓ Logged ${name}"
+      aboutHeader: name => "REFERENCE · ${upper(name)}"
+      brightnessLine: (az, alt, mag) => "Azimuth ${az}° · Altitude ${alt}° · Apparent mag ${mag}"
+      hourStatus: (sunAlt, alt) => sunAlt >= 0 ? "Day" : alt < 0 ? "Down" : alt < 20 ? "Low" : sunAlt > -18 ? "Twil" : "Dark"
+      skyCondDetail: sunAlt => sunAlt == null ? "—" : sunAlt >= 0 ? "Daylight" : sunAlt > -6 ? "Civil twilight" : sunAlt > -12 ? "Nautical twilight" : sunAlt > -18 ? "Astro twilight" : "Astronomical night"
+      skyQuality: (sunAlt, moonAlt, moonLit, cloud) => sunAlt >= 0 ? "Daylight" : sunAlt > -18 ? "Twilight" : cloud != null && cloud >= 75 ? "Overcast (${cloud}%)" : cloud != null && cloud >= 40 ? "Partly cloudy (${cloud}%)" : moonAlt > 5 && moonLit >= 60 ? "Moonlit sky" : cloud == null ? "Dark sky · clouds unknown" : "Dark sky · low cloud forecast"
+      eventName: label => get({"Sunset": "Sunset (0°)", "Sunrise": "Sunrise (0°)", "Civil dusk": "Civil dusk (−6°)", "Civil dawn": "Civil dawn (−6°)", "Nautical dusk": "Nautical dusk (−12°)", "Nautical dawn": "Nautical dawn (−12°)", "Astronomical dusk": "Astro night starts (−18°)", "Astronomical dawn": "Astro night ends (−18°)", "Moonrise": "Moonrise", "Moonset": "Moonset"}, label, label)
+      resultsFor: q => "Results for \"${q}\""
+      questName: id => get({"alnilam": "Orion's Belt", "sirius": "Sirius", "canopus": "Canopus", "betelgeuse": "Betelgeuse", "rigel": "Rigel", "aldebaran": "Aldebaran", "antares": "Antares", "vega": "Vega", "altair": "Altair", "arcturus": "Arcturus", "spica": "Spica", "regulus": "Regulus", "jupiter": "Jupiter", "saturn": "Saturn", "moon": "Moon"}, id, id)
+      questGroup: id => get({"alnilam": "Orion · ε Ori", "sirius": "Canis Major · α CMa", "canopus": "Carina · α Car", "betelgeuse": "Orion · α Ori", "rigel": "Orion · β Ori", "aldebaran": "Taurus · α Tau", "antares": "Scorpius · α Sco", "vega": "Lyra · α Lyr", "altair": "Aquila · α Aql", "arcturus": "Boötes · α Boo", "spica": "Virgo · α Vir", "regulus": "Leo · α Leo", "jupiter": "Planet", "saturn": "Planet", "moon": "Earth's Moon"}, id, "")
+      questHop: id => get({
+        "alnilam": "Finder: 3 bright stars in a tight straight line; Alnilam is the center star.",
+        "sirius": "Finder: Brightest star in the sky (−1.46 mag). Follow Orion's Belt down-left.",
+        "canopus": "Finder: 2nd brightest star (−0.74 mag), ~36° south of Sirius.",
+        "betelgeuse": "Finder: Bright orange-red star above Orion's three belt stars.",
+        "rigel": "Finder: Blue-white star below Orion's Belt, opposite orange Betelgeuse.",
+        "aldebaran": "Finder: Orange star in a V-shaped cluster; follow Orion's Belt up-right.",
+        "antares": "Finder: Deep red star at the heart of Scorpius' curving J-hook.",
+        "vega": "Finder: Brilliant blue-white vertex of the Summer Triangle.",
+        "altair": "Finder: White star closely flanked by two dimmer stars in a short line.",
+        "arcturus": "Finder: Golden-orange giant; follow the curve of the Big Dipper's handle.",
+        "spica": "Finder: Blue-white star south of Arcturus along the Big Dipper handle arc.",
+        "regulus": "Finder: Brightest star at the base of Leo's backwards question-mark.",
+        "jupiter": "Finder: Steady, non-twinkling golden-white planet—brighter than any star.",
+        "saturn": "Finder: Steady, non-twinkling cream-yellow planet along the ecliptic.",
+        "moon": "Finder: Observe craters along the terminator (day/night shadow boundary)."
+      }, id, "")
+      questLore: id => get({
+        "alnilam": "Blue supergiant ~1,340 ly away; luminosity ~375,000 Suns.",
+        "sirius": "Binary system (A1V + white dwarf Sirius B) at 8.6 ly distance.",
+        "canopus": "F0Ia supergiant at ~310 ly; primary attitude reference for spacecraft.",
+        "betelgeuse": "Red supergiant (M1–M2 Ia) ~500–650 ly away; radius ~760 solar radii.",
+        "rigel": "Blue supergiant quadruple system ~860 ly away; ~120,000 solar luminosities.",
+        "aldebaran": "K5III orange giant at 65 ly, foreground to the Hyades cluster.",
+        "antares": "M1.5Iab red supergiant ~550 ly away; radius ~680 solar radii.",
+        "vega": "Rapidly rotating A0V star at 25 ly; standard zero-point of the magnitude scale.",
+        "altair": "A7V star at 16.7 ly rotating in 8.9 hours (equatorial velocity ~286 km/s).",
+        "arcturus": "K1.5III red giant at 36.7 ly moving at 122 km/s relative to the Sun.",
+        "spica": "Close spectroscopic binary (B1III + B2V) at 250 ly with 4.01-day period.",
+        "regulus": "Quadruple star system at 79 ly; primary rotates in 15.9 hours.",
+        "jupiter": "Gas giant; 7x–10x binoculars resolve the four Galilean moons (Io, Europa, Ganymede, Callisto).",
+        "saturn": "Ringed gas giant; rings span 282,000 km with ~10 m vertical thickness.",
+        "moon": "Mean distance 384,400 km (1.28 light-seconds); synodic period 29.53 days."
+      }, id, "")
+    }
+    id {
+      subtitle: "INSTRUMEN LANGIT"
+      whereObserving: "Atur lokasi pengamatan Anda"
+      setLocationBtn: "◎ Atur lokasi"
+      chooseSite: "Lokasi pengamatan"
+      siteIntro: "Posisi bintang, planet, Matahari, dan Bulan dihitung secara lokal sesuai koordinat dan waktu Anda."
+      usePhoneLoc: "◎ Gunakan lokasi ponsel (GPS/jaringan)"
+      applyPhoneLoc: (lat, lon) => "◎ Pakai lokasi ponsel (${lat}°, ${lon}°)"
+      phoneLocName: "Lokasi ponsel"
+      privacyNote: "Efemeris dihitung offline dengan Astropy. Pencarian kota mengirim nama kota ke Open-Meteo. Prakiraan awan opsional memakai Open-Meteo (koordinat dibulatkan 2 desimal)."
+      cityPlaceholder: "Cari nama kota"
+      searchCities: "Cari kota"
+      searching: "Mencari…"
+      searchOffline: "Pencarian offline. Gunakan lokasi ponsel atau koordinat di bawah."
+      noCityMatch: "Kota tidak ditemukan. Coba nama lain atau masukkan koordinat."
+      orCoords: "Koordinat manual (bisa offline)"
+      coordsHint: "Derajat desimal: Lintang (−90 s/d 90), Bujur (−180 s/d 180). Selatan & Barat bernilai negatif."
+      latPlaceholder: "Lintang / Lat"
+      lonPlaceholder: "Bujur / Lon"
+      useCoords: "Terapkan koordinat"
+      cityErr: "Masukkan nama kota antara 2 hingga 80 karakter"
+      coordsErr: "Masukkan angka lintang (−90..90) dan bujur (−180..180) yang valid"
+      keepLocation: "Batal"
+      forgetLocation: "Hapus lokasi tersimpan"
+      selectedCoords: "Koordinat"
+      settingsTitle: "SETELAN INSTRUMEN"
+      changeSite: "Ubah"
+      cloudWeatherOn: "Prakiraan awan Open-Meteo · AKTIF"
+      cloudWeatherOff: "Prakiraan awan Open-Meteo · MATI"
+      refreshBtn: "↻ Hitung ulang"
+      closeSettings: "Selesai"
+      redBtn: "☾ Merah"
+      cosmicBtn: "✦ Kosmik"
+      torchOn: "☼ Nyala"
+      torchOff: "☼ Senter"
+      tabObserve: "Peta Langit"
+      tabTonight: "Jadwal 24j"
+      tabAlmanac: "Almanak"
+      tabJournal: "Catatan"
+      tileObserve: "◎ Peta Langit"
+      tileTonight: "☾ Jadwal 24j"
+      tileAlmanac: "☼ Almanak"
+      autoOn: "Otomatis ✓"
+      bestNow: "Target terbaik"
+      loadingSky: "Menghitung efemeris…"
+      checkLocationHint: "Cek lokasi atau ketuk untuk segarkan"
+      lookLater: "Siang hari · Tunggu senja"
+      belowHorizonShort: "Di bawah cakrawala"
+      daylight: "Siang"
+      twilight: "Senja/Fajar"
+      darkSky: "Langit gelap"
+      cloudsOff: "awan mati"
+      cloudsNA: "awan n/a"
+      skyUnavailable: "Data langit belum siap"
+      tapRefresh: "Ketuk untuk hitung ulang"
+      chartCaption: "Proyeksi zenit · Tengah = 90° tepat di atas · Lingkaran luar = 0° cakrawala"
+      nowLabel: "Kini"
+      waitingSky: "Menghitung…"
+      noneUp: "Tidak ada target di atas cakrawala"
+      directionsUnavailable: "Data arah belum tersedia"
+      notePlaceholder: "Catatan lapangan (kecerahan, kondisi langit, alat bantu…)"
+      journalFullBtn: "Catatan penuh (500) · Ekspor di Catatan"
+      justLoggedBtn: "✓ Baru dicatat <1m lalu"
+      previewOnlyBtn: "Mode pratinjau waktu · Ketuk untuk kembali ke Kini"
+      daylightWaitBtn: "☀ Matahari di atas cakrawala · Lihat jadwal puncak malam ini →"
+      unavailableLogBtn: "Di bawah cakrawala atau <30° dari Matahari"
+      logAgainBtn: "✓ Catat pengamatan"
+      logFirstBtn: "+ Catat pengamatan"
+      moreOpen: "− Tutup tabel 4 jam & detail"
+      moreClosed: "+ Tabel 4 jam & info fisik"
+      planLink: "Kurva 24j →"
+      jumpPeakBtn: "Lihat saat puncak →"
+      nextHoursTitle: "4 JAM KE DEPAN (INTERVAL 1 JAM)"
+      safetyNote: "Kunci keamanan Matahari: objek dalam jarak 30° dari Matahari tidak dapat dicatat."
+      tonightTitle: "PERENCANA PENGAMATAN 24 JAM"
+      noDarkness: "Tidak ada gelap astronomis (Matahari > −18°) dalam 24 jam ini"
+      noDarknessHint: "Planet terang dan bintang utama tetap dapat diamati saat senja."
+      darkAllPeriod: "Gelap astronomis sepanjang 24 jam ini"
+      noMoonCross: "Bulan tidak melintasi cakrawala dalam 24 jam ini"
+      altitudeHeader: "KURVA KETINGGIAN 24 JAM (0°–90°) · ketuk grafik atau geser"
+      goodWindow: "Jendela optimal ✓"
+      outsideWindow: "Rendah / langit terang"
+      moonWashHint: "Cahaya Bulan >50% di atas cakrawala menurunkan kontras bintang redup."
+      bestWindowsHeader: "JENDELA PENGAMATAN OPTIMAL (Matahari ≤ −6°, Alt ≥ 20°)"
+      noWindowTarget: "Tidak mencapai ketinggian ≥20° saat langit gelap dalam 24 jam ke depan."
+      observeNowBtn: "Buka di Peta Langit (Kini) →"
+      previewObserveBtn: "Pratinjau waktu ini di Peta Langit →"
+      newOnlyOn: "Belum dicatat ✓"
+      allTargetsBtn: "Semua 15"
+      rankedSub: "Diurutkan menurut tinggi puncak, magnitudo, dan durasi langit gelap."
+      noRankedNew: "Semua target optimal malam ini sudah pernah dicatat. Ketuk Semua 15."
+      noRankedAny: "Tidak ada target yang memenuhi kriteria (Alt ≥20°, Matahari ≤−6°) dalam 24 jam."
+      showTop6: "Tampilkan 6 teratas"
+      almanacMoonTitle: "FASE & POSISI BULAN"
+      almanacSunTitle: "ALMANAK MATAHARI & SENJA (24 JAM)"
+      almanacHourlyTitle: "KONDISI LANGIT & AWAN PER JAM"
+      almanacRulerTitle: "PENGUKUR SUDUT TANGAN (LENGAN LURUS)"
+      ruler1: "1° · Lebar ujung jari kelingking (~2x diameter Bulan)"
+      ruler5: "5° · Tiga jari tengah dirapatkan"
+      ruler10: "10° · Satu kepalan tangan tertutup (1 kepalan = 10° tinggi)"
+      ruler20: "20° · Satu jengkal penuh (ujung jempol ke kelingking)"
+      noSunMoonEvents: "Tidak ada perlintasan cakrawala/senja dalam 24 jam ke depan."
+      enableCloudsPrompt: "Aktifkan prakiraan awan Open-Meteo di ⚙ untuk melihat persentase awan per jam"
+      journalTitle: "LOG PENGAMATAN LAPANGAN"
+      emptyJournalTitle: "Belum ada pengamatan tercatat."
+      emptyJournalSub: "Pilih objek yang berada di atas cakrawala pada Peta Langit, amati langsung di langit, lalu catat untuk menyimpan waktu, azimut, ketinggian, dan kondisi awan."
+      findTargetLink: "Buka Peta Langit →"
+      saveNote: "Simpan"
+      cancelBtn: "Batal"
+      addNote: "+ Catatan"
+      editNoteBtn: "Ubah catatan"
+      removeBtn: "Hapus"
+      confirmRemovePrompt: "Hapus data pengamatan ini?"
+      confirmRemoveBtn: "Hapus"
+      keepEntryBtn: "Batal"
+      newerBtn: "‹ Terbaru"
+      olderBtn: "Lama ›"
+      exportTitle: "EKSPOR DATA (JSON)"
+      exportLocOn: "Sertakan koordinat lokasi · AKTIF"
+      exportLocOff: "Sertakan koordinat lokasi · MATI"
+      copyJson: "Salin JSON"
+      shareJson: "Bagikan JSON"
+      copiedNotice: "JSON disalin ke papan klip ✓"
+      foundBadge: done => "${done}/15 tercatat"
+      cloudPct: pct => "${pct}% awan"
+      nextWindowAt: (time, name, alt) => "Berikutnya: ${name} ~${time} (puncak ${alt}°)"
+      upSummary: (az, dir, alt, trend) => "Az ${az}° ${dir} · Alt ${alt}° ${trend}"
+      skyPreviewHeader: dur => "PETA LANGIT · +${dur}"
+      skyNowHeader: n => "PETA LANGIT LANGSUNG · ${n}/15 DI ATAS"
+      targetsUpHeader: n => "KATALOG OBJEK (${n}/15 DI ATAS CAKRAWALA)"
+      rankedHeader: n => "TARGET MALAM INI (${n})"
+      showAllTargets: n => "Tampilkan semua ${n} objek"
+      peakBest: alt => "puncak ${alt}°"
+      bestWindowRange: (s, e, mag) => "Jendela ~${s}–${e} · mag ${mag}"
+      windowPeakRange: (s, e, alt) => "~${s}–${e} · puncak ${alt}°"
+      atTime: t => "${t}"
+      darkUntil: e => "Gelap astronomis hingga ~${e}"
+      darkFrom: s => "Gelap astronomis mulai ~${s}"
+      darkRange: (s, e) => "Gelap astronomis ~${s}–${e}"
+      moonNow: (lit, alt) => "Bulan ${lit}% terang · " + (alt >= 0 ? "Alt ${alt}°" : "di bawah cakrawala")
+      moonPhaseLabel: (lit, waxing) => lit >= 97 ? "Bulan Purnama" : lit <= 3 ? "Bulan Baru" : lit >= 45 && lit <= 55 ? (waxing ? "Perbani Awal" : "Perbani Akhir") : lit > 55 ? (waxing ? "Cembung Awal" : "Cembung Akhir") : (waxing ? "Sabit Awal" : "Sabit Akhir")
+      sunStatusLine: (alt, cond) => "Tinggi Matahari ${alt}° · ${cond}"
+      planMoonStatus: (cond, lit, alt) => "${cond} · Bulan ${lit}% (" + (alt >= 0 ? "Alt ${alt}°" : "terbenam") + ")"
+      cloudForecast: (enabled, pct, hr) => !enabled ? "Prakiraan awan mati (aktifkan di ⚙)" : pct == null ? "Prakiraan awan tidak tersedia" : "Awan ~${pct}% (${hr})"
+      journalCounts: (obs, found) => "${obs} catatan · ${found}/15 objek telah diamati"
+      compass: idx => ["U", "UTL", "TL", "TTL", "T", "TMG", "TG", "STG", "S", "SBD", "BD", "BBD", "B", "BBL", "BL", "UBL"][idx]
+      directionName: idx => ["Utara", "UTL", "Timur Laut", "TTL", "Timur", "TMG", "Tenggara", "STG", "Selatan", "SBD", "Barat Daya", "BBD", "Barat", "BBL", "Barat Laut", "UBL"][idx]
+      lookGuide: (az, dir, alt, rising) => "Az ${az}° (${dir}) · Alt ${alt}° " + (rising ? "↑ naik" : "↓ turun") + " (~" + str(max(1, round(alt / 10))) + " kepalan tangan)"
+      belowGuide: (alt, peakTime, peakAlt) => "Di bawah cakrawala (${alt}°) · Puncak pukul ${peakTime} (${peakAlt}°)"
+      scheduleLine: (rise, peak, peakAlt, set) => (rise != "" ? "Terbit ${rise} · " : "") + "Puncak ${peak} (${peakAlt}°)" + (set != "" ? " · Terbenam ${set}" : "")
+      conditionsSummary: (preview, sunAlt, wEnabled, clouds) => (preview ? "Pratinjau · " : "") + (sunAlt >= 0 ? "Siang (Matahari +${round(sunAlt)}°)" : sunAlt > -6 ? "Senja sipil (Matahari ${round(sunAlt)}°)" : sunAlt > -12 ? "Senja nautika (Matahari ${round(sunAlt)}°)" : sunAlt > -18 ? "Senja astronomis (Matahari ${round(sunAlt)}°)" : "Langit gelap (Matahari ${round(sunAlt)}°)") + (preview || !wEnabled || clouds == null ? "" : " · Awan ${round(clouds)}%")
+      bestToast: (ready, sunAlt, idx, name, clouds) => !ready ? "Menghitung posisi langit…" : sunAlt == null || sunAlt >= 0 ? "Siang hari · Menampilkan jadwal malam ini" : idx == null ? "Belum ada target terang ≥20° saat ini" : "Target aktif: ${name}" + (clouds != null && clouds >= 70 ? " · awan ${round(clouds)}%" : "")
+      loggedToast: name => "✓ Pengamatan ${name} tersimpan"
+      aboutHeader: name => "DATA FISIK · ${upper(name)}"
+      brightnessLine: (az, alt, mag) => "Azimut ${az}° · Ketinggian ${alt}° · Magnitudo semu ${mag}"
+      hourStatus: (sunAlt, alt) => sunAlt >= 0 ? "Siang" : alt < 0 ? "Bawah" : alt < 20 ? "Rendah" : sunAlt > -18 ? "Senja" : "Gelap"
+      skyCondDetail: sunAlt => sunAlt == null ? "—" : sunAlt >= 0 ? "Siang hari" : sunAlt > -6 ? "Senja sipil" : sunAlt > -12 ? "Senja nautika" : sunAlt > -18 ? "Senja astronomis" : "Malam astronomis"
+      skyQuality: (sunAlt, moonAlt, moonLit, cloud) => sunAlt >= 0 ? "Siang hari" : sunAlt > -18 ? "Senja" : cloud != null && cloud >= 75 ? "Mendung (${cloud}%)" : cloud != null && cloud >= 40 ? "Berawan (${cloud}%)" : moonAlt > 5 && moonLit >= 60 ? "Terang Bulan" : cloud == null ? "Langit gelap · awan tidak diketahui" : "Langit gelap · prakiraan sedikit awan"
+      eventName: label => get({"Sunset": "Matahari terbenam (0°)", "Sunrise": "Matahari terbit (0°)", "Civil dusk": "Akhir senja sipil (−6°)", "Civil dawn": "Awal fajar sipil (−6°)", "Nautical dusk": "Akhir senja nautika (−12°)", "Nautical dawn": "Awal fajar nautika (−12°)", "Astronomical dusk": "Awal malam astronomis (−18°)", "Astronomical dawn": "Akhir malam astronomis (−18°)", "Moonrise": "Bulan terbit", "Moonset": "Bulan terbenam"}, label, label)
+      resultsFor: q => "Hasil untuk \"${q}\""
+      questName: id => get({"alnilam": "Sabuk Orion", "sirius": "Sirius", "canopus": "Canopus", "betelgeuse": "Betelgeuse", "rigel": "Rigel", "aldebaran": "Aldebaran", "antares": "Antares", "vega": "Vega", "altair": "Altair", "arcturus": "Arcturus", "spica": "Spica", "regulus": "Regulus", "jupiter": "Jupiter", "saturn": "Saturnus", "moon": "Bulan"}, id, id)
+      questGroup: id => get({"alnilam": "Orion · ε Ori", "sirius": "Canis Major · α CMa", "canopus": "Carina · α Car", "betelgeuse": "Orion · α Ori", "rigel": "Orion · β Ori", "aldebaran": "Taurus · α Tau", "antares": "Scorpius · α Sco", "vega": "Lyra · α Lyr", "altair": "Aquila · α Aql", "arcturus": "Boötes · α Boo", "spica": "Virgo · α Vir", "regulus": "Leo · α Leo", "jupiter": "Planet", "saturn": "Planet", "moon": "Satelit Bumi"}, id, "")
+      questHop: id => get({
+        "alnilam": "Identifikasi: 3 bintang terang berjejer lurus; Alnilam adalah bintang tengahnya.",
+        "sirius": "Identifikasi: Bintang paling terang di langit (−1,46 mag). Ikuti garis Sabuk Orion ke kiri bawah.",
+        "canopus": "Identifikasi: Bintang paling terang ke-2 (−0,74 mag), ~36° di selatan Sirius.",
+        "betelgeuse": "Identifikasi: Bintang jingga-merah terang di atas tiga bintang Sabuk Orion.",
+        "rigel": "Identifikasi: Bintang biru-putih terang di bawah Sabuk Orion, berseberangan dengan Betelgeuse.",
+        "aldebaran": "Identifikasi: Bintang jingga di gugus huruf V; ikuti garis Sabuk Orion ke kanan atas.",
+        "antares": "Identifikasi: Bintang merah delima di jantung pola kail (J) rasi Scorpius.",
+        "vega": "Identifikasi: Bintang biru-putih cemerlang di sudut Segitiga Musim Panas.",
+        "altair": "Identifikasi: Bintang putih terang diapit dekat oleh dua bintang lebih redup di kiri-kanannya.",
+        "arcturus": "Identifikasi: Raksasa kuning-jingga; ikuti lengkungan gagang rasi Biduk.",
+        "spica": "Identifikasi: Bintang biru-putih di selatan Arcturus mengikuti lengkungan gagang Biduk.",
+        "regulus": "Identifikasi: Bintang paling terang di titik bawah tanda tanya terbalik rasi Leo.",
+        "jupiter": "Identifikasi: Cahaya putih-emas sangat terang dan stabil (tidak berkedip seperti bintang).",
+        "saturn": "Identifikasi: Cahaya kuning-krem yang bersinar tenang tanpa berkedip di jalur ekliptika.",
+        "moon": "Identifikasi: Amati kawah di sepanjang garis terminator (batas siang dan malam Bulan)."
+      }, id, "")
+      questLore: id => get({
+        "alnilam": "Maharaksasa biru (B0Ia) berjarak ~1.340 tahun cahaya; luminositas ~375.000 Matahari.",
+        "sirius": "Sistem bintang ganda (A1V + katai putih Sirius B) pada jarak 8,6 tahun cahaya.",
+        "canopus": "Maharaksasa F0Ia berjarak ~310 tahun cahaya; acuan utama sensor navigasi wahana antariksa.",
+        "betelgeuse": "Maharaksasa merah (M1–M2 Ia) berjarak ~500–650 tahun cahaya; radius ~760 kali Matahari.",
+        "rigel": "Sistem empat bintang maharaksasa biru ~860 tahun cahaya; luminositas ~120.000 Matahari.",
+        "aldebaran": "Raksasa jingga K5III berjarak 65 tahun cahaya di depan gugus bintang Hyades.",
+        "antares": "Maharaksasa merah M1.5Iab berjarak ~550 tahun cahaya; radius ~680 kali Matahari.",
+        "vega": "Bintang A0V berotasi cepat pada jarak 25 tahun cahaya; titik nol standar skala magnitudo.",
+        "altair": "Bintang A7V berjarak 16,7 tahun cahaya dengan periode rotasi 8,9 jam (~286 km/dtk).",
+        "arcturus": "Raksasa jingga K1.5III berjarak 36,7 tahun cahaya dengan kecepatan gerak 122 km/dtk.",
+        "spica": "Bintang ganda dekat (B1III + B2V) berjarak 250 tahun cahaya dengan periode orbit 4,01 hari.",
+        "regulus": "Sistem empat bintang berjarak 79 tahun cahaya; bintang utamanya berotasi setiap 15,9 jam.",
+        "jupiter": "Planet raksasa gas; binokular 7x–10x dapat memisahkan 4 bulan Galilean (Io, Europa, Ganymede, Callisto).",
+        "saturn": "Planet raksasa bercincin; rentang cincin 282.000 km dengan ketebalan vertikal hanya ~10 m.",
+        "moon": "Jarak rata-rata 384.400 km (1,28 detik cahaya); periode sinodis 29,53 hari."
+      }, id, "")
+    }
+    es {
+      subtitle: "INSTRUMENTO CELESTE"
+      whereObserving: "Configura tu ubicación de observación"
+      setLocationBtn: "◎ Ubicación"
+      chooseSite: "Ubicación de observación"
+      siteIntro: "Las posiciones de estrellas, planetas, Sol y Luna se calculan localmente según tus coordenadas y hora."
+      usePhoneLoc: "◎ Usar ubicación del teléfono (GPS/red)"
+      applyPhoneLoc: (lat, lon) => "◎ Aplicar ubicación del teléfono (${lat}°, ${lon}°)"
+      phoneLocName: "Ubicación del teléfono"
+      privacyNote: "Las efemérides se calculan sin conexión con Astropy. La búsqueda envía el nombre de ciudad a Open-Meteo. El pronóstico opcional de nubes usa Open-Meteo (coordenadas redondeadas a 2 decimales)."
+      cityPlaceholder: "Buscar ciudad (ej. Madrid, Bogotá, México)"
+      searchCities: "Buscar ciudad"
+      searching: "Buscando…"
+      searchOffline: "Sin conexión. Usa la ubicación del teléfono o coordenadas."
+      noCityMatch: "No se encontró la ciudad. Prueba otro nombre o coordenadas."
+      orCoords: "Coordenadas manuales (sin internet)"
+      coordsHint: "Grados decimales: Latitud (−90 a 90), Longitud (−180 a 180). Sur y Oeste son negativos."
+      latPlaceholder: "Latitud (ej. 19.43)"
+      lonPlaceholder: "Longitud (ej. -99.13)"
+      useCoords: "Aplicar coordenadas"
+      cityErr: "Escribe un nombre de ciudad de 2 a 80 caracteres"
+      coordsErr: "Ingresa latitud (−90 a 90) y longitud (−180 a 180) válidas"
+      keepLocation: "Cancelar"
+      forgetLocation: "Borrar ubicación"
+      selectedCoords: "Coordenadas"
+      settingsTitle: "AJUSTES DEL INSTRUMENTO"
+      changeSite: "Cambiar"
+      cloudWeatherOn: "Pronóstico de nubes Open-Meteo · ACTIVO"
+      cloudWeatherOff: "Pronóstico de nubes Open-Meteo · APAGADO"
+      refreshBtn: "↻ Recalcular ahora"
+      closeSettings: "Listo"
+      redBtn: "☾ Rojo"
+      cosmicBtn: "✦ Noche"
+      torchOn: "☼ On"
+      torchOff: "☼ Linterna"
+      tabObserve: "Mapa"
+      tabTonight: "Plan 24h"
+      tabAlmanac: "Almanaque"
+      tabJournal: "Bitácora"
+      tileObserve: "◎ Mapa"
+      tileTonight: "☾ Plan 24h"
+      tileAlmanac: "☼ Almanaque"
+      autoOn: "Auto ✓"
+      bestNow: "Mejor ahora"
+      loadingSky: "Calculando efemérides…"
+      checkLocationHint: "Revisa tu ubicación o toca para actualizar"
+      lookLater: "De día · Espera al crepúsculo"
+      belowHorizonShort: "Bajo el horizonte"
+      daylight: "De día"
+      twilight: "Crepúsculo"
+      darkSky: "Cielo oscuro"
+      cloudsOff: "nubes off"
+      cloudsNA: "nubes n/d"
+      skyUnavailable: "Datos no disponibles"
+      tapRefresh: "Toca para recalcular"
+      chartCaption: "Proyección cenital · Centro = 90° arriba · Anillo exterior = 0° horizonte"
+      nowLabel: "Ahora"
+      waitingSky: "Calculando…"
+      noneUp: "Sin objetos del catálogo sobre el horizonte"
+      directionsUnavailable: "Efemérides no disponibles"
+      notePlaceholder: "Nota de campo (visibilidad, color, prismáticos…)"
+      journalFullBtn: "Bitácora llena (500) · Exporta en Bitácora"
+      justLoggedBtn: "✓ Registrado hace <1m"
+      previewOnlyBtn: "Vista previa activa · Toca para volver a Ahora"
+      daylightWaitBtn: "☀ Sol sobre el horizonte · Ver ventana de esta noche →"
+      unavailableLogBtn: "Bajo el horizonte o a <30° del Sol"
+      logAgainBtn: "✓ Registrar observación"
+      logFirstBtn: "+ Registrar observación"
+      moreOpen: "− Ocultar tabla 4h y datos"
+      moreClosed: "+ Tabla 4h y datos físicos"
+      planLink: "Curva 24h →"
+      jumpPeakBtn: "Ir al pico →"
+      nextHoursTitle: "PRÓXIMAS 4 HORAS (PASOS DE 1H)"
+      safetyNote: "Bloqueo solar: objetos a menos de 30° del Sol no pueden registrarse."
+      tonightTitle: "PLANIFICADOR DE OBSERVACIÓN 24H"
+      noDarkness: "Sin oscuridad astronómica (Sol > −18°) en estas 24h"
+      noDarknessHint: "Planetas brillantes y estrellas de 1ª magnitud son visibles en crepúsculo."
+      darkAllPeriod: "Oscuridad astronómica durante las 24h"
+      noMoonCross: "Sin salida ni puesta de la Luna en estas 24h"
+      altitudeHeader: "CURVA DE ALTURA 24H (0°–90°) · toca o desliza"
+      goodWindow: "Ventana óptima ✓"
+      outsideWindow: "Bajo / cielo claro"
+      moonWashHint: "Luna >50% iluminada sobre el horizonte reduce el contraste."
+      bestWindowsHeader: "VENTANAS ÓPTIMAS (Sol ≤ −6°, Alt ≥ 20°)"
+      noWindowTarget: "No supera 20° de altura con cielo oscuro en las próximas 24h."
+      observeNowBtn: "Abrir en Mapa (Ahora) →"
+      previewObserveBtn: "Ver esta hora en el Mapa →"
+      newOnlyOn: "No registrados ✓"
+      allTargetsBtn: "Todos (15)"
+      rankedSub: "Ordenados por altura máxima, magnitud y duración nocturna."
+      noRankedNew: "Todos los objetos óptimos de hoy ya fueron registrados. Toca Todos."
+      noRankedAny: "Ningún objeto cumple criterios (Alt ≥20°, Sol ≤−6°) en 24h."
+      showTop6: "Mostrar top 6"
+      almanacMoonTitle: "FASE Y POSICIÓN LUNAR"
+      almanacSunTitle: "ALMANAQUE SOLAR Y CREPÚSCULOS (24H)"
+      almanacHourlyTitle: "CONDICIONES Y NUBES POR HORA"
+      almanacRulerTitle: "REGLA ANGULAR MANUAL (BRAZO EXTENDIDO)"
+      ruler1: "1° · Ancho del meñique (~2 diámetros lunares)"
+      ruler5: "5° · Tres dedos centrales juntos"
+      ruler10: "10° · Un puño cerrado (1 puño = 10° de altura)"
+      ruler20: "20° · Un palmo abierto (pulgar a meñique)"
+      noSunMoonEvents: "Sin cruces de horizonte o crepúsculo en las próximas 24h."
+      enableCloudsPrompt: "Activa el pronóstico de nubes Open-Meteo en ⚙ para ver nubosidad por hora"
+      journalTitle: "BITÁCORA DE CAMPO"
+      emptyJournalTitle: "Sin observaciones registradas."
+      emptyJournalSub: "Selecciona un objeto visible en el Mapa, obsérvalo en el cielo y regístralo con su hora exacta, acimut, altura y nubosidad."
+      findTargetLink: "Abrir Mapa →"
+      saveNote: "Guardar"
+      cancelBtn: "Cancelar"
+      addNote: "+ Nota"
+      editNoteBtn: "Editar nota"
+      removeBtn: "Eliminar"
+      confirmRemovePrompt: "¿Eliminar este registro de observación?"
+      confirmRemoveBtn: "Eliminar"
+      keepEntryBtn: "Cancelar"
+      newerBtn: "‹ Recientes"
+      olderBtn: "Anteriores ›"
+      exportTitle: "EXPORTAR DATOS (JSON)"
+      exportLocOn: "Incluir coordenadas en JSON · SÍ"
+      exportLocOff: "Incluir coordenadas en JSON · NO"
+      copyJson: "Copiar JSON"
+      shareJson: "Compartir JSON"
+      copiedNotice: "JSON copiado al portapapeles ✓"
+      foundBadge: done => "${done}/15 reg."
+      cloudPct: pct => "${pct}% nubes"
+      nextWindowAt: (time, name, alt) => "Próx.: ${name} ~${time} (máx ${alt}°)"
+      upSummary: (az, dir, alt, trend) => "Az ${az}° ${dir} · Alt ${alt}° ${trend}"
+      skyPreviewHeader: dur => "MAPA CELESTE · +${dur}"
+      skyNowHeader: n => "MAPA EN VIVO · ${n}/15 SOBRE EL HORIZONTE"
+      targetsUpHeader: n => "CATÁLOGO (${n}/15 SOBRE EL HORIZONTE)"
+      rankedHeader: n => "OBJETOS DE ESTA NOCHE (${n})"
+      showAllTargets: n => "Mostrar los ${n} objetos"
+      peakBest: alt => "máx ${alt}°"
+      bestWindowRange: (s, e, mag) => "Ventana ~${s}–${e} · mag ${mag}"
+      windowPeakRange: (s, e, alt) => "~${s}–${e} · máx ${alt}°"
+      atTime: t => "${t}"
+      darkUntil: e => "Oscuridad astronómica hasta ~${e}"
+      darkFrom: s => "Oscuridad astronómica desde ~${s}"
+      darkRange: (s, e) => "Oscuridad astronómica ~${s}–${e}"
+      moonNow: (lit, alt) => "Luna ${lit}% iluminada · " + (alt >= 0 ? "Alt ${alt}°" : "bajo el horizonte")
+      moonPhaseLabel: (lit, waxing) => lit >= 97 ? "Luna Llena" : lit <= 3 ? "Luna Nueva" : lit >= 45 && lit <= 55 ? (waxing ? "Cuarto Creciente" : "Cuarto Menguante") : lit > 55 ? (waxing ? "Gibosa Creciente" : "Gibosa Menguante") : (waxing ? "Creciente" : "Menguante")
+      sunStatusLine: (alt, cond) => "Altura del Sol ${alt}° · ${cond}"
+      planMoonStatus: (cond, lit, alt) => "${cond} · Luna ${lit}% (" + (alt >= 0 ? "Alt ${alt}°" : "abajo") + ")"
+      cloudForecast: (enabled, pct, hr) => !enabled ? "Pronóstico de nubes off (activa en ⚙)" : pct == null ? "Pronóstico de nubes no disponible" : "Nubes ~${pct}% (${hr})"
+      journalCounts: (obs, found) => "${obs} " + (obs == 1 ? "registro" : "registros") + " · ${found}/15 objetos observados"
+      compass: idx => ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSO", "SO", "OSO", "O", "ONO", "NO", "NNO"][idx]
+      directionName: idx => ["Norte", "NNE", "Noreste", "ENE", "Este", "ESE", "Sureste", "SSE", "Sur", "SSO", "Suroeste", "OSO", "Oeste", "ONO", "Noroeste", "NNO"][idx]
+      lookGuide: (az, dir, alt, rising) => "Az ${az}° (${dir}) · Alt ${alt}° " + (rising ? "↑ subiendo" : "↓ bajando") + " (~" + str(max(1, round(alt / 10))) + (max(1, round(alt / 10)) == 1 ? " puño)" : " puños)")
+      belowGuide: (alt, peakTime, peakAlt) => "Bajo el horizonte (${alt}°) · Pico a las ${peakTime} (${peakAlt}°)"
+      scheduleLine: (rise, peak, peakAlt, set) => (rise != "" ? "Sale ${rise} · " : "") + "Pico ${peak} (${peakAlt}°)" + (set != "" ? " · Se pone ${set}" : "")
+      conditionsSummary: (preview, sunAlt, wEnabled, clouds) => (preview ? "Vista previa · " : "") + (sunAlt >= 0 ? "De día (Sol +${round(sunAlt)}°)" : sunAlt > -6 ? "Crepúsculo civil (Sol ${round(sunAlt)}°)" : sunAlt > -12 ? "Crepúsculo náutico (Sol ${round(sunAlt)}°)" : sunAlt > -18 ? "Crepúsculo astro (Sol ${round(sunAlt)}°)" : "Noche oscura (Sol ${round(sunAlt)}°)") + (preview || !wEnabled || clouds == null ? "" : " · Nubes ${round(clouds)}%")
+      bestToast: (ready, sunAlt, idx, name, clouds) => !ready ? "Calculando cielo…" : sunAlt == null || sunAlt >= 0 ? "De día · Mostrando planificador nocturno" : idx == null ? "Sin objeto brillante ≥20° ahora" : "Activo: ${name}" + (clouds != null && clouds >= 70 ? " · ${round(clouds)}% nubes" : "")
+      loggedToast: name => "✓ Observación de ${name} guardada"
+      aboutHeader: name => "DATOS FÍSICOS · ${upper(name)}"
+      brightnessLine: (az, alt, mag) => "Acimut ${az}° · Altura ${alt}° · Magnitud aparente ${mag}"
+      hourStatus: (sunAlt, alt) => sunAlt >= 0 ? "Día" : alt < 0 ? "Abajo" : alt < 20 ? "Bajo" : sunAlt > -18 ? "Crep." : "Oscuro"
+      skyCondDetail: sunAlt => sunAlt == null ? "—" : sunAlt >= 0 ? "Luz de día" : sunAlt > -6 ? "Crepúsculo civil" : sunAlt > -12 ? "Crepúsculo náutico" : sunAlt > -18 ? "Crepúsculo astronómico" : "Noche astronómica"
+      skyQuality: (sunAlt, moonAlt, moonLit, cloud) => sunAlt >= 0 ? "De día" : sunAlt > -18 ? "Crepúsculo" : cloud != null && cloud >= 75 ? "Cubierto (${cloud}%)" : cloud != null && cloud >= 40 ? "Nuboso (${cloud}%)" : moonAlt > 5 && moonLit >= 60 ? "Luz lunar" : cloud == null ? "Cielo oscuro · nubes desconocidas" : "Cielo oscuro · pocas nubes previstas"
+      eventName: label => get({"Sunset": "Puesta de Sol (0°)", "Sunrise": "Salida del Sol (0°)", "Civil dusk": "Fin crepúsculo civil (−6°)", "Civil dawn": "Inicio alba civil (−6°)", "Nautical dusk": "Fin crepúsculo náutico (−12°)", "Nautical dawn": "Inicio alba náutica (−12°)", "Astronomical dusk": "Inicio noche astronómica (−18°)", "Astronomical dawn": "Fin noche astronómica (−18°)", "Moonrise": "Salida de la Luna", "Moonset": "Puesta de la Luna"}, label, label)
+      resultsFor: q => "Resultados para \"${q}\""
+      questName: id => get({"alnilam": "Cinturón de Orión", "sirius": "Sirio", "canopus": "Canopo", "betelgeuse": "Betelgeuse", "rigel": "Rigel", "aldebaran": "Aldebarán", "antares": "Antares", "vega": "Vega", "altair": "Altair", "arcturus": "Arturo", "spica": "Espiga (Spica)", "regulus": "Régulo", "jupiter": "Júpiter", "saturn": "Saturno", "moon": "Luna"}, id, id)
+      questGroup: id => get({"alnilam": "Orión · ε Ori", "sirius": "Can Mayor · α CMa", "canopus": "Carina · α Car", "betelgeuse": "Orión · α Ori", "rigel": "Orión · β Ori", "aldebaran": "Tauro · α Tau", "antares": "Escorpio · α Sco", "vega": "Lira · α Lyr", "altair": "Águila · α Aql", "arcturus": "Boyero · α Boo", "spica": "Virgo · α Vir", "regulus": "Leo · α Leo", "jupiter": "Planeta", "saturn": "Planeta", "moon": "Satélite Terrestre"}, id, "")
+      questHop: id => get({
+        "alnilam": "Localización: 3 estrellas brillantes en línea recta; Alnilam es la central.",
+        "sirius": "Localización: Estrella más brillante (−1,46 mag). Sigue el Cinturón de Orión abajo-izquierda.",
+        "canopus": "Localización: 2ª estrella más brillante (−0,74 mag), ~36° al sur de Sirio.",
+        "betelgeuse": "Localización: Estrella naranja-rojiza brillante sobre el Cinturón de Orión.",
+        "rigel": "Localización: Estrella blanco-azulada bajo el Cinturón de Orión, opuesta a Betelgeuse.",
+        "aldebaran": "Localización: Estrella naranja en un cúmulo en V; sigue el Cinturón de Orión arriba-derecha.",
+        "antares": "Localización: Estrella roja intensa en el centro del anzuelo en J de Escorpio.",
+        "vega": "Localización: Brillante estrella azul-blanca del Triángulo de Verano.",
+        "altair": "Localización: Estrella blanca escoltada de cerca por dos estrellas más tenues.",
+        "arcturus": "Localización: Gigante naranja-dorada; sigue el arco del mango de la Osa Mayor.",
+        "spica": "Localización: Estrella azul-blanca al sur de Arturo siguiendo el arco de la Osa Mayor.",
+        "regulus": "Localización: Estrella principal en la base del signo de interrogación invertido de Leo.",
+        "jupiter": "Localización: Planeta blanco-dorado muy brillante y fijo (no titila).",
+        "saturn": "Localización: Planeta amarillo-crema de brillo constante sin parpadeo.",
+        "moon": "Localización: Observa cráteres a lo largo del terminador (límite entre luz y sombra)."
+      }, id, "")
+      questLore: id => get({
+        "alnilam": "Supergigante azul (B0Ia) a ~1.340 años luz; luminosidad ~375.000 Soles.",
+        "sirius": "Sistema binario (A1V + enana blanca Sirio B) a 8,6 años luz.",
+        "canopus": "Supergigante F0Ia a ~310 años luz; referencia primaria de navegación espacial.",
+        "betelgeuse": "Supergigante roja (M1–M2 Ia) a ~500–650 años luz; radio ~760 radios solares.",
+        "rigel": "Sistema cuádruple supergigante azul a ~860 años luz; ~120.000 luminosidades solares.",
+        "aldebaran": "Gigante naranja K5III a 65 años luz, en primer plano frente a las Híades.",
+        "antares": "Supergigante roja M1.5Iab a ~550 años luz; radio ~680 radios solares.",
+        "vega": "Estrella A0V de rápida rotación a 25 años luz; punto cero de la escala de magnitudes.",
+        "altair": "Estrella A7V a 16,7 años luz que rota en 8,9 horas (~286 km/s en el ecuador).",
+        "arcturus": "Gigante naranja K1.5III a 36,7 años luz moviéndose a 122 km/s respecto al Sol.",
+        "spica": "Binaria espectroscópica cercana (B1III + B2V) a 250 años luz con periodo de 4,01 días.",
+        "regulus": "Sistema estelar cuádruple a 79 años luz; la componente principal rota en 15,9 horas.",
+        "jupiter": "Gigante gaseoso; prismáticos 7x–10x resuelven sus 4 lunas galileanas.",
+        "saturn": "Gigante anillado; los anillos abarcan 282.000 km con solo ~10 m de espesor.",
+        "moon": "Distancia media 384.400 km (1,28 segundos luz); periodo sinódico 29,53 días."
+      }, id, "")
+    }
+  }
+
   // Persistent states
   state streak_days = 0 persist
-  state total_found = 0 persist
   state last_found_date = "" persist
   state found_quests = [] persist
   state quest_idx = 0 persist
@@ -30,68 +621,82 @@ widget "AstroQuest" {
   state bonus_xp = 0 persist
   state quiz_idx = 0 persist
   state quiz_streak = 0 persist
-
-  // 15 Naked-Eye Stargazing Quests with Constellation, Spectral Color, Star-Hopping Guide, and Lore
-  let quests = [
-    { id: "alnilam",    name: "Orion's Belt", body: "Alnilam",    kind: "star",   con: "Orion",      mag: "1.69", color: #93C5FD, hop: "Look for 3 bright stars in a tight straight line; Alnilam is the middle jewel.", lore: "A blue supergiant ~1,340 light-years away shining 375,000x brighter than the Sun." },
-    { id: "sirius",     name: "Sirius",       body: "Sirius",     kind: "star",   con: "Canis Major", mag: "-1.46", color: #E0F2FE, hop: "Follow Orion's Belt downward to the left (southeast) to the brightest star in the sky.", lore: "The Dog Star is just 8.6 light-years away and has a hidden white-dwarf companion, Sirius B." },
-    { id: "canopus",    name: "Canopus",      body: "Canopus",    kind: "star",   con: "Carina",     mag: "-0.74", color: #FEF08A, hop: "Look ~36° south of Sirius toward the southern horizon.", lore: "Second-brightest star in the night sky, used by deep-space probes for attitude navigation." },
-    { id: "betelgeuse", name: "Betelgeuse",   body: "Betelgeuse", kind: "star",   con: "Orion",      mag: "0.50", color: #FCA5A5, hop: "Spot the unmistakable orange-red shoulder above Orion's Belt.", lore: "A colossal red supergiant so wide that if placed at our Sun, it would engulf Mars!" },
-    { id: "rigel",      name: "Rigel",        body: "Rigel",      kind: "star",   con: "Orion",      mag: "0.13", color: #BFDBFE, hop: "Opposite Betelgeuse below Orion's Belt — the bright blue-white knee of Orion.", lore: "A scorching blue-white supergiant system radiating ~120,000 solar luminosities." },
-    { id: "aldebaran",  name: "Aldebaran",    body: "Aldebaran",  kind: "star",   con: "Taurus",     mag: "0.86", color: #FDBA74, hop: "Follow Orion's Belt upward to the right (northwest) to a fiery orange eye in a V-shaped cluster.", lore: "The fiery 'Eye of the Bull' sitting in front of the Hyades star cluster, 65 light-years away." },
-    { id: "antares",    name: "Antares",      body: "Antares",    kind: "star",   con: "Scorpius",   mag: "1.06", color: #F87171, hop: "Find the J-shaped fishhook of Scorpius; Antares glows ruby-red at its heart.", lore: "Its name means 'Rival of Mars' because its deep red hue rivals the red planet along the ecliptic." },
-    { id: "vega",       name: "Vega",         body: "Vega",       kind: "star",   con: "Lyra",       mag: "0.03", color: #BAE6FD, hop: "Brightest icy-blue vertex of the Summer Triangle high in the northern/zenith sky.", lore: "Spins so rapidly it bulges at the equator, and was Earth's North Star 14,000 years ago." },
-    { id: "altair",     name: "Altair",       body: "Altair",     kind: "star",   con: "Aquila",     mag: "0.76", color: #E2E8F0, hop: "Southern tip of the Summer Triangle, flanked by two dimmer guardian stars.", lore: "Only 16.7 light-years away, completing a full rotation in under 9 hours!" },
-    { id: "arcturus",   name: "Arcturus",     body: "Arcturus",   kind: "star",   con: "Boötes",     mag: "-0.05", color: #FCD34D, hop: "Follow the curve of the Big Dipper's handle: 'Arc to Arcturus'!", lore: "An ancient orange giant passing fast through the Milky Way disk from an old halo stream." },
-    { id: "spica",      name: "Spica",        body: "Spica",      kind: "star",   con: "Virgo",      mag: "0.97", color: #93C5FD, hop: "After 'Arc to Arcturus', continue the curve south to 'Speed on to Spica'.", lore: "A tight pair of blue giant stars orbiting so close their gravity stretches them into egg shapes." },
-    { id: "regulus",    name: "Regulus",      body: "Regulus",    kind: "star",   con: "Leo",        mag: "1.36", color: #DBEAFE, hop: "Look for the backwards question-mark ('The Sickle') of Leo; Regulus is the dot at the bottom.", lore: "The 'Little King' at the heart of Leo, a quadruple star system 79 light-years from Earth." },
-    { id: "jupiter",    name: "Jupiter",      body: "Jupiter",    kind: "planet", con: "Ecliptic",   mag: "-2.4", color: #FDE68A, hop: "Shines with a steady, non-twinkling golden-white glow along the zodiac band.", lore: "King of Planets — even steady 7x binoculars can reveal its four Galilean moons in a line!" },
-    { id: "saturn",     name: "Saturn",       body: "Saturn",     kind: "planet", con: "Ecliptic",   mag: "0.6",  color: #FDE047, hop: "Look for a calm, creamy-yellow 'star' that does not twinkle like background stars.", lore: "Famed for its icy rings spanning 282,000 km across yet only ~10 meters thick." },
-    { id: "moon",       name: "Moon",         body: "Moon",       kind: "planet", con: "Ecliptic",   mag: "-12.6", color: #F8FAFC, hop: "Follow the terminator line (day/night boundary) where craters cast dramatic shadows.", lore: "Drifting 3.8 cm away from Earth every year; look for dark volcanic plains ('maria') with the naked eye." }
-  ]
-
-  // Stargazer trivia questions
-  let quiz_bank = [
-    { q: "Which star sits right in the middle of Orion's Belt?", opts: ["Alnilam", "Betelgeuse", "Rigel", "Aldebaran"], ans: 0, tip: "Alnilam ('String of Pearls') is the bright blue supergiant in the center of the three belt stars." },
-    { q: "How many degrees of sky does one clenched fist at arm's length cover?", opts: ["~2 degrees", "~10 degrees", "~25 degrees", "~45 degrees"], ans: 1, tip: "A clenched fist held at arm's length spans roughly 10° of altitude — the classic stargazer's ruler!" },
-    { q: "Following Orion's Belt down and left points directly to which star?", opts: ["Vega", "Antares", "Sirius", "Arcturus"], ans: 2, tip: "Orion's Belt points straight to Sirius, the brightest star in Earth's night sky (-1.46 mag)." },
-    { q: "How can you tell a planet (like Jupiter or Saturn) apart from a star with the naked eye?", opts: ["Planets twinkle rapidly", "Planets shine steadily without twinkling", "Planets only appear in the north", "Planets are always green"], ans: 1, tip: "Stars are point sources that twinkle in atmospheric turbulence; planets have tiny disks that shine steadily!" },
-    { q: "Why do astronomers use deep red light (#FF3333) at night?", opts: ["It attracts meteors", "It preserves dark-adapted rod cells (rhodopsin)", "It warms the phone screen", "It blocks clouds"], ans: 1, tip: "Red wavelengths barely bleach rhodopsin in your retina's rod cells, saving 30 minutes of dark adaptation." },
-    { q: "Complete the classic star-hopping phrase: 'Arc to Arcturus, and...'", opts: ["Leap to Leo", "Speed on to Spica", "Run to Rigel", "Sail to Sirius"], ans: 1, tip: "Follow the Big Dipper's handle curve to orange Arcturus, then continue the arc to blue Spica!" }
-  ]
-
-  // Local states
-  state screen_tab = "radar"
-  state quest_filter = "all"
-  state confirm_reset = false
-  state reset_ends_at = 0
-  state time_offset_hrs = 0
-  state celebrate_msg = ""
-  state quiz_feedback = ""
-  state quiz_picked = -1
+  state follow_best = true persist
+  state observations = [] persist
   state quiz_solved = [] persist
   state weather_enabled = false persist
   state observing_site = null persist
+
+  // 15 Naked-Eye Catalogue Objects
+  let quests = [
+    { id: "alnilam",    mag: "1.69",  color: #93C5FD },
+    { id: "sirius",     mag: "-1.46", color: #E0F2FE },
+    { id: "canopus",    mag: "-0.74", color: #FEF08A },
+    { id: "betelgeuse", mag: "0.50",  color: #FCA5A5 },
+    { id: "rigel",      mag: "0.13",  color: #BFDBFE },
+    { id: "aldebaran",  mag: "0.86",  color: #FDBA74 },
+    { id: "antares",    mag: "1.06",  color: #F87171 },
+    { id: "vega",       mag: "0.03",  color: #BAE6FD },
+    { id: "altair",     mag: "0.76",  color: #E2E8F0 },
+    { id: "arcturus",   mag: "-0.05", color: #FCD34D },
+    { id: "spica",      mag: "0.97",  color: #93C5FD },
+    { id: "regulus",    mag: "1.36",  color: #DBEAFE },
+    { id: "jupiter",    mag: "-2.4",  color: #FDE68A },
+    { id: "saturn",     mag: "0.6",   color: #FDE047 },
+    { id: "moon",       mag: "-12.6", color: #F8FAFC }
+  ]
+
+  // Asterism guide lines connecting catalogue indices (Orion, Orion->Sirius/Aldebaran, Summer pair, Spring arc)
+  let guide_pairs = [[3, 0], [0, 4], [0, 1], [0, 5], [7, 8], [9, 10]]
+
+  // Local UI states
+  state screen_tab = "radar"
+  state plan_idx = -1
+  state plan_cursor = -1
+  state plan_new_only = false
+  state plan_show_all = false
+  state plan_picker = false
+  state observation_note = ""
+  state show_details = false
+  state show_settings = false
+  state journal_page = 0
+  state journal_notice = ""
+  state export_location = false
+  state edit_entry_id = ""
+  state edit_note = ""
+  state remove_entry_id = ""
+  state time_offset_hrs = 0
+  state celebrate_msg = ""
   state editing_location = false
+  state waiting_gps = false
   state city_draft = ""
   state city_query = ""
   state latitude_draft = ""
   state longitude_draft = ""
   state location_error = ""
 
-
   onTap: {
     haptic()
     screen()
   }
 
-  source now = clock every 1s
+  source now = clock every 10s
+  source here = android.location
+  source modes = android.modes
 
-  let safe_idx = clamp(int(quest_idx), 0, len(quests) - 1)
-  let safe_quiz_idx = clamp(int(quiz_idx), 0, len(quiz_bank) - 1)
-  let current_quest = quests[safe_idx]
+  on here {
+    if waiting_gps && location_open && value.granted && value.available && value.lat != null && value.lon != null {
+      observing_site = {lat: round(num(value.lat), 4), lon: round(num(value.lon), 4), name: str.phoneLocName, method: "gps", confirmed_at: now}
+      waiting_gps = false
+      editing_location = false
+      location_error = ""
+      haptic()
+    }
+  }
 
-  // Theme palette expressions (Cosmic Mode vs Strict Red Night-Vision Mode)
+  let stored_idx = clamp(int(quest_idx), 0, len(quests) - 1)
+
+  // Theme palette (Cosmic Mode vs Strict Red Night-Vision Mode)
   let is_cosmic = theme_mode == "cosmic"
   let c_bg = is_cosmic ? #080D20 : #000000
   let c_card = is_cosmic ? #111B32 : #000000
@@ -103,186 +708,207 @@ widget "AstroQuest" {
   let c_border = is_cosmic ? #293C59 : #FF3333
   let c_accent_border = is_cosmic ? #79D9ED : #FF3333
 
-  // Location is chosen by the user; no default city or IP-based guessing.
-  // OWL 13 has no GPS-coordinate/permission API. Exact coordinates may be entered.
+  // Location setup
   let site_lat = num(observing_site.lat)
   let site_lon = num(observing_site.lon)
   let location_ready = site_lat != null && site_lon != null && site_lat >= -90 && site_lat <= 90 && site_lon >= -180 && site_lon <= 180
-  let site_label = location_ready ? (observing_site.name ?? "Selected coordinates") : "Choose observing location"
+  let site_label = !location_ready ? str.chooseSite : (observing_site.method == "coordinates" || observing_site.method == "gps" ? (observing_site.method == "gps" ? str.phoneLocName : str.selectedCoords) + " (" + str(round(site_lat, 2)) + "°, " + str(round(site_lon, 2)) + "°)" : (observing_site.name ?? str.selectedCoords))
   let location_open = !location_ready || editing_location
   let draft_lat = num(trim(latitude_draft))
   let draft_lon = num(trim(longitude_draft))
   let coordinates_valid = len(trim(latitude_draft)) > 0 && len(trim(longitude_draft)) > 0 && draft_lat != null && draft_lon != null && draft_lat >= -90 && draft_lat <= 90 && draft_lon >= -180 && draft_lon <= 180
-  source places = http(location_open && len(trim(city_query)) >= 2 && len(trim(city_query)) <= 80 ? "https://geocoding-api.open-meteo.com/v1/search?name=${enc(city_query)}&count=5&language=en&format=json" : null) every 1h json status timeout 10s
+  source places = http(location_open && len(trim(city_query)) >= 2 && len(trim(city_query)) <= 80 ? "https://geocoding-api.open-meteo.com/v1/search?name=${enc(city_query)}&count=5&language=${enc(lang())}&format=json" : null) every 1h json status timeout 10s
 
-  // Isolated Python; user coordinates are shell-quoted arguments, never code.
+  // Local offline ephemeris calculation using Python + Astropy
   let site_lat_arg = location_ready ? str(site_lat) : ""
   let site_lon_arg = location_ready ? str(site_lon) : ""
-  // Use the phone clock and cache the 13-hour grid for each 10-minute bucket.
-  let sky_epoch = floor(now / 600) * 600
-  source astro_result = cmd("python -I -c 'import json\nimport math\nimport sys\ntry:\n    latitude, longitude = map(float, sys.argv[1:3])\n    timestamp = int(sys.argv[3])\n    if not 946684800 <= timestamp <= 4102444800:\n        raise ValueError(\"Unsupported timestamp\")\n    if not (math.isfinite(latitude) and math.isfinite(longitude) and -90 <= latitude <= 90 and -180 <= longitude <= 180):\n        raise ValueError(\"Coordinates out of range\")\nexcept (ValueError, TypeError, IndexError, OverflowError):\n    print(json.dumps({\"ok\": False, \"error\": \"Choose your observing location\"}))\n    sys.exit(0)\ntry:\n    from astropy import units as u\n    from astropy.coordinates import AltAz, EarthLocation, SkyCoord, get_body, solar_system_ephemeris\n    from astropy.time import Time\n    from astropy.utils import iers\nexcept ImportError:\n    print(json.dumps({\"ok\": False, \"error\": \"Astronomy unavailable: Python astropy is missing\"}))\nelse:\n    try:\n        iers.conf.auto_download = False\n        iers.conf.iers_degraded_accuracy = \"warn\"\n        iers.conf.auto_max_age = None\n        solar_system_ephemeris.set(\"builtin\")\n        site = EarthLocation.from_geodetic(longitude * u.deg, latitude * u.deg)\n        times = Time(timestamp, format=\"unix\") + list(range(13)) * u.hour\n        frame = AltAz(obstime=times, location=site, pressure=0 * u.hPa)\n        sun = get_body(\"sun\", times, site).transform_to(frame)\n        # Fixed J2000 star catalogue: right ascension, declination, visual magnitude.\n        stars = [(84.05338935, -1.20191983, 1.69), (101.28715455, -16.71611569, -1.46),\n                 (95.9879577, -52.69566045, -0.74), (88.7929386, 7.40706274, 0.50),\n                 (78.63446805, -8.20164055, 0.13), (68.980161, 16.50930138, 0.86),\n                 (247.35192045, -26.4320025, 1.06), (279.23473545, 38.78369185, 0.03),\n                 (297.6958296, 8.86832203, 0.76), (213.91530015, 19.18241038, -0.05),\n                 (201.29824695, -11.16132203, 0.97), (152.0929611, 11.96720709, 1.36)]\n        positions = [SkyCoord(ra=ra * u.deg, dec=dec * u.deg, frame=\"icrs\").transform_to(frame)\n                     for ra, dec, magnitude in stars]\n        magnitudes = [[magnitude] * 13 for ra, dec, magnitude in stars]\n        for name, reference_mag in ((\"jupiter\", -9.40), (\"saturn\", -8.88), (\"moon\", -12.717)):\n            body = get_body(name, times, site).transform_to(frame)\n            positions.append(body)\n            separations = body.separation(sun)\n            mags = []\n            for h in range(13):\n                delta = float(body.distance[h].to_value(u.au))\n                earth_sun = float(sun.distance[h].to_value(u.au))\n                elongation = float(separations.rad[h])\n                radius = math.sqrt(max(1e-20, delta**2 + earth_sun**2 - 2 * delta * earth_sun * math.cos(elongation)))\n                phase = math.acos(max(-1, min(1, (radius**2 + delta**2 - earth_sun**2) / (2 * radius * delta))))\n                if name == \"moon\":\n                    magnitude = reference_mag + 1.49 * phase + 0.0431 * phase**4 + 5 * math.log10(delta * 149597870.7 / 384400)\n                else:\n                    # Approximate disk magnitudes; Saturn ring brightness is omitted.\n                    magnitude = reference_mag + 5 * math.log10(radius * delta) + (0.005 if name == \"jupiter\" else 0.044) * math.degrees(phase)\n                mags.append(magnitude)\n            magnitudes.append(mags)\n        sun_separations = [p.separation(sun).deg for p in positions]\n        hours = [[{\"az\": round(float(p.az.deg[h]), 2) % 360,\n                   \"alt\": round(float(p.alt.deg[h]), 2),\n                   \"mag\": round(magnitudes[i][h], 2),\n                   \"sun_sep\": round(float(sun_separations[i][h]), 2)}\n                  for i, p in enumerate(positions)] for h in range(13)]\n        sun_alts = [round(float(alt), 2) for alt in sun.alt.deg]\n        print(json.dumps({\"ok\": True, \"generated_at\": timestamp, \"latitude\": latitude,\n                          \"longitude\": longitude, \"hours\": hours, \"sun_alts\": sun_alts}, allow_nan=False))\n    except Exception:\n        print(json.dumps({\"ok\": False, \"error\": \"Sky calculation failed; refresh or check the astronomy installation\"}))\n' ${sh(site_lat_arg)} ${sh(site_lon_arg)} ${sh(sky_epoch)}") every 10m json status timeout 30s
+  let minute_epoch = floor(now / 60) * 60
+  let sky_epoch = minute_epoch
+  source astro_result = cmd("if [ ${sh(location_ready && sky_epoch != null)} != true ]; then printf '{}'; exit 0; fi; python -I -c 'import json, math, sys\nimport numpy as np\n\nSTEP, SAMPLES = 900, 97\nSTARS = [(84.05338935, -1.20191983, 1.69), (101.28715455, -16.71611569, -1.46),\n         (95.9879577, -52.69566045, -0.74), (88.7929386, 7.40706274, 0.50),\n         (78.63446805, -8.20164055, 0.13), (68.980161, 16.50930138, 0.86),\n         (247.35192045, -26.4320025, 1.06), (279.23473545, 38.78369185, 0.03),\n         (297.6958296, 8.86832203, 0.76), (213.91530015, 19.18241038, -0.05),\n         (201.29824695, -11.16132203, 0.97), (152.0929611, 11.96720709, 1.36)]\n\ndef intervals(mask):\n    result, start = [], None\n    for k in range(len(mask) - 1):\n        good = mask[k] and mask[k + 1]\n        if good and start is None:\n            start = k\n        if start is not None and (not good or k == len(mask) - 2):\n            result.append((start, k if not good else k + 1))\n            start = None\n    return result\n\ndef crossings(values, threshold, timestamp, down_label, up_label):\n    thresholds = [threshold] * len(values) if isinstance(threshold, (float, int)) else threshold\n    result, previous_side = [], None\n    for k in range(len(values) - 1):\n        a, b = values[k] - thresholds[k], values[k + 1] - thresholds[k + 1]\n        if a != 0:\n            previous_side = a\n        if a * b < 0 or (a == 0 and b != 0 and (previous_side is None or previous_side * b < 0)):\n            result.append({\"label\": down_label if b < 0 else up_label, \"time\": int(round(timestamp + (k + a / (a - b)) * STEP))})\n    return result\n\ndef dark_intervals(sun_alts, timestamp):\n    result = []\n    start = timestamp if sun_alts[0] <= -18 else None\n    for event in crossings(sun_alts, -18, timestamp, \"dark\", \"light\"):\n        if event[\"label\"] == \"dark\":\n            start = event[\"time\"]\n        elif start is not None:\n            if event[\"time\"] > start:\n                result.append({\"start\": start, \"end\": event[\"time\"]})\n            start = None\n    if start is not None:\n        result.append({\"start\": start, \"end\": timestamp + (len(sun_alts) - 1) * STEP})\n    return result\n\ndef light_bands(sun_alts):\n    bands = []\n    for j in range(len(sun_alts) - 1):\n        k = 2 if sun_alts[j] >= 0 else 1 if sun_alts[j] > -18 else 0\n        if bands and bands[-1][\"k\"] == k:\n            bands[-1][\"e\"] = j + 1\n        else:\n            bands.append({\"s\": j, \"e\": j + 1, \"k\": k})\n    return bands\n\ndef summarize(hours, sun_alts, timestamp):\n    ranked, stats = [], []\n    for i in range(len(hours[0])):\n        alts = [row[i][\"alt\"] for row in hours]\n        cx = crossings(alts, 0.0, timestamp, \"set\", \"rise\")\n        nxt_rise = next((e[\"time\"] for e in cx if e[\"label\"] == \"rise\"), None)\n        nxt_set = next((e[\"time\"] for e in cx if e[\"label\"] == \"set\"), None)\n        pk_step = int(max(range(len(hours)), key=lambda k: alts[k]))\n        stats.append({\"rise\": nxt_rise, \"set\": nxt_set, \"peak_step\": pk_step, \"peak_time\": timestamp + pk_step * STEP, \"peak_alt\": alts[pk_step]})\n        eligible = [sun_alts[k] <= -6 and row[i][\"alt\"] >= 20 and row[i][\"sun_sep\"] >= 30 and row[i][\"mag\"] <= 2 for k, row in enumerate(hours)]\n        windows = []\n        for start, end in intervals(eligible):\n            peak = max(range(start, end + 1), key=lambda k: hours[k][i][\"alt\"])\n            score = hours[peak][i][\"alt\"] / 15 - hours[peak][i][\"mag\"] + (end - start) / 20\n            windows.append({\"start\": timestamp + start * STEP, \"end\": timestamp + end * STEP, \"start_step\": start, \"end_step\": end, \"best_step\": peak, \"peak_alt\": hours[peak][i][\"alt\"], \"score\": round(score, 3)})\n        if windows:\n            best = max(windows, key=lambda w: w[\"score\"])\n            ranked.append({\"idx\": i, \"windows\": windows, \"best_step\": best[\"best_step\"], \"start\": best[\"start\"], \"end\": best[\"end\"], \"peak_alt\": best[\"peak_alt\"], \"score\": best[\"score\"]})\n    ranked.sort(key=lambda item: (-item[\"score\"], item[\"idx\"]))\n    return ranked, dark_intervals(sun_alts, timestamp), stats\n\ndef calculate(latitude, longitude, timestamp):\n    if not (math.isfinite(latitude) and math.isfinite(longitude) and -90 <= latitude <= 90 and -180 <= longitude <= 180):\n        raise ValueError(\"Coordinates out of range\")\n    if not 946684800 <= timestamp <= 4102444800:\n        raise ValueError(\"Unsupported timestamp\")\n    from astropy import units as u\n    from astropy.coordinates import AltAz, EarthLocation, SkyCoord, get_body, get_body_barycentric, solar_system_ephemeris\n    from astropy.time import Time\n    from astropy.utils import iers\n    iers.conf.auto_download = False\n    iers.conf.iers_degraded_accuracy = \"warn\"\n    iers.conf.auto_max_age = None\n    solar_system_ephemeris.set(\"builtin\")\n    site = EarthLocation.from_geodetic(longitude * u.deg, latitude * u.deg)\n    times = Time(timestamp, format=\"unix\") + np.arange(SAMPLES) * (15 * u.minute)\n    frame = AltAz(obstime=times, location=site, pressure=0 * u.hPa)\n    sun = get_body(\"sun\", times, site).transform_to(frame)\n    catalogue = SkyCoord(ra=[s[0] for s in STARS] * u.deg, dec=[s[1] for s in STARS] * u.deg, frame=\"icrs\")\n    star_grid = catalogue[None, :].transform_to(AltAz(obstime=times[:, None], location=site, pressure=0 * u.hPa))\n    az_cols, alt_cols, sep_cols = [star_grid.az.deg], [star_grid.alt.deg], [star_grid.separation(sun[:, None]).deg]\n    mag_cols = [np.broadcast_to([s[2] for s in STARS], (SAMPLES, len(STARS)))]\n    moon_bary = get_body_barycentric(\"moon\", times)\n    moon_to_sun = get_body_barycentric(\"sun\", times) - moon_bary\n    moon_to_earth = get_body_barycentric(\"earth\", times) - moon_bary\n    phase_cosines = np.clip((moon_to_sun.dot(moon_to_earth) / (moon_to_sun.norm() * moon_to_earth.norm())).value, -1.0, 1.0)\n    earth_sun = sun.distance.to_value(u.au)\n    for name, ref_mag in ((\"jupiter\", -9.40), (\"saturn\", -8.88), (\"moon\", -12.717)):\n        body = get_body(name, times, site).transform_to(frame)\n        sep = body.separation(sun)\n        delta = body.distance.to_value(u.au)\n        radius = np.sqrt(np.maximum(1e-20, delta**2 + earth_sun**2 - 2 * delta * earth_sun * np.cos(sep.rad)))\n        phase = np.arccos(np.clip((radius**2 + delta**2 - earth_sun**2) / (2 * radius * delta), -1.0, 1.0))\n        if name == \"moon\":\n            dist_km = delta * 149597870.7\n            mags = ref_mag + 1.49 * phase + 0.0431 * phase**4 + 5 * np.log10(dist_km / 384400)\n            moon_alt_raw = body.alt.deg\n            moon_info = [{\"illumination\": round(float(50 * (1 + phase_cosines[h])), 2), \"alt\": round(float(moon_alt_raw[h]), 2)} for h in range(SAMPLES)]\n            moon_thresholds = (-34 / 60 - np.degrees(np.arcsin(1737.4 / dist_km))).tolist()\n        else:\n            mags = ref_mag + 5 * np.log10(radius * delta) + (0.005 if name == \"jupiter\" else 0.044) * np.degrees(phase)\n        az_cols.append(body.az.deg[:, None])\n        alt_cols.append(body.alt.deg[:, None])\n        sep_cols.append(sep.deg[:, None])\n        mag_cols.append(mags[:, None])\n    all_az = np.round(np.hstack(az_cols), 2) % 360\n    all_alt = np.round(np.hstack(alt_cols), 2)\n    all_sep = np.round(np.hstack(sep_cols), 2)\n    all_mag = np.round(np.hstack(mag_cols), 2)\n    if not (np.all(np.isfinite(all_az)) and np.all(np.isfinite(all_alt)) and np.all(np.isfinite(all_sep)) and np.all(np.isfinite(all_mag)) and np.all((0 <= all_az) & (all_az < 360)) and np.all((-90 <= all_alt) & (all_alt <= 90)) and np.all((0 <= all_sep) & (all_sep <= 180))):\n        raise ValueError(\"Invalid sky calculation\")\n    az_l, alt_l, mag_l, sep_l = all_az.tolist(), all_alt.tolist(), all_mag.tolist(), all_sep.tolist()\n    hours = [[{\"az\": az_l[h][i], \"alt\": alt_l[h][i], \"mag\": mag_l[h][i], \"sun_sep\": sep_l[h][i]} for i in range(15)] for h in range(SAMPLES)]\n    sun_raw = sun.alt.deg.tolist()\n    sun_alts = np.round(sun.alt.deg, 3).tolist()\n    ranked, dark, stats = summarize(hours, sun_alts, timestamp)\n    events = []\n    for level, evening, morning in ((-50 / 60, \"Sunset\", \"Sunrise\"), (-6, \"Civil dusk\", \"Civil dawn\"), (-12, \"Nautical dusk\", \"Nautical dawn\"), (-18, \"Astronomical dusk\", \"Astronomical dawn\")):\n        events.extend(crossings(sun_raw, level, timestamp, evening, morning))\n    events.extend(crossings(moon_alt_raw.tolist(), moon_thresholds, timestamp, \"Moonset\", \"Moonrise\"))\n    events.sort(key=lambda e: e[\"time\"])\n    return {\"ok\": True, \"schema\": 2, \"generated_at\": timestamp, \"latitude\": latitude, \"longitude\": longitude, \"step_seconds\": STEP, \"hours\": hours, \"sun_alts\": sun_alts, \"bands\": light_bands(sun_alts), \"moon\": moon_info, \"stats\": stats, \"planner\": {\"ranked\": ranked, \"dark\": dark, \"events\": events}}\n\nif __name__ == \"__main__\":\n    try:\n        result = calculate(float(sys.argv[1]), float(sys.argv[2]), int(sys.argv[3]))\n    except ImportError:\n        result = {\"ok\": False, \"error\": \"Astronomy unavailable: Python astropy is missing\"}\n    except (ValueError, TypeError, IndexError, OverflowError):\n        result = {\"ok\": False, \"error\": \"Check observing coordinates and phone time, then refresh\"}\n    except Exception:\n        result = {\"ok\": False, \"error\": \"Sky calculation failed; refresh or check astronomy installation\"}\n    print(json.dumps(result, allow_nan=False, separators=(\",\", \":\")))\n' ${sh(site_lat_arg)} ${sh(site_lon_arg)} ${sh(sky_epoch)}") every 1m json status timeout 30s
   let astro_weather = astro_result.ok ? astro_result.out : null
-  let sky_error = astro_result == null ? "Loading sky positions…" : !astro_result.ok ? "Sky calculation unavailable · check Linux and refresh" : astro_weather.error ?? "Waiting for fresh sky positions"
 
-  // Send selected coordinates to Open-Meteo only after the user chooses a site.
-  source weather = http(location_ready && weather_enabled ? "https://api.open-meteo.com/v1/forecast?latitude=${enc(round(site_lat, 2))}&longitude=${enc(round(site_lon, 2))}&current=cloud_cover&timezone=auto&timeformat=unixtime" : null) every 15m json status timeout 10s
+  // Optional live cloud cover from Open-Meteo
+  source weather = http(location_ready && weather_enabled ? "https://api.open-meteo.com/v1/forecast?latitude=${enc(round(site_lat, 2))}&longitude=${enc(round(site_lon, 2))}&current=cloud_cover&hourly=cloud_cover&forecast_days=2&timezone=auto&timeformat=unixtime" : null) every 15m json status timeout 10s
   let weather_matches = location_ready && weather_enabled && weather.ok && weather.out.latitude != null && weather.out.longitude != null && abs(num(weather.out.latitude) - site_lat) < 0.3 && abs((num(weather.out.longitude) - site_lon + 540) % 360 - 180) < 0.3
   let weather_time = num(weather.out.current.time)
-  let cloud_cover = weather_matches && weather_time != null && abs(now - weather_time) < 3600 && weather.out.current.cloud_cover != null ? clamp(num(weather.out.current.cloud_cover), 0, 100) : null
-  let cloud_label = !weather_enabled ? "off" : cloud_cover == null ? "unavailable" : str(round(cloud_cover)) + "%"
+  let cloud_cover = weather_matches && weather_time != null && abs(minute_epoch - weather_time) < 3600 && weather.out.current.cloud_cover != null ? clamp(num(weather.out.current.cloud_cover), 0, 100) : null
   let site_zone = observing_site.timezone ?? (weather_matches ? weather.out.timezone : null) ?? null
 
-  let safe_hr = clamp(int(time_offset_hrs), 0, 12)
-  let sky_ready = location_ready && astro_weather.latitude == site_lat && astro_weather.longitude == site_lon && astro_weather.ok == true && astro_weather.generated_at != null && abs(now - astro_weather.generated_at) <= 630 && len(astro_weather.hours) == 13 && len(astro_weather.sun_alts) == 13 && all(astro_weather.sun_alts, a => num(a) != null && a >= -90 && a <= 90) && all(astro_weather.hours, h => len(h) == len(quests) && all(h, t => num(t.az) != null && t.az >= 0 && t.az < 360 && num(t.alt) != null && t.alt >= -90 && t.alt <= 90 && num(t.mag) != null && num(t.sun_sep) != null && t.sun_sep >= 0 && t.sun_sep <= 180))
-  let active_targets = sky_ready ? (astro_weather.hours[safe_hr] ?? []) : []
-  let live_q_pos = active_targets[safe_idx]
-  let eff_az = num(live_q_pos.az)
-  let eff_alt = num(live_q_pos.alt)
-  let compass_points = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
-  let target_direction = compass_points[int(floor((eff_az + 11.25) / 22.5)) % 16]
-  let visible_count = count(active_targets, t => num(t.alt ?? -90) >= 0)
-  let sky_time = sky_ready ? fmtTime(astro_weather.generated_at + safe_hr * 3600, "EEE HH:mm:ss", site_zone) + " " + (site_zone ?? "phone time") : "unavailable"
-
-  let sun_alt = sky_ready ? num(astro_weather.sun_alts[safe_hr]) : null
+  let safe_step = clamp(int(round(time_offset_hrs * 4)), 0, 96)
+  let safe_hr = safe_step / 4
+  let sky_data_ok = location_ready && astro_weather.latitude == site_lat && astro_weather.longitude == site_lon && astro_weather.ok == true && astro_weather.schema == 2 && astro_weather.step_seconds == 900 && astro_weather.generated_at != null && len(astro_weather.hours) == 97 && len(astro_weather.sun_alts) == 97 && len(astro_weather.moon) == 97 && len(astro_weather.hours[0]) == len(quests)
+  let sky_ready = sky_data_ok && abs(minute_epoch - astro_weather.generated_at) <= 1800 && len(astro_weather.hours[safe_step]) == len(quests)
+  let sky_error = astro_result == null ? str.loadingSky : !astro_result.ok ? str.skyUnavailable : astro_weather.error ?? (sky_ready ? str.loadingSky : str.skyUnavailable)
+  let active_targets = sky_ready ? (astro_weather.hours[safe_step] ?? []) : []
+  let next_step_targets = sky_ready ? (astro_weather.hours[min(96, safe_step + 1)] ?? []) : []
+  let sun_alt = sky_ready ? num(astro_weather.sun_alts[safe_step]) : null
   let is_daylight = sun_alt != null && sun_alt >= 0
   let is_twilight = sun_alt != null && sun_alt < 0 && sun_alt > -18
   let live_targets = sky_ready ? astro_weather.hours[0] : []
+  let live_next_targets = sky_ready ? astro_weather.hours[1] : []
   let live_sun_alt = sky_ready ? num(astro_weather.sun_alts[0]) : null
-  // Prefer high, bright objects; exclude low targets, faint crescents, and the Sun's vicinity.
+
+  // Best target now: high (>=20°), safe from Sun (>=30°), bright (<=2 mag)
   let best_candidates = range(len(quests)).filter(i => num(live_targets[i].alt ?? -90) >= 20 && num(live_targets[i].sun_sep ?? 0) >= 30 && num(live_targets[i].mag ?? 99) <= 2).sortBy(i => num(live_targets[i].mag) - min(70, num(live_targets[i].alt)) / 15)
   let best_idx = live_sun_alt != null && live_sun_alt < 0 ? first(best_candidates) : null
-  let best_message = !sky_ready ? "Sky data unavailable · check location and refresh" : live_sun_alt == null ? "Daylight data unavailable · refresh before choosing a target" : live_sun_alt >= 0 ? "Daylight · try Best target now after sunset" : best_idx == null ? "No suitable bright target at least 20° up · try later" : "Selected " + quests[best_idx].name + ": bright and at least 20° above the horizon" + (cloud_cover >= 70 ? " · heavy cloud may hide it" : "")
-  let conditions_label = !sky_ready || sun_alt == null ? "Sky conditions unavailable" : (safe_hr > 0 ? "Preview: " : "") + (is_daylight ? "Daylight · stars are difficult to see" : is_twilight ? "Twilight · fainter stars may be hidden" : "Dark sky time") + (safe_hr > 0 ? " · clouds not forecast here" : !weather_enabled ? " · cloud weather off" : cloud_cover == null ? " · cloud data unavailable" : cloud_cover >= 70 ? " · heavy cloud may block the view" : cloud_cover >= 30 ? " · patchy cloud; look for gaps" : " · low cloud cover")
-  let direction_names = ["north", "north-northeast", "northeast", "east-northeast", "east", "east-southeast", "southeast", "south-southeast", "south", "south-southwest", "southwest", "west-southwest", "west", "west-northwest", "northwest", "north-northwest"]
-  let friendly_direction = direction_names[int(floor((eff_az + 11.25) / 22.5)) % 16]
+  let safe_idx = follow_best && safe_hr == 0 && best_idx != null ? best_idx : stored_idx
+  let current_quest = quests[safe_idx]
+  let current_name = str.questName(current_quest.id)
+  let current_group = str.questGroup(current_quest.id)
+  let live_q_pos = active_targets[safe_idx]
+  let next_q_pos = next_step_targets[safe_idx]
+  let eff_az = num(live_q_pos.az)
+  let eff_alt = num(live_q_pos.alt)
+  let is_rising = num(next_q_pos.alt ?? eff_alt) >= eff_alt
+  let q_stat = sky_ready && astro_weather.stats != null ? astro_weather.stats[safe_idx] : null
+  let q_rise_str = q_stat != null && q_stat.rise != null ? fmtTime(q_stat.rise, "HH:mm", site_zone) : ""
+  let q_set_str = q_stat != null && q_stat.set != null ? fmtTime(q_stat.set, "HH:mm", site_zone) : ""
+  let q_peak_str = q_stat != null && q_stat.peak_time != null ? fmtTime(q_stat.peak_time, "HH:mm", site_zone) : "—"
+  let q_peak_alt = q_stat != null && q_stat.peak_alt != null ? round(num(q_stat.peak_alt)) : 0
+  let visible_count = count(active_targets, t => num(t.alt ?? -90) >= 0)
 
-  at reset_ends_at { confirm_reset = false; reset_ends_at = 0 }
-  on observing_site { time_offset_hrs = 0; celebrate_msg = "" }
-  on quiz_idx { quiz_picked = -1; quiz_feedback = "" }
-  on screen_tab { confirm_reset = false; reset_ends_at = 0 }
+  let best_name = best_idx != null ? str.questName(quests[best_idx].id) : ""
+  let best_message = str.bestToast(sky_ready, live_sun_alt, best_idx, best_name, cloud_cover)
+  let conditions_label = !sky_ready || sun_alt == null ? str.skyUnavailable : str.conditionsSummary(safe_hr > 0, sun_alt, weather_enabled, cloud_cover)
+  let friendly_direction = str.directionName(int(floor((eff_az + 11.25) / 22.5)) % 16)
 
-  // Stable machine-readable dates, independent of the phone's display language.
-  let observing_today = fmtTime(now, "yyyy-MM-dd", site_zone, "en")
-  let observing_midnight = parseTime(observing_today, null, site_zone)
-  let observing_yesterday = fmtTime(observing_midnight - 43200, "yyyy-MM-dd", site_zone, "en")
-  let active_streak = last_found_date == observing_today || last_found_date == observing_yesterday ? max(0, int(streak_days)) : 0
+  on observing_site { time_offset_hrs = 0; plan_cursor = -1; plan_idx = -1; celebrate_msg = "" }
+  on screen_tab { plan_picker = false; remove_entry_id = ""; edit_entry_id = "" }
 
-  // [4. GAMIFICATION STATS]
-  // ASCII progress bar helper for 15 targets: build_ascii_progress_bar(total_found, 15)
   let clamped_found = count(quests, q => contains(found_quests, q.id))
-  let build_ascii_progress_bar = join(range(15).map(i => i < clamped_found ? "#" : "-"), "")
-
-  // XP & Rank progression
-  let total_xp = clamped_found * 100 + max(0, int(streak_days)) * 50 + max(0, int(bonus_xp))
-  let rank_title = total_xp >= 1800 ? "COSMIC MASTER" : total_xp >= 1200 ? "ASTRONOMER" : total_xp >= 600 ? "NAVIGATOR" : total_xp >= 200 ? "STAR SCOUT" : "CADET"
-  let rank_lvl = clamp(int(floor(total_xp / 300)) + 1, 1, 10)
-
   let target_tint = is_cosmic ? current_quest.color : c_pri
   let target_done = contains(found_quests, current_quest.id)
 
-  // [5. UI TREE LAYOUT (HOME-SCREEN TILE)]
+  let next_window = sky_ready ? first((astro_weather.planner.ranked ?? []).sortBy(t => first(t.windows).start)) : null
+  let next_window_label = next_window == null ? str.noRankedAny : str.nextWindowAt(fmtTime(first(next_window.windows).start, "HH:mm", site_zone), str.questName(quests[next_window.idx].id), round(num(next_window.peak_alt)))
+  let tile_pos = sky_ready ? live_targets[safe_idx] : null
+  let tile_next_pos = sky_ready ? live_next_targets[safe_idx] : null
+  let tile_rising = num(tile_next_pos.alt ?? 0) >= num(tile_pos.alt ?? 0)
+  let tile_direction = str.compass(int(floor((num(tile_pos.az) + 11.25) / 22.5)) % 16)
+  let tile_conditions = !sky_ready ? str.skyUnavailable : live_sun_alt >= 0 ? str.daylight : live_sun_alt > -18 ? str.twilight : str.darkSky
+  let tile_clouds = !weather_enabled ? str.cloudsOff : cloud_cover == null ? str.cloudsNA : str.cloudPct(round(cloud_cover))
+  let tile_tall = (tileHeight ?? 200) >= 140
+  let tile_wide = (tileWidth ?? 360) >= 240
+  let live_chart_dots = range(len(quests)).filter(i => sky_ready && num(live_targets[i].alt ?? -90) >= 0).map(i => {idx: i, px: 28 - 22 * (90 - num(live_targets[i].alt)) / 90 * sin(rad(num(live_targets[i].az))), py: 28 - 22 * (90 - num(live_targets[i].alt)) / 90 * cos(rad(num(live_targets[i].az)))})
+
+  // HOME TILE
   if location_open {
     Column {
-      fill: true
-      justify: spaceBetween
-      gap: 4
-      onTap: screen()
-      Text { text: "✦ ASTROQUEST"; color: c_pri; fontSize: 12; bold: true; letterSpacing: 1.5 }
-      Text { text: "Where are you observing?"; font: sans; fontSize: 18; bold: true; color: c_text }
-      Text { text: "Enter precise coordinates or choose a city"; fontSize: 10; color: c_muted }
-      Text { text: "◎ Set observing location"; color: c_bg; background: c_pri; padding: [8, 6]; fontSize: 12; align: center; bold: true; onTap: screen() }
+      fill: true; justify: spaceBetween; gap: 4
+      Text { text: "✦ ASTROQUEST"; font: sans; fontSize: 12; bold: true; color: c_pri }
+      Text { text: str.whereObserving; font: sans; fontSize: 18; bold: true; color: c_text }
+      Text { text: str.setLocationBtn; font: sans; fontSize: 12; bold: true; color: c_bg; background: c_pri; align: center; padding: 6; radius: 8 * corners; onTap: screen() }
     }
   } else {
-  Column {
-    fill: true
-    gap: 5
-    justify: spaceBetween
-    Row {
-      fill: width
-      align: center
-      Text { text: "✦ ASTROQUEST"; font: sans; fontSize: 12; letterSpacing: 1.5; bold: true; color: c_pri; weight: 1; onTap: screen() }
-      Text { text: "L" + str(rank_lvl) + " · " + str(total_xp) + " XP"; fontSize: 10; color: c_sec; onTap: { screen_tab = "quests"; screen() } }
-      Text { text: is_cosmic ? "☾" : "☀"; fontSize: 16; color: c_pri; padding: [6, 0]; onTap: { haptic(); theme_mode = is_cosmic ? "red" : "cosmic" } }
-    }
-    Row {
-      fill: width
-      align: center
-      gap: 10
-      Column {
-        weight: 1
-        gap: 0
-        onTap: { haptic(); quest_idx = (safe_idx + 1) % len(quests) }
-        Text { text: current_quest.name; font: sans; fontSize: 22; bold: true; color: target_tint; maxLines: 1 }
-        Text { text: !sky_ready ? "SKY DATA UNAVAILABLE" : (eff_alt >= 0 ? "● ABOVE HORIZON" : "○ BELOW HORIZON") + " · " + str(round(eff_alt)) + "°"; fontSize: 9; letterSpacing: 0.5; color: eff_alt >= 0 ? c_ok : c_muted; maxLines: 1 }
-      }
-      Text { text: "›"; fontSize: 26; color: c_pri; padding: [5, 0]; onTap: { haptic(); quest_idx = (safe_idx + 1) % len(quests) } }
-    }
-    Row {
-      fill: width
-      gap: 6
-      Text { text: "◎ Observing guide"; fontSize: 11; bold: true; color: c_bg; background: c_pri; align: center; padding: [6, 6]; radius: 10 * corners; weight: 1; onTap: { haptic(); screen_tab = "radar"; screen() } }
-      Text {
-        text: "✧ Best target now"
-        fontSize: 11
-        color: c_sec
-        background: c_card
-        align: center
-        padding: [6, 6]
-        radius: 10 * corners
-        weight: 1
-        onTap: { haptic(); let chosen = best_idx; let message = best_message; time_offset_hrs = 0; if chosen != null { quest_idx = chosen }; celebrate_msg = message; screen_tab = "radar"; screen() }
-      }
-    }
-  }
-
-  }
-
-  // [6. FULL-SCREEN OBSERVING GUIDE, QUEST LOGBOOK & STAR QUIZ]
-  screen {
-    title: "AstroQuest · Observatory"
-
     Column {
-      scroll: true
-      gap: 10
-      padding: 12
-      fill: width
-      background: c_bg
+      fill: true; justify: spaceBetween; gap: 3
+      Row {
+        fill: width; align: center; gap: 8
+        Text { text: "✦ ASTROQUEST"; font: sans; fontSize: !tile_wide ? 10 : 11; bold: true; letterSpacing: 0.6; color: c_pri; weight: 1 }
+        if tile_wide {
+          Text { text: tile_conditions + (sky_ready ? " · ☾ " + str(round(num(astro_weather.moon[0].illumination))) + "%" : "") + " · " + tile_clouds; font: sans; fontSize: 10; color: c_muted; maxLines: 1 }
+        }
+        Text { text: str.foundBadge(clamped_found); font: sans; fontSize: 10; bold: true; color: c_sec; onTap: { screen_tab = "journal"; screen() } }
+      }
+      Row {
+        fill: width; align: center; gap: 8
+        Column {
+          weight: 1; gap: 2
+          Text {
+            text: !sky_ready ? sky_error : follow_best && best_idx == null ? (live_sun_alt >= 0 ? str.lookLater : str.noneUp) : current_name + " · mag " + str(tile_pos.mag ?? current_quest.mag)
+            font: sans; fontSize: !tile_wide ? 17 : 20; bold: true; color: target_tint; maxLines: 1
+          }
+          Text {
+            text: !sky_ready ? str.checkLocationHint : follow_best && best_idx == null ? next_window_label : num(tile_pos.alt) >= 0 ? str.upSummary(round(num(tile_pos.az)), tile_direction, round(num(tile_pos.alt)), tile_rising ? "↑" : "↓") + (q_set_str != "" ? " · ↓" + q_set_str : "") : str.belowHorizonShort + " · " + str.scheduleLine(q_rise_str, q_peak_str, q_peak_alt, "")
+            font: sans; fontSize: 11; color: c_text; maxLines: 1
+          }
+        }
+        if tile_wide && sky_ready {
+          // Live mini overhead sky radar on home screen tile
+          Canvas {
+            width: 56; height: 56
+            circle(28, 28, 24, fill: c_card, stroke: c_border, width: 1)
+            circle(28, 28, 12, stroke: alpha(c_border, 0.5), width: 1)
+            line(4, 28, 52, 28, stroke: alpha(c_border, 0.4))
+            line(28, 4, 28, 52, stroke: alpha(c_border, 0.4))
+            for d in live_chart_dots {
+              let sel = d.idx == safe_idx
+              if sel { circle(d.px, d.py, 5, stroke: c_pri, width: 1.2) }
+              circle(d.px, d.py, sel ? 2.8 : 2.0, fill: is_cosmic ? quests[d.idx].color : c_pri)
+            }
+          }
+        }
+      }
+      if tile_tall && !tile_wide {
+        Text { text: tile_conditions + " · " + tile_clouds; font: sans; fontSize: 10; color: c_muted; maxLines: 1 }
+      }
+      Row {
+        fill: width; gap: 6
+        Text { text: str.tileObserve; font: sans; fontSize: 11; bold: true; color: c_bg; background: c_pri; padding: [6, 6]; radius: 8 * corners; align: center; weight: 1; onTap: { time_offset_hrs = 0; screen_tab = "radar"; screen() } }
+        Text { text: str.tileTonight; font: sans; fontSize: 11; bold: true; color: c_pri; background: c_card; padding: [6, 6]; radius: 8 * corners; align: center; weight: 1; onTap: { screen_tab = "tonight"; screen() } }
+        Text { text: str.tileAlmanac; font: sans; fontSize: 11; bold: true; color: c_sec; background: c_card; padding: [6, 6]; radius: 8 * corners; align: center; weight: 1; onTap: { screen_tab = "almanac"; screen() } }
+      }
+    }
+  }
+
+  screen {
+    title: "AstroQuest"
+    Column {
+      scroll: true; onPull: refresh(); fill: width; padding: 12; gap: 8; background: c_bg
+      Row {
+        fill: width; gap: 6; align: center
+        Column {
+          weight: 1; gap: 1
+          Text { text: str.subtitle; font: sans; fontSize: 10; letterSpacing: 0.8; bold: true; color: c_pri; maxLines: 1 }
+          Text { text: site_label; font: sans; fontSize: 11; color: c_muted; maxLines: 1; onTap: { if location_ready { latitude_draft = str(site_lat); longitude_draft = str(site_lon); location_error = ""; city_query = ""; editing_location = !editing_location } } }
+        }
+        if modes.torch != null {
+          Text { text: modes.torch ? str.torchOn : str.torchOff; font: sans; fontSize: 11; bold: modes.torch; color: modes.torch ? c_bg : c_sec; background: modes.torch ? c_sec : c_card; padding: [7, 6]; radius: 8 * corners; onTap: { haptic(); torch(modes.torch ? false : 20) } }
+        }
+        Text { text: is_cosmic ? str.redBtn : str.cosmicBtn; font: sans; fontSize: 11; color: c_pri; padding: [7, 6]; background: c_card; radius: 8 * corners; onTap: theme_mode = is_cosmic ? "red" : "cosmic" }
+        Text { text: "⚙"; font: sans; fontSize: 18; color: c_sec; padding: [6, 4]; onTap: show_settings = !show_settings }
+      }
 
       if location_open {
         Column {
-          fill: width
-          gap: 10
-          padding: 12
-          background: c_card
-          border: 1
-          borderColor: c_accent_border
-          radius: 16 * corners
-          Text { text: "Choose your observing location"; font: sans; fontSize: 20; bold: true; color: c_pri }
-          Text { text: "Sky positions use this location and the current time. There is no preset city."; fontSize: 12; color: c_text }
-          Text { text: "This launcher cannot read GPS coordinates. Enter coordinates from your maps app for a precise site, or choose a city center. Update the site when you move."; fontSize: 11; color: c_muted }
-          Text { text: "Sky calculations run locally. City searches go to Open-Meteo. Optional cloud weather shares coordinates rounded to 2 decimals. Your selected site is saved on this phone."; fontSize: 10; color: c_muted }
-          Input { text: city_draft; placeholder: "City name (at least 2 letters)"; color: c_text; fontSize: 13; onChange: city_draft = value; onSubmit: { if len(trim(value)) >= 2 && len(trim(value)) <= 80 { city_query = trim(value); location_error = "" } else { location_error = "Enter a city name between 2 and 80 characters" } } }
-          Text { text: "Search cities"; color: c_bg; background: c_pri; padding: [10, 8]; align: center; bold: true; onTap: { if len(trim(city_draft)) >= 2 && len(trim(city_draft)) <= 80 { city_query = trim(city_draft); location_error = ""; refresh() } else { location_error = "Enter a city name between 2 and 80 characters" } } }
+          fill: width; gap: 9; padding: 12; background: c_card; border: 1; borderColor: c_accent_border; radius: 14 * corners
+          Text { text: str.chooseSite; font: sans; fontSize: 18; bold: true; color: c_pri }
+          Text { text: str.siteIntro; fontSize: 12; color: c_text }
+          if here != null {
+            Text {
+              text: here.granted && here.available && here.lat != null ? str.applyPhoneLoc(round(num(here.lat), 2), round(num(here.lon), 2)) : str.usePhoneLoc
+              font: sans; fontSize: 12; bold: true; align: center; padding: [10, 9]
+              color: c_bg; background: c_ok; radius: 8 * corners
+              onTap: {
+                haptic()
+                if here.granted && here.available && here.lat != null && here.lon != null {
+                  observing_site = {lat: round(num(here.lat), 4), lon: round(num(here.lon), 4), name: str.phoneLocName, method: "gps", confirmed_at: now}
+                  editing_location = false
+                  location_error = ""
+                } else {
+                  waiting_gps = true
+                  location("request")
+                }
+              }
+            }
+          }
+          Input { text: city_draft; placeholder: str.cityPlaceholder; color: c_text; fontSize: 13; onChange: city_draft = value; onSubmit: { if len(trim(value)) >= 2 && len(trim(value)) <= 80 { city_query = trim(value); location_error = "" } else { location_error = str.cityErr } } }
+          Text { text: str.searchCities; color: c_bg; background: c_pri; padding: [10, 8]; align: center; bold: true; radius: 8 * corners; onTap: { if len(trim(city_draft)) >= 2 && len(trim(city_draft)) <= 80 { city_query = trim(city_draft); location_error = ""; refresh() } else { location_error = str.cityErr } } }
           if len(city_query) >= 2 {
-            Text { text: "Results for " + city_query; fontSize: 11; color: c_sec }
-            if places == null { Text { text: "Searching…"; color: c_muted } }
-            else if !places.ok { Text { text: "Search unavailable. Retry or enter coordinates below."; color: c_sec } }
-            else if len(places.out.results ?? []) == 0 { Text { text: "No matching city. Try another name or exact coordinates."; color: c_sec } }
+            Text { text: str.resultsFor(city_query); fontSize: 11; color: c_sec }
+            if places == null { Text { text: str.searching; color: c_muted } }
+            else if !places.ok { Text { text: str.searchOffline; color: c_sec } }
+            else if len(places.out.results ?? []) == 0 { Text { text: str.noCityMatch; color: c_sec } }
             for place in (places.ok ? places.out.results ?? [] : []).take(5) key place.id {
               Column {
-                fill: width
-                padding: [10, 8]
-                gap: 3
-                background: c_bg
-                border: 1
-                borderColor: c_border
-                radius: 10 * corners
+                fill: width; padding: [10, 8]; gap: 3; background: c_bg; border: 1; borderColor: c_border; radius: 10 * corners
                 Text { text: place.name + ", " + (place.admin1 ?? place.country ?? ""); fontSize: 13; bold: true; color: c_text }
-                Text { text: (place.country ?? "") + " · " + str(round(num(place.latitude), 4)) + ", " + str(round(num(place.longitude), 4)) + " · city center"; fontSize: 10; color: c_muted }
+                Text { text: (place.country ?? "") + " · " + str(round(num(place.latitude), 3)) + ", " + str(round(num(place.longitude), 3)); fontSize: 10; color: c_muted }
                 onTap: {
                   let chosen_lat = num(place.latitude)
                   let chosen_lon = num(place.longitude)
                   if chosen_lat != null && chosen_lon != null && chosen_lat >= -90 && chosen_lat <= 90 && chosen_lon >= -180 && chosen_lon <= 180 {
+                    waiting_gps = false
                     observing_site = {lat: chosen_lat, lon: chosen_lon, name: place.name + ", " + (place.country ?? ""), timezone: place.timezone, method: "city center", confirmed_at: now}
                     city_query = ""
                     city_draft = ""
@@ -295,21 +921,23 @@ widget "AstroQuest" {
               }
             }
           }
-          Text { text: "Or use exact coordinates"; fontSize: 14; bold: true; color: c_sec }
-          Text { text: "Decimal degrees: latitude −90 to 90, longitude −180 to 180. South and west are negative."; fontSize: 11; color: c_muted }
-          Input { text: latitude_draft; placeholder: "Latitude"; color: c_text; onChange: latitude_draft = value }
-          Input { text: longitude_draft; placeholder: "Longitude"; color: c_text; onChange: longitude_draft = value }
+          Text { text: str.orCoords; fontSize: 13; bold: true; color: c_sec }
+          Text { text: str.coordsHint; fontSize: 11; color: c_muted }
+          Row {
+            fill: width; gap: 8
+            Input { text: latitude_draft; placeholder: str.latPlaceholder; color: c_text; weight: 1; onChange: latitude_draft = value }
+            Input { text: longitude_draft; placeholder: str.lonPlaceholder; color: c_text; weight: 1; onChange: longitude_draft = value }
+          }
           Text {
-            text: "Use these coordinates"
+            text: str.useCoords
             color: coordinates_valid ? c_bg : c_muted
             background: coordinates_valid ? c_pri : c_bg
-            padding: [10, 8]
-            align: center
-            bold: true
+            padding: [10, 8]; align: center; bold: true; radius: 8 * corners
             onTap: {
               if coordinates_valid {
                 let selected_lat = draft_lat
                 let selected_lon = draft_lon
+                waiting_gps = false
                 observing_site = {lat: selected_lat, lon: selected_lon, name: "Selected coordinates", method: "coordinates", confirmed_at: now}
                 city_query = ""
                 city_draft = ""
@@ -317,940 +945,617 @@ widget "AstroQuest" {
                 screen_tab = "radar"
                 location_error = ""
                 haptic()
-              } else { location_error = "Enter valid decimal latitude and longitude within the ranges above" }
+              } else { location_error = str.coordsErr }
             }
           }
           if location_error != "" { Text { text: location_error; fontSize: 11; color: c_sec } }
+          Text { text: str.privacyNote; fontSize: 10; color: c_muted }
           if location_ready {
-            Text { text: "Keep current location"; align: center; padding: 8; color: c_pri; onTap: editing_location = false }
-            Text { text: "Forget saved location"; align: center; padding: 8; color: #FF3333; onTap: { observing_site = null; weather_enabled = false; latitude_draft = ""; longitude_draft = ""; city_draft = ""; city_query = ""; location_error = ""; editing_location = false } }
+            Row {
+              fill: width; gap: 8
+              Text { text: str.keepLocation; align: center; padding: 8; color: c_pri; weight: 1; onTap: { waiting_gps = false; editing_location = false } }
+              Text { text: str.forgetLocation; align: center; padding: 8; color: #FF3333; weight: 1; onTap: { waiting_gps = false; observing_site = null; weather_enabled = false; latitude_draft = ""; longitude_draft = ""; city_draft = ""; city_query = ""; location_error = ""; editing_location = false } }
+            }
           }
         }
-      } else {
+      } else if show_settings {
         Column {
-          fill: width
-          gap: 3
-          padding: [10, 8]
-          background: c_card
-          radius: 10 * corners
-          Text { text: "◎ " + site_label + " · Change"; fontSize: 12; bold: true; color: c_pri }
-          Text { text: str(round(site_lat, 4)) + ", " + str(round(site_lon, 4)) + " · " + (observing_site.method == "city center" ? "City center · enter coordinates for your exact site" : "Your observing coordinates"); fontSize: 10; color: c_muted }
-          onTap: { latitude_draft = str(site_lat); longitude_draft = str(site_lon); location_error = ""; city_query = ""; editing_location = true }
+          fill: width; padding: 12; gap: 8; background: c_card; border: 1; borderColor: c_border; radius: 12 * corners
+          Text { text: str.settingsTitle; font: sans; fontSize: 11; bold: true; letterSpacing: 0.8; color: c_pri }
+          Row {
+            fill: width; align: center; gap: 8; padding: [8, 6]; background: c_bg; radius: 8 * corners
+            Column {
+              weight: 1; gap: 2
+              Text { text: "◎ " + site_label; fontSize: 12; bold: true; color: c_text }
+              Text { text: str(round(site_lat, 4)) + "°, " + str(round(site_lon, 4)) + "° · " + (site_zone ?? ""); fontSize: 10; color: c_muted }
+            }
+            Text { text: str.changeSite; fontSize: 11; bold: true; color: c_pri; padding: [6, 4] }
+            onTap: { latitude_draft = str(site_lat); longitude_draft = str(site_lon); location_error = ""; city_query = ""; editing_location = true }
+          }
+          Text { text: weather_enabled ? str.cloudWeatherOn : str.cloudWeatherOff; font: sans; fontSize: 12; bold: true; color: weather_enabled ? c_ok : c_text; padding: [8, 6]; background: c_bg; radius: 8 * corners; onTap: { weather_enabled = !weather_enabled; refresh() } }
+          Text { text: str.privacyNote; font: sans; fontSize: 10; color: c_muted }
+          Row {
+            fill: width; gap: 8
+            Text { text: str.refreshBtn; font: sans; fontSize: 12; color: c_pri; padding: 8; background: c_bg; radius: 8 * corners; align: center; weight: 1; onTap: refresh() }
+            Text { text: str.closeSettings; font: sans; fontSize: 12; bold: true; color: c_bg; background: c_pri; padding: 8; radius: 8 * corners; align: center; weight: 1; onTap: show_settings = false }
+          }
         }
       }
+
       if !location_open {
-      Text { text: weather_enabled ? "Cloud weather: on · tap to disable" : "Cloud weather: off · tap to enable"; fontSize: 11; color: c_pri; padding: [8, 6]; onTap: { weather_enabled = !weather_enabled; refresh() } }
-      Text { text: "Optional weather sends your coordinates rounded to 2 decimals to Open-Meteo."; fontSize: 10; color: c_muted }
-      // Top Stargazer Status & Theme Toggle Bar
-      Row {
-        gap: 8
-        fill: width
-        align: center
-        padding: [10, 8]
-        background: c_card
-        border: 1
-        borderColor: c_accent_border
-        radius: 16 * corners
-
-        Column {
-          gap: 2
-          weight: 1
-
-          Text {
-            text: "★ LVL " + str(rank_lvl) + " " + rank_title + " · " + str(total_xp) + " XP"
-            font: sans
-            fontSize: 13
-            bold: true
-            color: c_sec
-          }
-
-          Text {
-            text: str(active_streak) + "d streak · " + str(clamped_found) + "/15 found · " + (sky_ready ? str(visible_count) + " above horizon" : "sky unavailable")
-            font: sans
-            fontSize: 11
-            color: c_muted
-          }
-        }
-
-        Text {
-          text: is_cosmic ? "Cosmic" : "Night red"
-          font: sans
-          fontSize: 11
-          bold: true
-          color: c_pri
-          background: is_cosmic ? alpha(#79D9ED, 0.15) : alpha(#FF3333, 0.18)
-          border: 1
-          borderColor: c_accent_border
-          padding: [8, 6]
-          radius: 10 * corners
-          onTap: {
-            haptic()
-            theme_mode = is_cosmic ? "red" : "cosmic"
-          }
-        }
-      }
-
-      // 3-Way Navigation Tabs: Sky Radar | 15 Quests | Star Quiz
-      Row {
-        gap: 6
-        fill: width
-
-        Text {
-          text: "◎ Observe"
-          font: sans
-          fontSize: 11
-          bold: true
-          color: screen_tab == "radar" ? c_pri : c_text
-          align: center
-          background: screen_tab == "radar" ? alpha(c_pri, 0.2) : c_card
-          border: 1
-          borderColor: screen_tab == "radar" ? c_accent_border : c_border
-          padding: [6, 8]
-          radius: 10 * corners
-          maxLines: 1
-          weight: 1
-          onTap: {
-            haptic()
-            screen_tab = "radar"
-          }
-        }
-
-        Text {
-          text: "✦ Quests"
-          font: sans
-          fontSize: 11
-          bold: true
-          color: screen_tab == "quests" ? c_sec : c_text
-          align: center
-          background: screen_tab == "quests" ? alpha(c_sec, 0.2) : c_card
-          border: 1
-          borderColor: screen_tab == "quests" ? c_sec : c_border
-          padding: [6, 8]
-          radius: 10 * corners
-          maxLines: 1
-          weight: 1
-          onTap: {
-            haptic()
-            screen_tab = "quests"
-          }
-        }
-
-        Text {
-          text: "✧ Quiz"
-          font: sans
-          fontSize: 11
-          bold: true
-          color: screen_tab == "quiz" ? c_ok : c_text
-          align: center
-          background: screen_tab == "quiz" ? alpha(c_ok, 0.2) : c_card
-          border: 1
-          borderColor: screen_tab == "quiz" ? c_ok : c_border
-          padding: [6, 8]
-          radius: 10 * corners
-          maxLines: 1
-          weight: 1
-          onTap: {
-            haptic()
-            screen_tab = "quiz"
-          }
-        }
-      }
-
-      if celebrate_msg != "" {
         Row {
-          gap: 8
-          fill: width
-          align: center
-          padding: [10, 6]
-          background: alpha(c_ok, 0.18)
-          border: 1
-          borderColor: c_ok
-          radius: 10 * corners
-          onTap: {
-            celebrate_msg = ""
-          }
-
-          Text {
-            text: celebrate_msg
-            font: sans
-            fontSize: 12
-            bold: true
-            color: c_ok
-            weight: 1
-          }
-
-          Text {
-            text: "✕"
-            font: sans
-            fontSize: 12
-            bold: true
-            color: c_ok
+          fill: width; gap: 6
+          for tab in [{id: "radar", label: str.tabObserve}, {id: "tonight", label: str.tabTonight}, {id: "almanac", label: str.tabAlmanac}, {id: "journal", label: str.tabJournal}] {
+            Text { text: tab.label; font: sans; fontSize: 11; bold: true; align: center; weight: 1; padding: [6, 8]; color: screen_tab == tab.id ? c_bg : c_text; background: screen_tab == tab.id ? c_pri : c_card; radius: 10 * corners; onTap: { screen_tab = tab.id; celebrate_msg = "" } }
           }
         }
-      }
-
-      if screen_tab == "radar" {
-        Column {
-          fill: width
-          gap: 6
-          padding: 10
-          background: c_card
-          radius: 10 * corners
-          Text { text: conditions_label; fontSize: 12; color: c_sec }
-          if !sky_ready { Text { text: sky_error + " · Tap to retry"; fontSize: 11; color: c_pri; onTap: refresh() } }
-          Text { text: "✧ Best target now"; fontSize: 13; bold: true; color: c_bg; background: c_pri; padding: [10, 8]; align: center; onTap: { haptic(); let chosen = best_idx; let message = best_message; time_offset_hrs = 0; if chosen != null { quest_idx = chosen }; celebrate_msg = message; screen_tab = "radar"; screen() } }
-          Text { text: "Choose a target below, or get a bright object at least 20° up after sunset."; fontSize: 10; color: c_muted }
-          if sky_ready && eff_alt >= 0 {
-            Text { text: (safe_hr > 0 ? "At preview time, face " : "Face ") + friendly_direction + ", then look " + str(round(eff_alt)) + "° up · about " + str(round(eff_alt / 10, 1)) + " fists above the horizon"; fontSize: 14; bold: true; color: c_text }
-            Text { text: "Confirm the pattern: " + current_quest.hop; fontSize: 12; color: c_text }
-          }
+        if celebrate_msg != "" {
+          Text { text: celebrate_msg + "  ×"; font: sans; fontSize: 12; color: c_ok; background: alpha(c_ok, 0.12); padding: 8; radius: 8 * corners; onTap: celebrate_msg = "" }
         }
 
-        // Selected target and calculated position
-        Column {
-          gap: 6
-          padding: 10
-          fill: width
-          background: c_card
-          border: 1
-          borderColor: c_accent_border
-          radius: 16 * corners
+        if screen_tab == "radar" {
+          let chart_side = max(152, min(180, (screenWidth ?? 360) - 104))
+          let chart_radius = chart_side / 2 - 18
+          let chart_coords = range(len(quests)).map(i => {
+            idx: i,
+            up: sky_ready && num(active_targets[i].alt ?? -90) >= 0,
+            px: chart_side / 2 - chart_radius * (90 - num(active_targets[i].alt ?? -90)) / 90 * sin(rad(num(active_targets[i].az ?? 0))),
+            py: chart_side / 2 - chart_radius * (90 - num(active_targets[i].alt ?? -90)) / 90 * cos(rad(num(active_targets[i].az ?? 0)))
+          })
+          let chart_targets = chart_coords.filter(d => d.up)
+          let sky_dark_enough = !is_daylight || current_quest.id == "moon"
+          let log_allowed = safe_hr == 0 && sky_ready && eff_alt >= 0 && num(live_q_pos.sun_sep ?? 0) >= 30 && sky_dark_enough
+          let duplicate_observation = any(observations, e => e.target == current_quest.id && now - num(e.time ?? 0) >= 0 && now - num(e.time ?? 0) < 60)
 
-          Row {
-            fill: width
-            align: center
-            gap: 6
+          if !sky_ready {
+            Text { text: sky_error + " · " + str.tapRefresh; font: sans; fontSize: 12; color: c_sec; padding: 10; background: c_card; radius: 10 * corners; onTap: refresh() }
+          }
 
-            Text {
-              text: "‹"
-              font: sans
-              fontSize: 11
-              bold: true
-              color: c_pri
-              border: 1
-              borderColor: c_accent_border
-              padding: [8, 4]
-              radius: 10 * corners
-              onTap: {
-                haptic()
-                quest_idx = (safe_idx + len(quests) - 1) % len(quests)
+          // TARGET INSTRUMENT CARD
+          Column {
+            fill: width; gap: 5; padding: [12, 10]; background: c_card; border: 1; borderColor: c_accent_border; radius: 14 * corners
+            Row {
+              fill: width; gap: 6; align: center
+              Column {
+                weight: 1; gap: 1
+                Text { text: current_name + (target_done ? " ✓" : ""); font: sans; fontSize: 20; bold: true; color: target_tint; maxLines: 1 }
+                Text { text: current_group + " · mag " + str(live_q_pos.mag ?? current_quest.mag); font: sans; fontSize: 11; color: c_muted; maxLines: 1 }
               }
+              Text { text: follow_best ? str.autoOn : str.bestNow; font: sans; fontSize: 11; color: c_sec; padding: [7, 4]; background: c_bg; radius: 6 * corners; onTap: { follow_best = true; time_offset_hrs = 0; celebrate_msg = best_message } }
+              Text { text: "‹"; fontSize: 20; color: c_pri; padding: [8, 2]; onTap: { let previous = safe_idx; quest_idx = (previous + len(quests) - 1) % len(quests); follow_best = false } }
+              Text { text: "›"; fontSize: 20; color: c_pri; padding: [8, 2]; onTap: { let previous = safe_idx; quest_idx = (previous + 1) % len(quests); follow_best = false } }
             }
 
-            Text {
-              text: current_quest.name + (contains(found_quests, current_quest.id) ? " ✓" : "")
-              font: sans
-              fontSize: 14
-              bold: true
-              color: is_cosmic ? current_quest.color : #FF3333
-              align: center
-              weight: 1
-            }
-
-            Text {
-              text: "Random"
-              font: sans
-              fontSize: 11
-              bold: true
-              color: c_sec
-              border: 1
-              borderColor: c_sec
-              padding: [6, 4]
-              radius: 10 * corners
-              onTap: {
-                haptic()
-                quest_idx = random(len(quests))
-              }
-            }
-
-            Text {
-              text: "›"
-              font: sans
-              fontSize: 11
-              bold: true
-              color: c_pri
-              border: 1
-              borderColor: c_accent_border
-              padding: [8, 4]
-              radius: 10 * corners
-              onTap: {
-                haptic()
-                quest_idx = (safe_idx + 1) % len(quests)
-              }
-            }
-          }
-
-          Text {
-            text: current_quest.con + " · Mag " + str(live_q_pos.mag ?? current_quest.mag) + (safe_hr > 0 ? " · weather: current only" : " · Clouds: " + cloud_label)
-            font: sans
-            fontSize: 11
-            color: c_muted
-            align: center
-            fill: width
-          }
-
-          Text {
-            text: !sky_ready ? (sky_error) : target_direction + " · Az " + fixed(eff_az, 2) + "° · Alt " + fixed(eff_alt, 2) + "°"
-            font: sans
-            fontSize: 12
-            bold: true
-            color: c_text
-            align: center
-            fill: width
-          }
-
-          Text {
-            text: !sky_ready ? "Positions are hidden until fresh data is available" : eff_alt >= 0 ? "Above horizon · elevation " + str(round(eff_alt)) + "°" : "Below horizon · choose another target or explore a later time"
-            font: sans
-            fontSize: 11
-            bold: true
-            color: eff_alt >= 0 ? c_ok : c_sec
-            align: center
-            fill: width
-          }
-        }
-
-        Text { text: (safe_hr > 0 ? "FUTURE PREVIEW · " : "Calculated for ") + sky_time + (safe_hr > 0 ? " · +" + str(safe_hr) + " hours" : " · updates every 10 minutes"); fontSize: 10; color: c_muted; align: center }
-        Text { text: "Azimuth: true north 0°, east 90°, south 180°, west 270°. Altitude: horizon 0°, overhead 90°."; fontSize: 10; color: c_muted; align: center }
-
-        Column {
-          fill: width
-          gap: 6
-          padding: 10
-          background: c_card
-          border: 1
-          borderColor: c_border
-          radius: 10 * corners
-          Text { text: "WHEN TO LOOK · " + upper(current_quest.name); fontSize: 12; bold: true; color: c_pri }
-          Text { text: "Next 3 hours from now · tap a row to preview its position"; fontSize: 10; color: c_muted }
-          if sky_ready {
-            for h in range(4) {
-              let outlook = astro_weather.hours[h][safe_idx]
-              let outlook_alt = num(outlook.alt)
-              let outlook_sun = num(astro_weather.sun_alts[h])
-              let outlook_dir = compass_points[int(floor((num(outlook.az) + 11.25) / 22.5)) % 16]
-              Row {
-                fill: width
-                gap: 6
-                padding: [6, 8]
-                background: h == safe_hr ? alpha(c_pri, 0.12) : c_bg
-                onTap: { haptic(); time_offset_hrs = h }
-                Text { text: h == 0 ? "Now" : fmtTime(astro_weather.generated_at + h * 3600, "HH:mm", site_zone); width: 48; fontSize: 12; bold: true; color: c_text }
-                Text { text: outlook_alt < 0 ? "Below horizon" : outlook_dir + " · " + str(round(outlook_alt)) + "° up"; weight: 1; fontSize: 12; color: outlook_alt >= 20 ? c_ok : c_muted }
-                Text { text: outlook_sun >= 0 ? "Daylight" : outlook_alt < 0 ? "Wait" : outlook_alt < 20 ? "Low" : outlook_sun > -18 ? "Twilight" : "Dark"; fontSize: 11; color: c_sec }
-              }
-            }
-          } else { Text { text: "Choose your observing site and refresh to load the outlook."; fontSize: 11; color: c_muted } }
-          Text { text: "Higher targets are usually easier to see over buildings. This outlook shows positions and daylight; it does not forecast clouds or local obstructions."; fontSize: 10; color: c_muted }
-        }
-
-        Column {
-          fill: width
-          gap: 5
-          padding: 10
-          background: c_card
-          radius: 10 * corners
-          Text { text: "HOW TO FOLLOW THE DIRECTIONS"; fontSize: 12; bold: true; color: c_pri }
-          Text { text: "1. Face the named direction using a compass set to true north.\n2. Look up from the horizon: one fist at arm’s length is roughly 10°.\n3. Match the identification guide before logging the object."; fontSize: 11; color: c_text }
-          Text { text: "Directions use your saved coordinates. Update them when you move. Phone rotation is not measured."; fontSize: 10; color: c_muted }
-        }
-
-        // Star-Hopping & Cosmic Lore Card
-        Column {
-          gap: 5
-          padding: 10
-          fill: width
-          background: c_card
-          border: 1
-          borderColor: c_border
-          radius: 16 * corners
-
-          Text {
-            text: "✧ HOW TO SPOT " + upper(current_quest.name) + " (" + current_quest.con + ")"
-            font: sans
-            fontSize: 11
-            bold: true
-            color: c_sec
-          }
-
-          Text {
-            text: "▸ Hop: " + current_quest.hop
-            font: sans
-            fontSize: 11
-            color: c_text
-          }
-
-          Text {
-            text: "Before logging: match the guide and confirm the object with your own eyes."; fontSize: 11; color: c_sec }
-          Text {
-            text: "✦ Lore: " + current_quest.lore
-            font: sans
-            fontSize: 11
-            color: c_muted
-          }
-        }
-
-        // Sky time preview controls
-        Column {
-          gap: 6
-          padding: 10
-          fill: width
-          background: c_card
-          border: 1
-          borderColor: c_border
-          radius: 16 * corners
-
-          Row {
-            fill: width
-            align: center
-            gap: 6
-
-            Text {
-              text: "Sky time · " + sky_time + (safe_hr == 0 ? "" : " (+" + str(safe_hr) + "h)")
-              font: sans
-              fontSize: 11
-              bold: true
-              color: c_sec
-              weight: 1
-            }
-
-            Text {
-              text: "NOW"
-              font: sans
-              fontSize: 11
-              bold: true
-              color: c_pri
-              border: 1
-              borderColor: c_accent_border
-              padding: [6, 3]
-              radius: 10 * corners
-              onTap: {
-                haptic()
-                time_offset_hrs = 0
-              }
-            }
-
-            Text {
-              text: "+3h"
-              font: sans
-              fontSize: 11
-              bold: true
-              color: c_pri
-              border: 1
-              borderColor: c_accent_border
-              padding: [6, 3]
-              radius: 10 * corners
-              onTap: {
-                haptic()
-                time_offset_hrs = safe_hr >= 12 ? 0 : min(12, safe_hr + 3)
-              }
-            }
-          }
-
-          Slider {
-            value: time_offset_hrs
-            min: 0
-            max: 12
-            step: 1
-            live: true
-            color: c_sec
-            track: alpha(c_sec, 0.25)
-            onChange: {
-              time_offset_hrs = int(round(value))
-            }
-          }
-
-
-        }
-
-        // Action Buttons Row
-        Row {
-          gap: 8
-          fill: width
-
-          Text {
-            text: safe_hr > 0 ? "Preview only" : !sky_ready || eff_alt < 0 ? "Target unavailable" : target_done ? "✓ I identified it · log observation" : "✦ I identified it · log discovery"
-            font: sans
-            fontSize: 13
-            bold: true
-            color: c_ok
-            align: center
-            background: c_card
-            border: 1
-            borderColor: c_ok
-            padding: [10, 8]
-            radius: 10 * corners
-            weight: 1
-            onTap: {
-              haptic()
-              if safe_hr == 0 && sky_ready && eff_alt >= 0 {
-                let logged_id = current_quest.id
-                let logged_name = current_quest.name
-                let was_found = contains(found_quests, logged_id)
-                let today = fmtTime(now, "yyyy-MM-dd", site_zone, "en")
-                let midnight = parseTime(today, null, site_zone)
-                let yesterday = fmtTime(midnight - 43200, "yyyy-MM-dd", site_zone, "en")
-                if today != null && midnight != null && last_found_date != today {
-                  streak_days = last_found_date == yesterday ? max(0, int(streak_days)) + 1 : 1
-                  last_found_date = today
+            // Direction, Altitude Sight Diagram, and Rise/Peak/Set Telemetry
+            Row {
+              fill: width; gap: 8; align: center
+              Column {
+                weight: 1; gap: 3
+                Text {
+                  text: !sky_ready ? str.directionsUnavailable : eff_alt < 0 ? str.belowGuide(round(eff_alt), q_peak_str, q_peak_alt) : str.lookGuide(round(eff_az), friendly_direction, round(eff_alt), is_rising)
+                  font: sans; fontSize: 13; bold: true; color: sky_ready && eff_alt >= 0 ? c_text : c_sec
                 }
-                if !was_found {
-                  found_quests = unique(flatten([found_quests, [logged_id]]))
-                  total_found = count(quests, q => contains(found_quests, q.id))
-                  bonus_xp = max(0, int(bonus_xp)) + 25
+                if sky_ready && q_stat != null {
+                  Text { text: str.scheduleLine(q_rise_str, q_peak_str, q_peak_alt, q_set_str); font: sans; fontSize: 11; color: c_pri }
                 }
-                celebrate_msg = was_found ? "✓ Observation logged · " + logged_name : "✦ Discovered " + logged_name + " · +100 XP +25 horizon bonus"
-                quest_idx = (safe_idx + 1) % len(quests)
-              } else {
-                celebrate_msg = safe_hr > 0 ? "Return to NOW to log a real observation" : "Choose a target currently above the horizon with fresh sky data"
+                Text { text: str.questHop(current_quest.id); font: sans; fontSize: 11; color: c_text }
+              }
+              if sky_ready {
+                // Functional Elevation Quadrant Sight (0° horizon to 90° zenith)
+                Canvas {
+                  width: 58; height: 58
+                  let ox = 10
+                  let oy = 48
+                  let r = 38
+                  line(ox, oy, ox + r, oy, stroke: c_border, width: 1.5)
+                  line(ox, oy, ox, oy - r, stroke: c_border, width: 1.5)
+                  path(range(10).map(k => [ox + r * cos(rad(k * 10)), oy - r * sin(rad(k * 10))]), stroke: alpha(c_border, 0.7), width: 1)
+                  let clamped_a = clamp(eff_alt, 0, 90)
+                  let tx = ox + r * cos(rad(clamped_a))
+                  let ty = oy - r * sin(rad(clamped_a))
+                  if eff_alt >= 0 {
+                    line(ox, oy, tx, ty, stroke: c_pri, width: 1.5)
+                    circle(tx, ty, 3.5, fill: target_tint)
+                  }
+                  text(str(round(eff_alt)) + "°", ox + r - 2, oy - 6, size: 9, bold: true, align: end, color: eff_alt >= 0 ? c_pri : c_muted, font: sans)
+                }
               }
             }
-          }
-        }
 
-        // Quick 3-Column Target Grid on Radar Tab
-        Column {
-          gap: 6
-          padding: 10
-          fill: width
-          background: c_card
-          border: 1
-          borderColor: c_border
-          radius: 16 * corners
+            Text { text: conditions_label; font: sans; fontSize: 11; color: c_sec }
 
-          Text {
-            text: "Targets · ● above horizon · ✓ logged · " + sky_time
-            font: sans
-            fontSize: 11
-            bold: true
-            color: c_sec
-            align: center
-            fill: width
-          }
-
-          Grid {
-            columns: 3
-            gap: 6
-            fill: width
-
-            for q, i in quests key q.id {
-              let is_sel = i == safe_idx
-              let is_done = contains(found_quests, q.id)
-              let q_pos = active_targets[i]
-              let is_up = num(q_pos.alt ?? -10) >= 0
+            if sky_ready && eff_alt < 0 && q_stat != null && q_stat.peak_alt >= 5 {
               Text {
-                text: (is_done ? "✓ " : is_up ? "● " : "") + q.name
-                font: sans
-                fontSize: 11
-                bold: is_sel
-                color: is_sel ? c_pri : is_up ? c_ok : c_text
-                align: center
-                background: is_sel ? alpha(c_pri, 0.22) : c_bg
-                border: 1
-                borderColor: is_sel ? c_accent_border : alpha(c_pri, 0.35)
-                padding: [4, 6]
-                radius: 10 * corners
-                maxLines: 1
+                text: str.jumpPeakBtn + " (" + q_peak_str + " · " + str(q_peak_alt) + "°)"
+                font: sans; fontSize: 12; bold: true; align: center; padding: [8, 8]; color: c_bg; background: c_pri; radius: 10 * corners
+                onTap: { let pk = q_stat.peak_step; let pin = safe_idx; quest_idx = pin; follow_best = false; time_offset_hrs = pk / 4; haptic() }
+              }
+            } else if safe_hr == 0 && is_daylight && current_quest.id != "moon" {
+              Text {
+                text: str.daylightWaitBtn
+                font: sans; fontSize: 12; bold: true; align: center; padding: [8, 8]; color: c_sec; background: c_bg; border: 1; borderColor: c_border; radius: 10 * corners
+                onTap: { let selected_target = safe_idx; plan_idx = selected_target; plan_cursor = -1; screen_tab = "tonight"; haptic() }
+              }
+            } else {
+              Input { text: observation_note; placeholder: str.notePlaceholder; fontSize: 12; color: c_text; onChange: observation_note = sub(value, 0, 500) }
+              Text {
+                text: len(observations) >= 500 ? str.journalFullBtn : duplicate_observation ? str.justLoggedBtn : safe_hr > 0 ? str.previewOnlyBtn : !log_allowed ? str.unavailableLogBtn : target_done ? str.logAgainBtn : str.logFirstBtn
+                font: sans; fontSize: 13; bold: true; align: center; padding: [8, 8]; color: log_allowed && !duplicate_observation && len(observations) < 500 ? c_bg : (safe_hr > 0 ? c_pri : c_muted); background: log_allowed && !duplicate_observation && len(observations) < 500 ? c_pri : c_bg; border: 1; borderColor: log_allowed && !duplicate_observation ? c_pri : c_border; radius: 10 * corners
                 onTap: {
                   haptic()
-                  quest_idx = i
-                }
-              }
-            }
-          }
-        }
-      }
-
-      if screen_tab == "quests" {
-        Text { text: "Visibility at " + sky_time; fontSize: 10; color: c_muted; align: center }
-        // Logbook & Badges Summary Card
-        Column {
-          gap: 6
-          padding: 10
-          fill: width
-          background: c_card
-          border: 1
-          borderColor: c_accent_border
-          radius: 16 * corners
-
-          Text {
-            text: "Streak: " + str(active_streak) + " Nights  | Found: [" + build_ascii_progress_bar + "] " + str(clamped_found) + "/15"
-            font: sans
-            fontSize: 12
-            bold: true
-            color: c_sec
-          }
-
-          // Unlockable Badges Row
-          Row {
-            gap: 6
-            fill: width
-
-            Text {
-              text: (clamped_found >= 1 ? "✦" : "○") + " First Light"
-              font: sans
-              fontSize: 10
-              bold: clamped_found >= 1
-              color: clamped_found >= 1 ? c_ok : c_muted
-              align: center
-              border: 1
-              borderColor: clamped_found >= 1 ? c_ok : c_border
-              padding: [4, 4]
-              radius: 10 * corners
-              weight: 1
-            }
-
-            Text {
-              text: (clamped_found >= 5 ? "✦" : "○") + " Hunter (5)"
-              font: sans
-              fontSize: 10
-              bold: clamped_found >= 5
-              color: clamped_found >= 5 ? c_ok : c_muted
-              align: center
-              border: 1
-              borderColor: clamped_found >= 5 ? c_ok : c_border
-              padding: [4, 4]
-              radius: 10 * corners
-              weight: 1
-            }
-
-            Text {
-              text: (clamped_found >= 15 ? "✦" : "○") + " Master (15)"
-              font: sans
-              fontSize: 10
-              bold: clamped_found >= 15
-              color: clamped_found >= 15 ? c_sec : c_muted
-              align: center
-              border: 1
-              borderColor: clamped_found >= 15 ? c_sec : c_border
-              padding: [4, 4]
-              radius: 10 * corners
-              weight: 1
-            }
-          }
-
-          // Filter Chips Row
-          Row {
-            gap: 6
-            fill: width
-
-            Text {
-              text: "ALL (15)"
-              font: sans
-              fontSize: 11
-              bold: quest_filter == "all"
-              color: quest_filter == "all" ? c_pri : c_muted
-              align: center
-              background: quest_filter == "all" ? alpha(c_pri, 0.18) : c_bg
-              border: 1
-              borderColor: quest_filter == "all" ? c_accent_border : c_border
-              padding: [6, 4]
-              radius: 10 * corners
-              weight: 1
-              onTap: {
-                haptic()
-                quest_filter = "all"
-              }
-            }
-
-            Text {
-              text: "UP (" + str(visible_count) + ")"
-              font: sans
-              fontSize: 11
-              bold: quest_filter == "up"
-              color: quest_filter == "up" ? c_ok : c_muted
-              align: center
-              background: quest_filter == "up" ? alpha(c_ok, 0.18) : c_bg
-              border: 1
-              borderColor: quest_filter == "up" ? c_ok : c_border
-              padding: [6, 4]
-              radius: 10 * corners
-              weight: 1
-              onTap: {
-                haptic()
-                quest_filter = "up"
-              }
-            }
-
-            Text {
-              text: "UNFOUND"
-              font: sans
-              fontSize: 11
-              bold: quest_filter == "todo"
-              color: quest_filter == "todo" ? c_sec : c_muted
-              align: center
-              background: quest_filter == "todo" ? alpha(c_sec, 0.18) : c_bg
-              border: 1
-              borderColor: quest_filter == "todo" ? c_sec : c_border
-              padding: [6, 4]
-              radius: 10 * corners
-              weight: 1
-              onTap: {
-                haptic()
-                quest_filter = "todo"
-              }
-            }
-          }
-
-          Row {
-            gap: 8
-            fill: width
-
-            Text {
-              text: "[ ↻ REFRESH TELEMETRY ]"
-              font: sans
-              fontSize: 11
-              bold: true
-              color: c_pri
-              align: center
-              border: 1
-              borderColor: c_accent_border
-              padding: [8, 5]
-              radius: 10 * corners
-              weight: 1
-              onTap: {
-                haptic()
-                refresh()
-              }
-            }
-
-            Text {
-              text: confirm_reset ? "[ ! TAP TO CONFIRM RESET ]" : "[ ✕ RESET LOGBOOK ]"
-              font: sans
-              fontSize: 11
-              bold: true
-              color: #FF3333
-              align: center
-              background: confirm_reset ? alpha(#FF3333, 0.2) : c_bg
-              border: 1
-              borderColor: #FF3333
-              padding: [8, 5]
-              radius: 10 * corners
-              weight: 1
-              onTap: {
-                haptic()
-                if confirm_reset && reset_ends_at > now {
-                  found_quests = []
-                  total_found = 0
-                  streak_days = 0
-                  bonus_xp = 0
-                  quiz_solved = []
-                  quiz_idx = 0
-                  quiz_streak = 0
-                  quiz_picked = -1
-                  quiz_feedback = ""
-                  celebrate_msg = ""
-                  time_offset_hrs = 0
-                  reset_ends_at = 0
-                  last_found_date = ""
-                  quest_idx = 0
-                  confirm_reset = false
-                } else {
-                  confirm_reset = true
-                  reset_ends_at = int(now + 5)
-                }
-              }
-            }
-          }
-        }
-
-        // Interactive 15-Quest Selector List with Star-Hopping Hints
-        for q, i in quests key q.id {
-          let is_found = contains(found_quests, q.id)
-          let is_selected = i == safe_idx
-          let q_coords = active_targets[i]
-          let q_az = round(num(q_coords.az), 1)
-          let q_alt = round(num(q_coords.alt ?? -90), 1)
-          let show_row = quest_filter == "all" || (quest_filter == "up" && q_alt >= 0) || (quest_filter == "todo" && !is_found)
-
-          if show_row {
-            Column {
-              gap: 4
-              fill: width
-              padding: [10, 8]
-              background: is_selected ? alpha(c_pri, 0.16) : c_card
-              border: 1
-              borderColor: is_selected ? c_accent_border : c_border
-              radius: 10 * corners
-              onTap: {
-                haptic()
-                quest_idx = i
-                screen_tab = "radar"
-              }
-
-              Row {
-                gap: 8
-                align: center
-                fill: width
-
-                Text {
-                  text: (is_found ? "[✓] " : "[ ] ") + pad(str(i + 1), 2, "0") + ". " + q.name + " (" + q.con + ")"
-                  font: sans
-                  fontSize: 13
-                  bold: true
-                  color: is_found ? c_ok : (is_cosmic ? q.color : #FF3333)
-                  weight: 1
-                }
-
-                Text {
-                  text: !sky_ready ? "Unavailable" : (q_alt >= 0 ? "● " : "○ ") + "Az " + str(q_az) + "° · Alt " + str(q_alt) + "°"
-                  font: sans
-                  fontSize: 11
-                  color: q_alt >= 0 ? c_ok : c_muted
-                }
-              }
-
-              Text {
-                text: "↳ " + q.hop
-                font: sans
-                fontSize: 11
-                color: c_muted
-              }
-            }
-          }
-        }
-      }
-
-      if screen_tab == "quiz" {
-        let cur_q = quiz_bank[safe_quiz_idx]
-
-        Column {
-          gap: 10
-          padding: 12
-          fill: width
-          background: c_card
-          border: 1
-          borderColor: c_accent_border
-          radius: 16 * corners
-
-          Row {
-            fill: width
-            align: center
-
-            Text {
-              text: "✧ STARGAZER ACADEMY QUIZ (" + str(clamp(int(quiz_idx), 0, len(quiz_bank) - 1) + 1) + "/" + str(len(quiz_bank)) + ")"
-              font: sans
-              fontSize: 12
-              bold: true
-              color: c_sec
-              weight: 1
-            }
-
-            Text {
-              text: "Streak: " + str(quiz_streak) + " "
-              font: sans
-              fontSize: 12
-              bold: true
-              color: c_ok
-            }
-          }
-
-          Text {
-            text: cur_q.q
-            font: sans
-            fontSize: 14
-            bold: true
-            color: c_text
-          }
-
-          for opt, oi in cur_q.opts {
-            let is_correct = oi == cur_q.ans
-            let is_picked = quiz_picked == oi
-            Text {
-              text: (is_picked ? (is_correct ? "[ ✓ ] " : "[ ✕ ] ") : "[ " + str(oi + 1) + " ] ") + opt
-              font: sans
-              fontSize: 13
-              bold: is_picked
-              color: is_picked ? (is_correct ? c_ok : #FF3333) : c_text
-              background: is_picked ? alpha(is_correct ? c_ok : #FF3333, 0.18) : c_bg
-              border: 1
-              borderColor: is_picked ? (is_correct ? c_ok : #FF3333) : c_border
-              padding: [10, 8]
-              radius: 10 * corners
-              fill: width
-              onTap: {
-                haptic()
-                if quiz_picked == -1 {
-                quiz_picked = oi
-                if oi == cur_q.ans {
-                  if !contains(quiz_solved, safe_quiz_idx) {
-                    bonus_xp = max(0, int(bonus_xp)) + 50
-                    quiz_streak = max(0, int(quiz_streak)) + 1
-                    quiz_solved = unique(flatten([quiz_solved, [safe_quiz_idx]]))
-                    quiz_feedback = "✓ Correct! +50 XP · " + cur_q.tip
-                  } else {
-                    quiz_feedback = "✓ Correct! Already mastered · " + cur_q.tip
+                  if log_allowed && !duplicate_observation && len(observations) < 500 {
+                    let logged_index = safe_idx
+                    let logged_id = current_quest.id
+                    let logged_name = str.questName(logged_id)
+                    let was_found = contains(found_quests, logged_id)
+                    let today = fmtTime(now, "yyyy-MM-dd", site_zone, "en")
+                    let midnight = parseTime(today, null, site_zone)
+                    let yesterday = fmtTime(midnight - 43200, "yyyy-MM-dd", site_zone, "en")
+                    if today != null && midnight != null && last_found_date != today {
+                      streak_days = last_found_date == yesterday ? max(0, int(streak_days)) + 1 : 1
+                      last_found_date = today
+                    }
+                    if !was_found {
+                      found_quests = unique(flatten([found_quests, [logged_id]]))
+                      bonus_xp = max(0, int(bonus_xp)) + 25
+                    }
+                    observations = flatten([[{id: str(now) + "-" + logged_id, target: logged_id, name: logged_name, time: now, calculated_at: astro_weather.generated_at, site: {name: site_label, lat: site_lat, lon: site_lon, timezone: site_zone}, az: eff_az, alt: eff_alt, clouds: cloud_cover, note: sub(trim(observation_note), 0, 500)}], observations])
+                    observation_note = ""
+                    celebrate_msg = str.loggedToast(logged_name)
+                    quest_idx = logged_index
+                    follow_best = false
+                  } else if safe_hr > 0 {
+                    time_offset_hrs = 0
                   }
-                } else {
-                  quiz_streak = 0
-                  quiz_feedback = "✕ Not quite! Hint: " + cur_q.tip
-                }
                 }
               }
             }
-          }
-
-          if quiz_feedback != "" {
-            Text {
-              text: quiz_feedback
-              font: sans
-              fontSize: 12
-              color: quiz_picked == cur_q.ans ? c_ok : c_sec
-              background: alpha(c_pri, 0.12)
-              border: 1
-              borderColor: c_accent_border
-              padding: 8
-              radius: 10 * corners
-              fill: width
+            Row {
+              fill: width; gap: 8; align: center
+              Text { text: show_details ? str.moreOpen : str.moreClosed; font: sans; fontSize: 11; color: c_pri; padding: [8, 5]; background: c_bg; radius: 6 * corners; align: center; weight: 1; onTap: show_details = !show_details }
+              Text { text: str.planLink; font: sans; fontSize: 11; color: c_sec; padding: [8, 5]; background: c_bg; radius: 6 * corners; align: center; weight: 1; onTap: { let selected_target = safe_idx; let selected_step = safe_step; plan_idx = selected_target; plan_cursor = selected_step; screen_tab = "tonight" } }
             }
           }
 
-          Row {
-            gap: 8
-            fill: width
+          if show_details {
+            Column {
+              fill: width; padding: 10; gap: 6; background: c_card; border: 1; borderColor: c_border; radius: 12 * corners
+              Text { text: str.aboutHeader(current_name); font: sans; fontSize: 11; bold: true; color: c_sec }
+              Text { text: str.questLore(current_quest.id); font: sans; fontSize: 12; color: c_text }
+              Text { text: str.brightnessLine(fixed(eff_az, 1), fixed(eff_alt, 1), str(live_q_pos.mag ?? current_quest.mag)); font: sans; fontSize: 11; color: c_muted }
+              Text { text: str.nextHoursTitle; font: sans; fontSize: 10; bold: true; color: c_pri }
+              if sky_ready {
+                Row {
+                  fill: width; gap: 6
+                  for h in range(4) {
+                    let hp = astro_weather.hours[h * 4][safe_idx]
+                    let ha = num(hp.alt)
+                    let hs = num(astro_weather.sun_alts[h * 4])
+                    Column {
+                      weight: 1; padding: [6, 6]; background: h == safe_hr ? alpha(c_pri, 0.14) : c_bg; border: 1; borderColor: h == safe_hr ? c_pri : c_border; radius: 8 * corners; align: center; gap: 2
+                      Text { text: h == 0 ? str.nowLabel : fmtTime(astro_weather.generated_at + h * 3600, "HH:mm", site_zone); font: sans; fontSize: 11; bold: true; color: c_text }
+                      Text { text: ha < 0 ? str(round(ha)) + "°" : str(round(ha)) + "°"; font: sans; fontSize: 12; bold: true; color: ha >= 20 && hs < 0 ? c_ok : ha >= 0 ? c_text : c_muted }
+                      Text { text: str.hourStatus(hs, ha); font: sans; fontSize: 9; color: c_sec; maxLines: 1 }
+                      onTap: { let pinned = safe_idx; quest_idx = pinned; follow_best = false; time_offset_hrs = h }
+                    }
+                  }
+                }
+              }
+              Text { text: str.safetyNote; font: sans; fontSize: 10; color: c_muted }
+            }
+          }
 
-            Text {
-              text: "↻ Random"
-              font: sans
-              fontSize: 12
-              bold: true
-              color: c_pri
-              align: center
-              border: 1
-              borderColor: c_accent_border
-              padding: [10, 8]
-              radius: 10 * corners
-              weight: 1
+          // OVERHEAD SKY MAP & 24H SCRUBBER
+          Column {
+            fill: width; align: center; gap: 4; padding: [10, 8]; background: c_card; radius: 14 * corners
+            Row {
+              fill: width; gap: 8; align: center
+              Text { text: safe_hr > 0 ? str.skyPreviewHeader(fmtDuration(safe_step * 900)) : str.skyNowHeader(visible_count); font: sans; fontSize: 11; bold: true; color: c_pri; weight: 1 }
+              Text { text: sky_ready ? fmtTime(astro_weather.generated_at + safe_hr * 3600, "EEE HH:mm", site_zone) : ""; font: sans; fontSize: 11; color: c_sec }
+            }
+            Canvas {
+              width: chart_side; height: chart_side
+              let cx = width / 2
+              let cy = height / 2
+              let cr = width / 2 - 18
+              circle(cx, cy, cr, fill: c_bg)
+              for ring in [1, 0.6667, 0.3333] { circle(cx, cy, cr * ring, stroke: c_border, width: 1) }
+              line(cx - cr, cy, cx + cr, cy, stroke: alpha(c_border, 0.45))
+              line(cx, cy - cr, cx, cy + cr, stroke: alpha(c_border, 0.45))
+              // Asterism guide lines when both stars are above horizon
+              for pair in guide_pairs {
+                let a = chart_coords[pair[0]]
+                let b = chart_coords[pair[1]]
+                if a.up && b.up {
+                  line(a.px, a.py, b.px, b.py, stroke: alpha(c_pri, 0.28), width: 1)
+                }
+              }
+              text(str.compass(0), cx, 8, size: 11, bold: true, align: center, color: c_pri, font: sans)
+              text(str.compass(8), cx, height - 8, size: 10, align: center, color: c_muted, font: sans)
+              text(str.compass(4), 8, cy, size: 10, align: center, color: c_muted, font: sans)
+              text(str.compass(12), width - 8, cy, size: 10, align: center, color: c_muted, font: sans)
+              for dot in chart_targets {
+                let dot_pos = active_targets[dot.idx]
+                let selected = dot.idx == safe_idx
+                let tint = is_cosmic ? quests[dot.idx].color : c_pri
+                if selected {
+                  circle(dot.px, dot.py, 10, fill: alpha(tint, 0.2))
+                  circle(dot.px, dot.py, 8, stroke: c_pri, width: 1.5)
+                }
+                circle(dot.px, dot.py, clamp(3.5 - num(dot_pos.mag) * 0.35, 2.2, 5), fill: tint)
+                if selected {
+                  text(str.questName(quests[dot.idx].id), clamp(dot.px, 48, width - 48), dot.py > cy ? dot.py - 14 : dot.py + 15, size: 10, bold: true, align: center, color: c_text, font: sans)
+                }
+              }
+              if !sky_ready { text(str.waitingSky, cx, cy, size: 11, align: center, color: c_muted, font: sans) }
+              if sky_ready && len(chart_targets) == 0 { text(str.noneUp, cx, cy, size: 11, align: center, color: c_muted, font: sans) }
               onTap: {
-                haptic()
-                quiz_idx = random(len(quiz_bank))
-                quiz_picked = -1
-                quiz_feedback = ""
+                let touch_x = x
+                let touch_y = y
+                let hit = first(chart_targets.sortBy(d => pow(d.px - touch_x, 2) + pow(d.py - touch_y, 2)))
+                if hit != null && pow(hit.px - touch_x, 2) + pow(hit.py - touch_y, 2) <= 576 {
+                  quest_idx = hit.idx
+                  follow_best = false
+                  haptic()
+                }
               }
             }
+            Text { text: str.chartCaption; font: sans; fontSize: 10; color: c_muted; align: center }
+            Row {
+              fill: width; gap: 6; align: center
+              Text { text: str.nowLabel; font: sans; fontSize: 10; bold: true; color: safe_hr == 0 ? c_bg : c_pri; background: safe_hr == 0 ? c_pri : c_bg; padding: [8, 4]; radius: 6 * corners; onTap: time_offset_hrs = 0 }
+              Slider { value: time_offset_hrs; min: 0; max: 24; step: 0.25; live: true; color: c_pri; track: c_border; weight: 1; height: 20; onChange: { let pinned = safe_idx; quest_idx = pinned; follow_best = false; time_offset_hrs = round(value * 4) / 4 } }
+              Text { text: safe_step == 0 ? str.nowLabel : "+" + fmtDuration(safe_step * 900); font: sans; fontSize: 11; color: c_sec; width: 46; align: end }
+            }
+          }
 
-            Text {
-              text: "Next question ›"
-              font: sans
-              fontSize: 12
-              bold: true
-              color: c_sec
-              align: center
-              border: 1
-              borderColor: c_sec
-              padding: [10, 8]
-              radius: 10 * corners
-              weight: 1
-              onTap: {
-                haptic()
-                quiz_idx = (safe_quiz_idx + 1) % len(quiz_bank)
-                quiz_picked = -1
-                quiz_feedback = ""
+          // CATALOGUE GRID WITH LIVE ALTITUDES
+          Text { text: str.targetsUpHeader(visible_count); font: sans; fontSize: 11; bold: true; color: c_pri }
+          Grid {
+            columns: 3; gap: 5; fill: width
+            for q, i in quests key q.id {
+              let t_alt = sky_ready ? num(active_targets[i].alt ?? -90) : -90
+              let up = t_alt >= 0
+              Column {
+                padding: [6, 5]; background: i == safe_idx ? alpha(c_pri, 0.18) : c_card; border: 1; borderColor: i == safe_idx ? c_pri : c_border; radius: 8 * corners; align: center; gap: 1
+                Text { text: (contains(found_quests, q.id) ? "✓ " : up ? "● " : "") + str.questName(q.id); font: sans; fontSize: 11; bold: up; maxLines: 1; color: i == safe_idx ? c_pri : up ? c_text : c_muted }
+                Text { text: !sky_ready ? "—" : up ? str(round(t_alt)) + "° · " + str.compass(int(floor((num(active_targets[i].az) + 11.25) / 22.5)) % 16) : str.belowHorizonShort; font: sans; fontSize: 9; maxLines: 1; color: up ? c_sec : c_muted }
+                onTap: { quest_idx = i; follow_best = false; haptic() }
               }
             }
           }
         }
-      }
+
+        if screen_tab == "tonight" {
+          let plan_ranked = sky_ready ? (astro_weather.planner.ranked ?? []).filter(t => !plan_new_only || !contains(found_quests, quests[t.idx].id)) : []
+          let plan_target_idx = clamp(plan_idx >= 0 ? int(plan_idx) : int(first(plan_ranked).idx ?? safe_idx), 0, len(quests) - 1)
+          let plan_target = quests[plan_target_idx]
+          let plan_target_name = str.questName(plan_target.id)
+          let plan_summary = sky_ready ? find(astro_weather.planner.ranked ?? [], t => t.idx == plan_target_idx) : null
+          let plan_stat = sky_ready && astro_weather.stats != null ? astro_weather.stats[plan_target_idx] : null
+          let plan_step = clamp(plan_cursor >= 0 ? int(plan_cursor) : int(plan_summary.best_step ?? plan_stat.peak_step ?? 0), 0, 96)
+          let plan_epoch = sky_ready ? astro_weather.generated_at + plan_step * 900 : null
+          let plan_position = sky_ready ? astro_weather.hours[plan_step][plan_target_idx] : null
+          let plan_sun = sky_ready ? num(astro_weather.sun_alts[plan_step]) : null
+          let plan_moon = sky_ready ? astro_weather.moon[plan_step] : null
+          let plan_windows = plan_summary.windows ?? []
+          let plan_eligible = sky_ready && plan_sun <= -6 && num(plan_position.alt ?? -90) >= 20 && num(plan_position.sun_sep ?? 0) >= 30 && num(plan_position.mag ?? 99) <= 2
+          let plan_curve = sky_ready ? astro_weather.hours.map(h => num(h[plan_target_idx].alt)) : []
+          let plan_bands = sky_ready ? (astro_weather.bands ?? []) : []
+          let curve_width = max(180, min(300, (screenWidth ?? 360) - 96))
+          let plan_dark = sky_ready ? astro_weather.planner.dark ?? [] : []
+          let forecast_fresh = weather_matches && weather_time != null && abs(minute_epoch - weather_time) < 3600 && len(weather.out.hourly.time ?? []) == len(weather.out.hourly.cloud_cover ?? [])
+          let forecast_hour = forecast_fresh && plan_epoch != null ? first(range(len(weather.out.hourly.time ?? [])).filter(i => num(weather.out.hourly.time[i]) <= plan_epoch && plan_epoch - num(weather.out.hourly.time[i]) < 3600)) : null
+          let plan_cloud = forecast_hour != null && weather.out.hourly.cloud_cover[forecast_hour] != null ? clamp(num(weather.out.hourly.cloud_cover[forecast_hour]), 0, 100) : null
+          let plan_clock_label = sky_ready ? fmtTime(plan_epoch, "EEE HH:mm", site_zone) : "—"
+          let plan_condition = !sky_ready ? str.skyUnavailable : str.skyCondDetail(plan_sun)
+
+          Column {
+            fill: width; gap: 5; padding: 12; background: c_card; radius: 12 * corners
+            Text { text: str.tonightTitle; font: sans; fontSize: 11; bold: true; letterSpacing: 0.8; color: c_pri }
+            if sky_ready {
+              if len(plan_dark) == 0 {
+                Text { text: str.noDarkness; font: sans; fontSize: 13; bold: true; color: c_sec }
+                Text { text: str.noDarknessHint; font: sans; fontSize: 11; color: c_muted }
+              } else {
+                for night in plan_dark {
+                  Text { text: night.start == astro_weather.generated_at && night.end == astro_weather.generated_at + 86400 ? str.darkAllPeriod : night.start == astro_weather.generated_at ? str.darkUntil(fmtTime(night.end, "EEE HH:mm", site_zone)) : night.end == astro_weather.generated_at + 86400 ? str.darkFrom(fmtTime(night.start, "EEE HH:mm", site_zone)) : str.darkRange(fmtTime(night.start, "EEE HH:mm", site_zone), fmtTime(night.end, "EEE HH:mm", site_zone)); font: sans; fontSize: 14; bold: true; color: c_text }
+                }
+              }
+              Text { text: str.moonNow(round(num(astro_weather.moon[0].illumination)), round(num(astro_weather.moon[0].alt))); font: sans; fontSize: 12; color: c_sec }
+            } else {
+              Text { text: sky_error + " · " + str.tapRefresh; font: sans; fontSize: 12; color: c_pri; padding: 8; onTap: refresh() }
+            }
+          }
+
+          if sky_ready {
+            Column {
+              fill: width; gap: 7; padding: 12; background: c_card; border: 1; borderColor: c_border; radius: 12 * corners
+              Row {
+                fill: width; gap: 8; align: center
+                Box {
+                  weight: 1
+                  Text { text: plan_target_name + " ▾"; font: sans; fontSize: 20; bold: true; color: is_cosmic ? plan_target.color : c_pri; onTap: plan_picker = true }
+                  Popup {
+                    visible: plan_picker; onDismiss: plan_picker = false; width: curve_width; background: c_card; border: 1; borderColor: c_border; radius: 10 * corners
+                    Column {
+                      height: 220; scroll: true; fill: width; gap: 3; padding: 8
+                      for q, qi in quests key q.id {
+                        let st = astro_weather.stats[qi]
+                        Text { text: str.questName(q.id) + " · " + str.peakBest(round(num(st.peak_alt))); font: sans; fontSize: 13; color: qi == plan_target_idx ? c_pri : c_text; padding: [8, 10]; background: qi == plan_target_idx ? alpha(c_pri, 0.1) : c_bg; onTap: { plan_idx = qi; plan_cursor = -1; plan_picker = false; haptic() } }
+                      }
+                    }
+                  }
+                }
+                Text { text: str.atTime(plan_clock_label); font: sans; fontSize: 11; color: c_sec }
+              }
+              Text { text: str.altitudeHeader; font: sans; fontSize: 10; color: c_muted }
+              Column {
+                fill: width; align: center
+                Canvas {
+                  width: curve_width; height: 144
+                  let plot_w = width - 32
+                  let plot_h = height - 36
+                  for b in plan_bands {
+                    rect(24 + plot_w * b.s / 96, 12, plot_w * (b.e - b.s) / 96 + 0.3, plot_h, fill: b.k == 2 ? mix(c_bg, c_sec, 0.15) : b.k == 1 ? mix(c_bg, c_sec, 0.05) : mix(c_bg, c_pri, 0.05))
+                  }
+                  for altitude in [0, 20, 45, 90] {
+                    let gy = height - 24 - altitude / 90 * plot_h
+                    line(24, gy, width - 8, gy, stroke: altitude == 20 ? alpha(c_ok, 0.55) : c_border, width: 1)
+                    text(str(altitude) + "°", 20, gy, size: 9, align: end, color: c_muted, font: sans)
+                  }
+                  clip(24, 12, plot_w, plot_h) {
+                    if len(plan_curve) == 97 {
+                      path(range(97).map(j => [24 + plot_w * j / 96, height - 24 - plan_curve[j] / 90 * plot_h]), stroke: c_pri, width: 2)
+                    }
+                    for w in plan_windows {
+                      line(24 + plot_w * w.start_step / 96, height - 25, 24 + plot_w * w.end_step / 96, height - 25, stroke: c_ok, width: 3)
+                    }
+                  }
+                  let selected_x = 24 + plot_w * plan_step / 96
+                  line(selected_x, 12, selected_x, height - 24, stroke: c_sec, width: 1)
+                  if num(plan_position.alt) >= 0 {
+                    circle(selected_x, height - 24 - num(plan_position.alt) / 90 * plot_h, 4, fill: c_sec)
+                  }
+                  for h in [0, 6, 12, 18, 24] {
+                    text(h == 0 ? str.nowLabel : "+" + str(h) + "h", 24 + plot_w * h / 24, height - 9, size: 9, align: h == 0 ? "start" : h == 24 ? "end" : "center", color: c_muted, font: sans)
+                  }
+                  onTap: plan_cursor = clamp(int(round((x - 24) / (curve_width - 32) * 96)), 0, 96)
+                }
+              }
+              Slider { value: plan_step / 4; min: 0; max: 24; step: 0.25; live: true; color: c_pri; track: c_border; onChange: plan_cursor = clamp(int(round(value * 4)), 0, 96) }
+              Row {
+                fill: width; gap: 8; align: center
+                Text { text: num(plan_position.alt) < 0 ? str.belowHorizonShort + " (" + str(round(num(plan_position.alt))) + "°)" : "Az " + str(round(num(plan_position.az))) + "° " + str.compass(int(floor((num(plan_position.az) + 11.25) / 22.5)) % 16) + " · Alt " + str(round(num(plan_position.alt))) + "°"; font: sans; fontSize: 14; bold: true; color: c_text; weight: 1 }
+                Text { text: plan_eligible ? str.goodWindow : str.outsideWindow; font: sans; fontSize: 11; color: plan_eligible ? c_ok : c_muted }
+              }
+              Text { text: str.planMoonStatus(plan_condition, round(num(plan_moon.illumination)), round(num(plan_moon.alt))); font: sans; fontSize: 11; color: c_sec }
+              Text { text: str.cloudForecast(weather_enabled, plan_cloud != null ? round(plan_cloud) : null, forecast_hour != null ? fmtTime(weather.out.hourly.time[forecast_hour], "EEE HH:mm", site_zone) : ""); font: sans; fontSize: 11; color: plan_cloud != null && plan_cloud >= 70 ? c_sec : c_muted }
+              if num(plan_moon.illumination) >= 50 && num(plan_moon.alt) > 0 && plan_target.id != "moon" {
+                Text { text: str.moonWashHint; font: sans; fontSize: 10; color: c_muted }
+              }
+              if len(plan_windows) > 0 {
+                Text { text: str.bestWindowsHeader; font: sans; fontSize: 10; bold: true; color: c_pri }
+                for w in plan_windows {
+                  Text { text: str.windowPeakRange(fmtTime(w.start, "EEE HH:mm", site_zone), fmtTime(w.end, "EEE HH:mm", site_zone), round(num(w.peak_alt))); font: sans; fontSize: 12; color: c_ok; padding: [8, 8]; background: c_bg; radius: 8 * corners; onTap: plan_cursor = int(w.best_step) }
+                }
+              } else {
+                Text { text: str.noWindowTarget; font: sans; fontSize: 12; color: c_muted }
+              }
+              Text {
+                text: plan_step == 0 ? str.observeNowBtn : str.previewObserveBtn
+                font: sans; fontSize: 13; bold: true; align: center; padding: [10, 9]; color: c_bg; background: c_pri; radius: 8 * corners
+                onTap: { let chosen_target = plan_target_idx; let chosen_offset = plan_step / 4; quest_idx = chosen_target; follow_best = false; time_offset_hrs = chosen_offset; celebrate_msg = ""; screen_tab = "radar"; haptic() }
+              }
+            }
+
+            Row {
+              fill: width; gap: 8; align: center
+              Text { text: str.rankedHeader(len(plan_ranked)); font: sans; fontSize: 11; bold: true; color: c_pri; weight: 1 }
+              Text { text: plan_new_only ? str.newOnlyOn : str.allTargetsBtn; font: sans; fontSize: 11; color: c_sec; padding: [8, 6]; background: c_card; radius: 8 * corners; onTap: { plan_new_only = !plan_new_only; plan_idx = -1; plan_cursor = -1 } }
+            }
+            Text { text: str.rankedSub; font: sans; fontSize: 11; color: c_muted }
+            if len(plan_ranked) == 0 {
+              Text { text: plan_new_only ? str.noRankedNew : str.noRankedAny; font: sans; fontSize: 12; color: c_muted; padding: 12; background: c_card; radius: 10 * corners }
+            }
+            for target, place in (plan_show_all ? plan_ranked : plan_ranked.take(6)) key target.idx {
+              Column {
+                fill: width; gap: 3; padding: [12, 9]; background: target.idx == plan_target_idx ? alpha(c_pri, 0.12) : c_card; border: 1; borderColor: target.idx == plan_target_idx ? c_pri : c_border; radius: 10 * corners
+                Row {
+                  fill: width; gap: 8; align: center
+                  Text { text: pad(str(place + 1), 2, "0") + " · " + str.questName(quests[target.idx].id) + (contains(found_quests, quests[target.idx].id) ? " ✓" : ""); font: sans; fontSize: 14; bold: true; color: c_text; weight: 1 }
+                  Text { text: str.peakBest(round(num(target.peak_alt))); font: sans; fontSize: 11; color: c_sec }
+                }
+                Text { text: str.bestWindowRange(fmtTime(target.start, "EEE HH:mm", site_zone), fmtTime(target.end, "EEE HH:mm", site_zone), str(quests[target.idx].mag)); font: sans; fontSize: 11; color: c_muted }
+                onTap: { plan_idx = int(target.idx); plan_cursor = -1; haptic() }
+              }
+            }
+            if len(plan_ranked) > 6 {
+              Text { text: plan_show_all ? str.showTop6 : str.showAllTargets(len(plan_ranked)); font: sans; fontSize: 12; color: c_pri; align: center; padding: 8; onTap: plan_show_all = !plan_show_all }
+            }
+          }
+        }
+
+        // ALMANAC TAB: Moon Phase Graphic, Sun/Twilight Crossings, 12h Hourly Sky & Cloud Conditions, Field Ruler
+        if screen_tab == "almanac" {
+          let moon_now = sky_ready ? astro_weather.moon[0] : null
+          let moon_lit = moon_now != null ? num(moon_now.illumination) : 0
+          let moon_waxing = sky_ready && num(astro_weather.moon[min(8, len(astro_weather.moon) - 1)].illumination) >= moon_lit
+          let moon_pos = sky_ready ? live_targets[14] : null
+          let moon_stat = sky_ready && astro_weather.stats != null ? astro_weather.stats[14] : null
+          let almanac_events = sky_ready ? astro_weather.planner.events ?? [] : []
+          let forecast_ok = weather_matches && weather_time != null && abs(minute_epoch - weather_time) < 3600 && len(weather.out.hourly.time ?? []) == len(weather.out.hourly.cloud_cover ?? [])
+
+          // Lunar Phase & Telemetry Card
+          Column {
+            fill: width; padding: 12; gap: 8; background: c_card; border: 1; borderColor: c_border; radius: 12 * corners
+            Text { text: str.almanacMoonTitle; font: sans; fontSize: 11; bold: true; letterSpacing: 0.8; color: c_pri }
+            if sky_ready {
+              Row {
+                fill: width; gap: 12; align: center
+                Canvas {
+                  width: 64; height: 64
+                  circle(32, 32, 26, fill: c_bg, stroke: c_border, width: 1.5)
+                  let frac = clamp(moon_lit / 100, 0, 1)
+                  for dy in range(-25, 26, 2) {
+                    let half_w = sqrt(max(0, 676 - dy * dy))
+                    let term = half_w * (1 - 2 * frac)
+                    let x1 = moon_waxing ? 32 + term : 32 - half_w
+                    let x2 = moon_waxing ? 32 + half_w : 32 - term
+                    if x2 > x1 {
+                      line(x1, 32 + dy, x2, 32 + dy, stroke: is_cosmic ? #F8FAFC : c_pri, width: 2.2)
+                    }
+                  }
+                }
+                Column {
+                  weight: 1; gap: 3
+                  Text { text: str.moonPhaseLabel(round(moon_lit), moon_waxing) + " · " + str(round(moon_lit)) + "%"; font: sans; fontSize: 16; bold: true; color: c_text }
+                  Text {
+                    text: num(moon_pos.alt) >= 0 ? "Az " + str(round(num(moon_pos.az))) + "° (" + str.compass(int(floor((num(moon_pos.az) + 11.25) / 22.5)) % 16) + ") · Alt " + str(round(num(moon_pos.alt))) + "°" : str.belowHorizonShort + " (" + str(round(num(moon_pos.alt))) + "°)"
+                    font: sans; fontSize: 12; color: c_sec
+                  }
+                  if moon_stat != null {
+                    Text {
+                      text: str.scheduleLine(moon_stat.rise != null ? fmtTime(moon_stat.rise, "HH:mm", site_zone) : "", fmtTime(moon_stat.peak_time, "HH:mm", site_zone), round(num(moon_stat.peak_alt)), moon_stat.set != null ? fmtTime(moon_stat.set, "HH:mm", site_zone) : "")
+                      font: sans; fontSize: 11; color: c_muted
+                    }
+                  }
+                }
+              }
+            } else {
+              Text { text: sky_error; font: sans; fontSize: 12; color: c_muted }
+            }
+          }
+
+          // Sun & Twilight Almanac
+          Column {
+            fill: width; padding: 12; gap: 6; background: c_card; radius: 12 * corners
+            Text { text: str.almanacSunTitle; font: sans; fontSize: 11; bold: true; letterSpacing: 0.8; color: c_pri }
+            if sky_ready {
+              Text { text: str.sunStatusLine(fixed(live_sun_alt, 1), str.skyCondDetail(live_sun_alt)); font: sans; fontSize: 13; bold: true; color: c_sec }
+              if len(almanac_events) == 0 {
+                Text { text: str.noSunMoonEvents; font: sans; fontSize: 12; color: c_muted }
+              }
+              for event in almanac_events {
+                Row {
+                  fill: width; gap: 8; padding: [4, 2]
+                  Text { text: str.eventName(event.label); font: sans; fontSize: 12; color: c_text; weight: 1 }
+                  Text { text: fmtTime(event.time, "EEE HH:mm", site_zone); font: sans; fontSize: 12; bold: true; color: c_pri }
+                }
+              }
+            }
+          }
+
+          // 12-Hour Sky & Cloud Forecast Table
+          if sky_ready {
+            Column {
+              fill: width; padding: 12; gap: 5; background: c_card; radius: 12 * corners
+              Text { text: str.almanacHourlyTitle; font: sans; fontSize: 11; bold: true; letterSpacing: 0.8; color: c_pri }
+              if !weather_enabled {
+                Text { text: str.enableCloudsPrompt; font: sans; fontSize: 11; color: c_sec; onTap: { weather_enabled = true; refresh() } }
+              }
+              for h in range(0, 12, 2) {
+                let step_k = h * 4
+                let t_ep = astro_weather.generated_at + h * 3600
+                let s_alt = num(astro_weather.sun_alts[step_k])
+                let m_alt = num(astro_weather.moon[step_k].alt)
+                let m_lit = num(astro_weather.moon[step_k].illumination)
+                let f_idx = forecast_ok ? first(range(len(weather.out.hourly.time ?? [])).filter(i => num(weather.out.hourly.time[i]) <= t_ep && t_ep - num(weather.out.hourly.time[i]) < 3600)) : null
+                let hr_cloud = f_idx != null && weather.out.hourly.cloud_cover[f_idx] != null ? round(clamp(num(weather.out.hourly.cloud_cover[f_idx]), 0, 100)) : null
+                Row {
+                  fill: width; gap: 8; padding: [8, 5]; background: c_bg; radius: 6 * corners; align: center
+                  Text { text: h == 0 ? str.nowLabel : fmtTime(t_ep, "HH:mm", site_zone); font: sans; fontSize: 12; bold: true; color: c_text; width: 46 }
+                  Text { text: "☉ " + str(round(s_alt)) + "° · ☾ " + str(round(m_alt)) + "°"; font: sans; fontSize: 11; color: c_muted; width: 88 }
+                  Text { text: str.skyQuality(s_alt, m_alt, m_lit, hr_cloud); font: sans; fontSize: 11; bold: true; color: s_alt <= -18 && hr_cloud != null && hr_cloud < 40 && !(m_alt > 5 && m_lit >= 60) ? c_ok : c_sec; weight: 1; align: end }
+                  onTap: { time_offset_hrs = h; screen_tab = "radar"; haptic() }
+                }
+              }
+            }
+          }
+
+          // Practical Angular Field Ruler
+          Column {
+            fill: width; padding: 12; gap: 5; background: c_card; radius: 12 * corners
+            Text { text: str.almanacRulerTitle; font: sans; fontSize: 11; bold: true; letterSpacing: 0.8; color: c_pri }
+            Text { text: str.ruler1; font: sans; fontSize: 12; color: c_text }
+            Text { text: str.ruler5; font: sans; fontSize: 12; color: c_text }
+            Text { text: str.ruler10; font: sans; fontSize: 12; color: c_text }
+            Text { text: str.ruler20; font: sans; fontSize: 12; color: c_text }
+          }
+        }
+
+        if screen_tab == "journal" {
+          let journal_pages = max(1, int(ceil(len(observations) / 8)))
+          let safe_journal_page = clamp(int(journal_page), 0, journal_pages - 1)
+
+          Column {
+            fill: width; padding: 12; gap: 6; background: c_card; radius: 12 * corners
+            Text { text: str.journalTitle; font: sans; fontSize: 11; bold: true; letterSpacing: 0.8; color: c_pri }
+            Text { text: str.journalCounts(len(observations), clamped_found); font: sans; fontSize: 18; bold: true; color: c_text }
+            Progress { value: clamped_found; max: 15; color: c_pri; track: c_border }
+          }
+          if len(observations) == 0 {
+            Column {
+              fill: width; padding: 16; gap: 8; background: c_card; radius: 12 * corners
+              Text { text: str.emptyJournalTitle; font: sans; fontSize: 16; bold: true; color: c_text }
+              Text { text: str.emptyJournalSub; font: sans; fontSize: 12; color: c_muted }
+              Text { text: str.findTargetLink; font: sans; fontSize: 13; bold: true; color: c_pri; padding: [4, 6]; onTap: screen_tab = "radar" }
+            }
+          }
+          for entry in observations.drop(safe_journal_page * 8).take(8) key entry.id {
+            Column {
+              fill: width; padding: 12; gap: 4; background: c_card; radius: 12 * corners
+              Row {
+                fill: width; align: center; gap: 8
+                Text { text: str.questName(entry.target ?? entry.name); font: sans; fontSize: 16; bold: true; color: c_text; weight: 1 }
+                Text { text: "Az " + str(round(num(entry.az ?? 0))) + "° · Alt " + str(round(num(entry.alt))) + "°" + (entry.clouds != null ? " · " + str(round(num(entry.clouds))) + "% cloud" : ""); font: sans; fontSize: 11; color: c_sec }
+              }
+              Text { text: fmtTime(entry.time, "EEE d MMM yyyy · HH:mm", entry.site.timezone) + " · " + entry.site.name; font: sans; fontSize: 11; color: c_muted }
+              if entry.note != "" { Text { text: entry.note; font: sans; fontSize: 12; color: c_text } }
+              if edit_entry_id == entry.id {
+                Input { text: edit_note; placeholder: str.notePlaceholder; fontSize: 12; color: c_text; onChange: edit_note = sub(value, 0, 500) }
+                Row {
+                  fill: width; gap: 8
+                  Text { text: str.saveNote; font: sans; fontSize: 12; bold: true; color: c_pri; padding: 8; onTap: { observations = observations.map(e => e.id == edit_entry_id ? merge(e, {note: sub(trim(edit_note), 0, 500)}) : e); edit_entry_id = ""; edit_note = "" } }
+                  Text { text: str.cancelBtn; font: sans; fontSize: 12; color: c_muted; padding: 8; onTap: edit_entry_id = "" }
+                }
+              } else {
+                Row {
+                  fill: width; gap: 8
+                  Text { text: entry.note == "" ? str.addNote : str.editNoteBtn; font: sans; fontSize: 11; color: c_pri; padding: [0, 6]; weight: 1; onTap: { edit_entry_id = entry.id; edit_note = entry.note; remove_entry_id = "" } }
+                  Text { text: str.removeBtn; font: sans; fontSize: 11; color: c_muted; padding: [6, 6]; onTap: remove_entry_id = entry.id }
+                }
+              }
+              if remove_entry_id == entry.id {
+                Text { text: str.confirmRemovePrompt; font: sans; fontSize: 11; color: c_sec }
+                Row {
+                  fill: width; gap: 8
+                  Text { text: str.confirmRemoveBtn; font: sans; fontSize: 12; bold: true; color: c_sec; padding: 8; onTap: { observations = observations.filter(e => e.id != remove_entry_id); remove_entry_id = ""; edit_entry_id = "" } }
+                  Text { text: str.keepEntryBtn; font: sans; fontSize: 12; color: c_pri; padding: 8; onTap: remove_entry_id = "" }
+                }
+              }
+            }
+          }
+          if journal_pages > 1 {
+            Row {
+              fill: width; gap: 8; align: center
+              Text { text: str.newerBtn; font: sans; fontSize: 12; color: c_pri; padding: 8; onTap: journal_page = max(0, safe_journal_page - 1) }
+              Text { text: str(safe_journal_page + 1) + "/" + str(journal_pages); font: sans; fontSize: 12; color: c_muted; align: center; weight: 1 }
+              Text { text: str.olderBtn; font: sans; fontSize: 12; color: c_pri; padding: 8; onTap: journal_page = min(journal_pages - 1, safe_journal_page + 1) }
+            }
+          }
+          Column {
+            fill: width; padding: 12; gap: 6; background: c_card; radius: 12 * corners
+            Text { text: str.exportTitle; font: sans; fontSize: 11; bold: true; letterSpacing: 0.8; color: c_pri }
+            Text { text: export_location ? str.exportLocOn : str.exportLocOff; font: sans; fontSize: 12; color: c_text; padding: [0, 6]; onTap: export_location = !export_location }
+            Row {
+              fill: width; gap: 8
+              Text { text: str.copyJson; font: sans; fontSize: 12; bold: true; color: c_pri; padding: 8; background: c_bg; radius: 8 * corners; align: center; weight: 1; onTap: { copy(toJson({version: 1, widget: "AstroQuest", discoveries: found_quests, observations: observations.map(e => export_location ? e : remove(e, "site"))})); journal_notice = str.copiedNotice } }
+              Text { text: str.shareJson; font: sans; fontSize: 12; bold: true; color: c_pri; padding: 8; background: c_bg; radius: 8 * corners; align: center; weight: 1; onTap: share(toJson({version: 1, widget: "AstroQuest", discoveries: found_quests, observations: observations.map(e => export_location ? e : remove(e, "site"))})) }
+            }
+            if journal_notice != "" { Text { text: journal_notice; font: sans; fontSize: 11; color: c_ok } }
+          }
+        }
       }
     }
   }
