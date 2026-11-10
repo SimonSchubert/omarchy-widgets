@@ -1,0 +1,509 @@
+widget "notallyxyz" {
+  page: 1
+  order: 8
+  size: 3x4
+  minSize: 2x3
+
+  meta { description: "NotallyXYZ notes via your sync server and a sealed local cache (nxyz). Run nxyz setup once in a terminal with server URL + sync key."; version: "1.0"; license: "MIT"; category: "productivity"; owl: 18 }
+
+  // Runtime: nxyz on PATH (/usr/local/bin/nxyz). Built from scripts/nxyz-src (needs pacman go).
+  // Commands only invoke nxyz (prebuilt); no pacman packages at runtime.
+  requires { pacman: [] }
+
+  state folder = "NOTES" persist
+  state q = ""
+  state label = ""
+  state view = "browse" // browse | edit
+  state editId = ""
+  state draftTitle = ""
+  state draftBody = ""
+  state draftType = "NOTE"
+  state draftColor = "DEFAULT"
+  state draftPinned = false
+  state draftLabels = "" // comma-separated
+  state draftItems = []
+  state newItem = ""
+  state loaded = 0
+  state saved = 0
+  state acted = 0
+  state problem = ""
+  state syncing = false
+  state screenOpen = false // faster list refresh while the full-screen view is open
+  state gen = 0 // bumped when live sync pulls remote changes
+
+  let colors = [
+    {n: "Default", c: "DEFAULT"}, {n: "Coral", c: "#FAAFA9"}, {n: "Orange", c: "#FFCC80"},
+    {n: "Sand", c: "#FFF8B9"}, {n: "Storm", c: "#AFCCDC"}, {n: "Fog", c: "#D3E4EC"},
+    {n: "Sage", c: "#B4DED4"}, {n: "Mint", c: "#E2F6D3"}, {n: "Dusk", c: "#D3BFDB"},
+    {n: "Flower", c: "#F8BBD0"}, {n: "Blossom", c: "#F5E2DC"}, {n: "Clay", c: "#E9E3D3"}
+  ]
+
+  // While the home page is visible: long-poll live sync. Notes/labels re-read on gen bump + interval.
+  // Tile interval 2m; screen open 15s (null-gated; every must be constant).
+  source status = cmd("nxyz status") every 2m json status timeout 20s
+  // Store review rejects cmd/stream(… : null); use fixed no-op branches instead.
+  source live = stream(status.out.configured == true ? "nxyz live --wait 30" : "exec sleep infinity") json
+  source notesSlow = cmd(!screenOpen && status.out.configured == true ? "GEN=${int(gen)} nxyz notes --folder ${sh(folder)} --sort modified" : "printf '{\"notes\":[]}'") every 2m json status timeout 60s
+  source notesFast = cmd(screenOpen && status.out.configured == true ? "GEN=${int(gen)} nxyz notes --folder ${sh(folder)} --sort modified" : "printf '{\"notes\":[]}'") every 15s json status timeout 60s
+  source labelsSlow = cmd(!screenOpen && status.out.configured == true ? "GEN=${int(gen)} nxyz labels" : "printf '{\"labels\":[]}'") every 2m json status timeout 60s
+  source labelsFast = cmd(screenOpen && status.out.configured == true ? "GEN=${int(gen)} nxyz labels" : "printf '{\"labels\":[]}'") every 15s json status timeout 60s
+  source atts = cmd(status.out.configured == true && editId != "" && view == "edit" ? "nxyz attach-meta ${sh(editId)}" : "printf '{\"images\":[],\"files\":[],\"audios\":[]}'") every 30s json status timeout 20s
+  source now = clock every 30s
+
+  on live {
+    if value != null && value.changed == true {
+      gen = gen + 1
+      syncing = false
+    }
+  }
+
+  let notesRaw = screenOpen ? notesFast : notesSlow
+  let labelsRaw = screenOpen ? labelsFast : labelsSlow
+  let configured = status.ok == true && (status.out.configured == true)
+  let syncErr = configured
+    ? ((live != null && (live.error ?? "") != "") ? live.error : (status.out.error ?? ""))
+    : ""
+  let allNotes = (notesRaw.ok == true ? (notesRaw.out.notes ?? []) : [])
+  let labels = (labelsRaw.ok == true ? (labelsRaw.out.labels ?? []) : [])
+  let ql = lower(trim(q))
+  let notes = allNotes.filter(n =>
+    (label == "" || contains(n.labels ?? [], label)) &&
+    (ql == "" || contains(lower("${n.title ?? ""} ${n.preview ?? ""} ${join(n.labels ?? [], " ")}"), ql))
+  )
+  let lastSyncMs = (live != null && (live.lastSync ?? 0) > 0)
+    ? live.lastSync
+    : (notesRaw.ok == true && (notesRaw.out.lastSync ?? 0) > 0
+      ? notesRaw.out.lastSync
+      : (status.ok == true ? (status.out.lastSync ?? 0) : 0))
+  let syncAgeSec = lastSyncMs > 0 && now != null ? max(0, now - lastSyncMs / 1000) : null
+  let syncLabel = !configured ? "setup"
+    : syncErr != "" ? "error"
+    : syncing || (live != null && live.syncing == true) ? "syncing"
+    : lastSyncMs == 0 ? "…"
+    : syncAgeSec != null && syncAgeSec > 180 ? "stale"
+    : "synced"
+  let images = atts.ok == true ? (atts.out.images ?? []) : []
+  let files = atts.ok == true ? (atts.out.files ?? []) : []
+  let audios = atts.ok == true ? (atts.out.audios ?? []) : []
+
+  on loaded {
+    let j = parseJson(value ?? "")
+    if j.ok == true && j.note != null {
+      editId = j.note.id
+      draftTitle = j.note.title ?? ""
+      draftBody = j.note.body ?? ""
+      draftType = j.note.type ?? "NOTE"
+      draftColor = j.note.color ?? "DEFAULT"
+      draftPinned = j.note.pinned == true
+      draftLabels = join(j.note.labels ?? [], ",")
+      draftItems = (j.note.items ?? []).map(it => {body: it.body ?? "", checked: it.checked == true, isChild: it.isChild == true})
+      problem = ""
+      view = "edit"
+    } else {
+      problem = j.error ?? "couldn't open note"
+    }
+  }
+
+  on saved {
+    let j = parseJson(value ?? "")
+    syncing = false
+    if j.ok == true {
+      problem = ""
+      view = "browse"
+      editId = ""
+      refresh()
+    } else {
+      problem = j.error ?? "save failed"
+    }
+  }
+
+  on acted {
+    let j = parseJson(value ?? "")
+    syncing = false
+    if j.ok == true {
+      problem = ""
+      refresh()
+    } else {
+      problem = j.error ?? "action failed"
+    }
+  }
+
+  onTap: { screenOpen = true; problem = ""; screen() }
+
+  Column {
+    gap: 6
+    fill: true
+    if !configured {
+      Text { text: "notally"; style: muted }
+      Text { text: "run setup"; style: title; color: accent }
+      Text { text: "nxyz setup — server URL + sync key"; style: small; color: muted }
+      Button { text: "open setup"; onTap: terminal("nxyz setup", "notally setup") }
+    } else {
+      Row {
+        align: center
+        gap: 6
+        Text { text: "notally"; style: muted; weight: 1 }
+        Text { text: syncLabel; style: small; color: syncErr != "" ? red : accent }
+        Text {
+          text: "+"
+          style: title
+          color: accent
+          onTap: {
+            editId = ""
+            draftTitle = ""
+            draftBody = ""
+            draftType = "NOTE"
+            draftColor = "DEFAULT"
+            draftPinned = false
+            draftLabels = ""
+            draftItems = []
+            problem = ""
+            view = "edit"
+            screenOpen = true
+            screen()
+          }
+        }
+      }
+      Input {
+        placeholder: "Search…"
+        text: q
+        clear: true
+        onChange: q = value
+        onSubmit: q = trim(value)
+      }
+      Flow {
+        gap: 4
+        Text {
+          text: "All"
+          style: small
+          color: label == "" ? accent : muted
+          padding: [4, 8]
+          background: label == "" ? alpha(accent, 0.2) : alpha(foreground, 0.06)
+          radius: 99
+          onTap: label = ""
+        }
+        for lab in labels.take(8) key lab.value {
+          Text {
+            text: lab.value
+            style: small
+            color: label == lab.value ? accent : muted
+            padding: [4, 8]
+            background: label == lab.value ? alpha(accent, 0.2) : alpha(foreground, 0.06)
+            radius: 99
+            onTap: label = lab.value
+          }
+        }
+      }
+      Column {
+        gap: 4
+        weight: 1
+        scroll: true
+        if len(notes) == 0 {
+          Text { text: notesRaw == null ? "…" : "no notes"; style: muted }
+        }
+        for n in notes.take(40) key n.id {
+          Row {
+            gap: 0
+            onTap: {
+              syncing = true
+              loaded = run("nxyz get ${sh(n.id)}")
+              screenOpen = true
+              screen()
+            }
+            if n.color != null && n.color != "DEFAULT" {
+              Box { width: 3; fill: height; background: n.color; radius: [8, 0, 0, 8] }
+            }
+            Column {
+              gap: 2
+              weight: 1
+              padding: [6, 8]
+              background: alpha(foreground, 0.06)
+              radius: n.color != null && n.color != "DEFAULT" ? [0, 8, 8, 0] : 8
+              Text { text: "${n.pinned ? "★ " : ""}${n.title != "" ? n.title : "(untitled)"}"; style: small; maxLines: 1 }
+              Text { text: "${n.type}${len(n.labels ?? []) > 0 ? " · " + join(n.labels, ", ") : ""}${n.preview != "" ? " · " + n.preview : ""}"; style: small; color: muted; maxLines: 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: view == "edit" ? (editId == "" ? "new note" : "edit") : "notally"
+    Column {
+      gap: 10
+      fill: true
+      padding: [0, 4]
+      if !configured {
+        Text { text: "Connect your NotallyXYZ sync server. The sync key stays in Linux (keyring or ~/.config/NotallyXYZ/sync-key), not in this widget file."; style: muted }
+        Button { text: "nxyz setup"; onTap: terminal("nxyz setup", "notally setup") }
+        Text { text: "After setup, pull to refresh."; style: small; color: muted; onTap: refresh() }
+      } else if view == "browse" {
+        Row {
+          gap: 6
+          Text {
+            text: "Notes"
+            style: small
+            color: folder == "NOTES" ? accent : muted
+            onTap: folder = "NOTES"
+          }
+          Text {
+            text: "Archive"
+            style: small
+            color: folder == "ARCHIVED" ? accent : muted
+            onTap: folder = "ARCHIVED"
+          }
+          Text {
+            text: "Bin"
+            style: small
+            color: folder == "DELETED" ? accent : muted
+            onTap: folder = "DELETED"
+          }
+          Spacer { weight: 1 }
+          Text { text: syncLabel; style: small; color: syncErr != "" ? red : muted }
+          Text {
+            text: "sync"
+            style: small
+            color: accent
+            onTap: { syncing = true; acted = run("nxyz sync") }
+          }
+        }
+        Input { placeholder: "Search…"; text: q; clear: true; onChange: q = value; onSubmit: q = trim(value) }
+        Flow {
+          gap: 4
+          Text {
+            text: "All"
+            style: small
+            padding: [4, 8]
+            radius: 99
+            background: label == "" ? alpha(accent, 0.2) : alpha(foreground, 0.06)
+            color: label == "" ? accent : muted
+            onTap: label = ""
+          }
+          for lab in labels key lab.value {
+            Text {
+              text: lab.value
+              style: small
+              padding: [4, 8]
+              radius: 99
+              background: label == lab.value ? alpha(accent, 0.2) : alpha(foreground, 0.06)
+              color: label == lab.value ? accent : muted
+              onTap: label = lab.value
+            }
+          }
+        }
+        if problem != "" { Text { text: problem; color: red; style: small } }
+        Column {
+          gap: 6
+          weight: 1
+          scroll: true
+          for n in notes key n.id {
+            Row {
+              gap: 8
+              align: center
+              Row {
+                gap: 0
+                weight: 1
+                onTap: {
+                  syncing = true
+                  loaded = run("nxyz get ${sh(n.id)}")
+                }
+                if n.color != null && n.color != "DEFAULT" {
+                  Box { width: 3; fill: height; background: n.color; radius: [10, 0, 0, 10] }
+                }
+                Column {
+                  gap: 2
+                  weight: 1
+                  padding: [8, 10]
+                  background: alpha(foreground, 0.06)
+                  radius: n.color != null && n.color != "DEFAULT" ? [0, 10, 10, 0] : 10
+                  Text { text: "${n.pinned ? "★ " : ""}${n.title != "" ? n.title : "(untitled)"}"; maxLines: 2 }
+                  Text { text: "${n.type}${len(n.labels ?? []) > 0 ? " · " + join(n.labels, ", ") : ""}"; style: small; color: muted; maxLines: 1 }
+                  if n.preview != "" { Text { text: n.preview; style: small; color: muted; maxLines: 2 } }
+                  if (n.images ?? 0) + (n.files ?? 0) + (n.audios ?? 0) > 0 {
+                    Text { text: "📎 ${(n.images ?? 0) + (n.files ?? 0) + (n.audios ?? 0)}"; style: small; color: muted }
+                  }
+                }
+              }
+              Column {
+                gap: 4
+                Text {
+                  text: n.pinned ? "unpin" : "pin"
+                  style: small
+                  color: accent
+                  onTap: { syncing = true; acted = run("nxyz pin ${sh(n.id)} ${sh(n.pinned ? "false" : "true")}") }
+                }
+                if folder == "NOTES" {
+                  Text {
+                    text: "arch"
+                    style: small
+                    color: muted
+                    onTap: { syncing = true; acted = run("nxyz folder ${sh(n.id)} ARCHIVED") }
+                  }
+                  Text {
+                    text: "bin"
+                    style: small
+                    color: red
+                    onTap: { syncing = true; acted = run("nxyz folder ${sh(n.id)} DELETED") }
+                  }
+                } else {
+                  Text {
+                    text: "restore"
+                    style: small
+                    color: accent
+                    onTap: { syncing = true; acted = run("nxyz folder ${sh(n.id)} NOTES") }
+                  }
+                }
+              }
+            }
+          }
+        }
+        Row {
+          gap: 8
+          Button {
+            text: "+ note"
+            onTap: {
+              editId = ""; draftTitle = ""; draftBody = ""; draftType = "NOTE"; draftColor = "DEFAULT"
+              draftPinned = false; draftLabels = ""; draftItems = []; problem = ""; view = "edit"
+            }
+          }
+          Button {
+            text: "+ list"
+            onTap: {
+              editId = ""; draftTitle = ""; draftBody = ""; draftType = "LIST"; draftColor = "DEFAULT"
+              draftPinned = false; draftLabels = ""; draftItems = []; problem = ""; view = "edit"
+            }
+          }
+        }
+      } else {
+        // editor
+        if problem != "" { Text { text: problem; color: red; style: small } }
+        Row {
+          gap: 8
+          Text {
+            text: "← back"
+            color: accent
+            onTap: {
+              view = "browse"
+              problem = ""
+            }
+          }
+          Spacer { weight: 1 }
+          Text {
+            text: draftPinned ? "★ pinned" : "pin"
+            style: small
+            color: accent
+            onTap: draftPinned = !draftPinned
+          }
+          Button {
+            text: "save"
+            onTap: {
+              syncing = true
+              saved = run(editId == ""
+                ? "nxyz upsert --type ${sh(draftType)} --title ${sh(draftTitle)} --body ${sh(draftBody)} --color ${sh(draftColor)} --pinned ${sh(draftPinned ? "true" : "false")} --labels ${sh(draftLabels)} --folder ${sh(folder)} --items ${sh(toJson(draftItems))}"
+                : "nxyz upsert --id ${sh(editId)} --type ${sh(draftType)} --title ${sh(draftTitle)} --body ${sh(draftBody)} --color ${sh(draftColor)} --pinned ${sh(draftPinned ? "true" : "false")} --labels ${sh(draftLabels)} --folder ${sh(folder)} --items ${sh(toJson(draftItems))}")
+            }
+          }
+        }
+        Input { placeholder: "Title"; text: draftTitle; onChange: draftTitle = value }
+        if draftType == "NOTE" {
+          Input {
+            placeholder: "Note body"
+            text: draftBody
+            lines: 10
+            weight: 1
+            onChange: draftBody = value
+          }
+        } else {
+          Column {
+            gap: 4
+            weight: 1
+            scroll: true
+            for it, i in draftItems {
+              Row {
+                gap: 8
+                align: center
+                Text {
+                  text: it.checked ? "☑" : "☐"
+                  onTap: draftItems = draftItems.take(i) + [{body: it.body, checked: !it.checked, isChild: it.isChild}] + draftItems.drop(i + 1)
+                }
+                Text {
+                  text: it.body
+                  weight: 1
+                  color: it.checked ? muted : foreground
+                  style: it.isChild ? "small" : "body"
+                }
+                Text {
+                  text: "✕"
+                  style: small
+                  color: muted
+                  onTap: draftItems = draftItems.take(i) + draftItems.drop(i + 1)
+                }
+              }
+            }
+            Input {
+              placeholder: "Add item…"
+              text: newItem
+              clear: true
+              onSubmit: {
+                if trim(value) != "" {
+                  draftItems = draftItems + [{body: trim(value), checked: false, isChild: false}]
+                }
+                newItem = ""
+              }
+            }
+          }
+        }
+        Text { text: "color"; style: label }
+        Flow {
+          gap: 6
+          for sw in colors {
+            Box {
+              width: 28
+              height: 28
+              radius: 8
+              background: sw.c == "DEFAULT" ? alpha(foreground, 0.12) : sw.c
+              border: draftColor == sw.c ? 2 : 1
+              borderColor: draftColor == sw.c ? accent : alpha(foreground, 0.25)
+              onTap: draftColor = sw.c
+            }
+          }
+        }
+        Input {
+          placeholder: "Labels (comma-separated)"
+          text: draftLabels
+          onChange: draftLabels = value
+        }
+        if editId != "" {
+          Row {
+            gap: 10
+            Text {
+              text: "archive"
+              style: small
+              color: muted
+              onTap: { syncing = true; acted = run("nxyz folder ${sh(editId)} ARCHIVED"); view = "browse" }
+            }
+            Text {
+              text: "move to bin"
+              style: small
+              color: red
+              onTap: { syncing = true; acted = run("nxyz folder ${sh(editId)} DELETED"); view = "browse" }
+            }
+          }
+          if len(images) + len(files) + len(audios) > 0 {
+            Text { text: "attachments"; style: label }
+            for im in images {
+              Text { text: "🖼 ${im.originalName ?? im.localName}"; style: small; color: muted }
+            }
+            for f in files {
+              Text { text: "📄 ${f.originalName ?? f.localName}"; style: small; color: muted }
+            }
+            for a in audios {
+              Text { text: "🎧 ${a.name}"; style: small; color: muted }
+            }
+          }
+        }
+      }
+    }
+  }
+}
