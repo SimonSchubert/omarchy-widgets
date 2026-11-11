@@ -1,0 +1,539 @@
+face "t9" {
+  // A dumb phone, reimagined: the keypad is the whole launcher. Tap keys and they spell, the old predictive way:
+  // 2-2-6 is CAMera, 8-6-7-2-4 is TORCH, any three digits or more can be dialled. An LCD with a pixel grid lights up
+  // as you press and fades when you stop. Hold a key after spelling something and it's on speed dial there; hold
+  // it from the idle screen to open it. Soft keys under the LCD's labels, a navigation pad (up and down are the
+  // volume when idle and pick a result while typing), a green key that opens or calls and a red one that hangs up.
+  // *#06# says what phone this is. Theme colours throughout, so it follows the Omarchy theme.
+
+  meta {
+    owl: 19
+    description: "A dumb phone reimagined: the keypad is the launcher. T9 spells apps and commands, dials numbers, an LCD lights up as you press, every key is a speed dial"
+    version: "1.0"
+    license: "MIT"
+    category: "productivity"
+  }
+
+  source now = clock every 1m
+  source apps = android.apps
+  source n = android.notifications
+  source alarm = android.alarm
+  source bat = android.battery
+  source sim = android.sim
+  source modes = android.modes
+  source m = android.media
+  source vol = android.volume
+  source dev = android.device
+
+  // What's typed, the result picked, seconds left of the backlight, of a message and of the volume bar.
+  state q = ""
+  state sel = 0
+  state lit = 0
+  state flash = ""
+  state flashN = 0
+  state volN = 0
+  // Speed dial: a key's digit to what it opens.
+  state speed = {} persist
+
+  every 1s {
+    if lit > 0 { lit = lit - 1 }
+    if flashN > 0 { flashN = flashN - 1 }
+    if volN > 0 { volN = volN - 1 }
+  }
+
+  statusBar: false
+  edge: true
+  padding: 0
+  background: background
+
+  let lcdFont = "https://raw.githubusercontent.com/google/fonts/main/ofl/vt323/VT323-Regular.ttf"
+  let inter = "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf"
+
+  // ---- the look: an LCD tinted by the theme's accent, ink a touch of it too ----
+  let glow = lit > 0
+  let ink = mix(foreground, accent, 0.2)
+  let faint = alpha(ink, 0.5)
+  let lcd = glow ? mix(background, accent, 0.2) : mix(background, accent, 0.07)
+
+  let W = tileWidth ?? 412
+  let H = tileHeight ?? 915
+  let wide = W > H
+  let kh = clamp((H - 420) / 7.2, 46, 70)
+  let navH = clamp(kh * 1.6, 84, 112)
+  let rowsN = H > 800 ? 5 : 4
+  let bigT = clamp(((wide ? W * 0.5 : W) - 70) / 2.6, 70, 150)
+
+  // ---- T9: every app's words as the digits that spell them ----
+  let t9 = {a: "2", b: "2", c: "2", d: "3", e: "3", f: "3", g: "4", h: "4", i: "4", j: "5", k: "5", l: "5", m: "6", n: "6", o: "6", p: "7", q: "7", r: "7", s: "7", t: "8", u: "8", v: "8", w: "9", x: "9", y: "9", z: "9"}
+  let cmds = [
+    {kind: "cmd", id: "torch", name: "Torch"},
+    {kind: "cmd", id: "quiet", name: "Quiet"},
+    {kind: "cmd", id: "wifi", name: "Wifi"},
+    {kind: "cmd", id: "bluetooth", name: "Bluetooth"},
+    {kind: "cmd", id: "music", name: "Music"},
+    {kind: "cmd", id: "next", name: "Next track"},
+    {kind: "cmd", id: "settings", name: "Settings"},
+    {kind: "cmd", id: "menu", name: "Menu"}
+  ]
+  let pool = ((apps ?? []).map(a => {kind: "app", key: a.key, id: null, name: join(words(a.name), " "), work: a.profile, score: num(a.score, 0), ws: words(lower(a.name))})
+    + cmds.map(c => merge(c, {score: 0, work: null, ws: words(lower(c.name))})))
+    .map(p => merge(p, {codes: p.ws.map(w => join(range(len(w)).map(i => contains("0123456789", sub(w, i, i + 1)) ? sub(w, i, i + 1) : get(t9, sub(w, i, i + 1), "")), ""))}))
+
+  let typing = q != ""
+  let spell = typing && !contains(q, "*") && !contains(q, "#") && !contains(q, "+")
+  let info = q == "*#06#"
+  // A whole word spelled first, then a name's start, then any word's start; apps before commands, used ones first.
+  let found = !spell ? [] : pool
+    .map(p => merge(p, {wi: range(len(p.codes)).find(i => startsWith(p.codes[i], q))}))
+    .filter(p => p.wi != null)
+    .sortBy(p => (p.codes[p.wi] == q ? 0 : 1000000) + (p.wi == 0 ? 0 : 300000) + (p.kind == "cmd" ? 100000 : 0) - p.score)
+    .take(8)
+    .map(p => merge(p, {off: sum(range(p.wi).map(j => len(p.ws[j]) + 1))}))
+  let cands = found + (len(q) >= 3 && !info ? [{kind: "call", name: "Call ${q}", num: q}] : [])
+  let at = len(cands) == 0 ? 0 : clamp(sel, 0, len(cands) - 1)
+  let cur = len(cands) == 0 ? null : cands[at]
+  let from = max(0, at - rowsN + 1)
+  let shown = cands.drop(from).take(rowsN)
+  let selI = at - from
+
+  // ---- the phone, as a dumb phone would tell it ----
+  let phoneApp = (apps ?? []).find(a => a.profile == null && contains(["com.google.android.dialer", "com.samsung.android.dialer", "com.android.dialer", "org.fossify.phone"], a.package))
+  let msgApp = (apps ?? []).find(a => a.profile == null && contains(["com.google.android.apps.messaging", "com.samsung.android.messaging", "com.android.mms", "com.android.messaging", "org.fossify.messages"], a.package))
+  let items = n.available ? n.items : []
+  let missed = phoneApp == null ? 0 : len(items.filter(i => i.package == phoneApp.package))
+  let unread = msgApp == null ? 0 : len(items.filter(i => i.package == msgApp.package))
+  let rest = items.filter(i => (phoneApp == null || i.package != phoneApp.package) && (msgApp == null || i.package != msgApp.package))
+  let lines = [
+    missed > 0 ? {k: "call", t: missed == 1 ? "1 missed call" : "${missed} missed calls"} : null,
+    unread > 0 ? {k: "sms", t: unread == 1 ? "1 message" : "${unread} messages"} : null,
+    len(rest) > 0 ? {k: "note", t: len(rest) == 1 ? "1 notification" : "${len(rest)} notifications"} : null,
+    alarm.set ? {k: "bell", t: "alarm " + lower(fmtTime(alarm.time, "EEE HH:mm"))} : null
+  ].filter(x => x != null)
+  let song = m.available && m.title != null ? [m.title, m.artist].filter(x => x != null && x != "").join(" - ") : null
+
+  // Pixel icons, one letter per LCD pixel.
+  let sprites = {
+    call: [".xxxxxxx.", "xx.....xx", "xx.xxx.xx", "...xxx...", "..xxxxx..", "..xxxxx.."],
+    sms: ["xxxxxxxxx", "xx.....xx", "x.x...x.x", "x..x.x..x", "x...x...x", "xxxxxxxxx"],
+    note: [".xxxxxxx.", "x.......x", "x.x.x.x.x", "x.......x", ".xxxxxxx.", ".xx......"],
+    bell: ["...x...", "..xxx..", ".xxxxx.", ".xxxxx.", "xxxxxxx", "...x..."],
+    song: ["..xxxxx", "..x...x", "..x...x", "xxx.xxx", "xxx.xxx", "......."],
+    handset: ["...xxxxxxx...", ".xxxxxxxxxxx.", "xxxx.....xxxx", "xxx.......xxx", ".x.........x."]
+  }
+
+  let pad = [{d: "1", l: "o_o"}, {d: "2", l: "abc"}, {d: "3", l: "def"}, {d: "4", l: "ghi"}, {d: "5", l: "jkl"}, {d: "6", l: "mno"}, {d: "7", l: "pqrs"}, {d: "8", l: "tuv"}, {d: "9", l: "wxyz"}, {d: "*", l: " "}, {d: "0", l: "+"}, {d: "#", l: " "}]
+
+  fps: m.playing && !typing ? 8 : typing ? 2 : 1
+
+  // ---- the LCD ----
+  component Status() {
+    Row {
+      fill: width
+      height: 22
+      gap: 8
+      align: center
+      Canvas {
+        width: 24
+        height: 16
+        for i in range(4) {
+          rect(i * 6, 16 - (i + 1) * 4, 4, (i + 1) * 4, fill: i < num(sim.signal, 0) ? ink : alpha(ink, 0.18))
+        }
+      }
+      Text { text: upper(sim.carrier ?? (sim.available ? "no sim" : "no service")); font: lcdFont; fontSize: 19; color: ink; maxLines: 1; weight: 1 }
+      if modes.dnd {
+        Text { text: " QUIET "; font: lcdFont; fontSize: 16; color: lcd; background: ink; maxLines: 1 }
+      }
+      if modes.torch == true {
+        Text { text: " LIGHT "; font: lcdFont; fontSize: 16; color: lcd; background: ink; maxLines: 1 }
+      }
+      Text { text: bat == null ? "" : "${bat.charging ? "+" : ""}${bat.level}"; font: lcdFont; fontSize: 19; color: ink; maxLines: 1 }
+      Canvas {
+        width: 28
+        height: 14
+        rect(0.75, 0.75, 23.5, 12.5, stroke: ink, width: 1.5)
+        rect(24.5, 4, 3, 6, fill: ink)
+        for i in range(4) {
+          rect(3 + i * 5, 3, 4, 8, fill: i < ceil(num(bat.level, 0) / 25) ? ink : alpha(ink, 0.15))
+        }
+      }
+    }
+  }
+
+  component Soft() {
+    Row {
+      fill: width
+      height: 26
+      gap: 4
+      align: center
+      Text { text: "Menu"; font: lcdFont; fontSize: 23; color: ink; weight: 1; maxLines: 1 }
+      Text { text: typing ? "Select" : modes.dnd ? "Loud" : "Quiet"; font: lcdFont; fontSize: 23; color: ink; weight: 1; align: center; maxLines: 1 }
+      Text { text: typing ? "Clear" : modes.torch == true ? "Dark" : "Light"; font: lcdFont; fontSize: 23; color: ink; weight: 1; align: end; maxLines: 1 }
+    }
+  }
+
+  // A message, or the volume as ten blocks.
+  component Banner() {
+    if volN > 0 {
+      Row {
+        fill: width
+        height: 30
+        gap: 10
+        align: center
+        Text { text: "VOL"; font: lcdFont; fontSize: 22; color: ink }
+        Canvas {
+          weight: 1
+          height: 14
+          for i in range(10) {
+            rect(i * width / 10, 0, width / 10 - 3, height, fill: i < round(num(vol.level, 0) / 10) ? ink : alpha(ink, 0.15))
+          }
+        }
+      }
+    } else if flashN > 0 {
+      Text { text: upper(flash); font: lcdFont; fontSize: 22; color: lcd; background: ink; align: center; maxLines: 1; padding: [6, 2] }
+    }
+  }
+
+  component Idle() {
+    Column {
+      fill: true
+      gap: 0
+      Spacer { weight: 1 }
+      Text { text: fmtTime(now, "HH:mm"); font: lcdFont; fontSize: bigT; color: ink; align: center; maxLines: 1 }
+      Text { text: upper(fmtTime(now, "EEE d MMM")); font: lcdFont; fontSize: 24; letterSpacing: 4; color: faint; align: center; maxLines: 1; offset: [0, -bigT * 0.12] }
+      Spacer { weight: 1 }
+      Banner { }
+      Spacer { height: 6 }
+      for it in lines key it.k {
+        Row {
+          fill: width
+          height: 28
+          gap: 10
+          align: center
+          onTap: {
+            haptic()
+            if it.k == "call" {
+              if phoneApp != null { androidApp(phoneApp.key) }
+            } else if it.k == "sms" {
+              if msgApp != null { androidApp(msgApp.key) }
+            } else if it.k == "note" {
+              notification("open", rest[0].key)
+            } else if it.k == "bell" {
+              androidApp(alarm.app)
+            }
+          }
+          Canvas { width: 22; height: 14; sprite(get(sprites, it.k), 2, 1, 2, fill: ink) }
+          Text { text: upper(it.t); font: lcdFont; fontSize: 22; color: ink; maxLines: 1; weight: 1 }
+        }
+      }
+      if song != null {
+        Row {
+          fill: width
+          height: 28
+          gap: 10
+          align: center
+          onTap: media("open")
+          Canvas { width: 22; height: 14; sprite(get(sprites, "song"), 4, 1, 2, fill: ink) }
+          Canvas {
+            weight: 1
+            height: 24
+            let s = upper(song)
+            let tw = len(s) * 10 + 48
+            clip(0, 0, width, height) {
+              if m.playing && tw > width {
+                let x = -((time * 30) % tw)
+                text(s, x, height / 2, size: 22, font: lcdFont, color: ink)
+                text(s, x + tw, height / 2, size: 22, font: lcdFont, color: ink)
+              } else {
+                text(s, 0, height / 2, size: 22, font: lcdFont, color: m.playing ? ink : faint)
+              }
+            }
+          }
+        }
+      }
+      if len(lines) == 0 && song == null {
+        Text { text: "NOTHING NEW"; font: lcdFont; fontSize: 22; color: faint; align: center }
+      }
+      Spacer { height: 6 }
+    }
+  }
+
+  component Typing() {
+    Column {
+      fill: true
+      gap: 3
+      Row {
+        fill: width
+        height: 60
+        gap: 0
+        align: center
+        Spacer { weight: 1 }
+        Text { text: q; font: lcdFont; fontSize: len(q) > 12 ? 36 : 56; color: ink; maxLines: 1 }
+        Canvas {
+          width: 14
+          height: 44
+          if floor(time * 2) % 2 == 0 { rect(5, 4, 6, 36, fill: ink) }
+        }
+      }
+      Spacer { height: 4 }
+      if info {
+        Column {
+          fill: width
+          gap: 0
+          Text { text: "PHONE"; font: lcdFont; fontSize: 18; color: faint }
+          Text { text: upper("${dev.maker ?? ""} ${dev.model ?? ""}"); font: lcdFont; fontSize: 26; color: ink; maxLines: 1 }
+          Text { text: "ANDROID ${dev.android ?? "…"} · SDK ${dev.sdk ?? "…"}"; font: lcdFont; fontSize: 22; color: ink; maxLines: 1 }
+          Text { text: upper(dev.soc ?? ""); font: lcdFont; fontSize: 22; color: ink; maxLines: 1 }
+          Text { text: bat == null ? "" : "BATTERY ${bat.temp}°C · ${upper(bat.health ?? "ok")}"; font: lcdFont; fontSize: 22; color: ink; maxLines: 1 }
+        }
+      } else if len(cands) == 0 {
+        Text { text: "NO MATCH"; font: lcdFont; fontSize: 24; color: faint }
+      } else {
+        for c, i in shown key "${c.kind}${c.key ?? c.id ?? c.num}" {
+          Row {
+            fill: width
+            height: 32
+            gap: 8
+            align: center
+            padding: [6, 0]
+            radius: 3
+            background: i == selI ? ink : alpha(ink, 0)
+            onTap: {
+              haptic()
+              lit = 8
+              if i == selI {
+                if c.kind == "app" { androidApp(c.key) } else if c.kind == "call" { url("tel:${enc(c.num)}") } else if c.id == "torch" { torch("toggle") } else if c.id == "quiet" { dnd("toggle") } else if c.id == "wifi" { settings("wifi") } else if c.id == "bluetooth" { settings("bluetooth") } else if c.id == "music" { media("toggle") } else if c.id == "next" { media("next") } else if c.id == "settings" { launcher("settings") } else if c.id == "menu" { launcher("drawer") }
+                q = ""
+                sel = 0
+              } else {
+                sel = from + i
+              }
+            }
+            Text {
+              spans: c.wi == null ? [c.name] : [sub(c.name, 0, c.off), {text: sub(c.name, c.off, min(c.off + len(q), len(c.name))), color: i == selI ? background : accent}, sub(c.name, min(c.off + len(q), len(c.name)), len(c.name))]
+              font: lcdFont
+              fontSize: 27
+              color: i == selI ? alpha(lcd, 0.6) : ink
+              maxLines: 1
+              weight: 1
+            }
+            Text {
+              text: upper(c.kind == "app" ? (c.work ?? "") : c.kind == "call" ? "dial" : c.id == "torch" ? (modes.torch == true ? "on" : "off") : c.id == "quiet" ? (modes.dnd ? "on" : "off") : c.id == "music" ? (m.playing ? "pause" : "play") : "cmd")
+              font: lcdFont
+              fontSize: 18
+              color: i == selI ? lcd : faint
+              maxLines: 1
+            }
+          }
+        }
+      }
+      Spacer { weight: 1 }
+      Banner { }
+      Spacer { height: 4 }
+    }
+  }
+
+  component Lcd() {
+    Box {
+      fill: true
+      radius: 6 + 14 * corners
+      clip: true
+      background: lcd
+      animate background: tween(450ms, "ease")
+      // The pixel grid, faint, under the ink.
+      Canvas {
+        fill: true
+        for i in range(floor(width / 4)) { line(i * 4 + 2, 0, i * 4 + 2, height, stroke: alpha(background, 0.22), width: 0.7) }
+        for j in range(floor(height / 4)) { line(0, j * 4 + 2, width, j * 4 + 2, stroke: alpha(background, 0.22), width: 0.7) }
+      }
+      Column {
+        fill: true
+        gap: 0
+        padding: [16, 12, 16, 10]
+        Status { }
+        if typing { Typing { weight: 1; fill: width } } else { Idle { weight: 1; fill: width } }
+        Soft { }
+      }
+    }
+  }
+
+  // ---- the keys ----
+  component Nav() {
+    Row {
+      fill: width
+      height: navH
+      gap: 12
+      align: center
+      Column {
+        weight: 1
+        fill: height
+        gap: 10
+        // Left soft key: the app drawer.
+        Box {
+          fill: width
+          weight: 1
+          align: center
+          radius: 12 * corners
+          onTap: { haptic(); lit = 8; launcher("drawer") }
+          Box { width: 56; height: 5; radius: 3; background: alpha(foreground, 0.35) }
+        }
+        // Call: what's picked, or the phone app.
+        Box {
+          fill: width
+          weight: 1.3
+          align: center
+          radius: 30 * corners
+          background: alpha(green, 0.16)
+          onTap: {
+            haptic()
+            lit = 8
+            if q == "" {
+              if phoneApp != null { androidApp(phoneApp.key) } else { url("tel:") }
+            } else if cur != null {
+              let c = cur
+              if c.kind == "app" { androidApp(c.key) } else if c.kind == "call" { url("tel:${enc(c.num)}") } else if c.id == "torch" { torch("toggle") } else if c.id == "quiet" { dnd("toggle") } else if c.id == "wifi" { settings("wifi") } else if c.id == "bluetooth" { settings("bluetooth") } else if c.id == "music" { media("toggle") } else if c.id == "next" { media("next") } else if c.id == "settings" { launcher("settings") } else if c.id == "menu" { launcher("drawer") }
+              q = ""
+              sel = 0
+            }
+          }
+          Canvas { width: 39; height: 15; sprite(get(sprites, "handset"), 0, 0, 3, fill: green) }
+        }
+      }
+      // The navigation pad: up, select, down.
+      Box {
+        width: navH
+        height: navH
+        onTap: {
+          haptic()
+          lit = 8
+          if y < navH * 0.34 {
+            if typing { sel = max(0, at - 1) } else { volume("up"); volN = 2 }
+          } else if y > navH * 0.66 {
+            if typing { sel = min(len(cands) - 1, at + 1) } else { volume("down"); volN = 2 }
+          } else if typing {
+            if cur != null {
+              let c = cur
+              if c.kind == "app" { androidApp(c.key) } else if c.kind == "call" { url("tel:${enc(c.num)}") } else if c.id == "torch" { torch("toggle") } else if c.id == "quiet" { dnd("toggle") } else if c.id == "wifi" { settings("wifi") } else if c.id == "bluetooth" { settings("bluetooth") } else if c.id == "music" { media("toggle") } else if c.id == "next" { media("next") } else if c.id == "settings" { launcher("settings") } else if c.id == "menu" { launcher("drawer") }
+              q = ""
+              sel = 0
+            }
+          } else {
+            dnd("toggle")
+          }
+        }
+        Canvas {
+          fill: true
+          let r = width / 2
+          circle(r, r, r - 1, stroke: alpha(foreground, 0.22), width: 1.5)
+          circle(r, r, r * 0.3, fill: glow ? alpha(accent, 0.5) : alpha(foreground, 0.12))
+          path([[r - 7, r * 0.42], [r + 7, r * 0.42], [r, r * 0.42 - 8]], closed: true, fill: alpha(foreground, 0.5))
+          path([[r - 7, r * 1.58], [r + 7, r * 1.58], [r, r * 1.58 + 8]], closed: true, fill: alpha(foreground, 0.5))
+        }
+      }
+      Column {
+        weight: 1
+        fill: height
+        gap: 10
+        // Right soft key: back a letter while typing (hold to clear), the torch when idle.
+        Box {
+          fill: width
+          weight: 1
+          align: center
+          radius: 12 * corners
+          onTap: { haptic(); lit = 8; if typing { q = sub(q, 0, len(q) - 1); sel = 0 } else { torch("toggle") } }
+          onLongPress: { haptic(); q = ""; sel = 0 }
+          Box { width: 56; height: 5; radius: 3; background: alpha(foreground, 0.35) }
+        }
+        // End: hang up, which clears and puts the backlight out.
+        Box {
+          fill: width
+          weight: 1.3
+          align: center
+          radius: 30 * corners
+          background: alpha(red, 0.16)
+          onTap: { haptic(); q = ""; sel = 0; lit = 0 }
+          Canvas { width: 39; height: 15; rotate(180, 19.5, 7.5) { sprite(get(sprites, "handset"), 0, 0, 3, fill: red) } }
+        }
+      }
+    }
+  }
+
+  component Keypad() {
+    Grid {
+      columns: 3
+      gap: 6
+      fill: width
+      for k in pad key k.d {
+        Box {
+          fill: width
+          height: kh
+          align: center
+          radius: 14 * corners
+          background: alpha(foreground, 0.04)
+          onTap: { haptic(); lit = 8; if len(q) < 24 { q = q + k.d }; sel = 0 }
+          onLongPress: {
+            haptic()
+            lit = 8
+            if k.d == "0" {
+              q = q + "+"
+              sel = 0
+            } else if k.d == "*" || k.d == "#" {
+              q = q + k.d
+            } else if typing && cur != null && cur.kind != "info" {
+              speed = set(speed, k.d, {kind: cur.kind, key: cur.key, id: cur.id, num: cur.num, name: cur.name})
+              flash = "${cur.name} on ${k.d}"
+              flashN = 3
+              q = ""
+              sel = 0
+            } else if get(speed, k.d, null) != null {
+              let c = get(speed, k.d, null)
+              if c.kind == "app" { androidApp(c.key) } else if c.kind == "call" { url("tel:${enc(c.num)}") } else if c.id == "torch" { torch("toggle") } else if c.id == "quiet" { dnd("toggle") } else if c.id == "wifi" { settings("wifi") } else if c.id == "bluetooth" { settings("bluetooth") } else if c.id == "music" { media("toggle") } else if c.id == "next" { media("next") } else if c.id == "settings" { launcher("settings") } else if c.id == "menu" { launcher("drawer") }
+            } else {
+              flash = "spell a name, hold ${k.d}"
+              flashN = 3
+            }
+          }
+          Column {
+            gap: 0
+            align: center
+            Text { text: k.d; font: inter; fontSize: 30; fontWeight: glow ? 300 : 200; color: glow ? mix(foreground, accent, 0.55) : foreground; align: center }
+            Text { text: upper(k.l); font: inter; fontSize: 9; fontWeight: 500; letterSpacing: 2.5; color: muted; align: center }
+          }
+          // A dot where a speed dial waits.
+          if get(speed, k.d, null) != null {
+            Canvas { fill: true; circle(width - 12, 12, 2.5, fill: accent) }
+          }
+        }
+      }
+    }
+  }
+
+  if wide {
+    Row {
+      fill: true
+      gap: 20
+      padding: [14 + screenLeft, screenTop + 10, 14 + screenRight, 10]
+      Lcd { weight: 1; fill: height }
+      Column {
+        width: min(W * 0.42, 380)
+        fill: height
+        gap: 12
+        Spacer { weight: 1 }
+        Nav { }
+        Keypad { }
+        Spacer { height: screenInset }
+      }
+    }
+  } else {
+    Column {
+      fill: true
+      gap: 0
+      padding: [14 + screenLeft, screenTop + 10, 14 + screenRight, 0]
+      Lcd { weight: 1; fill: width }
+      Spacer { height: 14 }
+      Nav { }
+      Spacer { height: 12 }
+      Keypad { }
+      Spacer { height: screenInset + 10 }
+    }
+  }
+}
