@@ -1,0 +1,436 @@
+face "console comms" {
+  // The console's second page (see console.owl): what's playing with its cover and keys, the newest notifications
+  // as incoming transmissions (tap to open, hold to dismiss) and your most used apps as console buttons.
+
+  meta { owl: 19 }
+
+  source now = clock every 1m
+  source mp = android.media
+  source n = android.notifications
+  // Ranked as the drawer's search ranks them: opened often and lately first.
+  source apps = android.apps
+
+  // The console has its own colours whatever the theme, so the status bar steps aside.
+  statusBar: false
+  edge: true
+  padding: 0
+  background: #000000
+  // The number cascade scrolls a row every half second; two frames a second is all it needs.
+  fps: 2
+
+  // Tapping the number cascade reshuffles it.
+  state seed = 4774 persist
+
+  // ---- the console's look, the same on all three pages ----
+  let antonio = "https://raw.githubusercontent.com/google/fonts/main/ofl/antonio/Antonio%5Bwght%5D.ttf"
+  let void = #000000
+  let amber = #F5A050
+  let peach = #EC9478
+  let tan = #F3CB9F
+  let lilac = #C79AC6
+  let violet = #9C7DAD
+  let periw = #9C9CE6
+  let sky = #A0C4EA
+  let rose = #CC6B6B
+  let gold = #F2C46E
+  // Text and unlit parts as solid colours, never a faded tan: on black that turns brown, which the console never was.
+  let txLabel = #B08BB0
+  let txNote = #8F7AA6
+  let dim = #5E5A86
+  let off = #24203A
+  let deco = [amber, peach, tan, lilac, periw, gold, violet, sky]
+
+  let W = tileWidth ?? 412
+  let H = tileHeight ?? 915
+  let wide = W > H
+  let sw = wide ? 120 : 80
+  let bar = 18
+  let R = 36
+  let ri = 14
+  let gp = 4
+  let topH = 64
+  let botH = 40
+
+  let yr = num(fmtTime(now, "yyyy"), 2026)
+  let doy = num(fmtTime(now, "D"), 1)
+  let mins = num(fmtTime(now, "H"), 0) * 60 + num(fmtTime(now, "m"), 0)
+  let stardate = fixed((yr - 1946) * 1000 + (doy - 1 + mins / 1440) / 365.25 * 1000, 1)
+
+  // The top of the frame: the elbow into the sidebar, the bar in three segments, the page's name and an end cap.
+  component Top(name, code, cA, cB, cC) {
+    Row {
+      gap: 0
+      align: top
+      fill: width
+      Box {
+        weight: 1
+        height: topH
+        Canvas {
+          let e = sw + 52
+          rect(0, 0, sw, height, fill: cA)
+          rect(0, 0, e, bar, fill: cA)
+          rect(0, 0, R, R, fill: void)
+          arc(R, R, R, 270, 90, fill: cA)
+          rect(sw, bar, ri, ri, fill: cA)
+          arc(sw + ri, bar + ri, ri, 270, 90, fill: void)
+          rect(e + gp, 0, 26, bar, fill: cB)
+          rect(e + 2 * gp + 26, 0, max(width - e - 2 * gp - 26 - 8, 0), bar, fill: cC)
+        }
+        Box {
+          width: sw
+          height: topH
+          align: bottomEnd
+          padding: [0, 0, 6, 3]
+          Text { text: code; font: antonio; fontSize: 13; fontWeight: 500; color: void; align: end }
+        }
+      }
+      Text { text: upper(name); font: antonio; fontSize: 28; fontWeight: 500; letterSpacing: 1; color: cA; maxLines: 1; offset: [0, -7] }
+      Canvas {
+        width: bar + 6
+        height: bar
+        rect(6, 0, bar / 2, bar, fill: cA)
+        circle(6 + bar / 2, bar / 2, bar / 2, fill: cA)
+      }
+    }
+  }
+
+  // The bottom of the frame, the top's mirror.
+  component Bottom(name, cA, cB, cC) {
+    Row {
+      gap: 0
+      align: bottom
+      fill: width
+      Box {
+        weight: 1
+        height: botH
+        Canvas {
+          let e = sw + 52
+          rect(0, 0, sw, height, fill: cA)
+          rect(0, height - bar, e, bar, fill: cA)
+          rect(0, height - R, R, R, fill: void)
+          arc(R, height - R, R, 180, 90, fill: cA)
+          rect(sw, height - bar - ri, ri, ri, fill: cA)
+          arc(sw + ri, height - bar - ri, ri, 180, 90, fill: void)
+          rect(e + gp, height - bar, 64, bar, fill: cB)
+          rect(e + 2 * gp + 64, height - bar, max(width - e - 2 * gp - 64 - 8, 0), bar, fill: cC)
+        }
+      }
+      Text { text: upper(name); font: antonio; fontSize: 16; fontWeight: 500; letterSpacing: 2; color: cB; maxLines: 1; offset: [0, 2] }
+      Canvas {
+        width: bar + 6
+        height: bar
+        rect(6, 0, bar / 2, bar, fill: cA)
+        circle(6 + bar / 2, bar / 2, bar / 2, fill: cA)
+      }
+    }
+  }
+
+  // A sidebar button: its name and a number at the bottom right, in void.
+  component Side(label, code, tint, h) {
+    Column {
+      width: sw
+      height: h
+      gap: 0
+      background: tint
+      padding: [6, 4, 6, 4]
+      Spacer { weight: 1 }
+      Text { text: upper(label); font: antonio; fontSize: 15; fontWeight: 600; color: void; align: end; maxLines: 1 }
+      Text { text: code; font: antonio; fontSize: 11; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+    }
+  }
+
+  // A section's heading: a rounded bar running into its name.
+  component Head(t, tint) {
+    Row {
+      gap: 8
+      align: center
+      fill: width
+      Canvas { width: 22; height: 14; rect(7, 0, 15, 14, fill: tint); circle(7, 7, 7, fill: tint) }
+      Text { text: upper(t); font: antonio; fontSize: 17; fontWeight: 500; letterSpacing: 1; color: tint; maxLines: 1 }
+      Box { weight: 1; height: 14; background: tint }
+      Canvas { width: 14; height: 14; rect(0, 0, 7, 14, fill: tint); circle(7, 7, 7, fill: tint) }
+    }
+  }
+
+  // A label at the left, its value at the right.
+  component Readout(k, v, vc = amber) {
+    Row {
+      gap: 8
+      fill: width
+      Text { text: upper(k); font: antonio; fontSize: 13; color: txLabel; maxLines: 1; weight: 1 }
+      Text { text: upper(v); font: antonio; fontSize: 14; fontWeight: 500; color: vc; maxLines: 1 }
+    }
+  }
+
+  // A percentage over twelve segments that light up, red past ninety.
+  component Meter(label, pct, note, tint) {
+    Column {
+      weight: 1
+      gap: 2
+      Row {
+        fill: width
+        align: bottom
+        gap: 4
+        Text { text: upper(label); font: antonio; fontSize: 13; color: txLabel; weight: 1; maxLines: 1 }
+        Text { text: pct == null ? "——" : "${round(pct)}%"; font: antonio; fontSize: 22; fontWeight: 500; color: pct != null && pct >= 90 ? rose : tint; maxLines: 1 }
+      }
+      Canvas {
+        fill: width
+        height: 10
+        let n = 12
+        let sg = (width - (n - 1) * 2) / n
+        let lit = pct == null ? 0 : round(clamp(pct, 0, 100) / 100 * n)
+        for i in range(n) {
+          rect(i * (sg + 2), 0, sg, height, fill: i < lit ? (pct >= 90 ? rose : tint) : off)
+        }
+      }
+      Text { text: upper(note ?? ""); font: antonio; fontSize: 11; color: txNote; maxLines: 1 }
+    }
+  }
+
+  // The stardate and the time.
+  component Clock() {
+    Row {
+      fill: width
+      align: bottom
+      gap: 8
+      Column {
+        weight: 1
+        gap: 0
+        Text { text: "STARDATE"; font: antonio; fontSize: 13; letterSpacing: 2; color: txLabel }
+        Text { text: stardate; font: antonio; fontSize: 24; fontWeight: 500; color: gold }
+        Text { text: upper(fmtTime(now, "EEE d MMM yyyy")); font: antonio; fontSize: 12; letterSpacing: 1; color: lilac }
+      }
+      Text { text: fmtTime(now, "HH:mm"); font: antonio; fontSize: 60; fontWeight: 400; color: amber; maxLines: 1 }
+    }
+  }
+
+  // Columns of numbers scrolling up a row every half second; a few are lit. Tap to reshuffle.
+  component Cascade(salt) {
+    Box {
+      weight: 1
+      fill: width
+      onTap: seed = random(1000000)
+      ripple: false
+      clip: true
+      Canvas {
+        fill: true
+        let rh = 17
+        let rows = floor(height / rh)
+        let cw = 50
+        let cols = max(floor(width / cw), 1)
+        let tick = floor(time * 2)
+        for r in range(rows) {
+          for k in range(cols) {
+            let h = hash(seed, salt, r + tick, k)
+            let d = 2 + floor(hash(seed, salt, r + tick, k, 1) * 5)
+            let x = width - k * cw - 2
+            if h < 0.06 {
+              rect(x - cw + 6, r * rh + 1, cw - 6, rh - 2, fill: deco[floor(h * 100) % 8])
+            }
+            text(pad(str(floor(hash(seed, salt, r + tick, k, 2) * pow(10, d))), d, "0"), x - 3, r * rh + rh / 2, size: 13, align: end, font: antonio, color: h < 0.06 ? void : h < 0.3 ? deco[floor(h * 1000) % 8] : dim)
+          }
+        }
+      }
+    }
+  }
+
+
+  // ---- this page ----
+  let has = mp != null && mp.title != null && mp.title != ""
+  let playing = has && mp.playing == true
+  let notes = n.available ? n.items.take(4) : []
+  let top = (apps ?? []).filter(a => !a.system || a.score > 0).sortBy(a => -a.score).take(8)
+  let tints = [amber, lilac, periw, peach, tan, sky, gold, violet]
+
+  // A rounded console button: its name at the right, in black.
+  component Pill(label, tint) {
+    Box {
+      fill: width
+      height: 32
+      radius: 16
+      background: tint
+      align: end
+      padding: [14, 0]
+      Text { text: upper(label); font: antonio; fontSize: 15; fontWeight: 600; letterSpacing: 1; color: void; maxLines: 1; align: end }
+    }
+  }
+
+  // What's playing: the cover in a frame, the title, and three keys.
+  component Audio() {
+    Column {
+      gap: 6
+      fill: width
+      Head { t: "audio"; tint: lilac }
+      Row {
+        gap: 12
+        fill: width
+        align: top
+        Box {
+          size: 96
+          radius: 16
+          clip: true
+          background: off
+          align: center
+          onTap: media("open")
+          if has && mp.art != null {
+            Image { src: mp.art; fit: cover; fill: true }
+          } else {
+            Canvas {
+              for i in range(4) { circle(width / 2, height / 2, width * (0.12 + i * 0.1), stroke: alpha(lilac, 0.6 - i * 0.12), width: 2) }
+              circle(width / 2, height / 2, 4, fill: lilac)
+            }
+          }
+        }
+        Column {
+          weight: 1
+          gap: 1
+          Text { text: !has ? (mp.available == false ? "NO ACCESS" : "NO SIGNAL") : playing ? "NOW PLAYING" : "PAUSED"; font: antonio; fontSize: 12; letterSpacing: 2; color: playing ? gold : txLabel }
+          Text { text: upper(has ? mp.title : mp.available == false ? "allow notification access to see music here" : "play something and it shows here"); font: antonio; fontSize: has ? 20 : 15; fontWeight: 500; color: amber; maxLines: 3 }
+          if has {
+            Text { text: upper(mp.artist ?? mp.app ?? ""); font: antonio; fontSize: 13; color: lilac; maxLines: 1 }
+          }
+        }
+      }
+      Row {
+        gap: 6
+        fill: width
+        Box { weight: 1; onTap: media("previous"); Pill { label: "prev"; tint: violet } }
+        Box { weight: 1; onTap: media("toggle"); Pill { label: playing ? "pause" : "play"; tint: playing ? gold : peach } }
+        Box { weight: 1; onTap: media("next"); Pill { label: "next"; tint: violet } }
+      }
+    }
+  }
+
+  // The newest four notifications.
+  component Comms() {
+    Column {
+      gap: 4
+      fill: width
+      Head { t: "incoming transmissions"; tint: amber }
+      if !n.available {
+        Box { onTap: notification("open", ""); Pill { label: "access denied · tap to grant"; tint: rose } }
+      } else if n.count == 0 {
+        Text { text: "NO INCOMING TRANSMISSIONS"; font: antonio; fontSize: 15; letterSpacing: 1; color: lilac; padding: [0, 4] }
+      } else {
+        for item, i in notes key item.key {
+          Row {
+            gap: 8
+            fill: width
+            height: 40
+            align: center
+            onTap: notification("open", item.key)
+            onLongPress: { haptic(); notification("dismiss", item.key) }
+            Box {
+              width: 42
+              height: 30
+              radius: 15
+              align: center
+              background: tints[i % 8]
+              Box { size: 22; radius: 11; background: void; align: center; Image { src: item.icon; size: 16 } }
+            }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: upper(item.title); font: antonio; fontSize: 15; fontWeight: 500; color: amber; maxLines: 1 }
+              if item.text != "" {
+                Text { text: item.text; font: antonio; fontSize: 12; color: txLabel; maxLines: 1 }
+              }
+            }
+            Text { text: upper(fmtAgo(item.time, now)); font: antonio; fontSize: 12; fontWeight: 500; color: txNote }
+          }
+        }
+        if n.count > 4 {
+          Text { text: "+ ${n.count - 4} MORE"; font: antonio; fontSize: 12; letterSpacing: 1; color: txNote; align: end }
+        }
+      }
+    }
+  }
+
+  // The eight most used apps as buttons, two by two.
+  component Apps() {
+    Column {
+      gap: 6
+      fill: width
+      Head { t: "applications"; tint: periw }
+      for pair, r in chunk(top, 2) {
+        Row {
+          gap: 6
+          fill: width
+          for a, j in pair key a.key {
+            Box { weight: 1; onTap: androidApp(a.key); Pill { label: a.name; tint: tints[(r * 2 + j + 2) % 8] } }
+          }
+          if len(pair) < 2 { Spacer { weight: 1 } }
+        }
+      }
+    }
+  }
+
+  component Content() {
+    if wide {
+      Row {
+        gap: 20
+        fill: true
+        Column {
+          weight: 1
+          gap: 14
+          Clock { }
+          Audio { }
+          Apps { }
+          Cascade { salt: 3; weight: 1; fill: width }
+        }
+        Column {
+          weight: 1
+          gap: 14
+          Comms { }
+          Cascade { salt: 4; weight: 1; fill: width }
+        }
+      }
+    } else {
+      Column {
+        fill: true
+        gap: 14
+        Clock { }
+        Audio { }
+        Comms { }
+        Apps { }
+        Cascade { salt: 3; weight: 1; fill: width }
+      }
+    }
+  }
+
+  Column {
+    fill: true
+    gap: 0
+    padding: [8 + screenLeft, screenTop + 6, 8 + screenRight, 0]
+    Top { name: "comms"; code: "02-4410"; cA: lilac; cB: amber; cC: periw }
+    Row {
+      weight: 1
+      fill: width
+      gap: 0
+      Column {
+        width: sw
+        fill: height
+        gap: gp
+        padding: [0, gp, 0, gp]
+        Box { onTap: media("open"); Side { label: "media"; code: "07-2209"; tint: peach; h: 64 } }
+        Box { onTap: settings("output"); Side { label: "output"; code: "08-1163"; tint: amber; h: 48 } }
+        Box { onTap: notification("open", ""); Side { label: "alerts"; code: "09-${pad(str(n.count ?? 0), 4, "0")}"; tint: n.count > 0 ? gold : tan; h: 64 } }
+        Box { onTap: androidApp("com.google.android.apps.messaging"); Side { label: "messages"; code: "09-1138"; tint: sky; h: 48 } }
+        Box { onTap: androidApp("com.google.android.gm"); Side { label: "gmail"; code: "09-2257"; tint: rose; h: 48 } }
+        Box { onTap: launcher("drawer"); Side { label: "apps"; code: "10-8875"; tint: periw; h: 96 } }
+        Column { width: sw; weight: 1; background: lilac }
+        Box { onTap: settings("sound"); Side { label: "sound"; code: "11-0316"; tint: violet; h: 56 } }
+      }
+      Column {
+        weight: 1
+        fill: height
+        gap: 0
+        padding: [ri + 10, 10, 2, 10]
+        Content { weight: 1; fill: width }
+      }
+    }
+    Bottom { name: !n.available || n.count == 0 ? "comms · today" : n.count == 1 ? "1 transmission" : "${n.count} transmissions"; cA: periw; cB: lilac; cC: amber }
+    Spacer { height: screenInset }
+  }
+}

@@ -1,0 +1,471 @@
+face "console engineering" {
+  // The console's third page (see console.owl): the battery, memory and storage, the network's speed and signal,
+  // switches for Wi-Fi, Bluetooth, Do Not Disturb and the torch, the volume in ten steps and the phone itself.
+
+  meta { owl: 19 }
+
+  source now = clock every 1m
+  source bat = android.battery
+  source sys = android.system every 30s
+  source dev = android.device
+  source net = android.network every 3s
+  source sim = android.sim
+  source modes = android.modes
+  source vol = android.volume
+
+  // The console has its own colours whatever the theme, so the status bar steps aside.
+  statusBar: false
+  edge: true
+  padding: 0
+  background: #000000
+  // The number cascade scrolls a row every half second; two frames a second is all it needs.
+  fps: 2
+
+  // Tapping the number cascade reshuffles it.
+  state seed = 4774 persist
+
+  // ---- the console's look, the same on all three pages ----
+  let antonio = "https://raw.githubusercontent.com/google/fonts/main/ofl/antonio/Antonio%5Bwght%5D.ttf"
+  let void = #000000
+  let amber = #F5A050
+  let peach = #EC9478
+  let tan = #F3CB9F
+  let lilac = #C79AC6
+  let violet = #9C7DAD
+  let periw = #9C9CE6
+  let sky = #A0C4EA
+  let rose = #CC6B6B
+  let gold = #F2C46E
+  // Text and unlit parts as solid colours, never a faded tan: on black that turns brown, which the console never was.
+  let txLabel = #B08BB0
+  let txNote = #8F7AA6
+  let dim = #5E5A86
+  let off = #24203A
+  let deco = [amber, peach, tan, lilac, periw, gold, violet, sky]
+
+  let W = tileWidth ?? 412
+  let H = tileHeight ?? 915
+  let wide = W > H
+  let sw = wide ? 120 : 80
+  let bar = 18
+  let R = 36
+  let ri = 14
+  let gp = 4
+  let topH = 64
+  let botH = 40
+
+  let yr = num(fmtTime(now, "yyyy"), 2026)
+  let doy = num(fmtTime(now, "D"), 1)
+  let mins = num(fmtTime(now, "H"), 0) * 60 + num(fmtTime(now, "m"), 0)
+  let stardate = fixed((yr - 1946) * 1000 + (doy - 1 + mins / 1440) / 365.25 * 1000, 1)
+
+  // The top of the frame: the elbow into the sidebar, the bar in three segments, the page's name and an end cap.
+  component Top(name, code, cA, cB, cC) {
+    Row {
+      gap: 0
+      align: top
+      fill: width
+      Box {
+        weight: 1
+        height: topH
+        Canvas {
+          let e = sw + 52
+          rect(0, 0, sw, height, fill: cA)
+          rect(0, 0, e, bar, fill: cA)
+          rect(0, 0, R, R, fill: void)
+          arc(R, R, R, 270, 90, fill: cA)
+          rect(sw, bar, ri, ri, fill: cA)
+          arc(sw + ri, bar + ri, ri, 270, 90, fill: void)
+          rect(e + gp, 0, 26, bar, fill: cB)
+          rect(e + 2 * gp + 26, 0, max(width - e - 2 * gp - 26 - 8, 0), bar, fill: cC)
+        }
+        Box {
+          width: sw
+          height: topH
+          align: bottomEnd
+          padding: [0, 0, 6, 3]
+          Text { text: code; font: antonio; fontSize: 13; fontWeight: 500; color: void; align: end }
+        }
+      }
+      Text { text: upper(name); font: antonio; fontSize: 28; fontWeight: 500; letterSpacing: 1; color: cA; maxLines: 1; offset: [0, -7] }
+      Canvas {
+        width: bar + 6
+        height: bar
+        rect(6, 0, bar / 2, bar, fill: cA)
+        circle(6 + bar / 2, bar / 2, bar / 2, fill: cA)
+      }
+    }
+  }
+
+  // The bottom of the frame, the top's mirror.
+  component Bottom(name, cA, cB, cC) {
+    Row {
+      gap: 0
+      align: bottom
+      fill: width
+      Box {
+        weight: 1
+        height: botH
+        Canvas {
+          let e = sw + 52
+          rect(0, 0, sw, height, fill: cA)
+          rect(0, height - bar, e, bar, fill: cA)
+          rect(0, height - R, R, R, fill: void)
+          arc(R, height - R, R, 180, 90, fill: cA)
+          rect(sw, height - bar - ri, ri, ri, fill: cA)
+          arc(sw + ri, height - bar - ri, ri, 180, 90, fill: void)
+          rect(e + gp, height - bar, 64, bar, fill: cB)
+          rect(e + 2 * gp + 64, height - bar, max(width - e - 2 * gp - 64 - 8, 0), bar, fill: cC)
+        }
+      }
+      Text { text: upper(name); font: antonio; fontSize: 16; fontWeight: 500; letterSpacing: 2; color: cB; maxLines: 1; offset: [0, 2] }
+      Canvas {
+        width: bar + 6
+        height: bar
+        rect(6, 0, bar / 2, bar, fill: cA)
+        circle(6 + bar / 2, bar / 2, bar / 2, fill: cA)
+      }
+    }
+  }
+
+  // A sidebar button: its name and a number at the bottom right, in void.
+  component Side(label, code, tint, h) {
+    Column {
+      width: sw
+      height: h
+      gap: 0
+      background: tint
+      padding: [6, 4, 6, 4]
+      Spacer { weight: 1 }
+      Text { text: upper(label); font: antonio; fontSize: 15; fontWeight: 600; color: void; align: end; maxLines: 1 }
+      Text { text: code; font: antonio; fontSize: 11; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+    }
+  }
+
+  // A section's heading: a rounded bar running into its name.
+  component Head(t, tint) {
+    Row {
+      gap: 8
+      align: center
+      fill: width
+      Canvas { width: 22; height: 14; rect(7, 0, 15, 14, fill: tint); circle(7, 7, 7, fill: tint) }
+      Text { text: upper(t); font: antonio; fontSize: 17; fontWeight: 500; letterSpacing: 1; color: tint; maxLines: 1 }
+      Box { weight: 1; height: 14; background: tint }
+      Canvas { width: 14; height: 14; rect(0, 0, 7, 14, fill: tint); circle(7, 7, 7, fill: tint) }
+    }
+  }
+
+  // A label at the left, its value at the right.
+  component Readout(k, v, vc = amber) {
+    Row {
+      gap: 8
+      fill: width
+      Text { text: upper(k); font: antonio; fontSize: 13; color: txLabel; maxLines: 1; weight: 1 }
+      Text { text: upper(v); font: antonio; fontSize: 14; fontWeight: 500; color: vc; maxLines: 1 }
+    }
+  }
+
+  // A percentage over twelve segments that light up, red past ninety.
+  component Meter(label, pct, note, tint) {
+    Column {
+      weight: 1
+      gap: 2
+      Row {
+        fill: width
+        align: bottom
+        gap: 4
+        Text { text: upper(label); font: antonio; fontSize: 13; color: txLabel; weight: 1; maxLines: 1 }
+        Text { text: pct == null ? "——" : "${round(pct)}%"; font: antonio; fontSize: 22; fontWeight: 500; color: pct != null && pct >= 90 ? rose : tint; maxLines: 1 }
+      }
+      Canvas {
+        fill: width
+        height: 10
+        let n = 12
+        let sg = (width - (n - 1) * 2) / n
+        let lit = pct == null ? 0 : round(clamp(pct, 0, 100) / 100 * n)
+        for i in range(n) {
+          rect(i * (sg + 2), 0, sg, height, fill: i < lit ? (pct >= 90 ? rose : tint) : off)
+        }
+      }
+      Text { text: upper(note ?? ""); font: antonio; fontSize: 11; color: txNote; maxLines: 1 }
+    }
+  }
+
+  // The stardate and the time.
+  component Clock() {
+    Row {
+      fill: width
+      align: bottom
+      gap: 8
+      Column {
+        weight: 1
+        gap: 0
+        Text { text: "STARDATE"; font: antonio; fontSize: 13; letterSpacing: 2; color: txLabel }
+        Text { text: stardate; font: antonio; fontSize: 24; fontWeight: 500; color: gold }
+        Text { text: upper(fmtTime(now, "EEE d MMM yyyy")); font: antonio; fontSize: 12; letterSpacing: 1; color: lilac }
+      }
+      Text { text: fmtTime(now, "HH:mm"); font: antonio; fontSize: 60; fontWeight: 400; color: amber; maxLines: 1 }
+    }
+  }
+
+  // Columns of numbers scrolling up a row every half second; a few are lit. Tap to reshuffle.
+  component Cascade(salt) {
+    Box {
+      weight: 1
+      fill: width
+      onTap: seed = random(1000000)
+      ripple: false
+      clip: true
+      Canvas {
+        fill: true
+        let rh = 17
+        let rows = floor(height / rh)
+        let cw = 50
+        let cols = max(floor(width / cw), 1)
+        let tick = floor(time * 2)
+        for r in range(rows) {
+          for k in range(cols) {
+            let h = hash(seed, salt, r + tick, k)
+            let d = 2 + floor(hash(seed, salt, r + tick, k, 1) * 5)
+            let x = width - k * cw - 2
+            if h < 0.06 {
+              rect(x - cw + 6, r * rh + 1, cw - 6, rh - 2, fill: deco[floor(h * 100) % 8])
+            }
+            text(pad(str(floor(hash(seed, salt, r + tick, k, 2) * pow(10, d))), d, "0"), x - 3, r * rh + rh / 2, size: 13, align: end, font: antonio, color: h < 0.06 ? void : h < 0.3 ? deco[floor(h * 1000) % 8] : dim)
+          }
+        }
+      }
+    }
+  }
+
+
+  // ---- this page ----
+  // The network's speed, from the change in its byte counters between two polls.
+  state down = null
+  state up = null
+  on net { if old != null && value.rx >= old.rx && value.uptime > old.uptime { down = (value.rx - old.rx) / (value.uptime - old.uptime); up = (value.tx - old.tx) / (value.uptime - old.uptime) } }
+
+  let level = num(bat.level, 0)
+  let batTint = bat.charging ? sky : level < 20 ? rose : amber
+  let memF = sys.memory == null || !sys.memory.total ? null : sys.memory.used / sys.memory.total
+  let diskF = sys.storage == null || !sys.storage.total ? null : sys.storage.used / sys.storage.total
+  let volLv = num(vol.level, 0)
+
+  // The battery as a big number and its readings, memory and storage as meters beside it.
+  component Power() {
+    Column {
+      gap: 6
+      fill: width
+      Head { t: "power · memory"; tint: amber }
+      Row {
+        gap: 12
+        fill: width
+        align: top
+        Box {
+          onTap: settings("battery")
+          Column {
+            gap: 0
+            width: 86
+            Text { text: "${bat.level ?? "…"}%"; font: antonio; fontSize: 40; fontWeight: 500; color: batTint; maxLines: 1 }
+            Text { text: bat.charging ? "CHARGING" : "BATTERY"; font: antonio; fontSize: 12; letterSpacing: 1; color: bat.charging ? sky : txLabel }
+            Text { text: upper([bat.temp == null ? null : "${round(bat.temp)}°c", bat.voltage == null ? null : "${fixed(bat.voltage, 2)} v"].filter(x => x != null).join(" · ")); font: antonio; fontSize: 12; color: lilac; maxLines: 1 }
+          }
+        }
+        Column {
+          weight: 1
+          gap: 8
+          Row { fill: width; Meter { label: "memory"; pct: memF == null ? null : memF * 100; note: sys.memory == null ? "" : "${fmtBytes(sys.memory.available)} free"; tint: periw } }
+          Row { fill: width; Meter { label: "storage"; pct: diskF == null ? null : diskF * 100; note: sys.storage == null ? "" : "${fmtBytes(sys.storage.free)} free"; tint: lilac } }
+        }
+      }
+    }
+  }
+
+  // Down and up, the carrier and its signal, and how long the phone has been on.
+  component Net() {
+    Column {
+      gap: 6
+      fill: width
+      Head { t: "subspace network"; tint: sky }
+      Row {
+        gap: 16
+        fill: width
+        Column {
+          weight: 1
+          gap: 1
+          Readout { k: "downlink"; v: down == null ? "…" : "${fmtBytes(down)}/s"; vc: sky }
+          Readout { k: "uplink"; v: up == null ? "…" : "${fmtBytes(up)}/s"; vc: peach }
+          Readout { k: "uptime"; v: sys.uptime == null ? "…" : fmtDuration(sys.uptime) }
+        }
+        Box {
+          weight: 1
+          onTap: settings("internet")
+          Column {
+            fill: width
+            gap: 1
+            Readout { k: "carrier"; v: !sim.available ? "wi-fi" : !sim.present ? "no sim" : sim.carrier ?? "…"; vc: periw }
+            Readout { k: "link"; v: sim.data ? "mobile data" : modes.wifi == true ? "wi-fi" : "—"; vc: periw }
+            Row {
+              fill: width
+              gap: 8
+              Text { text: "SIGNAL"; font: antonio; fontSize: 13; color: txLabel; weight: 1 }
+              Canvas {
+                width: 40
+                height: 16
+                for i in range(4) {
+                  rect(i * 10, 16 - (i + 1) * 4, 7, (i + 1) * 4, fill: sim.signal != null && i < sim.signal ? gold : off)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // A switch as a console button: lit in its colour when on, dark with its name in colour when off.
+  component Toggle(label, on, tint) {
+    Box {
+      fill: width
+      height: 34
+      radius: 17
+      background: on ? tint : off
+      align: end
+      padding: [14, 0]
+      Text { text: upper(label) + (on ? " · ON" : " · OFF"); font: antonio; fontSize: 15; fontWeight: 600; letterSpacing: 1; color: on ? void : tint; maxLines: 1; align: end }
+    }
+  }
+
+  component Systems() {
+    Column {
+      gap: 6
+      fill: width
+      Head { t: "systems"; tint: periw }
+      Row {
+        gap: 6
+        fill: width
+        Box { weight: 1; onTap: settings("wifi"); Toggle { label: "wi-fi"; on: modes.wifi == true; tint: periw } }
+        Box { weight: 1; onTap: settings("bluetooth"); Toggle { label: "bluetooth"; on: modes.bluetooth == true; tint: sky } }
+      }
+      Row {
+        gap: 6
+        fill: width
+        Box { weight: 1; onTap: dnd("toggle"); Toggle { label: "quiet"; on: modes.dnd == true; tint: rose } }
+        Box { weight: 1; onTap: if modes.torch != null { torch("toggle") }; Toggle { label: "torch"; on: modes.torch == true; tint: gold } }
+      }
+    }
+  }
+
+  // The volume in ten rising steps: tap one to set it.
+  component Volume() {
+    Column {
+      gap: 6
+      fill: width
+      Head { t: "audio level"; tint: lilac }
+      Row {
+        fill: width
+        gap: 8
+        Text { text: vol.muted ? "MUTED" : "VOLUME ${volLv}%"; font: antonio; fontSize: 14; fontWeight: 500; color: amber; weight: 1 }
+        Text { text: upper(vol.output.name ?? vol.output.type ?? ""); font: antonio; fontSize: 12; color: txNote; maxLines: 1 }
+      }
+      Row {
+        fill: width
+        height: 28
+        gap: 3
+        align: bottom
+        for i in range(10) {
+          Box {
+            weight: 1
+            height: 28
+            align: bottom
+            onTap: volume((i + 1) * 10)
+            ripple: false
+            Box { fill: width; height: 5 + i * 2.5; radius: 3; background: !vol.muted && volLv > i * 10 ? lilac : off }
+          }
+        }
+      }
+    }
+  }
+
+  // The phone itself.
+  component Vessel() {
+    Column {
+      gap: 4
+      fill: width
+      Head { t: "vessel"; tint: tan }
+      Text { text: dev == null ? "…" : upper("${dev.maker} ${dev.model}"); font: antonio; fontSize: 19; fontWeight: 500; color: amber; maxLines: 1 }
+      Text { text: upper([dev.android == null ? null : "android ${dev.android}", sys.kernel == null ? null : "linux ${first(split(sys.kernel, "-"))}", sys.launcher == null ? null : "omalauncher ${sys.launcher}"].filter(x => x != null).join(" · ")); font: antonio; fontSize: 12; color: txLabel; maxLines: 1 }
+    }
+  }
+
+  component Content() {
+    if wide {
+      Row {
+        gap: 20
+        fill: true
+        Column {
+          weight: 1
+          gap: 10
+          Clock { }
+          Power { }
+          Net { }
+          Cascade { salt: 5; weight: 1; fill: width }
+        }
+        Column {
+          weight: 1
+          gap: 10
+          Systems { }
+          Volume { }
+          Vessel { }
+          Cascade { salt: 6; weight: 1; fill: width }
+        }
+      }
+    } else {
+      Column {
+        fill: true
+        gap: 10
+        Clock { }
+        Power { }
+        Net { }
+        Systems { }
+        Volume { }
+        Vessel { }
+        Cascade { salt: 5; weight: 1; fill: width }
+      }
+    }
+  }
+
+  Column {
+    fill: true
+    gap: 0
+    padding: [8 + screenLeft, screenTop + 6, 8 + screenRight, 0]
+    Top { name: "engineering"; code: "03-7741"; cA: peach; cB: periw; cC: amber }
+    Row {
+      weight: 1
+      fill: width
+      gap: 0
+      Column {
+        width: sw
+        fill: height
+        gap: gp
+        padding: [0, gp, 0, gp]
+        Box { onTap: settings("battery"); Side { label: "power"; code: "12-${pad(str(level), 4, "0")}"; tint: batTint; h: 64 } }
+        Box { onTap: settings("internet"); Side { label: "network"; code: "13-5530"; tint: sky; h: 64 } }
+        Box { onTap: settings("display"); Side { label: "display"; code: "14-2271"; tint: lilac; h: 48 } }
+        Box { onTap: settings("volume"); Side { label: "volume"; code: "15-${pad(str(volLv), 4, "0")}"; tint: periw; h: 96 } }
+        Box { onTap: androidApp("com.android.chrome"); Side { label: "chrome"; code: "15-8080"; tint: gold; h: 48 } }
+        Column { width: sw; weight: 1; background: amber }
+        Box { onTap: launcher("settings"); Side { label: "launcher"; code: "16-0089"; tint: violet; h: 56 } }
+      }
+      Column {
+        weight: 1
+        fill: height
+        gap: 0
+        padding: [ri + 10, 10, 2, 10]
+        Content { weight: 1; fill: width }
+      }
+    }
+    Bottom { name: "phone · systems"; cA: tan; cB: peach; cC: periw }
+    Spacer { height: screenInset }
+  }
+}

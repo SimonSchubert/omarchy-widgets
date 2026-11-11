@@ -1,0 +1,602 @@
+face "console ops" {
+  // A starship-bridge console in three pages, the bauhaus face's content in a new look: black glass, rounded
+  // elbows framing the screen, a sidebar of coloured buttons, readouts in a tall condensed face (Antonio) and a
+  // cascade of numbers that never stops scrolling. This first page: Arch's packages and updates, Claude Code's
+  // sessions and limits, ChatGPT's plan and limits, and the agents' latest sessions.
+  // Pages two and three are console.2.owl (comms) and console.3.owl (engineering).
+  // Built on simonschubert/bauhaus (MIT): the same readouts and logins, read from the agents' own files and only
+  // sent to their own servers.
+
+  meta {
+    owl: 19
+    description: "A starship-bridge console in three pages: Arch, Claude Code, ChatGPT and agent sessions; music, messages and apps; battery, storage, network and switches"
+    version: "1.0"
+    license: "MIT"
+    category: "dev"
+  }
+  requires { pacman: ["bash", "coreutils", "grep", "sed", "pacman", "curl"] }
+
+  source now = clock every 1m
+  source drawer = android.drawer
+  source ag = android.agents
+
+  // Arch: the release, kernel, packages and the last full upgrade (from pacman's log).
+  source lx = cmd("""
+    . /etc/os-release
+    printf '{"os":"%s","kernel":"%s","pkgs":%s,"explicit":%s,"shell":"%s","upgraded":"%s"}\n' \
+      "$PRETTY_NAME" "$(uname -r)" "$(pacman -Qq | wc -l)" "$(pacman -Qqe | wc -l)" "$(basename "${SHELL:-bash}")" \
+      "$(grep -a 'starting full system upgrade' /var/log/pacman.log 2>/dev/null | tail -1 | cut -c2-25)"
+  """) every 30m json optional
+
+  // Claude Code's running sessions: each registers itself in ~/.claude/sessions/<pid>.json while its process lives.
+  source cs = cmd("""
+    sep=""
+    printf '['
+    for f in ~/.claude/sessions/*.json; do
+      [ -e "$f" ] || continue
+      p=${f##*/}; p=${p%.json}
+      case $p in ''|*[!0-9]*) continue ;; esac
+      [ -d /proc/$p ] || continue
+      printf '%s' "$sep"; tr -d '\n' < "$f"; sep=,
+    done
+    printf ']\n'
+  """) every 10s json optional
+
+  // Claude Code's limits, as /usage shows them, with the login Claude Code keeps; the last good answer is kept.
+  // Shares its cache with the bauhaus face, so the two never fetch twice.
+  source cl = cmd("""
+    c=~/.cache/bauhaus-claude-usage.json
+    mkdir -p ~/.cache
+    t=$(tr -d '\n' 2>/dev/null < ~/.claude/.credentials.json | grep -o '"accessToken" *: *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    [ -n "$t" ] || { echo '{"error":"no login"}'; exit 0; }
+    code=$(printf 'Authorization: Bearer %s\n' "$t" | curl -s -m 15 -o "$c.new" -w '%{http_code}' -H @- -H 'anthropic-beta: oauth-2025-04-20' https://api.anthropic.com/api/oauth/usage)
+    [ "$code" = 200 ] && mv "$c.new" "$c"
+    rm -f "$c.new"
+    cat "$c" 2>/dev/null || echo '{"error":"offline"}'
+  """) every 10m json timeout 30s optional
+
+  // The latest four Grok sessions: their summary and signals (how full the context is).
+  source gs = cmd("""
+    sep=""
+    printf '['
+    for f in $(ls -t ~/.grok/sessions/*/*/summary.json 2>/dev/null | head -4); do
+      g="${f%summary.json}signals.json"
+      printf '%s{"sum":' "$sep"; tr -d '\n' < "$f"
+      printf ',"sig":'; if [ -f "$g" ]; then tr -d '\n' < "$g"; else printf null; fi
+      printf '}'; sep=,
+    done
+    printf ']\n'
+  """) every 30s json optional
+
+  // ChatGPT's plan and its 5-hour and weekly limits, with the ChatGPT login Codex CLI keeps (codex login).
+  source gu = cmd("""
+    a=$(tr -d '\n' 2>/dev/null < ~/.codex/auth.json)
+    t=$(printf '%s' "$a" | grep -o '"access_token" *: *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    u=$(printf '%s' "$a" | grep -o '"account_id" *: *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    [ -n "$t" ] || { echo '{"error":"no login"}'; exit 0; }
+    r=$(printf 'Authorization: Bearer %s\nChatGPT-Account-Id: %s\n' "$t" "$u" | curl -s -m 15 -A 'omarchy-widgets/console' -H @- -H 'Accept: application/json' https://chatgpt.com/backend-api/wham/usage)
+    case $r in '{'*) printf '%s\n' "$r" ;; *) echo '{"error":"offline"}' ;; esac
+  """) every 15m json timeout 30s optional
+
+  // The console has its own colours whatever the theme, so the status bar steps aside.
+  statusBar: false
+  edge: true
+  padding: 0
+  background: #000000
+  // The number cascade scrolls a row every half second; two frames a second is all it needs.
+  fps: 2
+
+  // Tapping the number cascade reshuffles it.
+  state seed = 4774 persist
+
+  // ---- the console's look, the same on all three pages ----
+  let antonio = "https://raw.githubusercontent.com/google/fonts/main/ofl/antonio/Antonio%5Bwght%5D.ttf"
+  let void = #000000
+  let amber = #F5A050
+  let peach = #EC9478
+  let tan = #F3CB9F
+  let lilac = #C79AC6
+  let violet = #9C7DAD
+  let periw = #9C9CE6
+  let sky = #A0C4EA
+  let rose = #CC6B6B
+  let gold = #F2C46E
+  // Text and unlit parts as solid colours, never a faded tan: on black that turns brown, which the console never was.
+  let txLabel = #B08BB0
+  let txNote = #8F7AA6
+  let dim = #5E5A86
+  let off = #24203A
+  let deco = [amber, peach, tan, lilac, periw, gold, violet, sky]
+
+  let W = tileWidth ?? 412
+  let H = tileHeight ?? 915
+  let wide = W > H
+  let sw = wide ? 120 : 80
+  let bar = 18
+  let R = 36
+  let ri = 14
+  let gp = 4
+  let topH = 64
+  let botH = 40
+
+  let yr = num(fmtTime(now, "yyyy"), 2026)
+  let doy = num(fmtTime(now, "D"), 1)
+  let mins = num(fmtTime(now, "H"), 0) * 60 + num(fmtTime(now, "m"), 0)
+  let stardate = fixed((yr - 1946) * 1000 + (doy - 1 + mins / 1440) / 365.25 * 1000, 1)
+
+  // The top of the frame: the elbow into the sidebar, the bar in three segments, the page's name and an end cap.
+  component Top(name, code, cA, cB, cC) {
+    Row {
+      gap: 0
+      align: top
+      fill: width
+      Box {
+        weight: 1
+        height: topH
+        Canvas {
+          let e = sw + 52
+          rect(0, 0, sw, height, fill: cA)
+          rect(0, 0, e, bar, fill: cA)
+          rect(0, 0, R, R, fill: void)
+          arc(R, R, R, 270, 90, fill: cA)
+          rect(sw, bar, ri, ri, fill: cA)
+          arc(sw + ri, bar + ri, ri, 270, 90, fill: void)
+          rect(e + gp, 0, 26, bar, fill: cB)
+          rect(e + 2 * gp + 26, 0, max(width - e - 2 * gp - 26 - 8, 0), bar, fill: cC)
+        }
+        Box {
+          width: sw
+          height: topH
+          align: bottomEnd
+          padding: [0, 0, 6, 3]
+          Text { text: code; font: antonio; fontSize: 13; fontWeight: 500; color: void; align: end }
+        }
+      }
+      Text { text: upper(name); font: antonio; fontSize: 28; fontWeight: 500; letterSpacing: 1; color: cA; maxLines: 1; offset: [0, -7] }
+      Canvas {
+        width: bar + 6
+        height: bar
+        rect(6, 0, bar / 2, bar, fill: cA)
+        circle(6 + bar / 2, bar / 2, bar / 2, fill: cA)
+      }
+    }
+  }
+
+  // The bottom of the frame, the top's mirror.
+  component Bottom(name, cA, cB, cC) {
+    Row {
+      gap: 0
+      align: bottom
+      fill: width
+      Box {
+        weight: 1
+        height: botH
+        Canvas {
+          let e = sw + 52
+          rect(0, 0, sw, height, fill: cA)
+          rect(0, height - bar, e, bar, fill: cA)
+          rect(0, height - R, R, R, fill: void)
+          arc(R, height - R, R, 180, 90, fill: cA)
+          rect(sw, height - bar - ri, ri, ri, fill: cA)
+          arc(sw + ri, height - bar - ri, ri, 180, 90, fill: void)
+          rect(e + gp, height - bar, 64, bar, fill: cB)
+          rect(e + 2 * gp + 64, height - bar, max(width - e - 2 * gp - 64 - 8, 0), bar, fill: cC)
+        }
+      }
+      Text { text: upper(name); font: antonio; fontSize: 16; fontWeight: 500; letterSpacing: 2; color: cB; maxLines: 1; offset: [0, 2] }
+      Canvas {
+        width: bar + 6
+        height: bar
+        rect(6, 0, bar / 2, bar, fill: cA)
+        circle(6 + bar / 2, bar / 2, bar / 2, fill: cA)
+      }
+    }
+  }
+
+  // A sidebar button: its name and a number at the bottom right, in void.
+  component Side(label, code, tint, h) {
+    Column {
+      width: sw
+      height: h
+      gap: 0
+      background: tint
+      padding: [6, 4, 6, 4]
+      Spacer { weight: 1 }
+      Text { text: upper(label); font: antonio; fontSize: 15; fontWeight: 600; color: void; align: end; maxLines: 1 }
+      Text { text: code; font: antonio; fontSize: 11; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+    }
+  }
+
+  // A section's heading: a rounded bar running into its name.
+  component Head(t, tint) {
+    Row {
+      gap: 8
+      align: center
+      fill: width
+      Canvas { width: 22; height: 14; rect(7, 0, 15, 14, fill: tint); circle(7, 7, 7, fill: tint) }
+      Text { text: upper(t); font: antonio; fontSize: 17; fontWeight: 500; letterSpacing: 1; color: tint; maxLines: 1 }
+      Box { weight: 1; height: 14; background: tint }
+      Canvas { width: 14; height: 14; rect(0, 0, 7, 14, fill: tint); circle(7, 7, 7, fill: tint) }
+    }
+  }
+
+  // A label at the left, its value at the right.
+  component Readout(k, v, vc = amber) {
+    Row {
+      gap: 8
+      fill: width
+      Text { text: upper(k); font: antonio; fontSize: 13; color: txLabel; maxLines: 1; weight: 1 }
+      Text { text: upper(v); font: antonio; fontSize: 14; fontWeight: 500; color: vc; maxLines: 1 }
+    }
+  }
+
+  // A percentage over twelve segments that light up, red past ninety.
+  component Meter(label, pct, note, tint) {
+    Column {
+      weight: 1
+      gap: 2
+      Row {
+        fill: width
+        align: bottom
+        gap: 4
+        Text { text: upper(label); font: antonio; fontSize: 13; color: txLabel; weight: 1; maxLines: 1 }
+        Text { text: pct == null ? "——" : "${round(pct)}%"; font: antonio; fontSize: 22; fontWeight: 500; color: pct != null && pct >= 90 ? rose : tint; maxLines: 1 }
+      }
+      Canvas {
+        fill: width
+        height: 10
+        let n = 12
+        let sg = (width - (n - 1) * 2) / n
+        let lit = pct == null ? 0 : round(clamp(pct, 0, 100) / 100 * n)
+        for i in range(n) {
+          rect(i * (sg + 2), 0, sg, height, fill: i < lit ? (pct >= 90 ? rose : tint) : off)
+        }
+      }
+      Text { text: upper(note ?? ""); font: antonio; fontSize: 11; color: txNote; maxLines: 1 }
+    }
+  }
+
+  // The stardate and the time.
+  component Clock() {
+    Row {
+      fill: width
+      align: bottom
+      gap: 8
+      Column {
+        weight: 1
+        gap: 0
+        Text { text: "STARDATE"; font: antonio; fontSize: 13; letterSpacing: 2; color: txLabel }
+        Text { text: stardate; font: antonio; fontSize: 24; fontWeight: 500; color: gold }
+        Text { text: upper(fmtTime(now, "EEE d MMM yyyy")); font: antonio; fontSize: 12; letterSpacing: 1; color: lilac }
+      }
+      Text { text: fmtTime(now, "HH:mm"); font: antonio; fontSize: 60; fontWeight: 400; color: amber; maxLines: 1 }
+    }
+  }
+
+  // Columns of numbers scrolling up a row every half second; a few are lit. Tap to reshuffle.
+  component Cascade(salt) {
+    Box {
+      weight: 1
+      fill: width
+      onTap: seed = random(1000000)
+      ripple: false
+      clip: true
+      Canvas {
+        fill: true
+        let rh = 17
+        let rows = floor(height / rh)
+        let cw = 50
+        let cols = max(floor(width / cw), 1)
+        let tick = floor(time * 2)
+        for r in range(rows) {
+          for k in range(cols) {
+            let h = hash(seed, salt, r + tick, k)
+            let d = 2 + floor(hash(seed, salt, r + tick, k, 1) * 5)
+            let x = width - k * cw - 2
+            if h < 0.06 {
+              rect(x - cw + 6, r * rh + 1, cw - 6, rh - 2, fill: deco[floor(h * 100) % 8])
+            }
+            text(pad(str(floor(hash(seed, salt, r + tick, k, 2) * pow(10, d))), d, "0"), x - 3, r * rh + rh / 2, size: 13, align: end, font: antonio, color: h < 0.06 ? void : h < 0.3 ? deco[floor(h * 1000) % 8] : dim)
+          }
+        }
+      }
+    }
+  }
+
+  // ---- this page ----
+  let agents = ag.installed ?? []
+  let updates = num(drawer.updates, 0)
+  let upgraded = parseTime(lx.upgraded ?? "")
+
+  let sess = (cs ?? []).sortBy(s => s.status == "idle" ? 1 : 0)
+  let busy = len(sess.filter(s => s.status != "idle"))
+  let lims = cl.limits ?? []
+  let five = lims.find(l => l.kind == "session")
+  let week = lims.find(l => l.kind == "weekly_all")
+
+  let grok = (gs ?? []).map(x => {
+    id: x.sum.info.id,
+    cwd: x.sum.info.cwd,
+    name: x.sum.session_summary ?? x.sum.generated_title ?? "grok",
+    model: x.sum.current_model_id,
+    last: parseTime(x.sum.last_active_at ?? x.sum.updated_at ?? ""),
+    ctx: x.sig.contextWindowUsage
+  })
+  let clErr = !linux ? "no linux" : cl == null ? null : cl.error ?? (cl.limits == null ? "offline" : null)
+  let rl = gu.rate_limit
+  let gptErr = !linux ? "no linux" : gu == null ? null : gu.error ?? (rl == null ? "offline" : null)
+  let gpt5 = rl.primary_window
+  let gptWk = rl.secondary_window
+  let gpt5Reset = gpt5.reset_at ?? (gpt5.reset_after_seconds == null ? null : now + gpt5.reset_after_seconds)
+  let gptWkReset = gptWk.reset_at ?? (gptWk.reset_after_seconds == null ? null : now + gptWk.reset_after_seconds)
+  // Each limit's name from its length, as plans differ: 5 hours and a week on paid plans, 30 days on free.
+  let g1s = num(gpt5.limit_window_seconds, 18000)
+  let g2s = num(gptWk.limit_window_seconds, 604800)
+  let gpt5Name = g1s < 86400 ? "${round(g1s / 3600)} hours" : g1s <= 691200 ? (g1s < 518400 ? "${round(g1s / 86400)} days" : "week") : g1s <= 2851200 ? "month" : "${round(g1s / 86400)} days"
+  let gptWkName = g2s < 86400 ? "${round(g2s / 3600)} hours" : g2s <= 691200 ? (g2s < 518400 ? "${round(g2s / 86400)} days" : "week") : g2s <= 2851200 ? "month" : "${round(g2s / 86400)} days"
+
+  // Claude's running sessions, then Grok's latest, four in all.
+  let strips = (sess.map(s => {
+    kind: "claude",
+    name: s.name ?? "claude",
+    cwd: s.cwd ?? "",
+    note: s.status == "idle" ? "idle" : "${s.status} ${fmtDuration(max(0, now - num(s.statusUpdatedAt, 0) / 1000))}",
+    hot: s.status != "idle",
+    id: s.sessionId
+  }) + grok.map(g => {
+    kind: "grok",
+    name: g.name,
+    cwd: g.cwd ?? "",
+    note: g.last == null ? "" : now - g.last < 180 ? "active" : fmtAgo(g.last, now),
+    hot: g.last != null && now - g.last < 180,
+    id: g.id,
+    model: g.model,
+    ctx: g.ctx
+  })).take(4)
+
+  // Arch: the packages as a big number, the rest as readouts, and the updates as a bar to tap.
+  component Arch() {
+    Column {
+      gap: 6
+      fill: width
+      Head { t: "arch linux · ops"; tint: lilac }
+      if !linux {
+        Box {
+          fill: width
+          height: 34
+          radius: 17
+          background: rose
+          align: end
+          padding: [14, 0]
+          onTap: launcher("linux")
+          Text { text: "LINUX OFFLINE · INSTALL"; font: antonio; fontSize: 15; fontWeight: 600; color: void }
+        }
+      } else {
+        Row {
+          gap: 12
+          fill: width
+          align: top
+          Box {
+            onTap: terminal("bash -l", "arch")
+            Column {
+              gap: 0
+              width: 86
+              Text { text: lx == null ? "…" : str(lx.pkgs); font: antonio; fontSize: 40; fontWeight: 500; color: amber; maxLines: 1 }
+              Text { text: "PACKAGES"; font: antonio; fontSize: 12; letterSpacing: 1; color: txLabel }
+              Text { text: lx == null ? "" : "${lx.explicit} EXPLICIT"; font: antonio; fontSize: 12; color: lilac }
+            }
+          }
+          Column {
+            weight: 1
+            gap: 1
+            Readout { k: "kernel"; v: first(split(lx.kernel ?? "…", "-")) }
+            Readout { k: "shell"; v: lx.shell ?? "…" }
+            Readout { k: "upgraded"; v: upgraded == null ? "never" : fmtAgo(upgraded, now) + " ago" }
+            Readout { k: "agents"; v: len(agents) == 0 ? "none" : agents.map(a => a.bin).join(" "); vc: periw }
+          }
+        }
+        Box {
+          fill: width
+          height: 30
+          radius: 15
+          background: updates > 0 ? gold : off
+          align: end
+          padding: [14, 0]
+          onTap: if updates > 0 { terminal("pacman -Syu", "update") }
+          Text { text: updates > 0 ? "${updates} ${updates == 1 ? "UPDATE" : "UPDATES"} · UPGRADE" : "ALL SYSTEMS NOMINAL"; font: antonio; fontSize: 15; fontWeight: 600; letterSpacing: 1; color: updates > 0 ? void : periw }
+        }
+      }
+    }
+  }
+
+  // Claude Code: how many sessions run, and its two limits.
+  component ClaudeBlock() {
+    Column {
+      gap: 6
+      fill: width
+      Head { t: "claude code"; tint: peach }
+      Row {
+        gap: 12
+        fill: width
+        align: top
+        Box {
+          onTap: launcher("agents")
+          Column {
+            gap: 0
+            width: 64
+            Text { text: linux ? str(len(sess)) : "—"; font: antonio; fontSize: 34; fontWeight: 500; color: peach }
+            Text { text: "SESSIONS"; font: antonio; fontSize: 12; letterSpacing: 1; color: txLabel }
+            Text { text: busy > 0 ? "${busy} ACTIVE" : "STANDBY"; font: antonio; fontSize: 12; color: busy > 0 ? gold : txNote }
+          }
+        }
+        Meter {
+          label: "5 hours"
+          pct: five == null ? null : five.percent
+          note: five == null ? (clErr ?? "") : five.resets_at == null ? "" : "resets in ${fmtDuration(max(0, parseTime(five.resets_at) - now))}"
+          tint: peach
+        }
+        Meter {
+          label: "week"
+          pct: week == null ? null : week.percent
+          note: week == null ? (clErr ?? "") : week.resets_at == null ? "" : "resets " + fmtTime(parseTime(week.resets_at), "EEE HH:mm")
+          tint: amber
+        }
+      }
+    }
+  }
+
+  // ChatGPT: the plan, and its 5-hour and weekly limits.
+  component GptBlock() {
+    Column {
+      gap: 6
+      fill: width
+      Head { t: "chatgpt"; tint: periw }
+      Row {
+        gap: 12
+        fill: width
+        align: top
+        Box {
+          onTap: androidApp("com.openai.chatgpt")
+          Column {
+            gap: 0
+            width: 64
+            Text { text: gptErr != null ? "—" : upper(gu.plan_type ?? "chatgpt"); font: antonio; fontSize: 20; fontWeight: 500; color: periw; maxLines: 1 }
+            Text { text: "PLAN"; font: antonio; fontSize: 12; letterSpacing: 1; color: txLabel }
+          }
+        }
+        Meter {
+          label: gpt5Name
+          pct: gpt5.used_percent
+          note: gpt5 == null ? (gptErr ?? "") : gpt5Reset == null ? "" : gpt5Reset - now < 86400 ? "resets in ${fmtDuration(max(0, gpt5Reset - now))}" : "resets " + fmtTime(gpt5Reset, "EEE d MMM")
+          tint: periw
+        }
+        Meter {
+          label: gptWkName
+          pct: gptWk.used_percent
+          note: gptWk == null ? (gptErr ?? (rl != null ? "not on plan" : "")) : gptWkReset == null ? "" : "resets " + fmtTime(gptWkReset, "EEE HH:mm")
+          tint: sky
+        }
+      }
+    }
+  }
+
+  // The running Claude sessions and the latest Grok ones; a Grok one taps open where it left off.
+  component Sessions() {
+    Column {
+      gap: 4
+      fill: width
+      Head { t: "active sessions"; tint: amber }
+      if len(strips) == 0 {
+        Text { text: linux ? "NO SESSIONS ON RECORD" : "LINUX OFFLINE"; font: antonio; fontSize: 15; letterSpacing: 1; color: lilac; padding: [0, 4] }
+      } else {
+        for s in strips key s.id {
+          Row {
+            gap: 8
+            fill: width
+            height: 34
+            align: center
+            onTap: if s.kind == "grok" { terminal("cd ${sh(s.cwd)} && grok -r ${sh(s.id)}", "grok") } else { launcher("agents") }
+            Box {
+              width: 42
+              height: 28
+              radius: 14
+              align: center
+              background: s.hot ? (s.kind == "claude" ? peach : periw) : off
+              Text { text: s.kind == "claude" ? "CC" : "GK"; font: antonio; fontSize: 14; fontWeight: 600; color: s.hot ? void : (s.kind == "claude" ? peach : periw); align: center }
+            }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: upper(s.name); font: antonio; fontSize: 15; fontWeight: 500; color: amber; maxLines: 1 }
+              Text { text: upper([last(split(s.cwd, "/")), s.model, s.ctx == null ? null : "${round(s.ctx)}% context"].filter(x => x != null && x != "").join(" · ")); font: antonio; fontSize: 11; color: txNote; maxLines: 1 }
+            }
+            Text { text: upper(s.note); font: antonio; fontSize: 12; fontWeight: 500; color: s.hot ? gold : txNote; maxLines: 1 }
+          }
+        }
+      }
+    }
+  }
+
+  component Content() {
+    if wide {
+      Row {
+        gap: 20
+        fill: true
+        Column {
+          weight: 1
+          gap: 14
+          Clock { }
+          Arch { }
+          ClaudeBlock { }
+          Cascade { salt: 1; weight: 1; fill: width }
+        }
+        Column {
+          weight: 1
+          gap: 14
+          GptBlock { }
+          Sessions { }
+          Cascade { salt: 2; weight: 1; fill: width }
+        }
+      }
+    } else {
+      Column {
+        fill: true
+        gap: 14
+        Clock { }
+        Arch { }
+        ClaudeBlock { }
+        GptBlock { }
+        Sessions { }
+        Cascade { salt: 1; weight: 1; fill: width }
+      }
+    }
+  }
+
+  Column {
+    fill: true
+    gap: 0
+    padding: [8 + screenLeft, screenTop + 6, 8 + screenRight, 0]
+    Top { name: "ops"; code: "01-1701"; cA: amber; cB: lilac; cC: tan }
+    Row {
+      weight: 1
+      fill: width
+      gap: 0
+      Column {
+        width: sw
+        fill: height
+        gap: gp
+        padding: [0, gp, 0, gp]
+        Box {
+          onTap: androidApp("com.anthropic.claude")
+          Side { label: "claude"; code: "02-5521"; tint: peach; h: 64 }
+        }
+        Box {
+          onTap: androidApp("com.openai.chatgpt")
+          Side { label: "chatgpt"; code: "03-0447"; tint: periw; h: 64 }
+        }
+        Box {
+          onTap: launcher("agents")
+          Side { label: "agents"; code: "04-3318"; tint: lilac; h: 48 }
+        }
+        Box {
+          onTap: terminal("bash -l", "arch")
+          Side { label: "terminal"; code: "05-9902"; tint: amber; h: 96 }
+        }
+        Column { width: sw; weight: 1; background: tan }
+        Box {
+          onTap: androidApp("com.google.android.dialer")
+          Side { label: "phone"; code: "06-5550"; tint: violet; h: 56 }
+        }
+      }
+      Column {
+        weight: 1
+        fill: height
+        gap: 0
+        padding: [ri + 10, 10, 2, 10]
+        Content { weight: 1; fill: width }
+      }
+    }
+    Bottom { name: "linux · agents"; cA: violet; cB: amber; cC: peach }
+    Spacer { height: screenInset }
+  }
+}
