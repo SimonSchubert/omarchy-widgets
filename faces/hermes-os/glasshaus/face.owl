@@ -1,0 +1,930 @@
+face "glasshaus" {
+  // Frosted glass on the wallpaper, in the Omarchy theme's colours, in three pages. Each pane is a sheet of glass
+  // with square corners that the wallpaper shows through. What can be tapped is a key: a thin window in one of the
+  // theme's colours over a solid edge of that colour, its glyph and its words on thicker glass so they read on any
+  // wallpaper; it goes down under the finger and says what it does. What only shows something is a card, home's
+  // own tile glass in the theme's background. It follows the theme, and the opacity, frost, gaps and border of
+  // home's widgets in style.toml. Set in Space Grotesk.
+  // This first page: Arch's packages and updates, Claude Code's sessions and limits, the latest Claude Code and
+  // Codex sessions, Codex's plan and limits, and a row of shortcuts. Pages two and three are page-2.owl (today)
+  // and page-3.owl (phone).
+  // Built on simonschubert/bauhaus (MIT): the same grid and readouts. Logins are read from the agents' own files
+  // and only sent to their own servers.
+
+  meta {
+    owl: 19
+    description: "Frosted glass in your Omarchy theme's colours, three pages where every key does something: Linux, Claude Code and Codex sessions and limits; music, notifications, apps; battery, network, switches"
+    version: "1.0"
+    license: "MIT"
+    category: "dev"
+  }
+  requires { pacman: ["bash", "btop", "coreutils", "curl", "fastfetch", "grep", "jq", "pacman", "procps-ng", "sed"] }
+
+  source bat = android.battery
+  source now = clock every 1m
+  source drawer = android.drawer
+  source ag = android.agents
+  // To find the Claude app among the phone's apps, for the key that opens it.
+  source apps = android.apps
+
+  // Arch: the release, kernel, packages and the last full upgrade (from pacman's log).
+  source lx = cmd("""
+    . /etc/os-release
+    printf '{"os":"%s","kernel":"%s","pkgs":%s,"explicit":%s,"shell":"%s","upgraded":"%s"}\n' \
+      "$PRETTY_NAME" "$(uname -r)" "$(pacman -Qq | wc -l)" "$(pacman -Qqe | wc -l)" "$(basename "${SHELL:-bash}")" \
+      "$(grep -a 'starting full system upgrade' /var/log/pacman.log 2>/dev/null | tail -1 | cut -c2-25)"
+  """) every 30m json optional
+
+  // Claude Code's running sessions: each registers itself in ~/.claude/sessions/<pid>.json (name, folder, busy or idle)
+  // while its process lives.
+  source cs = cmd("""
+    sep=""
+    printf '['
+    for f in ~/.claude/sessions/*.json; do
+      [ -e "$f" ] || continue
+      p=${f##*/}; p=${p%.json}
+      case $p in ''|*[!0-9]*) continue ;; esac
+      [ -d /proc/$p ] || continue
+      printf '%s' "$sep"; tr -d '\n' < "$f"; sep=,
+    done
+    printf ']\n'
+  """) every 10s json optional
+
+  // Claude Code's latest sessions, from its transcripts: the folder, the title Claude gave each and when it was last
+  // written. One that isn't running now opens where it left off.
+  source ch = cmd("""
+    sep=""
+    printf '['
+    for f in $(ls -t ~/.claude/projects/*/*.jsonl 2>/dev/null | head -8); do
+      id=${f##*/}; id=${id%.jsonl}
+      w=$(grep -m1 -o '"cwd":"\([^"\\]\|\\.\)*"' "$f" | sed 's/^"cwd"://')
+      t=$(tail -c 300000 "$f" | grep -o '"aiTitle":"\([^"\\]\|\\.\)*"' | tail -1 | sed 's/^"aiTitle"://')
+      [ -n "$t" ] || t=$(grep -m1 -o '"aiTitle":"\([^"\\]\|\\.\)*"' "$f" | sed 's/^"aiTitle"://')
+      printf '%s{"id":"%s","cwd":%s,"title":%s,"mtime":%s}' "$sep" "$id" "${w:-null}" "${t:-null}" "$(stat -c %Y "$f")"
+      sep=,
+    done
+    printf ']\n'
+  """) every 60s json timeout 20s optional
+
+  // Claude Code's limits, as /usage shows them, with the login Claude Code keeps; the last good answer is kept, so a
+  // failed fetch shows it rather than nothing.
+  source cl = cmd("""
+    c=~/.cache/bauhaus-claude-usage.json
+    mkdir -p ~/.cache
+    t=$(tr -d '\n' 2>/dev/null < ~/.claude/.credentials.json | grep -o '"accessToken" *: *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    [ -n "$t" ] || { echo '{"error":"no login"}'; exit 0; }
+    code=$(printf 'Authorization: Bearer %s\n' "$t" | curl -s -m 15 -o "$c.new" -w '%{http_code}' -H @- -H 'anthropic-beta: oauth-2025-04-20' https://api.anthropic.com/api/oauth/usage)
+    [ "$code" = 200 ] && mv "$c.new" "$c"
+    rm -f "$c.new"
+    cat "$c" 2>/dev/null || echo '{"error":"offline"}'
+  """) every 10m json timeout 30s optional
+
+  // The latest four Codex sessions, from its rollout logs: folder, first prompt, model, how full the context is and
+  // when it last wrote; and how many codex processes run.
+  source xs = cmd("""
+    n=$(pgrep -x codex 2>/dev/null | wc -l)
+    ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl 2>/dev/null | head -4 | while read -r f; do
+      jq -cs --arg m "$(stat -c %Y "$f")" '
+        (map(select(.type == "session_meta"))[0].payload) as $s |
+        ([.[] | select(.type == "event_msg" and .payload.type == "token_count" and .payload.info != null) | .payload.info] | last) as $i |
+        {id: $s.id, cwd: $s.cwd,
+         title: ([.[] | select(.type == "event_msg" and .payload.type == "user_message") | .payload.message][0] // null),
+         model: ([.[] | select(.type == "turn_context") | .payload.model] | last),
+         ctx: (if $i == null or $i.model_context_window == null then null else ($i.last_token_usage.total_tokens / $i.model_context_window * 100) end),
+         mtime: ($m | tonumber)}' "$f" 2>/dev/null
+    done | jq -cs --argjson n "$n" '{running: $n, sessions: .}'
+  """) every 30s json timeout 20s optional
+
+  // Codex's plan and its limits, with the ChatGPT login Codex keeps (codex login); the last good answer is kept.
+  source xu = cmd("""
+    c=~/.cache/glasshaus-codex-usage.json
+    mkdir -p ~/.cache
+    a=$(tr -d '\n' 2>/dev/null < ~/.codex/auth.json)
+    t=$(printf '%s' "$a" | grep -o '"access_token" *: *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    u=$(printf '%s' "$a" | grep -o '"account_id" *: *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    [ -n "$t" ] || { echo '{"error":"no login"}'; exit 0; }
+    code=$(printf 'Authorization: Bearer %s\nChatGPT-Account-Id: %s\n' "$t" "$u" | curl -s -m 15 -o "$c.new" -w '%{http_code}' -A 'omarchy-widgets/glasshaus' -H @- -H 'Accept: application/json' https://chatgpt.com/backend-api/wham/usage)
+    [ "$code" = 200 ] && mv "$c.new" "$c"
+    rm -f "$c.new"
+    cat "$c" 2>/dev/null || echo '{"error":"offline"}'
+  """) every 15m json timeout 30s optional
+
+  let rowsA = 3
+  let rowsB = 3
+  let pageNo = "01"
+  let pageIx = 0
+  let pageWhat = "Linux · Agents"
+
+  // The face draws straight on the wallpaper, so the status bar steps aside. Cards and keys are panes of the
+  // launcher's own frosted glass in the Omarchy theme's colours: they follow the theme, and widgets.opacity,
+  // widgets.frost, widgets.gaps-in and widgets.border-width in style.toml, as those change.
+  statusBar: false
+  edge: true
+  padding: 0
+
+  // The key under the finger: its cap goes down onto its edge until it's let go.
+  state held = ""
+
+  // ---- the look, the same on all three pages: square corners, flat tints, no gradients ----
+  let grot = "https://raw.githubusercontent.com/google/fonts/main/ofl/spacegrotesk/SpaceGrotesk%5Bwght%5D.ttf"
+  // Glass: the wallpaper blurred behind each pane, under a thin tint. A card is exactly home's own tile glass, the
+  // theme's background at widgets.opacity. Under the finger a key's glass turns nearly solid. The blur is home's
+  // (widgets.frost), and never less than 22 dp, since without it there is no glass.
+  let glass = max(num(tileFrost, 0), 22)
+  let cardA = tileOpacity
+  // A key is a thin window of its colour; its glyph and its words sit on thicker glass of the same colour, so they
+  // read on any wallpaper. bandL is that thicker glass as a layer over the window.
+  let winA = tileOpacity * 0.6
+  let bandA = min(0.92, tileOpacity + 0.26)
+  let bandL = 1 - (1 - bandA) / (1 - winA)
+  let downA = min(1, tileOpacity + 0.46)
+  let bw = borderWidth
+  let card = alpha(background, cardA)
+  // Text on a card: the theme's foreground pushed a little further from its background, to hold up on glass.
+  let ink = mix(foreground, background, -0.4)
+  let soft = alpha(ink, 0.88)
+  let rule = alpha(ink, 0.22)
+  let onCap = background
+  let keyWall = border
+  // The theme's colours, by the names the keys use.
+  let cBlue = blue
+  let cViolet = magenta
+  let cPink = red
+  let cRed = bright_red
+  let cOrange = orange
+  let cYellow = yellow
+  let cGreen = green
+  let cTeal = bright_cyan
+
+  // The three pages, for the marks at the foot.
+  let tabs = [{name: "Linux", tint: cBlue}, {name: "Today", tint: cPink}, {name: "Phone", tint: cGreen}]
+
+  // The grid: square cells c dp across, four columns, two blocks of four side by side when the screen is wide. The
+  // page's panels take rowsA rows in the first block and rowsB in the second; the rows left over are more keys.
+  // Between two panes is the launcher's own gap, as far as the small ones have room for it.
+  let W = tileWidth ?? 412
+  let H = tileHeight ?? 915
+  let wide = W > H
+  let m = 9
+  let gp = clamp(gapsIn / 2, 2, 4)
+  let kd = 5
+  let ds = 4
+  let headH = 72
+  let footH = 48
+  let availW = W - 2 * m - screenLeft - screenRight
+  let availH = H - screenTop - 8 - headH - footH - 12 - screenInset
+  let c = floor(min(availW / (wide ? 8 : 4), availH / (wide ? max(rowsA, rowsB) : rowsA + rowsB)))
+  let rowsFit = floor(availH / c)
+  let gw = c * (wide ? 8 : 4)
+  let tagW = c * 0.7
+  let capH = c - 2 * gp - kd
+  let stripH = c / 2 - 2 * gp - ds
+
+  // The glyphs, drawn flat on a grid of 24, in one colour.
+  component Icon(name, col) {
+    Canvas {
+      let u = width / 24
+      let w = 2 * u
+      if name == "term" {
+        path([[4, 7], [10, 12], [4, 17]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+        rect(12 * u, 16 * u, 8 * u, 2 * u, fill: col)
+      }
+      if name == "plus" {
+        rect(11 * u, 4 * u, 2 * u, 16 * u, fill: col)
+        rect(4 * u, 11 * u, 16 * u, 2 * u, fill: col)
+      }
+      if name == "out" {
+        line(6 * u, 18 * u, 17 * u, 7 * u, stroke: col, width: w)
+        path([[8, 6], [18, 6], [18, 16]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "play" { path([[7, 4], [20, 12], [7, 20]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col) }
+      if name == "pause" {
+        rect(6 * u, 4 * u, 4 * u, 16 * u, fill: col)
+        rect(14 * u, 4 * u, 4 * u, 16 * u, fill: col)
+      }
+      if name == "prev" {
+        path([[20, 4], [9, 12], [20, 20]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col)
+        rect(4 * u, 4 * u, 3 * u, 16 * u, fill: col)
+      }
+      if name == "next" {
+        path([[4, 4], [15, 12], [4, 20]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col)
+        rect(17 * u, 4 * u, 3 * u, 16 * u, fill: col)
+      }
+      if name == "up" {
+        rect(11 * u, 6 * u, 2 * u, 15 * u, fill: col)
+        path([[5, 11], [12, 4], [19, 11]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "dn" {
+        rect(11 * u, 3 * u, 2 * u, 15 * u, fill: col)
+        path([[5, 13], [12, 20], [19, 13]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "check" { path([[4, 12], [10, 18], [20, 6]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w * 1.25) }
+      if name == "x" {
+        line(6 * u, 6 * u, 18 * u, 18 * u, stroke: col, width: w)
+        line(18 * u, 6 * u, 6 * u, 18 * u, stroke: col, width: w)
+      }
+      if name == "bars" {
+        rect(4 * u, 12 * u, 4 * u, 8 * u, fill: col)
+        rect(10 * u, 4 * u, 4 * u, 16 * u, fill: col)
+        rect(16 * u, 9 * u, 4 * u, 11 * u, fill: col)
+      }
+      if name == "folder" { path([[3, 5], [10, 5], [12, 8], [21, 8], [21, 19], [3, 19]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w) }
+      if name == "bag" {
+        rect(5 * u, 9 * u, 14 * u, 11 * u, stroke: col, width: w)
+        path([[9, 9], [9, 4], [15, 4], [15, 9]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "sliders" {
+        rect(4 * u, 6 * u, 16 * u, 2 * u, fill: col)
+        rect(13 * u, 4 * u, 3 * u, 6 * u, fill: col)
+        rect(4 * u, 11 * u, 16 * u, 2 * u, fill: col)
+        rect(7 * u, 9 * u, 3 * u, 6 * u, fill: col)
+        rect(4 * u, 16 * u, 16 * u, 2 * u, fill: col)
+        rect(15 * u, 14 * u, 3 * u, 6 * u, fill: col)
+      }
+      if name == "swatch" {
+        rect(4 * u, 4 * u, 7 * u, 7 * u, fill: col)
+        rect(14 * u, 5 * u, 5 * u, 5 * u, stroke: col, width: w)
+        rect(5 * u, 14 * u, 5 * u, 5 * u, stroke: col, width: w)
+        rect(13 * u, 13 * u, 7 * u, 7 * u, fill: col)
+      }
+      if name == "grid" {
+        for j in range(9) { rect((4 + (j % 3) * 6) * u, (4 + floor(j / 3) * 6) * u, 4 * u, 4 * u, fill: col) }
+      }
+      if name == "agents" {
+        rect(4 * u, 8 * u, 16 * u, 11 * u, stroke: col, width: w)
+        rect(8 * u, 12 * u, 2.5 * u, 2.5 * u, fill: col)
+        rect(13.5 * u, 12 * u, 2.5 * u, 2.5 * u, fill: col)
+        rect(11 * u, 3 * u, 2 * u, 5 * u, fill: col)
+      }
+      if name == "clock" {
+        circle(12 * u, 12 * u, 8 * u, stroke: col, width: w)
+        path([[12, 7], [12, 12], [16, 14]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "wifi" {
+        for j in range(3) { arc(12 * u, 19 * u, (6 + j * 5) * u, 315, 90, stroke: col, width: w) }
+        rect(10.5 * u, 17.5 * u, 3 * u, 3 * u, fill: col)
+      }
+      if name == "bt" { path([[7, 8], [17, 16], [12, 20], [12, 4], [17, 8], [7, 16]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w) }
+      if name == "dnd" {
+        circle(12 * u, 12 * u, 8 * u, stroke: col, width: w)
+        rect(8 * u, 11 * u, 8 * u, 2 * u, fill: col)
+      }
+      if name == "torch" {
+        path([[8, 3], [16, 3], [16, 8], [14, 11], [14, 21], [10, 21], [10, 11], [8, 8]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w)
+        rect(11.2 * u, 13 * u, 1.6 * u, 3.5 * u, fill: col)
+      }
+      if name == "sun" {
+        rect(8.5 * u, 8.5 * u, 7 * u, 7 * u, fill: col)
+        rect(11 * u, 2 * u, 2 * u, 4 * u, fill: col)
+        rect(11 * u, 18 * u, 2 * u, 4 * u, fill: col)
+        rect(2 * u, 11 * u, 4 * u, 2 * u, fill: col)
+        rect(18 * u, 11 * u, 4 * u, 2 * u, fill: col)
+      }
+      if name == "moon" {
+        circle(12 * u, 12 * u, 8 * u, stroke: col, width: w)
+        arc(12 * u, 12 * u, 8 * u, 0, 180, fill: col)
+      }
+      if name == "pin" {
+        path([[12, 21], [6, 12], [6, 8], [9, 4], [15, 4], [18, 8], [18, 12]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w)
+        rect(10.5 * u, 7.5 * u, 3 * u, 3 * u, fill: col)
+      }
+      if name == "plane" { path([[12, 2], [14, 9], [22, 14], [22, 16], [14, 14], [13.5, 19], [16, 21], [16, 22], [8, 22], [8, 21], [10.5, 19], [10, 14], [2, 16], [2, 14], [10, 9]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col) }
+      if name == "speaker" || name == "mute" {
+        path([[3, 9], [8, 9], [13, 4], [13, 20], [8, 15], [3, 15]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col)
+      }
+      if name == "speaker" {
+        rect(16 * u, 9 * u, 2 * u, 6 * u, fill: col)
+        rect(20 * u, 6 * u, 2 * u, 12 * u, fill: col)
+      }
+      if name == "mute" {
+        line(16 * u, 9 * u, 22 * u, 15 * u, stroke: col, width: w)
+        line(22 * u, 9 * u, 16 * u, 15 * u, stroke: col, width: w)
+      }
+      if name == "bell" {
+        path([[4, 17], [7, 14], [7, 10], [9, 6], [15, 6], [17, 10], [17, 14], [20, 17]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w)
+        rect(10 * u, 19.5 * u, 4 * u, 2 * u, fill: col)
+      }
+      if name == "note" {
+        rect(8 * u, 4 * u, 2 * u, 13 * u, fill: col)
+        rect(8 * u, 4 * u, 10 * u, 3 * u, fill: col)
+        rect(16 * u, 4 * u, 2 * u, 11 * u, fill: col)
+        rect(4 * u, 15 * u, 6 * u, 5 * u, fill: col)
+        rect(12 * u, 13 * u, 6 * u, 5 * u, fill: col)
+      }
+      if name == "updown" {
+        rect(7 * u, 6 * u, 2 * u, 14 * u, fill: col)
+        path([[3.5, 10], [8, 5], [12.5, 10]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+        rect(15 * u, 4 * u, 2 * u, 14 * u, fill: col)
+        path([[11.5, 14], [16, 19], [20.5, 14]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "signal" {
+        rect(3 * u, 15 * u, 3.5 * u, 5 * u, fill: col)
+        rect(8.5 * u, 11 * u, 3.5 * u, 9 * u, fill: col)
+        rect(14 * u, 7 * u, 3.5 * u, 13 * u, fill: col)
+        rect(19.5 * u, 3 * u, 3.5 * u, 17 * u, fill: col)
+      }
+      if name == "battery" {
+        rect(3 * u, 8 * u, 16 * u, 9 * u, stroke: col, width: w)
+        rect(19.5 * u, 10.5 * u, 2.5 * u, 4 * u, fill: col)
+      }
+      if name == "phone" {
+        rect(7 * u, 3 * u, 10 * u, 18 * u, stroke: col, width: w)
+        rect(10.5 * u, 16.5 * u, 3 * u, 1.5 * u, fill: col)
+      }
+    }
+  }
+
+  // A key: a window of thin glass in its colour over a solid edge of the same colour, with its glyph (or a number,
+  // with `big`) on a chip and its name and what a tap does on a band, both of thicker glass. Pressed, the cap goes
+  // down onto the edge, its glass turns nearly solid, and it springs back when let go.
+  component Key(name, note, tint, glyph, pressed = false, big = "", unit = "", hint = "") {
+    Box {
+      size: c
+      padding: gp
+      Box { fill: width; height: kd; offset: [0, capH]; background: tint; visible: !pressed }
+      Column {
+        fill: width
+        height: capH
+        offset: [0, pressed ? kd : 0]
+        animate offset: spring(0.62, 1600)
+        background: alpha(tint, pressed ? downA : winA)
+        frost: glass
+        border: bw
+        borderColor: tint
+        radius: 0
+        gap: 0
+        Row {
+          gap: 0
+          fill: width
+          weight: 1
+          align: top
+          padding: [bw + 5, bw + 5, bw + 5, 0]
+          Row {
+            gap: 0
+            height: 28
+            background: alpha(tint, bandL)
+            align: center
+            padding: [big != "" ? 7 : 4, 0]
+            if big != "" {
+              Text { spans: [big, {text: unit == "" ? "" : " ${unit}", fontSize: 9.5, fontWeight: 600}]; font: grot; fontSize: len(big) > 3 ? 14 : 19; fontWeight: 700; color: onCap; maxLines: 1 }
+            } else {
+              Icon { name: glyph; col: onCap; size: 20 }
+            }
+          }
+          Spacer { weight: 1 }
+          if hint != "" {
+            Box {
+              size: 18
+              background: alpha(tint, bandL)
+              align: center
+              Icon { name: hint; col: onCap; size: 11 }
+            }
+          }
+        }
+        Column {
+          gap: 0
+          fill: width
+          background: alpha(tint, bandL)
+          padding: [bw + 6, 4, bw + 4, bw + 4]
+          Text { text: name; font: grot; fontSize: 12; fontWeight: 700; color: onCap; maxLines: 1 }
+          Text { text: note; font: grot; fontSize: 9.5; fontWeight: 500; color: alpha(onCap, 0.8); maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  // A readout: a card of glass with no edge under it, so it doesn't look like a key. A label, a number, a bar that
+  // fills and a note.
+  component Meter(name, value, note, frac, tint) {
+    Box {
+      size: c
+      padding: gp
+      Column {
+        fill: true
+        background: card
+        frost: glass
+        border: bw
+        borderColor: keyWall
+        radius: 0
+        gap: 0
+        padding: [9, 8, 9, 8]
+        Text { text: upper(name); font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft; maxLines: 1 }
+        Text { text: value; font: grot; fontSize: c * 0.26; fontWeight: 700; color: ink; maxLines: 1 }
+        Spacer { weight: 1 }
+        Progress { value: clamp(num(frac, 0), 0, 1) * 100; max: 100; color: num(frac, 0) >= 0.9 ? cRed : tint; track: rule; fill: width; height: 6; animate value: spring() }
+        Spacer { height: 5 }
+        Text { text: note; font: grot; fontSize: 9.5; fontWeight: 500; color: soft; maxLines: 1 }
+      }
+    }
+  }
+
+  // The top: a card with the page's number on a block of its colour, its name, the date and the battery, and the time.
+  component Header(no, what, tint) {
+    Box {
+      width: gw
+      height: headH
+      padding: [gp, 0, gp, 10]
+      Row {
+        gap: 11
+        fill: true
+        background: card
+        frost: glass
+        border: bw
+        borderColor: keyWall
+        radius: 0
+        align: center
+        padding: [0, 0, 12, 0]
+        Box {
+          width: headH - 10
+          height: headH - 10
+          background: alpha(tint, bandA)
+          frost: glass
+          align: center
+          Text { text: no; font: grot; fontSize: 18; fontWeight: 700; color: onCap; align: center }
+        }
+        Column {
+          gap: 1
+          weight: 1
+          Text { text: what; font: grot; fontSize: 18; fontWeight: 700; color: ink; maxLines: 1 }
+          Text { text: "${upper(fmtTime(now, "EEE d MMM"))}  ·  ${bat.level ?? "…"}%${bat.charging == true ? " +" : ""}"; font: grot; fontSize: 10; fontWeight: 600; letterSpacing: 0.8; color: soft; maxLines: 1 }
+        }
+        Text { text: fmtTime(now, "HH:mm"); font: grot; fontSize: 32; fontWeight: 700; color: ink; maxLines: 1 }
+      }
+    }
+  }
+
+  // The bottom: a mark for each of the three pages, the one showing in its colour. They only show where you are:
+  // a face can't tell which of home's pages it is on, so it can't turn to another.
+  component Footer() {
+    Row {
+      width: gw
+      height: footH
+      gap: 0
+      align: top
+      padding: [0, 10, 0, 0]
+      for t, i in tabs key t.name {
+        Box {
+          weight: 1
+          height: 26
+          padding: [gp, 0]
+          Row {
+            fill: true
+            background: i == pageIx ? alpha(t.tint, bandA) : alpha(surface, cardA * 0.55)
+            frost: glass
+            gap: 6
+            align: center
+            justify: center
+            Text { text: pad(i + 1, 2, "0"); font: grot; fontSize: 10; fontWeight: 700; color: i == pageIx ? alpha(onCap, 0.65) : soft }
+            Text { text: t.name; font: grot; fontSize: 11.5; fontWeight: 700; color: i == pageIx ? onCap : soft }
+          }
+        }
+      }
+    }
+  }
+
+  let agents = ag.installed ?? []
+  let claudeCodeAg = agents.find(a => a.bin == "claude")
+  let codexAg = agents.find(a => a.bin == "codex")
+  let claudeApp = (apps ?? []).find(a => a.package == "com.anthropic.claude") ?? (apps ?? []).find(a => lower(a.name) == "claude")
+  let updates = num(drawer.updates, 0)
+  let upgraded = parseTime(lx.upgraded ?? "")
+
+  // Claude Code: the busy sessions first, then the limits for five hours and for the week.
+  let sess = (cs ?? []).sortBy(s => s.status == "idle" ? 1 : 0)
+  let busy = len(sess.filter(s => s.status != "idle"))
+  let lims = cl.limits ?? []
+  let five = lims.find(l => l.kind == "session")
+  let week = lims.find(l => l.kind == "weekly_all")
+  let clErr = !linux ? "no linux" : cl == null ? null : cl.error ?? (cl.limits == null ? "offline" : null)
+
+  // Codex: the latest sessions, the plan and its two windows, named by how long they run.
+  let xsess = (xs.sessions ?? []).filter(x => x != null && x.id != null)
+  let xRunning = num(xs.running, 0)
+  let rl = xu.rate_limit
+  let xA = rl.primary_window
+  let xB = rl.secondary_window
+  let xErr = !linux ? "no linux" : xu == null ? null : xu.error ?? (rl == null ? "offline" : null)
+  let xAName = xA == null ? "limit" : xA.limit_window_seconds <= 18000 ? "5 hours" : xA.limit_window_seconds <= 86400 ? "day" : xA.limit_window_seconds <= 604800 ? "week" : "month"
+  let xBName = xB == null ? "week" : xB.limit_window_seconds <= 18000 ? "5 hours" : xB.limit_window_seconds <= 86400 ? "day" : xB.limit_window_seconds <= 604800 ? "week" : "month"
+  let xAReset = xA.reset_at == null ? "" : "${fmtDuration(max(0, xA.reset_at - now))} left"
+  let xBReset = xB.reset_at == null ? "" : "${fmtDuration(max(0, xB.reset_at - now))} left"
+
+  // Claude Code's past sessions: the latest ones that aren't running now.
+  let hist = (ch ?? []).filter(h => h != null && h.id != null)
+  let past = hist.filter(h => !sess.any(s => s.sessionId == h.id))
+
+  // One list of strips, four in all: Claude Code's running sessions first, then the latest of its past ones and of
+  // Codex's, the newest first.
+  let running = sess.map(s => {
+    kind: "claude",
+    run: true,
+    title: (hist.find(h => h.id == s.sessionId)).title ?? s.name ?? "Claude Code",
+    cwd: s.cwd ?? "",
+    note: s.status == "idle" ? "idle" : "${s.status} ${fmtDuration(max(0, now - num(s.statusUpdatedAt, 0) / 1000))}",
+    hot: s.status != "idle",
+    id: s.sessionId,
+    model: null,
+    ctx: null,
+    last: now
+  })
+  let resumable = (past.map(h => {
+    kind: "claude",
+    run: false,
+    title: h.title ?? "Claude Code session",
+    cwd: h.cwd ?? "",
+    note: h.mtime == null ? "" : "${fmtAgo(h.mtime, now)} ago",
+    hot: false,
+    id: h.id,
+    model: null,
+    ctx: null,
+    last: num(h.mtime, 0)
+  }) + xsess.map(x => {
+    kind: "codex",
+    run: false,
+    title: trim(first(lines(x.title ?? "")) ?? "") == "" ? "Codex session" : trim(first(lines(x.title))),
+    cwd: x.cwd ?? "",
+    note: x.mtime == null ? "" : now - x.mtime < 180 ? "active" : "${fmtAgo(x.mtime, now)} ago",
+    hot: x.mtime != null && now - x.mtime < 180,
+    id: x.id,
+    model: x.model,
+    ctx: x.ctx,
+    last: num(x.mtime, 0)
+  })).sortBy(r => -r.last)
+  let strips = (running + resumable).take(4)
+
+  // The shortcuts in the rows left over: each a key that opens something.
+  let quick = [
+    {id: "btop", name: "Monitor", note: "Open btop", glyph: "bars", tint: cRed},
+    {id: "files", name: "Files", note: "Browse", glyph: "folder", tint: cYellow},
+    {id: "store", name: "Store", note: "Get widgets", glyph: "bag", tint: cPink},
+    {id: "settings", name: "Settings", note: "Launcher", glyph: "sliders", tint: cGreen},
+    {id: "style", name: "Style", note: "Theme, look", glyph: "swatch", tint: cViolet},
+    {id: "agents", name: "Agents", note: "Manage", glyph: "agents", tint: cOrange},
+    {id: "drawer", name: "Apps", note: "Open drawer", glyph: "grid", tint: cBlue},
+    {id: "fetch", name: "System", note: "Fastfetch", glyph: "term", tint: cTeal}
+  ]
+
+  // Arch: one big key of thin glass that opens a terminal, with the packages on a block of thicker glass, Arch's A
+  // in the theme's blue, and what a tap does on a band; beside it the system's readouts on a card, over a key that
+  // upgrades, or checks for updates when there are none.
+  component Arch() {
+    Row {
+      gap: 0
+      Box {
+        size: 2 * c
+        padding: gp
+        onPress: held = "arch"
+        onRelease: held = ""
+        onTap: { haptic(); terminal("bash -l", "arch") }
+        ripple: false
+        Box { fill: width; height: kd; offset: [0, 2 * c - 2 * gp - kd]; background: cBlue; visible: !(held == "arch") }
+        Box {
+          fill: width
+          height: 2 * c - 2 * gp - kd
+          offset: [0, held == "arch" ? kd : 0]
+          animate offset: spring(0.62, 1600)
+          background: alpha(cBlue, held == "arch" ? downA : winA)
+          frost: glass
+          border: bw
+          borderColor: cBlue
+          radius: 0
+          Canvas {
+            let s = height * 0.36
+            let ox = width - s - 14
+            let oy = height - 50 - s
+            path([[0.5, 0], [1, 1], [0.7, 0.84], [0.62, 0.62], [0.5, 0.56], [0.38, 0.62], [0.3, 0.84], [0, 1]].map(p => [ox + p[0] * s, oy + p[1] * s]), closed: true, fill: cBlue)
+          }
+          Column {
+            gap: 0
+            fill: true
+            Row {
+              gap: 0
+              fill: width
+              weight: 1
+              align: top
+              padding: [bw + 7, bw + 7, 0, 0]
+              Column {
+                gap: 0
+                background: alpha(cBlue, bandL)
+                padding: [9, 6, 12, 8]
+                Text { text: upper(linux ? (lx.os ?? "arch linux") : "arch linux"); font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: alpha(onCap, 0.8); maxLines: 1 }
+                Text { text: !linux ? "—" : lx == null ? "…" : str(lx.pkgs); font: grot; fontSize: len(str(lx.pkgs ?? "")) > 3 ? c * 0.36 : c * 0.46; fontWeight: 700; color: onCap; maxLines: 1 }
+                Text { text: !linux ? "Not installed" : "packages"; font: grot; fontSize: 12; fontWeight: 700; color: onCap; maxLines: 1 }
+                Text { text: !linux || lx == null ? "" : "${lx.explicit} explicit"; font: grot; fontSize: 10; fontWeight: 500; color: alpha(onCap, 0.8); maxLines: 1 }
+              }
+            }
+            Row {
+              gap: 8
+              fill: width
+              height: 36
+              background: alpha(cBlue, bandL)
+              align: center
+              padding: [bw + 9, 0, bw + 6, bw]
+              Icon { name: "term"; col: onCap; size: 18 }
+              Text { text: "Open terminal"; font: grot; fontSize: 12; fontWeight: 700; color: onCap; maxLines: 1 }
+            }
+          }
+        }
+      }
+      Box {
+        size: 2 * c
+        padding: gp
+        Column {
+          gap: 0
+          fill: true
+          background: card
+          frost: glass
+          border: bw
+          borderColor: keyWall
+          radius: 0
+          padding: [11, 6, 11, 10]
+          if !linux {
+            Text { text: "Install Linux to see Arch, Claude Code and Codex here."; font: grot; fontSize: 13; fontWeight: 500; color: ink; maxLines: 5; padding: [0, 6, 0, 0] }
+          } else {
+            for r in [["kernel", first(split(lx.kernel ?? "…", "-"))], ["shell", lx.shell ?? "…"], ["upgraded", upgraded == null ? "never" : fmtAgo(upgraded, now) + " ago"], ["agents", len(agents) == 0 ? "none" : agents.map(a => a.bin).join(", ")]] {
+              Row {
+                gap: 6
+                fill: width
+                height: 25
+                align: center
+                Text { text: upper(r[0]); font: grot; fontSize: 9; fontWeight: 700; letterSpacing: 0.8; color: soft; width: 62; maxLines: 1 }
+                Text { text: r[1]; font: grot; fontSize: 12.5; fontWeight: 600; color: ink; weight: 1; maxLines: 1 }
+              }
+              Box { fill: width; height: 1; background: rule }
+            }
+          }
+          Spacer { weight: 1 }
+          Box {
+            fill: width
+            height: 34 + ds
+            onPress: held = "update"
+            onRelease: held = ""
+            onTap: { haptic(); if !linux { launcher("linux") } else { terminal("pacman -Syu", "update") } }
+            ripple: false
+            let tint = !linux ? cBlue : updates > 0 ? cYellow : cGreen
+            Box { fill: width; height: ds; offset: [0, 34]; background: tint; visible: !(held == "update") }
+            Row {
+              gap: 8
+              fill: width
+              height: 34
+              offset: [0, held == "update" ? ds : 0]
+              animate offset: spring(0.62, 1600)
+              background: alpha(tint, held == "update" ? downA : bandA)
+              frost: glass
+              border: bw
+              borderColor: tint
+              radius: 0
+              align: center
+              padding: [10, 0]
+              Icon { name: !linux ? "dn" : updates > 0 ? "up" : "check"; col: onCap; size: 16 }
+              Text { text: !linux ? "Install Linux" : updates > 0 ? "Upgrade ${updates} ${updates == 1 ? "package" : "packages"}" : "Up to date · check"; font: grot; fontSize: 11.5; fontWeight: 700; color: onCap; maxLines: 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Claude Code: a key that starts a session and counts the ones running, its two limits, and a key that opens
+  // the Claude app (or its page in the Play Store, on a phone without it).
+  component ClaudeRow() {
+    Row {
+      gap: 0
+      Box {
+        onPress: held = "cc"
+        onRelease: held = ""
+        onTap: { haptic(); if claudeCodeAg != null { open(claudeCodeAg.key) } else { launcher("agents") } }
+        ripple: false
+        Key { name: "Claude Code"; note: claudeCodeAg == null ? "Install" : "New session"; tint: cOrange; glyph: "term"; big: linux ? str(len(sess)) : "—"; unit: busy > 0 ? "busy" : len(sess) > 0 ? "idle" : ""; hint: "plus"; pressed: held == "cc" }
+      }
+      Meter {
+        name: "5 hours"
+        value: five == null ? "—" : "${round(five.percent)}%"
+        note: five == null ? (clErr ?? (cl == null ? "" : "Not started")) : five.resets_at == null ? "" : "${fmtDuration(max(0, parseTime(five.resets_at) - now))} left"
+        frac: five == null ? 0 : five.percent / 100
+        tint: cOrange
+      }
+      Meter {
+        name: "week"
+        value: week == null ? "—" : "${round(week.percent)}%"
+        note: week == null ? (clErr ?? "") : week.resets_at == null ? "" : "${fmtDuration(max(0, parseTime(week.resets_at) - now))} left"
+        frac: week == null ? 0 : week.percent / 100
+        tint: cOrange
+      }
+      Box {
+        onPress: held = "claude"
+        onRelease: held = ""
+        onTap: { haptic(); if claudeApp != null { androidApp(claudeApp.key) } else if apps == null { androidApp("com.anthropic.claude") } else { url("https://play.google.com/store/apps/details?id=com.anthropic.claude") } }
+        ripple: false
+        Key { name: "Claude"; note: apps != null && claudeApp == null ? "Get the app" : "Open app"; tint: cYellow; glyph: "out"; pressed: held == "claude" }
+      }
+    }
+  }
+
+  // Codex: a key with the plan that opens its usage page, its two windows, and a key that starts a session.
+  component CodexRow() {
+    Row {
+      gap: 0
+      Box {
+        onPress: held = "plan"
+        onRelease: held = ""
+        onTap: { haptic(); url("https://chatgpt.com/codex/settings/usage") }
+        ripple: false
+        Key { name: "Codex plan"; note: xErr != null ? xErr : "Usage page"; tint: cViolet; glyph: "out"; big: xErr != null ? "—" : upper(xu.plan_type ?? "…"); hint: "out"; pressed: held == "plan" }
+      }
+      Meter {
+        name: xAName
+        value: xA == null ? "—" : "${round(xA.used_percent)}%"
+        note: xA == null ? (xErr ?? "") : xAReset
+        frac: xA == null ? 0 : xA.used_percent / 100
+        tint: cTeal
+      }
+      Meter {
+        name: xBName
+        value: xB == null ? "—" : "${round(xB.used_percent)}%"
+        note: xB == null ? (xErr ?? (xu == null ? "" : "Not on plan")) : xBReset
+        frac: xB == null ? 0 : xB.used_percent / 100
+        tint: cTeal
+      }
+      Box {
+        onPress: held = "codex"
+        onRelease: held = ""
+        onTap: { haptic(); if codexAg != null { open(codexAg.key) } else { launcher("agents") } }
+        ripple: false
+        Key { name: "Codex"; note: codexAg == null ? "Install" : xRunning > 0 ? "${xRunning} running · new" : "New session"; tint: cTeal; glyph: "play"; pressed: held == "codex" }
+      }
+    }
+  }
+
+  // Claude Code's running sessions, then its latest past ones and Codex's, each a key: a running one opens a shell
+  // in its folder, a past one opens where it left off.
+  component Sessions() {
+    Column {
+      gap: 0
+      width: 4 * c
+      height: 2 * c
+      if len(strips) == 0 {
+        Box {
+          width: 4 * c
+          height: 2 * c
+          padding: gp
+          Column {
+            gap: 2
+            fill: true
+            background: card
+            frost: glass
+            border: bw
+            borderColor: keyWall
+            radius: 0
+            padding: [14, 12]
+            Text { text: "SESSIONS"; font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft }
+            Spacer { weight: 1 }
+            Text { text: linux ? "Nothing running" : "No Linux yet"; font: grot; fontSize: c * 0.24; fontWeight: 700; color: ink; maxLines: 1 }
+            Text { text: linux ? "Start a session with the Claude Code or the Codex key." : "Install Linux with the key above."; font: grot; fontSize: 11; fontWeight: 500; color: soft; maxLines: 2 }
+          }
+        }
+      } else {
+        for s, i in strips key s.id {
+          Box {
+            width: 4 * c
+            height: c / 2
+            padding: gp
+            onPress: held = "s${i}"
+            onRelease: held = ""
+            onTap: { haptic(); if s.kind == "codex" { terminal("cd ${sh(s.cwd)} && codex resume ${sh(s.id)}", "codex") } else if s.run { terminal("cd ${sh(s.cwd)}", "shell") } else { terminal("cd ${sh(s.cwd)} && claude --resume ${sh(s.id)}", "claude") } }
+            ripple: false
+            Box { fill: width; height: ds; offset: [0, stripH]; background: keyWall; visible: !(held == "s${i}") }
+            Row {
+              gap: 0
+              fill: width
+              height: stripH
+              offset: [0, held == "s${i}" ? ds : 0]
+              animate offset: spring(0.62, 1600)
+              background: alpha(held == "s${i}" ? mix(surface, ink, 0.2) : surface, held == "s${i}" ? downA : cardA)
+              frost: glass
+              border: bw
+              borderColor: keyWall
+              radius: 0
+              align: center
+              Box {
+                width: tagW
+                height: stripH
+                background: alpha(s.kind == "claude" ? cOrange : cTeal, bandA)
+                frost: glass
+                align: center
+                Text { text: s.kind == "claude" ? "Claude" : "Codex"; font: grot; fontSize: 10.5; fontWeight: 700; color: onCap; align: center; maxLines: 1 }
+              }
+              Column {
+                gap: 0
+                weight: 1
+                padding: [9, 0, 6, 0]
+                Text { text: s.title; font: grot; fontSize: 12; fontWeight: 700; color: ink; maxLines: 1 }
+                Text { text: [last(split(s.cwd, "/")), s.model, s.ctx == null ? null : "${round(s.ctx)}% context"].filter(x => x != null && x != "").join(" · "); font: grot; fontSize: 9.5; fontWeight: 500; color: soft; maxLines: 1 }
+              }
+              if s.hot { Box { size: 7; background: cOrange } }
+              Text { text: s.note; font: grot; fontSize: 9.5; fontWeight: 600; color: s.hot ? cOrange : soft; padding: [5, 0, 9, 0]; maxLines: 1 }
+              Icon { name: s.run ? "term" : "play"; col: ink; size: 15 }
+              Spacer { width: 10 }
+            }
+          }
+        }
+        // The slots left over are one flat card that says so: nothing there to tap.
+        if len(strips) < 4 {
+          Box {
+            width: 4 * c
+            height: (4 - len(strips)) * c / 2
+            padding: [gp, gp, gp, gp + ds]
+            Column {
+              gap: 2
+              fill: true
+              background: card
+              frost: glass
+              border: bw
+              borderColor: keyWall
+              radius: 0
+              padding: [12, 9]
+              Text { text: "NO MORE SESSIONS"; font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft; maxLines: 1 }
+              if len(strips) < 3 {
+                Text { text: "Your Claude Code and Codex sessions show here. Tap one to open it where it left off."; font: grot; fontSize: 10.5; fontWeight: 500; color: soft; maxLines: 3 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Rows of shortcut keys, four to a row, from the from-th.
+  component Extra(n, from) {
+    Column {
+      gap: 0
+      for r in range(n) {
+        Row {
+          gap: 0
+          for q in quick.drop(from + r * 4).take(4) key q.id {
+            Box {
+              onPress: held = q.id
+              onRelease: held = ""
+              onTap: {
+                haptic()
+                if q.id == "btop" { terminal("btop", "monitor") } else if q.id == "files" { run("omarchy-files") } else if q.id == "fetch" { terminal("fastfetch", "system") } else if q.id == "drawer" { launcher("drawer") } else if q.id == "store" { launcher("store") } else if q.id == "style" { launcher("style") } else if q.id == "agents" { launcher("agents") } else { launcher("settings") }
+              }
+              ripple: false
+              Key { name: q.name; note: q.note; tint: q.tint; glyph: q.glyph; pressed: held == q.id }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  component PartA() {
+    Column {
+      gap: 0
+      Arch { }
+      ClaudeRow { }
+    }
+  }
+
+  component PartB() {
+    Column {
+      gap: 0
+      Sessions { }
+      CodexRow { }
+    }
+  }
+
+  Column {
+    fill: true
+    gap: 0
+    align: center
+    padding: [m + screenLeft, screenTop + 8, m + screenRight, 0]
+    Header { no: pageNo; what: pageWhat; tint: tabs[pageIx].tint }
+    Spacer { weight: 1 }
+    if wide {
+      Row {
+        gap: 0
+        Column {
+          gap: 0
+          PartA { }
+          Extra { n: max(rowsFit - rowsA, 0); from: 0 }
+        }
+        Column {
+          gap: 0
+          PartB { }
+          Extra { n: max(rowsFit - rowsB, 0); from: max(rowsFit - rowsA, 0) * 4 }
+        }
+      }
+    } else {
+      Column {
+        gap: 0
+        PartA { }
+        PartB { }
+        Extra { n: max(rowsFit - rowsA - rowsB, 0); from: 0 }
+      }
+    }
+    Spacer { weight: 1 }
+    Footer { }
+    Spacer { height: screenInset + 4 }
+  }
+}

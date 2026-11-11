@@ -1,0 +1,914 @@
+face "glasshaus today" {
+  // The glasshaus face's second page, in frosted glass and the Omarchy theme's colours: what's playing, its cover a key
+  // that opens the player, with keys for back, play and on; the newest notifications, each a key that opens it with
+  // a red key beside it that dismisses it, over keys that clear or snooze them all; and your most used apps as a
+  // bank of keys.
+
+  meta { owl: 19 }
+
+  source now = clock every 1m
+  source bat = android.battery
+  source mp = android.media
+  source n = android.notifications
+  // Ranked as the drawer's search ranks them: opened often and lately first.
+  source apps = android.apps
+  source drawer = android.drawer
+
+  let rowsA = 4
+  let rowsB = 2
+  let pageNo = "02"
+  let pageIx = 1
+  let pageWhat = !n.available || n.count == 0 ? "Today" : n.count == 1 ? "1 notification" : "${n.count} notifications"
+
+  // The face draws straight on the wallpaper, so the status bar steps aside. Cards and keys are panes of the
+  // launcher's own frosted glass in the Omarchy theme's colours: they follow the theme, and widgets.opacity,
+  // widgets.frost, widgets.gaps-in and widgets.border-width in style.toml, as those change.
+  statusBar: false
+  edge: true
+  padding: 0
+
+  // The key under the finger: its cap goes down onto its edge until it's let go.
+  state held = ""
+
+  // ---- the look, the same on all three pages: square corners, flat tints, no gradients ----
+  let grot = "https://raw.githubusercontent.com/google/fonts/main/ofl/spacegrotesk/SpaceGrotesk%5Bwght%5D.ttf"
+  // Glass: the wallpaper blurred behind each pane, under a thin tint. A card is exactly home's own tile glass, the
+  // theme's background at widgets.opacity. Under the finger a key's glass turns nearly solid. The blur is home's
+  // (widgets.frost), and never less than 22 dp, since without it there is no glass.
+  let glass = max(num(tileFrost, 0), 22)
+  let cardA = tileOpacity
+  // A key is a thin window of its colour; its glyph and its words sit on thicker glass of the same colour, so they
+  // read on any wallpaper. bandL is that thicker glass as a layer over the window.
+  let winA = tileOpacity * 0.6
+  let bandA = min(0.92, tileOpacity + 0.26)
+  let bandL = 1 - (1 - bandA) / (1 - winA)
+  let downA = min(1, tileOpacity + 0.46)
+  let bw = borderWidth
+  let card = alpha(background, cardA)
+  // Text on a card: the theme's foreground pushed a little further from its background, to hold up on glass.
+  let ink = mix(foreground, background, -0.4)
+  let soft = alpha(ink, 0.88)
+  let rule = alpha(ink, 0.22)
+  let onCap = background
+  let keyWall = border
+  // The theme's colours, by the names the keys use.
+  let cBlue = blue
+  let cViolet = magenta
+  let cPink = red
+  let cRed = bright_red
+  let cOrange = orange
+  let cYellow = yellow
+  let cGreen = green
+  let cTeal = bright_cyan
+
+  // The three pages, for the marks at the foot.
+  let tabs = [{name: "Linux", tint: cBlue}, {name: "Today", tint: cPink}, {name: "Phone", tint: cGreen}]
+
+  // The grid: square cells c dp across, four columns, two blocks of four side by side when the screen is wide. The
+  // page's panels take rowsA rows in the first block and rowsB in the second; the rows left over are more keys.
+  // Between two panes is the launcher's own gap, as far as the small ones have room for it.
+  let W = tileWidth ?? 412
+  let H = tileHeight ?? 915
+  let wide = W > H
+  let m = 9
+  let gp = clamp(gapsIn / 2, 2, 4)
+  let kd = 5
+  let ds = 4
+  let headH = 72
+  let footH = 48
+  let availW = W - 2 * m - screenLeft - screenRight
+  let availH = H - screenTop - 8 - headH - footH - 12 - screenInset
+  let c = floor(min(availW / (wide ? 8 : 4), availH / (wide ? max(rowsA, rowsB) : rowsA + rowsB)))
+  let rowsFit = floor(availH / c)
+  let gw = c * (wide ? 8 : 4)
+  let tagW = c * 0.7
+  let capH = c - 2 * gp - kd
+  let stripH = c / 2 - 2 * gp - ds
+
+  // The glyphs, drawn flat on a grid of 24, in one colour.
+  component Icon(name, col) {
+    Canvas {
+      let u = width / 24
+      let w = 2 * u
+      if name == "term" {
+        path([[4, 7], [10, 12], [4, 17]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+        rect(12 * u, 16 * u, 8 * u, 2 * u, fill: col)
+      }
+      if name == "plus" {
+        rect(11 * u, 4 * u, 2 * u, 16 * u, fill: col)
+        rect(4 * u, 11 * u, 16 * u, 2 * u, fill: col)
+      }
+      if name == "out" {
+        line(6 * u, 18 * u, 17 * u, 7 * u, stroke: col, width: w)
+        path([[8, 6], [18, 6], [18, 16]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "play" { path([[7, 4], [20, 12], [7, 20]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col) }
+      if name == "pause" {
+        rect(6 * u, 4 * u, 4 * u, 16 * u, fill: col)
+        rect(14 * u, 4 * u, 4 * u, 16 * u, fill: col)
+      }
+      if name == "prev" {
+        path([[20, 4], [9, 12], [20, 20]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col)
+        rect(4 * u, 4 * u, 3 * u, 16 * u, fill: col)
+      }
+      if name == "next" {
+        path([[4, 4], [15, 12], [4, 20]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col)
+        rect(17 * u, 4 * u, 3 * u, 16 * u, fill: col)
+      }
+      if name == "up" {
+        rect(11 * u, 6 * u, 2 * u, 15 * u, fill: col)
+        path([[5, 11], [12, 4], [19, 11]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "dn" {
+        rect(11 * u, 3 * u, 2 * u, 15 * u, fill: col)
+        path([[5, 13], [12, 20], [19, 13]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "check" { path([[4, 12], [10, 18], [20, 6]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w * 1.25) }
+      if name == "x" {
+        line(6 * u, 6 * u, 18 * u, 18 * u, stroke: col, width: w)
+        line(18 * u, 6 * u, 6 * u, 18 * u, stroke: col, width: w)
+      }
+      if name == "bars" {
+        rect(4 * u, 12 * u, 4 * u, 8 * u, fill: col)
+        rect(10 * u, 4 * u, 4 * u, 16 * u, fill: col)
+        rect(16 * u, 9 * u, 4 * u, 11 * u, fill: col)
+      }
+      if name == "folder" { path([[3, 5], [10, 5], [12, 8], [21, 8], [21, 19], [3, 19]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w) }
+      if name == "bag" {
+        rect(5 * u, 9 * u, 14 * u, 11 * u, stroke: col, width: w)
+        path([[9, 9], [9, 4], [15, 4], [15, 9]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "sliders" {
+        rect(4 * u, 6 * u, 16 * u, 2 * u, fill: col)
+        rect(13 * u, 4 * u, 3 * u, 6 * u, fill: col)
+        rect(4 * u, 11 * u, 16 * u, 2 * u, fill: col)
+        rect(7 * u, 9 * u, 3 * u, 6 * u, fill: col)
+        rect(4 * u, 16 * u, 16 * u, 2 * u, fill: col)
+        rect(15 * u, 14 * u, 3 * u, 6 * u, fill: col)
+      }
+      if name == "swatch" {
+        rect(4 * u, 4 * u, 7 * u, 7 * u, fill: col)
+        rect(14 * u, 5 * u, 5 * u, 5 * u, stroke: col, width: w)
+        rect(5 * u, 14 * u, 5 * u, 5 * u, stroke: col, width: w)
+        rect(13 * u, 13 * u, 7 * u, 7 * u, fill: col)
+      }
+      if name == "grid" {
+        for j in range(9) { rect((4 + (j % 3) * 6) * u, (4 + floor(j / 3) * 6) * u, 4 * u, 4 * u, fill: col) }
+      }
+      if name == "agents" {
+        rect(4 * u, 8 * u, 16 * u, 11 * u, stroke: col, width: w)
+        rect(8 * u, 12 * u, 2.5 * u, 2.5 * u, fill: col)
+        rect(13.5 * u, 12 * u, 2.5 * u, 2.5 * u, fill: col)
+        rect(11 * u, 3 * u, 2 * u, 5 * u, fill: col)
+      }
+      if name == "clock" {
+        circle(12 * u, 12 * u, 8 * u, stroke: col, width: w)
+        path([[12, 7], [12, 12], [16, 14]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "wifi" {
+        for j in range(3) { arc(12 * u, 19 * u, (6 + j * 5) * u, 315, 90, stroke: col, width: w) }
+        rect(10.5 * u, 17.5 * u, 3 * u, 3 * u, fill: col)
+      }
+      if name == "bt" { path([[7, 8], [17, 16], [12, 20], [12, 4], [17, 8], [7, 16]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w) }
+      if name == "dnd" {
+        circle(12 * u, 12 * u, 8 * u, stroke: col, width: w)
+        rect(8 * u, 11 * u, 8 * u, 2 * u, fill: col)
+      }
+      if name == "torch" {
+        path([[8, 3], [16, 3], [16, 8], [14, 11], [14, 21], [10, 21], [10, 11], [8, 8]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w)
+        rect(11.2 * u, 13 * u, 1.6 * u, 3.5 * u, fill: col)
+      }
+      if name == "sun" {
+        rect(8.5 * u, 8.5 * u, 7 * u, 7 * u, fill: col)
+        rect(11 * u, 2 * u, 2 * u, 4 * u, fill: col)
+        rect(11 * u, 18 * u, 2 * u, 4 * u, fill: col)
+        rect(2 * u, 11 * u, 4 * u, 2 * u, fill: col)
+        rect(18 * u, 11 * u, 4 * u, 2 * u, fill: col)
+      }
+      if name == "moon" {
+        circle(12 * u, 12 * u, 8 * u, stroke: col, width: w)
+        arc(12 * u, 12 * u, 8 * u, 0, 180, fill: col)
+      }
+      if name == "pin" {
+        path([[12, 21], [6, 12], [6, 8], [9, 4], [15, 4], [18, 8], [18, 12]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w)
+        rect(10.5 * u, 7.5 * u, 3 * u, 3 * u, fill: col)
+      }
+      if name == "plane" { path([[12, 2], [14, 9], [22, 14], [22, 16], [14, 14], [13.5, 19], [16, 21], [16, 22], [8, 22], [8, 21], [10.5, 19], [10, 14], [2, 16], [2, 14], [10, 9]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col) }
+      if name == "speaker" || name == "mute" {
+        path([[3, 9], [8, 9], [13, 4], [13, 20], [8, 15], [3, 15]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col)
+      }
+      if name == "speaker" {
+        rect(16 * u, 9 * u, 2 * u, 6 * u, fill: col)
+        rect(20 * u, 6 * u, 2 * u, 12 * u, fill: col)
+      }
+      if name == "mute" {
+        line(16 * u, 9 * u, 22 * u, 15 * u, stroke: col, width: w)
+        line(22 * u, 9 * u, 16 * u, 15 * u, stroke: col, width: w)
+      }
+      if name == "bell" {
+        path([[4, 17], [7, 14], [7, 10], [9, 6], [15, 6], [17, 10], [17, 14], [20, 17]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w)
+        rect(10 * u, 19.5 * u, 4 * u, 2 * u, fill: col)
+      }
+      if name == "note" {
+        rect(8 * u, 4 * u, 2 * u, 13 * u, fill: col)
+        rect(8 * u, 4 * u, 10 * u, 3 * u, fill: col)
+        rect(16 * u, 4 * u, 2 * u, 11 * u, fill: col)
+        rect(4 * u, 15 * u, 6 * u, 5 * u, fill: col)
+        rect(12 * u, 13 * u, 6 * u, 5 * u, fill: col)
+      }
+      if name == "updown" {
+        rect(7 * u, 6 * u, 2 * u, 14 * u, fill: col)
+        path([[3.5, 10], [8, 5], [12.5, 10]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+        rect(15 * u, 4 * u, 2 * u, 14 * u, fill: col)
+        path([[11.5, 14], [16, 19], [20.5, 14]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "signal" {
+        rect(3 * u, 15 * u, 3.5 * u, 5 * u, fill: col)
+        rect(8.5 * u, 11 * u, 3.5 * u, 9 * u, fill: col)
+        rect(14 * u, 7 * u, 3.5 * u, 13 * u, fill: col)
+        rect(19.5 * u, 3 * u, 3.5 * u, 17 * u, fill: col)
+      }
+      if name == "battery" {
+        rect(3 * u, 8 * u, 16 * u, 9 * u, stroke: col, width: w)
+        rect(19.5 * u, 10.5 * u, 2.5 * u, 4 * u, fill: col)
+      }
+      if name == "phone" {
+        rect(7 * u, 3 * u, 10 * u, 18 * u, stroke: col, width: w)
+        rect(10.5 * u, 16.5 * u, 3 * u, 1.5 * u, fill: col)
+      }
+    }
+  }
+
+  // A key: a window of thin glass in its colour over a solid edge of the same colour, with its glyph (or a number,
+  // with `big`) on a chip and its name and what a tap does on a band, both of thicker glass. Pressed, the cap goes
+  // down onto the edge, its glass turns nearly solid, and it springs back when let go.
+  component Key(name, note, tint, glyph, pressed = false, big = "", unit = "", hint = "") {
+    Box {
+      size: c
+      padding: gp
+      Box { fill: width; height: kd; offset: [0, capH]; background: tint; visible: !pressed }
+      Column {
+        fill: width
+        height: capH
+        offset: [0, pressed ? kd : 0]
+        animate offset: spring(0.62, 1600)
+        background: alpha(tint, pressed ? downA : winA)
+        frost: glass
+        border: bw
+        borderColor: tint
+        radius: 0
+        gap: 0
+        Row {
+          gap: 0
+          fill: width
+          weight: 1
+          align: top
+          padding: [bw + 5, bw + 5, bw + 5, 0]
+          Row {
+            gap: 0
+            height: 28
+            background: alpha(tint, bandL)
+            align: center
+            padding: [big != "" ? 7 : 4, 0]
+            if big != "" {
+              Text { spans: [big, {text: unit == "" ? "" : " ${unit}", fontSize: 9.5, fontWeight: 600}]; font: grot; fontSize: len(big) > 3 ? 14 : 19; fontWeight: 700; color: onCap; maxLines: 1 }
+            } else {
+              Icon { name: glyph; col: onCap; size: 20 }
+            }
+          }
+          Spacer { weight: 1 }
+          if hint != "" {
+            Box {
+              size: 18
+              background: alpha(tint, bandL)
+              align: center
+              Icon { name: hint; col: onCap; size: 11 }
+            }
+          }
+        }
+        Column {
+          gap: 0
+          fill: width
+          background: alpha(tint, bandL)
+          padding: [bw + 6, 4, bw + 4, bw + 4]
+          Text { text: name; font: grot; fontSize: 12; fontWeight: 700; color: onCap; maxLines: 1 }
+          Text { text: note; font: grot; fontSize: 9.5; fontWeight: 500; color: alpha(onCap, 0.8); maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  // A readout: a card of glass with no edge under it, so it doesn't look like a key. A label, a number, a bar that
+  // fills and a note.
+  component Meter(name, value, note, frac, tint) {
+    Box {
+      size: c
+      padding: gp
+      Column {
+        fill: true
+        background: card
+        frost: glass
+        border: bw
+        borderColor: keyWall
+        radius: 0
+        gap: 0
+        padding: [9, 8, 9, 8]
+        Text { text: upper(name); font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft; maxLines: 1 }
+        Text { text: value; font: grot; fontSize: c * 0.26; fontWeight: 700; color: ink; maxLines: 1 }
+        Spacer { weight: 1 }
+        Progress { value: clamp(num(frac, 0), 0, 1) * 100; max: 100; color: num(frac, 0) >= 0.9 ? cRed : tint; track: rule; fill: width; height: 6; animate value: spring() }
+        Spacer { height: 5 }
+        Text { text: note; font: grot; fontSize: 9.5; fontWeight: 500; color: soft; maxLines: 1 }
+      }
+    }
+  }
+
+  // The top: a card with the page's number on a block of its colour, its name, the date and the battery, and the time.
+  component Header(no, what, tint) {
+    Box {
+      width: gw
+      height: headH
+      padding: [gp, 0, gp, 10]
+      Row {
+        gap: 11
+        fill: true
+        background: card
+        frost: glass
+        border: bw
+        borderColor: keyWall
+        radius: 0
+        align: center
+        padding: [0, 0, 12, 0]
+        Box {
+          width: headH - 10
+          height: headH - 10
+          background: alpha(tint, bandA)
+          frost: glass
+          align: center
+          Text { text: no; font: grot; fontSize: 18; fontWeight: 700; color: onCap; align: center }
+        }
+        Column {
+          gap: 1
+          weight: 1
+          Text { text: what; font: grot; fontSize: 18; fontWeight: 700; color: ink; maxLines: 1 }
+          Text { text: "${upper(fmtTime(now, "EEE d MMM"))}  ·  ${bat.level ?? "…"}%${bat.charging == true ? " +" : ""}"; font: grot; fontSize: 10; fontWeight: 600; letterSpacing: 0.8; color: soft; maxLines: 1 }
+        }
+        Text { text: fmtTime(now, "HH:mm"); font: grot; fontSize: 32; fontWeight: 700; color: ink; maxLines: 1 }
+      }
+    }
+  }
+
+  // The bottom: a mark for each of the three pages, the one showing in its colour. They only show where you are:
+  // a face can't tell which of home's pages it is on, so it can't turn to another.
+  component Footer() {
+    Row {
+      width: gw
+      height: footH
+      gap: 0
+      align: top
+      padding: [0, 10, 0, 0]
+      for t, i in tabs key t.name {
+        Box {
+          weight: 1
+          height: 26
+          padding: [gp, 0]
+          Row {
+            fill: true
+            background: i == pageIx ? alpha(t.tint, bandA) : alpha(surface, cardA * 0.55)
+            frost: glass
+            gap: 6
+            align: center
+            justify: center
+            Text { text: pad(i + 1, 2, "0"); font: grot; fontSize: 10; fontWeight: 700; color: i == pageIx ? alpha(onCap, 0.65) : soft }
+            Text { text: t.name; font: grot; fontSize: 11.5; fontWeight: 700; color: i == pageIx ? onCap : soft }
+          }
+        }
+      }
+    }
+  }
+
+  let has = mp != null && mp.title != null && mp.title != ""
+  let playing = has && mp.playing == true
+  let noteCount = n.available ? num(n.count, 0) : 0
+  let notes = n.available ? n.items.take(3) : []
+  let top = (apps ?? []).filter(a => !a.system || a.score > 0).sortBy(a => -a.score).take(24)
+  // With monochrome icons on, an app's icon is a silhouette, drawn here in the key's ink.
+  let mono = drawer.monochrome == true
+  let hues = [cBlue, cPink, cYellow, cGreen, cViolet, cOrange, cTeal]
+
+  // What's playing: the cover is a key that opens the player; beside it the title and keys for back, play or pause
+  // and on. With nothing playing there are no keys, only a card that says so.
+  component Music() {
+    Row {
+      gap: 0
+      if has || mp.available == false {
+        Box {
+          size: 2 * c
+          padding: gp
+          onPress: held = "art"
+          onRelease: held = ""
+          onTap: { haptic(); media("open") }
+          ripple: false
+          Box { fill: width; height: kd; offset: [0, 2 * c - 2 * gp - kd]; background: cViolet; visible: !(held == "art") }
+          Box {
+            fill: width
+            height: 2 * c - 2 * gp - kd
+            offset: [0, held == "art" ? kd : 0]
+            animate offset: spring(0.62, 1600)
+            background: alpha(cViolet, held == "art" ? downA : winA)
+            frost: glass
+            border: bw
+            borderColor: cViolet
+            radius: 0
+            clip: true
+            if has && mp.art != null {
+              Image { src: mp.art; fit: cover; fill: true }
+            } else {
+              Column {
+                fill: true
+                padding: [bw + 8, bw + 8]
+                Box {
+                  size: 56
+                  background: alpha(cViolet, bandL)
+                  align: center
+                  Icon { name: "note"; col: onCap; size: 38 }
+                }
+              }
+            }
+            Box {
+              fill: true
+              align: bottomStart
+              Row {
+                gap: 8
+                fill: width
+                height: 32
+                background: onCap
+                align: center
+                padding: [10, 0]
+                Icon { name: "out"; col: ink; size: 14 }
+                Text { text: mp.available == false ? "Allow access" : "Open player"; font: grot; fontSize: 11.5; fontWeight: 700; color: ink; maxLines: 1 }
+              }
+            }
+          }
+        }
+      } else {
+        Box {
+          size: 2 * c
+          padding: gp
+          Column {
+            gap: 2
+            fill: true
+            background: card
+            frost: glass
+            border: bw
+            borderColor: keyWall
+            radius: 0
+            padding: [12, 11]
+            Icon { name: "note"; col: soft; size: 36 }
+            Spacer { weight: 1 }
+            Text { text: "Nothing playing"; font: grot; fontSize: 15; fontWeight: 700; color: ink; maxLines: 1 }
+            Text { text: "Start music or a podcast in any app."; font: grot; fontSize: 10.5; fontWeight: 500; color: soft; maxLines: 2 }
+          }
+        }
+      }
+      Box {
+        size: 2 * c
+        padding: gp
+        Column {
+          gap: 2
+          fill: true
+          background: card
+          frost: glass
+          border: bw
+          borderColor: keyWall
+          radius: 0
+          padding: [11, 10, 11, 10]
+          Row {
+            gap: 6
+            align: center
+            if playing { Box { size: 7; background: cPink } }
+            Text { text: upper(mp.available == false ? "music" : !has ? "player" : playing ? "now playing" : "paused"); font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: playing ? cPink : soft; maxLines: 1 }
+          }
+          Text { text: has ? mp.title : mp.available == false ? "Allow notification access to see and control music here." : "The title and the keys show up here once something plays."; font: grot; fontSize: has ? 15 : 11.5; fontWeight: has ? 700 : 500; color: has ? ink : soft; maxLines: has ? 3 : 4 }
+          if has {
+            Text { text: mp.artist ?? mp.app ?? ""; font: grot; fontSize: 11; fontWeight: 500; color: soft; maxLines: 1 }
+          }
+          Spacer { weight: 1 }
+          if has {
+            Row {
+              gap: 6
+              fill: width
+              height: 40 + ds
+              Box {
+                weight: 1
+                height: 40 + ds
+                onPress: held = "prev"
+                onRelease: held = ""
+                onTap: { haptic(); media("previous") }
+                ripple: false
+                Box { fill: width; height: ds; offset: [0, 40]; background: keyWall; visible: !(held == "prev") }
+                Box {
+                  fill: width
+                  height: 40
+                  offset: [0, held == "prev" ? ds : 0]
+                  animate offset: spring(0.62, 1600)
+                  background: alpha(held == "prev" ? mix(surface, ink, 0.2) : surface, held == "prev" ? downA : cardA)
+                  frost: glass
+                  border: bw
+                  borderColor: keyWall
+                  radius: 0
+                  align: center
+                  Icon { name: "prev"; col: ink; size: 16 }
+                }
+              }
+              Box {
+                weight: 1.5
+                height: 40 + ds
+                onPress: held = "play"
+                onRelease: held = ""
+                onTap: { haptic(); media("toggle") }
+                ripple: false
+                Box { fill: width; height: ds; offset: [0, 40]; background: cPink; visible: !(held == "play") }
+                Box {
+                  fill: width
+                  height: 40
+                  offset: [0, held == "play" ? ds : 0]
+                  animate offset: spring(0.62, 1600)
+                  background: alpha(cPink, held == "play" ? downA : bandA)
+                  frost: glass
+                  border: bw
+                  borderColor: cPink
+                  radius: 0
+                  align: center
+                  Icon { name: playing ? "pause" : "play"; col: onCap; size: 18 }
+                }
+              }
+              Box {
+                weight: 1
+                height: 40 + ds
+                onPress: held = "next"
+                onRelease: held = ""
+                onTap: { haptic(); media("next") }
+                ripple: false
+                Box { fill: width; height: ds; offset: [0, 40]; background: keyWall; visible: !(held == "next") }
+                Box {
+                  fill: width
+                  height: 40
+                  offset: [0, held == "next" ? ds : 0]
+                  animate offset: spring(0.62, 1600)
+                  background: alpha(held == "next" ? mix(surface, ink, 0.2) : surface, held == "next" ? downA : cardA)
+                  frost: glass
+                  border: bw
+                  borderColor: keyWall
+                  radius: 0
+                  align: center
+                  Icon { name: "next"; col: ink; size: 16 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // The newest three notifications: each a key that opens it, with a red key that dismisses it; under them, keys
+  // that clear them all or snooze them for an hour.
+  component Notes() {
+    Column {
+      gap: 0
+      width: 4 * c
+      height: 2 * c
+      if !n.available {
+        Box {
+          width: 4 * c
+          height: 2 * c
+          padding: gp
+          onPress: held = "grant"
+          onRelease: held = ""
+          onTap: { haptic(); notification("open", "") }
+          ripple: false
+          Box { fill: width; height: kd; offset: [0, 2 * c - 2 * gp - kd]; background: cPink; visible: !(held == "grant") }
+          Column {
+            gap: 2
+            fill: width
+            height: 2 * c - 2 * gp - kd
+            offset: [0, held == "grant" ? kd : 0]
+            animate offset: spring(0.62, 1600)
+            background: alpha(cPink, held == "grant" ? downA : winA)
+            frost: glass
+            border: bw
+            borderColor: cPink
+            radius: 0
+            padding: [bw + 8, bw + 8]
+            Box {
+              size: 40
+              background: alpha(cPink, bandL)
+              align: center
+              Icon { name: "bell"; col: onCap; size: 26 }
+            }
+            Spacer { weight: 1 }
+            Column {
+              gap: 2
+              fill: width
+              background: alpha(cPink, bandL)
+              padding: [10, 7]
+              Text { text: "Allow notification access"; font: grot; fontSize: 16; fontWeight: 700; color: onCap; maxLines: 1 }
+              Text { text: "Opens the setting. Your notifications and what's playing show here after."; font: grot; fontSize: 11; fontWeight: 500; color: alpha(onCap, 0.8); maxLines: 2 }
+            }
+          }
+        }
+      } else if noteCount == 0 {
+        Box {
+          width: 4 * c
+          height: 2 * c
+          padding: gp
+          Column {
+            gap: 2
+            fill: true
+            background: card
+            frost: glass
+            border: bw
+            borderColor: keyWall
+            radius: 0
+            padding: [14, 12]
+            Text { text: "NOTIFICATIONS"; font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft }
+            Spacer { weight: 1 }
+            Row {
+              gap: 10
+              align: center
+              Icon { name: "check"; col: cGreen; size: 26 }
+              Text { text: "All clear"; font: grot; fontSize: c * 0.26; fontWeight: 700; color: ink; maxLines: 1 }
+            }
+            Text { text: "Nothing is waiting for you."; font: grot; fontSize: 11; fontWeight: 500; color: soft; maxLines: 1 }
+          }
+        }
+      } else {
+        for item, i in notes key item.key {
+          Row {
+            gap: 6
+            width: 4 * c
+            height: c / 2
+            padding: gp
+            Box {
+              weight: 1
+              height: stripH + ds
+              onPress: held = "n${i}"
+              onRelease: held = ""
+              onTap: { haptic(); notification("open", item.key) }
+              ripple: false
+              Box { fill: width; height: ds; offset: [0, stripH]; background: keyWall; visible: !(held == "n${i}") }
+              Row {
+                gap: 0
+                fill: width
+                height: stripH
+                offset: [0, held == "n${i}" ? ds : 0]
+                animate offset: spring(0.62, 1600)
+                background: alpha(held == "n${i}" ? mix(surface, ink, 0.2) : surface, held == "n${i}" ? downA : cardA)
+                frost: glass
+                border: bw
+                borderColor: keyWall
+                radius: 0
+                align: center
+                Box {
+                  size: stripH
+                  background: alpha(hues[(i * 3) % 7], bandA)
+                  frost: glass
+                  align: center
+                  if mono { Image { src: item.icon; size: stripH * 0.56; tint: onCap } } else { Image { src: item.icon; size: stripH * 0.62 } }
+                }
+                Column {
+                  gap: 0
+                  weight: 1
+                  padding: [9, 0, 6, 0]
+                  Text { text: item.title; font: grot; fontSize: 12; fontWeight: 700; color: ink; maxLines: 1 }
+                  if item.text != "" {
+                    Text { text: item.text; font: grot; fontSize: 10; fontWeight: 500; color: soft; maxLines: 1 }
+                  }
+                }
+                Text { text: fmtAgo(item.time, now); font: grot; fontSize: 9.5; fontWeight: 600; color: soft; padding: [0, 0, 10, 0]; maxLines: 1 }
+              }
+            }
+            if item.clearable != false {
+              Box {
+                width: stripH + 6
+                height: stripH + ds
+                onPress: held = "x${i}"
+                onRelease: held = ""
+                onTap: { haptic(); notification("dismiss", item.key) }
+                ripple: false
+                Box { fill: width; height: ds; offset: [0, stripH]; background: cRed; visible: !(held == "x${i}") }
+                Box {
+                  fill: width
+                  height: stripH
+                  offset: [0, held == "x${i}" ? ds : 0]
+                  animate offset: spring(0.62, 1600)
+                  background: alpha(cRed, held == "x${i}" ? downA : bandA)
+                  frost: glass
+                  border: bw
+                  borderColor: cRed
+                  radius: 0
+                  align: center
+                  Icon { name: "x"; col: onCap; size: 14 }
+                }
+              }
+            }
+          }
+        }
+        if len(notes) < 3 {
+          Box {
+            weight: 1
+            fill: width
+            padding: [gp, gp, gp, gp + ds]
+            Column {
+              fill: true
+              background: card
+              frost: glass
+              border: bw
+              borderColor: keyWall
+              radius: 0
+              padding: [12, 9]
+              Text { text: "NO MORE NOTIFICATIONS"; font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft; maxLines: 1 }
+            }
+          }
+        }
+        Row {
+          gap: 6
+          width: 4 * c
+          height: c / 2
+          padding: gp
+          Box {
+            weight: 1
+            height: stripH + ds
+            onPress: held = "clear"
+            onRelease: held = ""
+            onTap: { haptic(); notification("clear") }
+            ripple: false
+            Box { fill: width; height: ds; offset: [0, stripH]; background: cRed; visible: !(held == "clear") }
+            Row {
+              gap: 8
+              fill: width
+              height: stripH
+              offset: [0, held == "clear" ? ds : 0]
+              animate offset: spring(0.62, 1600)
+              background: alpha(cRed, held == "clear" ? downA : bandA)
+              frost: glass
+              border: bw
+              borderColor: cRed
+              radius: 0
+              align: center
+              padding: [11, 0]
+              Icon { name: "x"; col: onCap; size: 14 }
+              Text { text: noteCount > 3 ? "Clear all ${noteCount}" : "Clear all"; font: grot; fontSize: 12; fontWeight: 700; color: onCap; maxLines: 1 }
+            }
+          }
+          Box {
+            weight: 1
+            height: stripH + ds
+            onPress: held = "snooze"
+            onRelease: held = ""
+            onTap: { haptic(); notification("snoozeAll", 3600) }
+            ripple: false
+            Box { fill: width; height: ds; offset: [0, stripH]; background: cYellow; visible: !(held == "snooze") }
+            Row {
+              gap: 8
+              fill: width
+              height: stripH
+              offset: [0, held == "snooze" ? ds : 0]
+              animate offset: spring(0.62, 1600)
+              background: alpha(cYellow, held == "snooze" ? downA : bandA)
+              frost: glass
+              border: bw
+              borderColor: cYellow
+              radius: 0
+              align: center
+              padding: [11, 0]
+              Icon { name: "clock"; col: onCap; size: 15 }
+              Text { text: "Snooze all 1 h"; font: grot; fontSize: 12; fontWeight: 700; color: onCap; maxLines: 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Four of the most used apps, from the from-th, each a key of thin glass in a colour of its own, the icon on a
+  // chip and the name on a band of thicker glass.
+  component AppRow(from) {
+    Row {
+      gap: 0
+      for i in range(4) {
+        let a = top[from + i]
+        let tint = hues[(from + i) % 7]
+        if a != null {
+          Box {
+            size: c
+            padding: gp
+            onPress: held = "a${from + i}"
+            onRelease: held = ""
+            onTap: { haptic(); androidApp(a.key) }
+            ripple: false
+            Box { fill: width; height: kd; offset: [0, capH]; background: tint; visible: !(held == "a${from + i}") }
+            Column {
+              gap: 0
+              fill: width
+              height: capH
+              offset: [0, held == "a${from + i}" ? kd : 0]
+              animate offset: spring(0.62, 1600)
+              background: alpha(tint, held == "a${from + i}" ? downA : winA)
+              frost: glass
+              border: bw
+              borderColor: tint
+              radius: 0
+              Row {
+                gap: 0
+                fill: width
+                weight: 1
+                align: top
+                padding: [bw + 5, bw + 5, 0, 0]
+                Box {
+                  size: c * 0.4
+                  background: alpha(tint, bandL)
+                  align: center
+                  if mono { Image { src: a.icon; size: c * 0.3; tint: onCap } } else { Image { src: a.icon; size: c * 0.34 } }
+                }
+              }
+              Text { text: a.name; font: grot; fontSize: 11.5; fontWeight: 700; color: onCap; maxLines: 1; background: alpha(tint, bandL); padding: [bw + 6, 4, bw + 4, bw + 5] }
+            }
+          }
+        } else {
+          Spacer { size: c }
+        }
+      }
+    }
+  }
+
+  // The rows left over are more of your apps, on from the ninth.
+  component Extra(n, from) {
+    Column {
+      gap: 0
+      for r in range(min(n, 4)) {
+        AppRow { from: 8 + from + r * 4 }
+      }
+    }
+  }
+
+  component PartA() {
+    Column {
+      gap: 0
+      Music { }
+      if wide {
+        AppRow { from: 0 }
+        AppRow { from: 4 }
+      } else {
+        Notes { }
+      }
+    }
+  }
+
+  component PartB() {
+    Column {
+      gap: 0
+      if wide {
+        Notes { }
+      } else {
+        AppRow { from: 0 }
+        AppRow { from: 4 }
+      }
+    }
+  }
+
+  Column {
+    fill: true
+    gap: 0
+    align: center
+    padding: [m + screenLeft, screenTop + 8, m + screenRight, 0]
+    Header { no: pageNo; what: pageWhat; tint: tabs[pageIx].tint }
+    Spacer { weight: 1 }
+    if wide {
+      Row {
+        gap: 0
+        Column {
+          gap: 0
+          PartA { }
+          Extra { n: max(rowsFit - rowsA, 0); from: 0 }
+        }
+        Column {
+          gap: 0
+          PartB { }
+          Extra { n: max(rowsFit - rowsB, 0); from: max(rowsFit - rowsA, 0) * 4 }
+        }
+      }
+    } else {
+      Column {
+        gap: 0
+        PartA { }
+        PartB { }
+        Extra { n: max(rowsFit - rowsA - rowsB, 0); from: 0 }
+      }
+    }
+    Spacer { weight: 1 }
+    Footer { }
+    Spacer { height: screenInset + 4 }
+  }
+}

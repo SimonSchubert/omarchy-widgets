@@ -1,0 +1,893 @@
+face "glasshaus phone" {
+  // The glasshaus face's third page, in frosted glass and the Omarchy theme's colours: the battery on a key that opens its settings, memory and storage as bars,
+  // the network's speed as it changes, the signal on a key that opens the network panel, keys for Wi-Fi, Bluetooth,
+  // Do Not Disturb and the torch that stay down in their colour while on, the volume as a slide with a key that
+  // mutes, the phone itself, and a row of keys to Android's panels.
+
+  meta { owl: 19 }
+
+  source now = clock every 1m
+  source bat = android.battery
+  source sys = android.system every 30s
+  source dev = android.device
+  source net = android.network every 3s
+  source sim = android.sim
+  source modes = android.modes
+  source vol = android.volume
+
+  let rowsA = 3
+  let rowsB = 3
+  let pageNo = "03"
+  let pageIx = 2
+  let pageWhat = "Phone"
+
+  // The face draws straight on the wallpaper, so the status bar steps aside. Cards and keys are panes of the
+  // launcher's own frosted glass in the Omarchy theme's colours: they follow the theme, and widgets.opacity,
+  // widgets.frost, widgets.gaps-in and widgets.border-width in style.toml, as those change.
+  statusBar: false
+  edge: true
+  padding: 0
+
+  // The key under the finger: its cap goes down onto its edge until it's let go.
+  state held = ""
+
+  // ---- the look, the same on all three pages: square corners, flat tints, no gradients ----
+  let grot = "https://raw.githubusercontent.com/google/fonts/main/ofl/spacegrotesk/SpaceGrotesk%5Bwght%5D.ttf"
+  // Glass: the wallpaper blurred behind each pane, under a thin tint. A card is exactly home's own tile glass, the
+  // theme's background at widgets.opacity. Under the finger a key's glass turns nearly solid. The blur is home's
+  // (widgets.frost), and never less than 22 dp, since without it there is no glass.
+  let glass = max(num(tileFrost, 0), 22)
+  let cardA = tileOpacity
+  // A key is a thin window of its colour; its glyph and its words sit on thicker glass of the same colour, so they
+  // read on any wallpaper. bandL is that thicker glass as a layer over the window.
+  let winA = tileOpacity * 0.6
+  let bandA = min(0.92, tileOpacity + 0.26)
+  let bandL = 1 - (1 - bandA) / (1 - winA)
+  let downA = min(1, tileOpacity + 0.46)
+  let bw = borderWidth
+  let card = alpha(background, cardA)
+  // Text on a card: the theme's foreground pushed a little further from its background, to hold up on glass.
+  let ink = mix(foreground, background, -0.4)
+  let soft = alpha(ink, 0.88)
+  let rule = alpha(ink, 0.22)
+  let onCap = background
+  let keyWall = border
+  // The theme's colours, by the names the keys use.
+  let cBlue = blue
+  let cViolet = magenta
+  let cPink = red
+  let cRed = bright_red
+  let cOrange = orange
+  let cYellow = yellow
+  let cGreen = green
+  let cTeal = bright_cyan
+
+  // The three pages, for the marks at the foot.
+  let tabs = [{name: "Linux", tint: cBlue}, {name: "Today", tint: cPink}, {name: "Phone", tint: cGreen}]
+
+  // The grid: square cells c dp across, four columns, two blocks of four side by side when the screen is wide. The
+  // page's panels take rowsA rows in the first block and rowsB in the second; the rows left over are more keys.
+  // Between two panes is the launcher's own gap, as far as the small ones have room for it.
+  let W = tileWidth ?? 412
+  let H = tileHeight ?? 915
+  let wide = W > H
+  let m = 9
+  let gp = clamp(gapsIn / 2, 2, 4)
+  let kd = 5
+  let ds = 4
+  let headH = 72
+  let footH = 48
+  let availW = W - 2 * m - screenLeft - screenRight
+  let availH = H - screenTop - 8 - headH - footH - 12 - screenInset
+  let c = floor(min(availW / (wide ? 8 : 4), availH / (wide ? max(rowsA, rowsB) : rowsA + rowsB)))
+  let rowsFit = floor(availH / c)
+  let gw = c * (wide ? 8 : 4)
+  let tagW = c * 0.7
+  let capH = c - 2 * gp - kd
+  let stripH = c / 2 - 2 * gp - ds
+
+  // The glyphs, drawn flat on a grid of 24, in one colour.
+  component Icon(name, col) {
+    Canvas {
+      let u = width / 24
+      let w = 2 * u
+      if name == "term" {
+        path([[4, 7], [10, 12], [4, 17]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+        rect(12 * u, 16 * u, 8 * u, 2 * u, fill: col)
+      }
+      if name == "plus" {
+        rect(11 * u, 4 * u, 2 * u, 16 * u, fill: col)
+        rect(4 * u, 11 * u, 16 * u, 2 * u, fill: col)
+      }
+      if name == "out" {
+        line(6 * u, 18 * u, 17 * u, 7 * u, stroke: col, width: w)
+        path([[8, 6], [18, 6], [18, 16]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "play" { path([[7, 4], [20, 12], [7, 20]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col) }
+      if name == "pause" {
+        rect(6 * u, 4 * u, 4 * u, 16 * u, fill: col)
+        rect(14 * u, 4 * u, 4 * u, 16 * u, fill: col)
+      }
+      if name == "prev" {
+        path([[20, 4], [9, 12], [20, 20]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col)
+        rect(4 * u, 4 * u, 3 * u, 16 * u, fill: col)
+      }
+      if name == "next" {
+        path([[4, 4], [15, 12], [4, 20]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col)
+        rect(17 * u, 4 * u, 3 * u, 16 * u, fill: col)
+      }
+      if name == "up" {
+        rect(11 * u, 6 * u, 2 * u, 15 * u, fill: col)
+        path([[5, 11], [12, 4], [19, 11]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "dn" {
+        rect(11 * u, 3 * u, 2 * u, 15 * u, fill: col)
+        path([[5, 13], [12, 20], [19, 13]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "check" { path([[4, 12], [10, 18], [20, 6]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w * 1.25) }
+      if name == "x" {
+        line(6 * u, 6 * u, 18 * u, 18 * u, stroke: col, width: w)
+        line(18 * u, 6 * u, 6 * u, 18 * u, stroke: col, width: w)
+      }
+      if name == "bars" {
+        rect(4 * u, 12 * u, 4 * u, 8 * u, fill: col)
+        rect(10 * u, 4 * u, 4 * u, 16 * u, fill: col)
+        rect(16 * u, 9 * u, 4 * u, 11 * u, fill: col)
+      }
+      if name == "folder" { path([[3, 5], [10, 5], [12, 8], [21, 8], [21, 19], [3, 19]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w) }
+      if name == "bag" {
+        rect(5 * u, 9 * u, 14 * u, 11 * u, stroke: col, width: w)
+        path([[9, 9], [9, 4], [15, 4], [15, 9]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "sliders" {
+        rect(4 * u, 6 * u, 16 * u, 2 * u, fill: col)
+        rect(13 * u, 4 * u, 3 * u, 6 * u, fill: col)
+        rect(4 * u, 11 * u, 16 * u, 2 * u, fill: col)
+        rect(7 * u, 9 * u, 3 * u, 6 * u, fill: col)
+        rect(4 * u, 16 * u, 16 * u, 2 * u, fill: col)
+        rect(15 * u, 14 * u, 3 * u, 6 * u, fill: col)
+      }
+      if name == "swatch" {
+        rect(4 * u, 4 * u, 7 * u, 7 * u, fill: col)
+        rect(14 * u, 5 * u, 5 * u, 5 * u, stroke: col, width: w)
+        rect(5 * u, 14 * u, 5 * u, 5 * u, stroke: col, width: w)
+        rect(13 * u, 13 * u, 7 * u, 7 * u, fill: col)
+      }
+      if name == "grid" {
+        for j in range(9) { rect((4 + (j % 3) * 6) * u, (4 + floor(j / 3) * 6) * u, 4 * u, 4 * u, fill: col) }
+      }
+      if name == "agents" {
+        rect(4 * u, 8 * u, 16 * u, 11 * u, stroke: col, width: w)
+        rect(8 * u, 12 * u, 2.5 * u, 2.5 * u, fill: col)
+        rect(13.5 * u, 12 * u, 2.5 * u, 2.5 * u, fill: col)
+        rect(11 * u, 3 * u, 2 * u, 5 * u, fill: col)
+      }
+      if name == "clock" {
+        circle(12 * u, 12 * u, 8 * u, stroke: col, width: w)
+        path([[12, 7], [12, 12], [16, 14]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "wifi" {
+        for j in range(3) { arc(12 * u, 19 * u, (6 + j * 5) * u, 315, 90, stroke: col, width: w) }
+        rect(10.5 * u, 17.5 * u, 3 * u, 3 * u, fill: col)
+      }
+      if name == "bt" { path([[7, 8], [17, 16], [12, 20], [12, 4], [17, 8], [7, 16]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w) }
+      if name == "dnd" {
+        circle(12 * u, 12 * u, 8 * u, stroke: col, width: w)
+        rect(8 * u, 11 * u, 8 * u, 2 * u, fill: col)
+      }
+      if name == "torch" {
+        path([[8, 3], [16, 3], [16, 8], [14, 11], [14, 21], [10, 21], [10, 11], [8, 8]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w)
+        rect(11.2 * u, 13 * u, 1.6 * u, 3.5 * u, fill: col)
+      }
+      if name == "sun" {
+        rect(8.5 * u, 8.5 * u, 7 * u, 7 * u, fill: col)
+        rect(11 * u, 2 * u, 2 * u, 4 * u, fill: col)
+        rect(11 * u, 18 * u, 2 * u, 4 * u, fill: col)
+        rect(2 * u, 11 * u, 4 * u, 2 * u, fill: col)
+        rect(18 * u, 11 * u, 4 * u, 2 * u, fill: col)
+      }
+      if name == "moon" {
+        circle(12 * u, 12 * u, 8 * u, stroke: col, width: w)
+        arc(12 * u, 12 * u, 8 * u, 0, 180, fill: col)
+      }
+      if name == "pin" {
+        path([[12, 21], [6, 12], [6, 8], [9, 4], [15, 4], [18, 8], [18, 12]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w)
+        rect(10.5 * u, 7.5 * u, 3 * u, 3 * u, fill: col)
+      }
+      if name == "plane" { path([[12, 2], [14, 9], [22, 14], [22, 16], [14, 14], [13.5, 19], [16, 21], [16, 22], [8, 22], [8, 21], [10.5, 19], [10, 14], [2, 16], [2, 14], [10, 9]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col) }
+      if name == "speaker" || name == "mute" {
+        path([[3, 9], [8, 9], [13, 4], [13, 20], [8, 15], [3, 15]].map(p => [p[0] * u, p[1] * u]), closed: true, fill: col)
+      }
+      if name == "speaker" {
+        rect(16 * u, 9 * u, 2 * u, 6 * u, fill: col)
+        rect(20 * u, 6 * u, 2 * u, 12 * u, fill: col)
+      }
+      if name == "mute" {
+        line(16 * u, 9 * u, 22 * u, 15 * u, stroke: col, width: w)
+        line(22 * u, 9 * u, 16 * u, 15 * u, stroke: col, width: w)
+      }
+      if name == "bell" {
+        path([[4, 17], [7, 14], [7, 10], [9, 6], [15, 6], [17, 10], [17, 14], [20, 17]].map(p => [p[0] * u, p[1] * u]), closed: true, stroke: col, width: w)
+        rect(10 * u, 19.5 * u, 4 * u, 2 * u, fill: col)
+      }
+      if name == "note" {
+        rect(8 * u, 4 * u, 2 * u, 13 * u, fill: col)
+        rect(8 * u, 4 * u, 10 * u, 3 * u, fill: col)
+        rect(16 * u, 4 * u, 2 * u, 11 * u, fill: col)
+        rect(4 * u, 15 * u, 6 * u, 5 * u, fill: col)
+        rect(12 * u, 13 * u, 6 * u, 5 * u, fill: col)
+      }
+      if name == "updown" {
+        rect(7 * u, 6 * u, 2 * u, 14 * u, fill: col)
+        path([[3.5, 10], [8, 5], [12.5, 10]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+        rect(15 * u, 4 * u, 2 * u, 14 * u, fill: col)
+        path([[11.5, 14], [16, 19], [20.5, 14]].map(p => [p[0] * u, p[1] * u]), stroke: col, width: w)
+      }
+      if name == "signal" {
+        rect(3 * u, 15 * u, 3.5 * u, 5 * u, fill: col)
+        rect(8.5 * u, 11 * u, 3.5 * u, 9 * u, fill: col)
+        rect(14 * u, 7 * u, 3.5 * u, 13 * u, fill: col)
+        rect(19.5 * u, 3 * u, 3.5 * u, 17 * u, fill: col)
+      }
+      if name == "battery" {
+        rect(3 * u, 8 * u, 16 * u, 9 * u, stroke: col, width: w)
+        rect(19.5 * u, 10.5 * u, 2.5 * u, 4 * u, fill: col)
+      }
+      if name == "phone" {
+        rect(7 * u, 3 * u, 10 * u, 18 * u, stroke: col, width: w)
+        rect(10.5 * u, 16.5 * u, 3 * u, 1.5 * u, fill: col)
+      }
+    }
+  }
+
+  // A key: a window of thin glass in its colour over a solid edge of the same colour, with its glyph (or a number,
+  // with `big`) on a chip and its name and what a tap does on a band, both of thicker glass. Pressed, the cap goes
+  // down onto the edge, its glass turns nearly solid, and it springs back when let go.
+  component Key(name, note, tint, glyph, pressed = false, big = "", unit = "", hint = "") {
+    Box {
+      size: c
+      padding: gp
+      Box { fill: width; height: kd; offset: [0, capH]; background: tint; visible: !pressed }
+      Column {
+        fill: width
+        height: capH
+        offset: [0, pressed ? kd : 0]
+        animate offset: spring(0.62, 1600)
+        background: alpha(tint, pressed ? downA : winA)
+        frost: glass
+        border: bw
+        borderColor: tint
+        radius: 0
+        gap: 0
+        Row {
+          gap: 0
+          fill: width
+          weight: 1
+          align: top
+          padding: [bw + 5, bw + 5, bw + 5, 0]
+          Row {
+            gap: 0
+            height: 28
+            background: alpha(tint, bandL)
+            align: center
+            padding: [big != "" ? 7 : 4, 0]
+            if big != "" {
+              Text { spans: [big, {text: unit == "" ? "" : " ${unit}", fontSize: 9.5, fontWeight: 600}]; font: grot; fontSize: len(big) > 3 ? 14 : 19; fontWeight: 700; color: onCap; maxLines: 1 }
+            } else {
+              Icon { name: glyph; col: onCap; size: 20 }
+            }
+          }
+          Spacer { weight: 1 }
+          if hint != "" {
+            Box {
+              size: 18
+              background: alpha(tint, bandL)
+              align: center
+              Icon { name: hint; col: onCap; size: 11 }
+            }
+          }
+        }
+        Column {
+          gap: 0
+          fill: width
+          background: alpha(tint, bandL)
+          padding: [bw + 6, 4, bw + 4, bw + 4]
+          Text { text: name; font: grot; fontSize: 12; fontWeight: 700; color: onCap; maxLines: 1 }
+          Text { text: note; font: grot; fontSize: 9.5; fontWeight: 500; color: alpha(onCap, 0.8); maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  // A readout: a card of glass with no edge under it, so it doesn't look like a key. A label, a number, a bar that
+  // fills and a note.
+  component Meter(name, value, note, frac, tint) {
+    Box {
+      size: c
+      padding: gp
+      Column {
+        fill: true
+        background: card
+        frost: glass
+        border: bw
+        borderColor: keyWall
+        radius: 0
+        gap: 0
+        padding: [9, 8, 9, 8]
+        Text { text: upper(name); font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft; maxLines: 1 }
+        Text { text: value; font: grot; fontSize: c * 0.26; fontWeight: 700; color: ink; maxLines: 1 }
+        Spacer { weight: 1 }
+        Progress { value: clamp(num(frac, 0), 0, 1) * 100; max: 100; color: num(frac, 0) >= 0.9 ? cRed : tint; track: rule; fill: width; height: 6; animate value: spring() }
+        Spacer { height: 5 }
+        Text { text: note; font: grot; fontSize: 9.5; fontWeight: 500; color: soft; maxLines: 1 }
+      }
+    }
+  }
+
+  // The top: a card with the page's number on a block of its colour, its name, the date and the battery, and the time.
+  component Header(no, what, tint) {
+    Box {
+      width: gw
+      height: headH
+      padding: [gp, 0, gp, 10]
+      Row {
+        gap: 11
+        fill: true
+        background: card
+        frost: glass
+        border: bw
+        borderColor: keyWall
+        radius: 0
+        align: center
+        padding: [0, 0, 12, 0]
+        Box {
+          width: headH - 10
+          height: headH - 10
+          background: alpha(tint, bandA)
+          frost: glass
+          align: center
+          Text { text: no; font: grot; fontSize: 18; fontWeight: 700; color: onCap; align: center }
+        }
+        Column {
+          gap: 1
+          weight: 1
+          Text { text: what; font: grot; fontSize: 18; fontWeight: 700; color: ink; maxLines: 1 }
+          Text { text: "${upper(fmtTime(now, "EEE d MMM"))}  ·  ${bat.level ?? "…"}%${bat.charging == true ? " +" : ""}"; font: grot; fontSize: 10; fontWeight: 600; letterSpacing: 0.8; color: soft; maxLines: 1 }
+        }
+        Text { text: fmtTime(now, "HH:mm"); font: grot; fontSize: 32; fontWeight: 700; color: ink; maxLines: 1 }
+      }
+    }
+  }
+
+  // The bottom: a mark for each of the three pages, the one showing in its colour. They only show where you are:
+  // a face can't tell which of home's pages it is on, so it can't turn to another.
+  component Footer() {
+    Row {
+      width: gw
+      height: footH
+      gap: 0
+      align: top
+      padding: [0, 10, 0, 0]
+      for t, i in tabs key t.name {
+        Box {
+          weight: 1
+          height: 26
+          padding: [gp, 0]
+          Row {
+            fill: true
+            background: i == pageIx ? alpha(t.tint, bandA) : alpha(surface, cardA * 0.55)
+            frost: glass
+            gap: 6
+            align: center
+            justify: center
+            Text { text: pad(i + 1, 2, "0"); font: grot; fontSize: 10; fontWeight: 700; color: i == pageIx ? alpha(onCap, 0.65) : soft }
+            Text { text: t.name; font: grot; fontSize: 11.5; fontWeight: 700; color: i == pageIx ? onCap : soft }
+          }
+        }
+      }
+    }
+  }
+
+  // The network's speed, from the change in its byte counters between two polls, and how it has run lately.
+  state down = null
+  state up = null
+  on net { if old != null && value.rx >= old.rx && value.uptime > old.uptime { down = (value.rx - old.rx) / (value.uptime - old.uptime); up = (value.tx - old.tx) / (value.uptime - old.uptime) } }
+  let downH = history(down ?? 0, 14)
+  let upH = history(up ?? 0, 14)
+  // The volume the finger is setting, shown at once while it slides, and after it lifts until the phone says what
+  // the volume now is, so the knob never jumps back for a moment.
+  state volSet = 0
+  state volKeep = false
+  on vol { volKeep = false }
+
+  let level = num(bat.level, 0)
+  let batTint = bat.charging == true ? cTeal : level < 20 ? cRed : level < 40 ? cYellow : cGreen
+  let memF = sys.memory == null || !sys.memory.total ? 0 : sys.memory.used / sys.memory.total
+  let diskF = sys.storage == null || !sys.storage.total ? 0 : sys.storage.used / sys.storage.total
+  let volLv = held == "vol" || volKeep ? volSet : vol.muted == true ? 0 : num(vol.level, 0)
+  let slW = 4 * c - 2 * gp - tagW - 6
+
+  // The keys in the rows left over: each opens one of Android's own panels, and says how things stand.
+  let quick = [
+    {id: "display", name: "Display", note: modes.brightness == null ? "Brightness" : "${round(modes.brightness)}% bright", glyph: "sun", tint: cYellow},
+    {id: "dark", name: "Dark theme", note: modes.dark == true ? "On" : "Off", glyph: "moon", tint: cViolet},
+    {id: "location", name: "Location", note: modes.location == true ? "On" : "Off", glyph: "pin", tint: cGreen},
+    {id: "airplane", name: "Airplane", note: modes.airplane == true ? "On" : "Off", glyph: "plane", tint: cBlue},
+    {id: "sound", name: "Sound", note: capitalize(modes.ringer ?? "ringer"), glyph: "bell", tint: cOrange},
+    {id: "output", name: "Output", note: vol.output.name ?? capitalize(vol.output.type ?? "speaker"), glyph: "speaker", tint: cTeal},
+    {id: "data", name: "Mobile data", note: sim.data == true ? "On" : sim.data == false ? "Off" : "Open panel", glyph: "updown", tint: cPink},
+    {id: "notifications", name: "Alerts", note: "Settings", glyph: "bell", tint: cRed}
+  ]
+
+  // A card two cells wide: a label and a note, the number, and a bar that fills.
+  component Gauge(name, value, note, frac, tint) {
+    Box {
+      width: 2 * c
+      height: c
+      padding: gp
+      Column {
+        gap: 0
+        fill: true
+        background: card
+        frost: glass
+        border: bw
+        borderColor: keyWall
+        radius: 0
+        padding: [11, 8, 11, 10]
+        Row {
+          gap: 6
+          fill: width
+          Text { text: upper(name); font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft; maxLines: 1; weight: 1 }
+          Text { text: note; font: grot; fontSize: 9.5; fontWeight: 500; color: soft; maxLines: 1 }
+        }
+        Text { text: value; font: grot; fontSize: c * 0.28; fontWeight: 700; color: ink; maxLines: 1 }
+        Spacer { weight: 1 }
+        Progress { value: clamp(num(frac, 0), 0, 1) * 100; max: 100; color: num(frac, 0) >= 0.9 ? cRed : tint; track: rule; fill: width; height: 8; animate value: spring() }
+      }
+    }
+  }
+
+  // A card with the speed one way and its last readings as bars.
+  component Speed(name, value, hist, tint, glyph) {
+    Box {
+      size: c
+      padding: gp
+      Column {
+        gap: 0
+        fill: true
+        background: card
+        frost: glass
+        border: bw
+        borderColor: keyWall
+        radius: 0
+        padding: [9, 8, 9, 8]
+        Row {
+          gap: 5
+          fill: width
+          align: center
+          Icon { name: glyph; col: tint; size: 13 }
+          Text { text: upper(name); font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft; maxLines: 1 }
+        }
+        Text { text: value; font: grot; fontSize: c * 0.2; fontWeight: 700; color: ink; maxLines: 1 }
+        Spacer { height: 3 }
+        Canvas {
+          weight: 1
+          fill: width
+          let k = len(hist)
+          let top = max(last(sort(hist)) ?? 1, 1)
+          let bw = width / 14
+          rect(0, height - 1, width, 1, fill: rule)
+          for j in range(k) {
+            rect((14 - k + j) * bw, height - max(2, hist[j] / top * height), bw - 2, max(2, hist[j] / top * height), fill: j == k - 1 ? tint : alpha(tint, 0.45))
+          }
+        }
+      }
+    }
+  }
+
+  // A card with one fact.
+  component Fact(name, value, note) {
+    Box {
+      size: c
+      padding: gp
+      Column {
+        gap: 0
+        fill: true
+        background: card
+        frost: glass
+        border: bw
+        borderColor: keyWall
+        radius: 0
+        padding: [9, 8, 9, 8]
+        Text { text: upper(name); font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft; maxLines: 1 }
+        Text { text: value; font: grot; fontSize: c * 0.2; fontWeight: 700; color: ink; maxLines: 1 }
+        Spacer { weight: 1 }
+        Text { text: note; font: grot; fontSize: 9.5; fontWeight: 500; color: soft; maxLines: 2 }
+      }
+    }
+  }
+
+  // The battery: one big key of thin glass in the colour of how it's doing, that opens the battery's settings, with
+  // the charge on a block of thicker glass over ten marks; beside it memory and storage.
+  component Power() {
+    Row {
+      gap: 0
+      Box {
+        size: 2 * c
+        padding: gp
+        onPress: held = "bat"
+        onRelease: held = ""
+        onTap: { haptic(); settings("battery") }
+        ripple: false
+        Box { fill: width; height: kd; offset: [0, 2 * c - 2 * gp - kd]; background: batTint; visible: !(held == "bat") }
+        Column {
+          gap: 0
+          fill: width
+          height: 2 * c - 2 * gp - kd
+          offset: [0, held == "bat" ? kd : 0]
+          animate offset: spring(0.62, 1600)
+          background: alpha(batTint, held == "bat" ? downA : winA)
+          frost: glass
+          border: bw
+          borderColor: batTint
+          radius: 0
+          Row {
+            gap: 0
+            fill: width
+            align: top
+            padding: [bw + 7, bw + 7, 0, 0]
+            Column {
+              gap: 0
+              background: alpha(batTint, bandL)
+              padding: [9, 6, 12, 7]
+              Text { text: bat.charging == true ? "BATTERY · CHARGING" : level < 20 ? "BATTERY · LOW" : "BATTERY"; font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: alpha(onCap, 0.8); maxLines: 1 }
+              Text { text: "${bat.level ?? "…"}%"; font: grot; fontSize: c * 0.46; fontWeight: 700; color: onCap; maxLines: 1 }
+              Text { text: [bat.temp == null ? null : "${round(bat.temp)}°C", bat.voltage == null ? null : "${fixed(bat.voltage, 2)} V", bat.health == null ? null : "${bat.health}"].filter(x => x != null).join(" · "); font: grot; fontSize: 10; fontWeight: 500; color: alpha(onCap, 0.8); maxLines: 1 }
+            }
+          }
+          Spacer { weight: 1 }
+          Canvas {
+            fill: width
+            height: 14
+            let x0 = bw + 7
+            let bwd = (width - 2 * x0) / 10
+            for j in range(10) {
+              rect(x0 + j * bwd, 0, bwd - 3, height, fill: j < ceil(level / 10) ? batTint : alpha(onCap, 0.35))
+            }
+          }
+          Spacer { height: 8 }
+          Row {
+            gap: 8
+            fill: width
+            height: 36
+            background: alpha(batTint, bandL)
+            align: center
+            padding: [bw + 9, 0, bw + 6, bw]
+            Icon { name: "battery"; col: onCap; size: 18 }
+            Text { text: "Battery settings"; font: grot; fontSize: 12; fontWeight: 700; color: onCap; maxLines: 1 }
+          }
+        }
+      }
+      Column {
+        gap: 0
+        Gauge { name: "memory"; value: "${round(memF * 100)}%"; note: sys.memory == null ? "…" : "${fmtBytes(sys.memory.available)} free"; frac: memF; tint: cBlue }
+        Gauge { name: "storage"; value: "${round(diskF * 100)}%"; note: sys.storage == null ? "…" : "${fmtBytes(sys.storage.free)} free"; frac: diskF; tint: cViolet }
+      }
+    }
+  }
+
+  // Down and up as they change, a key with the signal that opens the network panel, and how long the phone has
+  // been on.
+  component Net() {
+    Row {
+      gap: 0
+      Speed { name: "down"; value: down == null ? "…" : "${fmtBytes(down)}/s"; hist: downH; tint: cTeal; glyph: "dn" }
+      Speed { name: "up"; value: up == null ? "…" : "${fmtBytes(up)}/s"; hist: upH; tint: cPink; glyph: "up" }
+      Box {
+        onPress: held = "sig"
+        onRelease: held = ""
+        onTap: { haptic(); settings("internet") }
+        ripple: false
+        Key { name: !sim.available ? "Internet" : !sim.present ? "No SIM" : capitalize(lower(sim.carrier ?? "Network")); note: sim.signal == null ? "Open panel" : "${sim.signal} of 4 bars"; tint: cYellow; glyph: "signal"; hint: "out"; pressed: held == "sig" }
+      }
+      Fact { name: "uptime"; value: sys.uptime == null ? "…" : fmtDuration(sys.uptime); note: "since the last restart" }
+    }
+  }
+
+  // A switch: while on, a key of its colour that stays down, its glyph on a chip and its name on a band of thicker
+  // glass; while off, plain glass and up. A light on it says which. The torch and Do Not Disturb switch at a tap;
+  // Wi-Fi and Bluetooth open Android's panel, where they switch.
+  component Switch(name, note, on, tint, glyph, pressed = false) {
+    Box {
+      size: c
+      padding: gp
+      let fg = on ? onCap : ink
+      Box { fill: width; height: on ? 2 : kd; offset: [0, capH + (on ? kd - 2 : 0)]; background: on ? tint : keyWall; visible: !pressed }
+      Column {
+        gap: 0
+        fill: width
+        height: capH
+        offset: [0, pressed ? kd : on ? kd - 2 : 0]
+        animate offset: spring(0.62, 1600)
+        background: on ? alpha(tint, pressed ? downA : winA) : alpha(pressed ? mix(surface, ink, 0.2) : surface, pressed ? downA : cardA)
+        frost: glass
+        border: bw
+        borderColor: on ? tint : keyWall
+        radius: 0
+        Row {
+          gap: 0
+          fill: width
+          weight: 1
+          align: top
+          padding: [bw + 5, bw + 5, bw + 5, 0]
+          Box {
+            size: 28
+            background: on ? alpha(tint, bandL) : alpha(surface, 0)
+            align: center
+            Icon { name: glyph; col: fg; size: 20 }
+          }
+          Spacer { weight: 1 }
+          Box { width: 16; height: 7; background: on ? ink : alpha(ink, 0.3) }
+        }
+        Column {
+          gap: 0
+          fill: width
+          background: on ? alpha(tint, bandL) : alpha(surface, 0)
+          padding: [bw + 6, 4, bw + 4, bw + 4]
+          Text { text: name; font: grot; fontSize: 12; fontWeight: 700; color: fg; maxLines: 1 }
+          Text { text: note; font: grot; fontSize: 9.5; fontWeight: 500; color: alpha(fg, 0.82); maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  component Switches() {
+    Row {
+      gap: 0
+      Box {
+        onPress: held = "wifi"
+        onRelease: held = ""
+        onTap: { haptic(); settings("wifi") }
+        ripple: false
+        Switch { name: "Wi-Fi"; note: modes.wifi == true ? "On · panel" : "Off · panel"; on: modes.wifi == true; tint: cBlue; glyph: "wifi"; pressed: held == "wifi" }
+      }
+      Box {
+        onPress: held = "bt"
+        onRelease: held = ""
+        onTap: { haptic(); settings("bluetooth") }
+        ripple: false
+        Switch { name: "Bluetooth"; note: modes.bluetooth == true ? "On · panel" : "Off · panel"; on: modes.bluetooth == true; tint: cViolet; glyph: "bt"; pressed: held == "bt" }
+      }
+      Box {
+        onPress: held = "dnd"
+        onRelease: held = ""
+        onTap: { haptic(); dnd("toggle") }
+        ripple: false
+        Switch { name: "Quiet"; note: modes.dnd == true ? "On" : "Off"; on: modes.dnd == true; tint: cPink; glyph: "dnd"; pressed: held == "dnd" }
+      }
+      if modes.torch != null {
+        Box {
+          onPress: held = "torch"
+          onRelease: held = ""
+          onTap: { haptic(); torch("toggle") }
+          ripple: false
+          Switch { name: "Torch"; note: modes.torch == true ? "On" : "Off"; on: modes.torch == true; tint: cYellow; glyph: "torch"; pressed: held == "torch" }
+        }
+      } else {
+        Box {
+          onPress: held = "rot"
+          onRelease: held = ""
+          onTap: { haptic(); settings("display") }
+          ripple: false
+          Switch { name: "Rotate"; note: modes.rotate == true ? "On · panel" : "Off · panel"; on: modes.rotate == true; tint: cYellow; glyph: "phone"; pressed: held == "rot" }
+        }
+      }
+    }
+  }
+
+  // The volume: a key that mutes, and a slide to tap or drag, its knob a key that goes down under the finger and
+  // ticks at every step.
+  component Volume() {
+    Row {
+      gap: 6
+      width: 4 * c
+      height: c
+      padding: gp
+      Box {
+        width: tagW
+        height: c - 2 * gp
+        onPress: held = "mute"
+        onRelease: held = ""
+        onTap: { haptic(); volume("toggle") }
+        ripple: false
+        let off = vol.muted == true
+        Box { fill: width; height: off ? 2 : kd; offset: [0, capH + (off ? kd - 2 : 0)]; background: off ? cRed : keyWall; visible: held != "mute" }
+        Column {
+          gap: 0
+          fill: width
+          height: capH
+          offset: [0, held == "mute" ? kd : off ? kd - 2 : 0]
+          animate offset: spring(0.62, 1600)
+          background: off ? alpha(cRed, held == "mute" ? downA : winA) : alpha(held == "mute" ? mix(surface, ink, 0.2) : surface, held == "mute" ? downA : cardA)
+          frost: glass
+          border: bw
+          borderColor: off ? cRed : keyWall
+          radius: 0
+          Row {
+            gap: 0
+            fill: width
+            weight: 1
+            align: top
+            padding: [bw + 5, bw + 5, 0, 0]
+            Box {
+              size: 28
+              background: off ? alpha(cRed, bandL) : alpha(surface, 0)
+              align: center
+              Icon { name: off ? "mute" : "speaker"; col: off ? onCap : ink; size: 20 }
+            }
+          }
+          Column {
+            gap: 0
+            fill: width
+            background: off ? alpha(cRed, bandL) : alpha(surface, 0)
+            padding: [bw + 6, 4, bw + 2, bw + 4]
+            Text { text: off ? "Muted" : "Mute"; font: grot; fontSize: 12; fontWeight: 700; color: off ? onCap : ink; maxLines: 1 }
+            Text { text: off ? "Tap: sound on" : "Tap to mute"; font: grot; fontSize: 9; fontWeight: 500; color: alpha(off ? onCap : ink, 0.82); maxLines: 1 }
+          }
+        }
+      }
+      Box {
+        weight: 1
+        height: c - 2 * gp
+        onPress: { held = "vol"; volSet = clamp(round((x - 16) / (slW - 32) * 20) * 5, 0, 100) }
+        onRelease: held = ""
+        onTap: {
+          let v = clamp(round((x - 16) / (slW - 32) * 20) * 5, 0, 100)
+          haptic()
+          volSet = v
+          volKeep = true
+          volume(v)
+        }
+        onDrag: {
+          let v = clamp(round((x - 16) / (slW - 32) * 20) * 5, 0, 100)
+          if v != volSet || !volKeep { haptic(); volSet = v; volKeep = true; volume(v) }
+        }
+        drag: horizontal
+        ripple: false
+        background: card
+        frost: glass
+        border: bw
+        borderColor: keyWall
+        radius: 0
+        Canvas {
+          let x0 = 16
+          let x1 = width - 16
+          let y = height * 0.6
+          let f = clamp(volLv / 100, 0, 1)
+          let kx = x0 + (x1 - x0) * f
+          let dn = held == "vol"
+          for j in range(21) { rect(x0 + j * (x1 - x0) / 20 - 1, y + 13, 2, j % 5 == 0 ? 8 : 4, fill: j * 5 <= volLv ? cOrange : rule) }
+          rect(x0, y - 5, x1 - x0, 10, fill: rule)
+          rect(x0, y - 5, kx - x0, 10, fill: cOrange)
+          rect(kx - 9, y - 13 + 4, 18, 26, fill: mix(ink, onCap, 0.55))
+          rect(kx - 9, y - 13 + (dn ? 4 : 0), 18, 26, fill: ink)
+          rect(kx - 1, y - 6 + (dn ? 4 : 0), 2, 12, fill: onCap)
+        }
+        Row {
+          gap: 6
+          fill: width
+          padding: [12, 9, 12, 0]
+          Text { text: "VOLUME"; font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft; maxLines: 1 }
+          Text { text: vol.muted == true && held != "vol" && !volKeep ? "muted" : "${volLv}%"; font: grot; fontSize: 9.5; fontWeight: 700; color: ink; maxLines: 1; weight: 1 }
+          Text { text: vol.output.name ?? capitalize(vol.output.type ?? ""); font: grot; fontSize: 9.5; fontWeight: 500; color: soft; maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  // The phone itself, on a card.
+  component Device() {
+    Box {
+      width: 4 * c
+      height: c
+      padding: gp
+      Row {
+        gap: 12
+        fill: true
+        background: card
+        frost: glass
+        border: bw
+        borderColor: keyWall
+        radius: 0
+        align: center
+        padding: [12, 0, 12, 0]
+        Box {
+          size: c * 0.56
+          background: alpha(cGreen, bandA)
+          frost: glass
+          align: center
+          Icon { name: "phone"; col: onCap; size: c * 0.34 }
+        }
+        Column {
+          gap: 1
+          weight: 1
+          Text { text: "THIS PHONE"; font: grot; fontSize: 9.5; fontWeight: 700; letterSpacing: 0.8; color: soft; maxLines: 1 }
+          Text { text: dev == null ? "…" : "${dev.maker} ${dev.model}"; font: grot; fontSize: 16; fontWeight: 700; color: ink; maxLines: 1 }
+          Text { text: [dev.android == null ? null : "Android ${dev.android}", sys.kernel == null ? null : "Linux ${first(split(sys.kernel, "-"))}", sys.launcher == null ? null : "omalauncher ${sys.launcher}"].filter(x => x != null).join(" · "); font: grot; fontSize: 10; fontWeight: 500; color: soft; maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  // Rows of keys to Android's panels, four to a row, from the from-th.
+  component Extra(n, from) {
+    Column {
+      gap: 0
+      for r in range(n) {
+        Row {
+          gap: 0
+          for q in quick.drop(from + r * 4).take(4) key q.id {
+            Box {
+              onPress: held = q.id
+              onRelease: held = ""
+              onTap: { haptic(); settings(q.id) }
+              ripple: false
+              Key { name: q.name; note: q.note; tint: q.tint; glyph: q.glyph; hint: "out"; pressed: held == q.id }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  component PartA() {
+    Column {
+      gap: 0
+      Power { }
+      Net { }
+    }
+  }
+
+  component PartB() {
+    Column {
+      gap: 0
+      Switches { }
+      Volume { }
+      Device { }
+    }
+  }
+
+  Column {
+    fill: true
+    gap: 0
+    align: center
+    padding: [m + screenLeft, screenTop + 8, m + screenRight, 0]
+    Header { no: pageNo; what: pageWhat; tint: tabs[pageIx].tint }
+    Spacer { weight: 1 }
+    if wide {
+      Row {
+        gap: 0
+        Column {
+          gap: 0
+          PartA { }
+          Extra { n: max(rowsFit - rowsA, 0); from: 0 }
+        }
+        Column {
+          gap: 0
+          PartB { }
+          Extra { n: max(rowsFit - rowsB, 0); from: max(rowsFit - rowsA, 0) * 4 }
+        }
+      }
+    } else {
+      Column {
+        gap: 0
+        PartA { }
+        PartB { }
+        Extra { n: max(rowsFit - rowsA - rowsB, 0); from: 0 }
+      }
+    }
+    Spacer { weight: 1 }
+    Footer { }
+    Spacer { height: screenInset + 4 }
+  }
+}
