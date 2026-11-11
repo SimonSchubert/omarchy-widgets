@@ -1,5 +1,6 @@
 face "Omagara" {
-  meta { owl: 21; description: "Omagara: a transparent home face with grouped notifications, curved app navigation, search, calendar, timers and world clocks"; version: "1.0"; license: "MIT"; category: "home" }
+  meta { owl: 21; description: "A transparent home face with grouped interactive notifications, curved alphabetical navigation and on-demand search"; version: "1.1"; license: "MIT"; category: "home" }
+  fps: 60
   page: 0
   edge: true
   padding: 0
@@ -18,9 +19,20 @@ face "Omagara" {
   state browsing = false
   state queryText = ""
   state letter = "A"
+  state appTracking = false
   state activeSide = 0
   state draggingSide = 0
   state fingerPosition = 0
+  // Horizontal mountain travel (dp), driven by the thumb’s absolute drag position.
+  state railPull = 0
+  state railThumbX = 0
+  state hapticSteps = 0
+  state appScroll = 0
+  state appVelocity = 0
+  state appGlideStarted = 0
+  state appAnchor = ""
+  state appAnchorOffset = 0
+  state appAnchorSection = ""
   // Screen-space dp, updated only by stationary rail touch handlers.
   state touchY = 0
   state expandedStack = ""
@@ -47,8 +59,10 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, tintIcons: false, clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true}
-  let cfg = merge(defaults, prefs)
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, tintIcons: false, clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, hapticFeedback: "Every letter"}
+  let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
+  let hapticChoices = ["Off", "Reduced", "Every letter"]
+  let cfg = merge(defaults, prefs, {searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter"})
   let zoneChoices = ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland"]
   let preferenceRows = [
     {section: "Appearance", key: "icons", name: "Show application icons"},
@@ -59,11 +73,13 @@ face "Omagara" {
     {section: "Navigation", key: "idleAlphabet", name: "Show alphabet while idle"},
     {key: "hideEmpty", name: "Hide empty alphabet letters"},
     {key: "leftInput", name: "Enable left-edge input"},
-    {key: "curve", name: "Curved alphabet magnification"},
+    {key: "curve", name: "Curved alphabet animation"},
     {section: "Notifications", key: "notifications", name: "Show notifications"},
     {key: "previews", name: "Show notification content previews"},
     {key: "grouping", name: "Group notifications by application"},
     {key: "actions", name: "Show notification action buttons"},
+    {section: "Search", key: "calculator", name: "Integrated calculator"},
+    {key: "searchContacts", name: "Search contacts (unavailable)"},
     {section: "Header interactions", key: "clockTap", name: "Clock tap action"},
     {key: "dateTap", name: "Date / calendar tap action"},
     {key: "eventTap", name: "Calendar event tap action"}
@@ -74,16 +90,19 @@ face "Omagara" {
   at timerDeadline { timerDeadline = 0; timerLeft = 0; notify("Omagara timer", "Time is up") }
 
   let fullAlphabet = split("A B C D E F G H I J K L M N O P Q R S T U V W X Y Z #", " ")
-  let apps = (installed ?? []).sortBy(a => lower(a.name))
+  let apps = (installed ?? []).sortBy(a => lower(trim(a.name)))
   let groups = groupBy(apps, a => contains(fullAlphabet, upper(sub(trim(a.name), 0, 1))) ? upper(sub(trim(a.name), 0, 1)) : "#")
   // Freeze mapping and geometry for the entire touch, even if apps update.
   let liveAlphabet = cfg.hideEmpty ? fullAlphabet.filter(c => len(get(groups, c, [])) > 0) : fullAlphabet
   let alphabet = railHeld ? heldAlphabet : liveAlphabet
-  let shown = get(groups, letter, [])
   let searchResults = trim(queryText) == "" ? apps : rank(apps, trim(queryText))
   let availableHeight = (tileHeight ?? 800) - screenTop - screenInset
   let compact = availableHeight < 560
   let availableWidth = (tileWidth ?? 400) - screenLeft - screenRight
+  // The 44dp right rail is inset by screenRight + 4dp; glyphs are centered
+  // 22dp inside it. Keep the glyph fully inside the opposite safe edge.
+  let railBaseX = (tileWidth ?? 400) - screenRight - 26
+  let railMaxReach = max(0, railBaseX - screenLeft - 14)
   // First/last letter centers sit at 31%/90% of the inset-safe height.
   // Include half a cell above/below them so both endpoint hit regions are full-sized.
   let railStep = availableHeight * 0.59 / max(1, len(alphabet) - 1)
@@ -117,22 +136,95 @@ face "Omagara" {
   // One source of truth: 20dp outer left; 12dp clear of the 44dp right rail.
   let noticeWidth = max(0, availableWidth - 80)
 
-  // A compact viewport surrounds the finger; long groups scroll inside it.
-  // Reserve a separate right control lane so lower rows can reach near the
-  // navigation inset without passing behind Search or Close.
-  let appRowHeight = 64
-  let appLabelHeight = 32
-  let appSafeTop = headerBottom + 12
-  let appSafeBottom = max(appSafeTop, (tileHeight ?? 800) - screenInset - 16)
-  let appPanelHeight = min(max(0, appSafeBottom - appSafeTop), appLabelHeight + max(1, min(4, len(shown))) * appRowHeight)
-  let appPanelTop = clamp(touchY - appLabelHeight - (appPanelHeight - appLabelHeight) / 2, appSafeTop, max(appSafeTop, appSafeBottom - appPanelHeight))
+  // One stable viewport, one continuous A–Z/# document. Only intersecting
+  // rows are instantiated: OWL 21 lazy Columns expose no scroll controller.
+  let appScale = cfg.appScale / 100
+  let appRowHeight = max(48, 64 * appScale)
+  let appLabelHeight = 32 * appScale
+  let appSafeTop = screenTop
+  let appSafeBottom = max(appSafeTop, (tileHeight ?? 800) - screenInset)
+  let appPanelHeight = max(0, appSafeBottom - appSafeTop)
+  let appFade = min(60, appPanelHeight / 5)
+  let appEdgeSpace = appFade + 8
   let appPanelWidth = max(80, availableWidth - 168)
+  let appSections = fullAlphabet.filter(c => !cfg.hideEmpty || len(get(groups, c, [])) > 0)
+  let appSectionEnds = scan(appSections, (height, c) => height + appLabelHeight + len(get(groups, c, [])) * appRowHeight, 0)
+  let appSectionStarts = map(appSections, (c, i) => appEdgeSpace + (i == 0 ? 0 : appSectionEnds[i - 1]))
+  let appDocumentHeight = (last(appSectionEnds) ?? 0) + appEdgeSpace * 2
+  let appMaxScroll = max(0, appDocumentHeight - appPanelHeight)
+  // Read time ONLY while gliding. An every-frame trigger would keep OWL's
+  // frame clock awake even at rest. This analytic integral is exact at any fps.
+  let appGliding = browsing && !railHeld && menu == "" && appVelocity != 0
+  let appGlideAge = appGliding ? max(0, time - appGlideStarted) : 0
+  let appDecay = pow(2.718281828459045, -5 * min(appGlideAge, 1.6))
+  let appOffset = clamp(appScroll + (appGliding ? appVelocity * (1 - appDecay) / 5 : 0), 0, appMaxScroll)
+  let appGlideDone = appGliding && (appGlideAge >= 1.6 || abs(appVelocity) * appDecay <= 30 || appVelocity < 0 && appOffset <= 0 || appVelocity > 0 && appOffset >= appMaxScroll)
+  on appGlideDone {
+    if value {
+      appScroll = appOffset
+      appVelocity = 0
+      if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top }
+    }
+  }
+  on browsing { if !value { appVelocity = 0; appTracking = false } }
+  // Keep section metadata separate from the window: headings must not use
+  // up the engine's 1,000-item app-list allowance.
+  let appDocument = map(appSections, (c, i) => {section: c, top: appSectionStarts[i], height: appLabelHeight + len(get(groups, c, [])) * appRowHeight})
+  let appKeyGroups = reduce(appSections, (m, c) => set(m, c, get(groups, c, []).map(a => a.key)), {})
+  // Render a continuous slice of the WHOLE document, with two guard rows
+  // beyond each edge. Never derive this span from letter or railHeld.
+  let appRenderTop = max(0, appOffset - 2 * appRowHeight)
+  let appRenderBottom = min(appDocumentHeight, appOffset + appPanelHeight + 2 * appRowHeight)
+  let visibleSections = appDocument.filter(s => s.top + s.height > appRenderTop && s.top < appRenderBottom).map(s => merge(s, {firstRow: max(0, floor((appRenderTop - s.top - appLabelHeight) / appRowHeight))}))
+  let appWindow = flatten(visibleSections.map(s => (
+    s.top + appLabelHeight > appRenderTop ? [{id: "heading:" + s.section, section: s.section, heading: true, top: s.top, height: appLabelHeight}] : []
+  ) + map(take(drop(get(groups, s.section, []), s.firstRow), ceil((appRenderBottom - appRenderTop) / appRowHeight) + 1), (a, j) => {id: a.key, section: s.section, heading: false, app: a, top: s.top + appLabelHeight + (s.firstRow + j) * appRowHeight, height: appRowHeight}).filter(r => r.top + r.height > appRenderTop && r.top < appRenderBottom)))
+  let appVisibleRows = appWindow.filter(r => r.top + r.height > appOffset && r.top < appOffset + appPanelHeight)
+  let appFirst = first(appVisibleRows)
+  // A single focus line serves section alignment and manual-scroll tracking.
+  // Explicit rail selection remains authoritative until a real list drag.
+  let appFocusY = appPanelHeight * 0.33
+  let focusLetter = (last(appDocument.filter(s => s.top <= appOffset + appFocusY)) ?? first(appDocument)).section ?? "A"
+  let selectedSection = max(0, indexOf(appSections, letter))
+  let selectedTop = get(appSectionStarts, selectedSection, 0)
+  let railScroll = clamp(selectedTop - appFocusY, 0, appMaxScroll)
+  let highlightedLetter = appTracking ? focusLetter : letter
+  // Settings handlers capture the active section before changing dimensions.
+  // Re-anchor once, never retain a pixel offset from the previous scale.
+  on appScale {
+    appVelocity = 0
+    menu = ""
+    if browsing {
+      appTracking = false
+      appScroll = railScroll
+      appAnchor = ""
+    }
+  }
+  // Keep the same visible row through installation/removal/profile updates.
+  let anchorSection = find(appDocument, s => s.section == appAnchorSection)
+  let anchorIndex = indexOf(get(appKeyGroups, appAnchorSection, []), appAnchor)
+  let anchorTop = anchorSection == null ? null : appAnchor == "heading:" + appAnchorSection ? anchorSection.top : anchorIndex < 0 ? null : anchorSection.top + appLabelHeight + anchorIndex * appRowHeight
+  // No per-scroll on-triggers: OWL limits those to 10 runs/sec. Anchors
+  // are captured by direct input handlers and once when a glide stops.
+  on apps {
+    if browsing && !railHeld {
+      let moving = appVelocity != 0
+      appScroll = moving || anchorTop == null || appAnchor == "" ? appOffset : clamp(anchorTop + appAnchorOffset, 0, appMaxScroll)
+      appVelocity = 0
+      menu = ""
+    }
+  }
 
   let selectedDate = calendarDay == "" ? fmtTime(now, "yyyy-MM-dd") : calendarDay
   // Noon avoids crossing a DST boundary when stepping a local calendar day.
   let selectedNoon = parseTime(selectedDate + " 12:00", "yyyy-MM-dd HH:mm")
   let calendarEvents = (agenda.events ?? []).filter(e => upcoming || fmtTime(e.start, "yyyy-MM-dd") <= selectedDate && fmtTime(e.end - 1, "yyyy-MM-dd") >= selectedDate)
-  on railHeld { if !value && !contains(liveAlphabet, letter) { letter = first(liveAlphabet) ?? "A" } }
+  on railHeld {
+    if !value {
+      if browsing { if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top } }
+      if !contains(liveAlphabet, letter) { letter = first(liveAlphabet) ?? "A" }
+    }
+  }
   on liveAlphabet { if !railHeld && !contains(liveAlphabet, letter) { letter = first(liveAlphabet) ?? "A" } }
 
   on notices {
@@ -159,7 +251,7 @@ face "Omagara" {
         } else {
           let notificationKey = item.key
           queryText = ""
-          browsing = false
+          appVelocity = 0; browsing = false
           activeSide = 0
           expandedStack = ""
           replyKey = ""
@@ -221,7 +313,7 @@ face "Omagara" {
                   replyDraft = ""
                 } else {
                   queryText = ""
-                  browsing = false
+                  appVelocity = 0; browsing = false
                   activeSide = 0
                   notification("action", item.key, actionIndex)
                 }
@@ -272,15 +364,27 @@ face "Omagara" {
       width: side == 1 ? 44 : 20
       height: railHeight
       gap: 0
-      drag: vertical
+      // Track both axes: outward thumb motion must work even without moving vertically.
+      // Hit region stays fixed; the glyph transforms are visual only.
       ripple: false
       onPress: {
+        appTracking = false
+        appScroll = appOffset
+        appVelocity = 0
         heldAlphabet = liveAlphabet
         railHeld = true
         draggingSide = 0
+        hapticSteps = 0
+        // Track absolute thumb position while the rail's hit cells stay fixed.
+        // Aim the peak 84dp left of the thumb until the screen edge limits it.
+        railPull = side == 1 ? clamp(106 - x, 0, railMaxReach) : min(84, railMaxReach)
+        railThumbX = side == 1 ? railBaseX - 22 + x : screenLeft + x
         touchY = railTop + clamp(y, 0, railHeight)
         fingerPosition = clamp(y / railStep - 0.5, 0, max(0, len(alphabet) - 1))
         letter = get(alphabet, clamp(floor(y / railStep), 0, max(0, len(alphabet) - 1)), letter)
+        if cfg.hapticFeedback != "Off" { haptic() }
+        appScroll = railScroll
+        menu = ""
         activeSide = 1
         browsing = true
         expandedStack = ""
@@ -288,47 +392,63 @@ face "Omagara" {
         replyDraft = ""
       }
       onDrag: {
+        appTracking = false
+        appVelocity = 0
         railHeld = true
         draggingSide = 1
+        // Track absolute thumb position while the rail's hit cells stay fixed.
+        // Aim the peak 84dp left of the thumb until the screen edge limits it.
+        railPull = side == 1 ? clamp(106 - x, 0, railMaxReach) : min(84, railMaxReach)
+        railThumbX = side == 1 ? railBaseX - 22 + x : screenLeft + x
         touchY = railTop + clamp(y, 0, railHeight)
         fingerPosition = clamp(y / railStep - 0.5, 0, max(0, len(alphabet) - 1))
-        letter = get(alphabet, clamp(floor(y / railStep), 0, max(0, len(alphabet) - 1)), letter)
+        let nextLetter = get(alphabet, clamp(floor(y / railStep), 0, max(0, len(alphabet) - 1)), letter)
+        if nextLetter != letter {
+          hapticSteps = hapticSteps + 1
+          if cfg.hapticFeedback == "Every letter" || (cfg.hapticFeedback == "Reduced" && hapticSteps % 2 == 0) { haptic() }
+          letter = nextLetter
+        }
+        appScroll = railScroll
+        menu = ""
         activeSide = 1
         browsing = true
         expandedStack = ""
         replyKey = ""
         replyDraft = ""
       }
-      onTap: { browsing = true; activeSide = 0; railHeld = false }
+      onTap: { browsing = true; activeSide = 0; railHeld = false; railPull = 0 }
       // A press is cancelled when the drag detector consumes its first move.
       // Keep the curve active in either detector order at that transition;
       // a real drag release/cancellation always clears both states below.
-      onRelease: { if draggingSide == 0 { activeSide = 0; railHeld = false } }
-      onDragEnd: { draggingSide = 0; activeSide = 0; railHeld = false }
+      onRelease: { if draggingSide == 0 { activeSide = 0; railHeld = false; railPull = 0 } }
+      onDragEnd: { draggingSide = 0; activeSide = 0; railHeld = false; railPull = 0 }
       // Left input has no glyph nodes; either edge drives the right feedback.
       if side == 1 && (cfg.idleAlphabet || activeSide != 0) {
         for character, i in alphabet {
+          // One continuous elastic arc. A broad half-cosine spreads the
+          // outward travel across many adjacent letters instead of making a
+          // sharp kink at the selected letter. The curve follows the finger
+          // continuously; unchanged cells keep the same touch targets.
           let distance = abs(i - fingerPosition)
-          let curve = activeSide != 0 && cfg.curve && !cfg.reduceMotion ? (1 + cos(rad(min(distance / 4, 1) * 180))) / 2 : 0
+          let expanded = activeSide != 0 && cfg.curve && !cfg.reduceMotion
+          let radius = max(10, min(14, len(alphabet) * 0.58))
+          let curve = expanded ? (1 + cos(rad(min(distance / radius, 1) * 180))) / 2 : 0
           Box {
             height: railStep
             fill: width
             align: center
-            // Only the glyph moves. The rail and its children never move or resize.
-            // No spring/tween on these descendants: that would trail the parent's
-            // drag. Direct draw-time transforms track each native move immediately.
             Text {
               text: character
               width: 18
               font: sans
               fontSize: 11
-              bold: letter == character && browsing
-              color: letter == character && browsing ? accent : curve > 0 ? foreground : len(get(groups, character, [])) > 0 ? muted : alpha(muted, 0.35)
+              bold: highlightedLetter == character && browsing
+              color: highlightedLetter == character && browsing ? accent : curve > 0 ? foreground : len(get(groups, character, [])) > 0 ? muted : alpha(muted, 0.35)
               align: center
-              background: curve > 0 ? alpha(background, 0.9) : transparent
+              background: transparent
               radius: 4
-              offset: [-72 * curve, 6 * sin(rad(clamp((i - fingerPosition) / 4, -1, 1) * 180)) * curve]
-              scale: 1 + 0.85 * curve
+              offset: [-railPull * curve, 0]
+              scale: 1 + 0.16 * curve
             }
           }
         }
@@ -336,74 +456,131 @@ face "Omagara" {
     }
   }
 
-  component AppRows(choices, searchView = false, thumbView = false) {
+  // Bounded expression parser: each token updates a stack of sum/product
+  // frames. No dynamic evaluation, recursion, shell, service or idle trigger.
+  component Calculator(expression) {
+    Column {
+      let input = trim(sub(expression, 0, 129))
+      let candidate = cfg.calculator && match(input, "^[0-9.()+*/ \\t\\r\\n-]+$") != null && match(input, "[0-9]") != null && match(input, "[+*/()-]") != null
+      let tokens = candidate && len(expression) <= 128 ? matchAll(input, "[0-9]+(?:[.][0-9]*)?|[.][0-9]+|[()+*/-]") : []
+      let frame = {sum: 0, term: null, op: "+", unary: 1, need: true}
+      let lexical = join(tokens, "") == join(matchAll(input, "[^ \\t\\r\\n]"), "")
+      // Phase 0 reads syntax, phase 1 folds an atom into the product, and
+      // phase 2 checks numeric bounds. At most 64 tokens / 16 parentheses.
+      let parsed = !candidate || len(expression) > 128 || len(tokens) > 64 ? {frames: [frame], atom: null, error: "Use at most 128 characters and 64 tokens"} : !lexical ? {frames: [frame], atom: null, error: "Invalid number or operator"} : reduce(tokens, (s, t) => reduce([0, 1, 2], (r, phase) => r.error != "" ? r : phase == 0 ? (
+        num(t) != null ? (last(r.frames).need ? merge(r, {atom: num(t)}) : merge(r, {error: "Expected an operator"})) :
+        t == "(" ? (!last(r.frames).need ? merge(r, {error: "Expected an operator before ("}) : len(r.frames) >= 17 ? merge(r, {error: "Use at most 16 parentheses levels"}) : merge(r, {frames: r.frames + [frame]})) :
+        t == ")" ? (len(r.frames) == 1 || last(r.frames).need ? merge(r, {error: "Unmatched or incomplete parentheses"}) : merge(r, {atom: last(r.frames).sum + last(r.frames).term, frames: take(r.frames, len(r.frames) - 1)})) :
+        t == "+" || t == "-" ? merge(r, {frames: take(r.frames, len(r.frames) - 1) + [last(r.frames).need ? merge(last(r.frames), {unary: last(r.frames).unary * (t == "-" ? -1 : 1)}) : merge(frame, {sum: last(r.frames).sum + last(r.frames).term, unary: t == "-" ? -1 : 1})]}) :
+        last(r.frames).need ? merge(r, {error: "Expected a number"}) : merge(r, {frames: take(r.frames, len(r.frames) - 1) + [merge(last(r.frames), {op: t, need: true, unary: 1})]})
+      ) : phase == 1 ? (
+        r.atom == null ? r : abs(r.atom) > 1000000000000000 ? merge(r, {error: "Number exceeds calculator range"}) : last(r.frames).op == "/" && r.atom == 0 ? merge(r, {error: "Division by zero"}) : merge(r, {atom: null, frames: take(r.frames, len(r.frames) - 1) + [merge(last(r.frames), {term: last(r.frames).op == "*" ? last(r.frames).term * last(r.frames).unary * r.atom : last(r.frames).op == "/" ? last(r.frames).term / (last(r.frames).unary * r.atom) : last(r.frames).unary * r.atom, need: false, unary: 1})]})
+      ) : abs(last(r.frames).sum) > 1000000000000000 || abs(last(r.frames).term ?? 0) > 1000000000000000 ? merge(r, {error: "Number exceeds calculator range"}) : r, s), {frames: [frame], atom: null, error: ""})
+      let error = parsed.error != "" ? parsed.error : len(parsed.frames) != 1 || last(parsed.frames).need ? "Incomplete expression" : abs(last(parsed.frames).sum + last(parsed.frames).term) > 1000000000000000 ? "Number exceeds calculator range" : ""
+      let answer = candidate && error == "" ? last(parsed.frames).sum + last(parsed.frames).term : null
+      let rounded = answer == null ? null : round(answer, 10)
+      let answerText = answer == null ? "" : str(abs(answer - rounded) <= abs(answer) * 0.000000000000001 ? rounded : answer)
+      fill: width
+      gap: 4
+      if candidate {
+        Row {
+          fill: width
+          gap: 12
+          Text { text: error == "" ? "= " + answerText : error; font: sans; fontSize: error == "" ? 24 : 13; color: error == "" ? accent : muted; weight: 1 }
+          if answer != null {
+            Text { text: "Copy"; font: sans; fontSize: 14; color: accent; padding: [12, 10]; onTap: copy(answerText) }
+          }
+        }
+      }
+    }
+  }
+
+  component AppRow(a, searchView = false, thumbView = false, interactive = true) {
+    let rowScale = thumbView ? appScale : 1
+    Row {
+      fill: width
+      height: thumbView ? appRowHeight : null
+      align: center
+      gap: 16 * rowScale
+      padding: [4 * rowScale, thumbView ? 8 * rowScale : 12]
+      onTap: {
+        if interactive {
+        let launchKey = a.key
+        appVelocity = 0; browsing = false
+        activeSide = 0
+        railHeld = false
+        draggingSide = 0
+        letter = first(liveAlphabet) ?? "A"
+        appScroll = 0
+        appAnchor = ""
+        menu = ""
+        queryText = ""
+        if searchView { close() }
+        androidApp(launchKey)
+        }
+      }
+      onLongPress: {
+        if interactive {
+        appScroll = appOffset
+        appVelocity = 0
+        if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top }
+        menuShortcuts = null
+        menu = a.key
+        menuShortcuts = shortcuts(a.key)
+        }
+      }
+      Popup {
+        visible: interactive && menu == a.key && menuShortcuts != null
+        position: above
+        onDismiss: menu = ""
+        width: 220
+        gap: 0
+        for shortcut in menuShortcuts ?? [] key shortcut.key {
+          Text { text: shortcut.name; fill: width; padding: [12, 14]; maxLines: 2; onTap: { menu = ""; appVelocity = 0; browsing = false; activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; queryText = ""; open(shortcut.key) } }
+        }
+        for actionWord in (find(drawer.apps ?? [], d => d.key == a.key || d.key == "a:" + a.key).actions ?? []) {
+          Text {
+            text: get({pin: "Add to home", info: "App info", uninstall: "Uninstall", remove: "Remove", edit: "Edit", share: "Share"}, actionWord, actionWord)
+            fill: width
+            padding: [12, 14]
+            onTap: { menu = ""; appVelocity = 0; browsing = false; activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; queryText = ""; appAction(actionWord, a.key) }
+          }
+        }
+      }
+      if cfg.icons {
+        Box {
+          size: 36 * rowScale
+          align: center
+          // OWL selects original/mask icons globally, not per Image.
+          // Tint only native Alpha8 masks; never tint original opaque icons.
+          if cfg.tintIcons && drawer.monochrome != true {
+            Text { text: upper(sub(trim(a.name), 0, 2)); font: sans; fontSize: 16 * rowScale; color: foreground; align: center }
+          } else if a.icon != null && a.icon != "" {
+            Image { src: a.icon; size: 36 * rowScale; tint: cfg.tintIcons ? foreground : null; label: a.name + (a.profile == null ? "" : " · " + a.profile) }
+          } else {
+            Text { text: upper(sub(trim(a.name), 0, 2)); font: sans; fontSize: 16 * rowScale; color: foreground; align: center }
+          }
+        }
+      }
+      Column {
+        weight: 1
+        gap: rowScale
+        Text { text: a.name; font: sans; fontSize: 20 * rowScale; maxLines: 1 }
+        if a.profile != null { Text { text: a.profile; font: sans; fontSize: 11 * rowScale; color: muted; maxLines: 1 } }
+      }
+    }
+  }
+
+  component AppRows(choices, searchView = false) {
     Column {
       lazy: true
       fill: true
       gap: 0
       for a in choices key a.key {
-        Row {
-          fill: width
-          height: thumbView ? appRowHeight : null
-          align: center
-          gap: 16
-          padding: [4, thumbView ? 8 : 12]
-          onTap: {
-            let launchKey = a.key
-            browsing = false
-            activeSide = 0
-            queryText = ""
-            if searchView { close() }
-            androidApp(launchKey)
-          }
-          onLongPress: {
-            menuShortcuts = null
-            menu = a.key
-            menuShortcuts = shortcuts(a.key)
-          }
-          Popup {
-            visible: menu == a.key && menuShortcuts != null
-            position: above
-            onDismiss: menu = ""
-            width: 220
-            gap: 0
-            for shortcut in menuShortcuts ?? [] key shortcut.key {
-              Text { text: shortcut.name; fill: width; padding: [12, 14]; maxLines: 2; onTap: { menu = ""; open(shortcut.key) } }
-            }
-            for actionWord in (find(drawer.apps ?? [], d => d.key == a.key || d.key == "a:" + a.key).actions ?? []) {
-              Text {
-                text: get({pin: "Add to home", info: "App info", uninstall: "Uninstall", remove: "Remove", edit: "Edit", share: "Share"}, actionWord, actionWord)
-                fill: width
-                padding: [12, 14]
-                onTap: { menu = ""; appAction(actionWord, a.key) }
-              }
-            }
-          }
-          if cfg.icons {
-            Box {
-              size: 36
-              align: center
-              // OWL selects original/mask icons globally, not per Image.
-              // Tint only native Alpha8 masks; never tint original opaque icons.
-              if cfg.tintIcons && drawer.monochrome != true {
-                Text { text: upper(sub(trim(a.name), 0, 2)); font: sans; fontSize: 16; color: foreground; align: center }
-              } else if a.icon != null && a.icon != "" {
-                Image { src: a.icon; size: 36; tint: cfg.tintIcons ? foreground : null; label: a.name + (a.profile == null ? "" : " · " + a.profile) }
-              } else {
-                Text { text: upper(sub(trim(a.name), 0, 2)); font: sans; fontSize: 16; color: foreground; align: center }
-              }
-            }
-          }
-          Column {
-            weight: 1
-            gap: 1
-            Text { text: a.name; font: sans; fontSize: 20; maxLines: 1 }
-            if a.profile != null { Text { text: a.profile; font: sans; fontSize: 11; color: muted; maxLines: 1 } }
-          }
-        }
+        AppRow { a: a; searchView: searchView }
       }
       if len(choices) == 0 {
-        Text { text: installed == null ? "Loading apps…" : searchView ? "No matching apps" : "No apps under ${letter}"; font: sans; fontSize: 14; color: muted; padding: [4, 20] }
+        Text { text: installed == null ? "Loading apps…" : "No matching apps"; font: sans; fontSize: 14; color: muted; padding: [4, 20] }
       }
     }
   }
@@ -411,11 +588,13 @@ face "Omagara" {
   Box {
     fill: true
     ripple: false
-    onTap: { browsing = false; activeSide = 0; expandedStack = ""; replyKey = ""; replyDraft = "" }
+    onPress: { if appVelocity != 0 { appScroll = appOffset; appVelocity = 0; if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top } } }
+    onTap: { appVelocity = 0; browsing = false; activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; queryText = ""; menu = ""; expandedStack = ""; replyKey = ""; replyDraft = "" }
     Column {
       fill: true
       gap: 0
       padding: [screenLeft + 24, screenTop + 12, screenRight + 24, 0]
+      visible: !browsing
       // Both taps open views inside this face’s native launcher screen.
       Column {
         fill: width
@@ -438,17 +617,46 @@ face "Omagara" {
       }
     }
     if browsing {
-      Column {
+      Box {
         width: appPanelWidth
         height: appPanelHeight
-        offset: [screenLeft + 48, appPanelTop]
+        offset: [screenLeft + 48, appSafeTop]
         clip: true
-        gap: 0
-        Text { text: letter; height: appLabelHeight; font: sans; fontSize: 22; color: accent; maxLines: 1 }
-        // Only the list resets when the selected group changes. Rail bounds,
-        // gesture detectors, and viewport identity stay stationary/stable.
-        for groupKey in [letter] key groupKey {
-          AppRows { choices: shown; thumbView: true; weight: 1; fill: width }
+        drag: vertical
+        onPress: { appScroll = appOffset; appVelocity = 0; if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top } }
+        onDrag: {
+          let position = appOffset
+          appVelocity = 0
+          appScroll = clamp(position - dy, 0, appMaxScroll)
+          if dy != 0 { appTracking = true }
+          menu = ""
+          if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top }
+        }
+        onDragEnd: {
+          appScroll = appOffset
+          appVelocity = !browsing || railHeld || cfg.reduceMotion || abs(vy) < 160 || vy > 0 && appOffset <= 0 || vy < 0 && appOffset >= appMaxScroll ? 0 : clamp(-vy, -6000, 6000)
+          if appVelocity != 0 { appGlideStarted = time }
+          if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top }
+        }
+        for row in appWindow key row.id {
+          // Fade by row centre: a partly clipped row must not vanish whole.
+          let rowCentre = row.top - appOffset + row.height / 2
+          let edge = clamp(min(rowCentre, appPanelHeight - rowCentre) / max(1, appFade), 0, 1)
+          let rowAlpha = edge * edge * (3 - 2 * edge)
+          Box {
+            width: appPanelWidth
+            height: row.height
+            offset: [0, row.top - appOffset]
+            opacity: rowAlpha
+            if row.heading {
+              Text { text: row.section; height: appLabelHeight; font: sans; fontSize: 22 * appScale; color: accent; maxLines: 1 }
+            } else {
+              AppRow { a: row.app; thumbView: true; interactive: rowAlpha > 0.08 && row.top >= appOffset && row.top + row.height <= appOffset + appPanelHeight }
+            }
+          }
+        }
+        if len(apps) == 0 {
+          Text { text: installed == null ? "Loading apps…" : "No installed apps"; font: sans; fontSize: 14; color: muted }
         }
       }
     }
@@ -506,6 +714,22 @@ face "Omagara" {
       align: topEnd
       padding: [0, railTop, screenRight + 4, 0]
       AlphabetRail { side: 1 }
+      // Keep the cue close to the peak, not stranded far to its left.
+      // At the screen edge, lift it above the peak to prevent an overlap.
+      if railHeld && activeSide != 0 {
+        let peakX = railBaseX - railPull
+        let bubbleX = max(screenLeft + 22, peakX - 42)
+        let peakLift = 40 * clamp((screenLeft + 56 - railThumbX) / 46, 0, 1)
+        let bubbleLift = peakLift + 66 * clamp((screenLeft + 60 - peakX) / 46, 0, 1)
+        Box {
+          size: 42
+          radius: 21
+          background: alpha(surface, 0.94)
+          align: center
+          offset: [bubbleX - railBaseX - 1, clamp(touchY - railTop - 21 - bubbleLift, 0, max(0, appSafeBottom - railTop - 42))]
+          Text { text: letter; font: sans; fontSize: 20; color: accent; bold: true; align: center }
+        }
+      }
     }
     Box {
       fill: true
@@ -517,7 +741,7 @@ face "Omagara" {
         radius: 24
         background: alpha(surface, 0.85)
         align: center
-        onTap: { browsing = false; activeSide = 0 }
+        onTap: { appVelocity = 0; browsing = false; activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; queryText = ""; menu = ""; expandedStack = ""; replyKey = ""; replyDraft = "" }
         Text { text: "×"; font: sans; fontSize: 26; align: center }
       }
     }
@@ -532,8 +756,8 @@ face "Omagara" {
         radius: 24
         background: alpha(surface, 0.85)
         align: center
-        onTap: { activeSide = 0; browsing = false; queryText = ""; expandedStack = ""; replyKey = ""; replyDraft = ""; screenMode = "search"; screen() }
-        onLongPress: { menu = ""; activeSide = 0; browsing = false; resetConfirm = false; screenMode = "settings"; screen() }
+        onTap: { activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; menu = ""; appVelocity = 0; browsing = false; queryText = ""; expandedStack = ""; replyKey = ""; replyDraft = ""; screenMode = "search"; screen() }
+        onLongPress: { menu = ""; activeSide = 0; railHeld = false; draggingSide = 0; appScroll = 0; appAnchor = ""; letter = first(liveAlphabet) ?? "A"; appVelocity = 0; browsing = false; resetConfirm = false; screenMode = "settings"; screen() }
         // A native Canvas magnifier avoids relying on an unsupported icon glyph.
         Canvas {
           size: 24
@@ -559,15 +783,21 @@ face "Omagara" {
         gap: 12
         Input {
           text: queryText
-          placeholder: "App name…"
+          placeholder: cfg.calculator ? "App name or calculation…" : "App name…"
           fontSize: 18
           focus: true
           onChange: queryText = value
           onSubmit: {
             if len(searchResults) > 0 {
               let launchKey = searchResults[0].key
-              browsing = false
+              appVelocity = 0; browsing = false
               activeSide = 0
+              railHeld = false
+              draggingSide = 0
+              letter = first(liveAlphabet) ?? "A"
+              appScroll = 0
+              appAnchor = ""
+              menu = ""
               queryText = ""
               close()
               androidApp(launchKey)
@@ -579,8 +809,10 @@ face "Omagara" {
           font: sans
           fontSize: 12
           color: muted
-          onTap: { queryText = ""; browsing = false; activeSide = 0; close() }
+          onTap: { queryText = ""; appVelocity = 0; browsing = false; activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; menu = ""; close() }
         }
+        Calculator { expression: queryText }
+        Text { text: "Applications"; font: sans; fontSize: 13; color: muted }
         for searchKey in [queryText] key searchKey {
           AppRows { choices: searchResults; searchView: true; weight: 1; fill: width }
         }
@@ -601,12 +833,34 @@ face "Omagara" {
               fill: width
               align: center
               padding: [8, 14]
-              onTap: { prefs = set(prefs, pref.key, !get(cfg, pref.key)); menu = "" }
+              onTap: { if pref.key != "searchContacts" { prefs = set(prefs, pref.key, !get(cfg, pref.key)) }; menu = "" }
               Text { text: pref.name; font: sans; fontSize: 15; weight: 1 }
               Text { text: get(cfg, pref.key) ? "ON" : "OFF"; color: get(cfg, pref.key) ? accent : muted; fontSize: 14 }
             }
           }
         }
+        Text { text: "Alphabet touch feedback"; color: accent; padding: [0, 18, 0, 6] }
+        Flow {
+          fill: width
+          gap: 8
+          for mode in hapticChoices {
+            Button { text: (cfg.hapticFeedback == mode ? "✓ " : "") + mode; onTap: prefs = set(prefs, "hapticFeedback", mode) }
+          }
+        }
+        Text { text: "Reduced vibrates on every second letter change. Every letter vibrates on each change. Android controls vibration strength and may disable touch feedback."; font: sans; fontSize: 13; color: muted }
+        Text { text: "Application Browser"; color: accent; padding: [0, 18, 0, 6] }
+        Text { text: "Application Scale · " + str(cfg.appScale) + "%"; font: sans; fontSize: 15 }
+        Slider {
+          value: cfg.appScale
+          min: 75
+          max: 115
+          step: 5
+          live: true
+          onChange: { letter = highlightedLetter; appTracking = false; prefs = set(prefs, "appScale", clamp(round(value / 5) * 5, 75, 115)) }
+        }
+        Text { text: "80% is the default. 100% restores the previous browser sizing. Search and home content keep their size."; font: sans; fontSize: 13; color: muted }
+        Button { text: "Reset Application Scale to 80%"; onTap: { letter = highlightedLetter; appTracking = false; prefs = set(prefs, "appScale", 80) } }
+        Text { text: "Contact search is unavailable in this launcher: OWL 21 has no contacts source or permission action. It stays OFF and reads no contacts."; font: sans; fontSize: 13; color: muted }
         Text { text: "World clocks"; color: accent; padding: [0, 18, 0, 6] }
         Text { text: "Select zones; daylight-saving changes follow Android's time-zone database."; font: sans; fontSize: 13; color: muted }
         for zone in zoneChoices {
@@ -624,11 +878,12 @@ face "Omagara" {
           text: "Import Omagara settings"
           onTap: {
             let imported = parseJson(importText)
-            if imported.version == 1 && all(keys(defaults), k => get(imported.prefs, k) == true || get(imported.prefs, k) == false) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
-              prefs = reduce(keys(defaults), (m, k) => set(m, k, get(imported.prefs, k)), {})
+            if imported.version == 1 && all(keys(defaults), k => k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
+              letter = highlightedLetter; appTracking = false
+              prefs = reduce(keys(defaults), (m, k) => set(m, k, k == "searchContacts" ? false : (get(imported.prefs, k) ?? get(defaults, k))), {})
               worldZones = unique(imported.zones ?? [])
               importStatus = "Settings imported"
-            } else { importStatus = "Invalid settings: export version 1 with boolean preferences and supported zones required" }
+            } else { importStatus = "Invalid settings: export version 1 with boolean preferences, Application Scale 75–115 in steps of 5, valid haptic mode, and supported zones required" }
           }
         }
         if importStatus != "" { Text { text: importStatus; fontSize: 13; color: muted } }
@@ -636,7 +891,7 @@ face "Omagara" {
         if resetConfirm {
           Text { text: "Reset Omagara appearance and world clocks?"; font: sans }
           Row {
-            Button { text: "Confirm reset"; onTap: { prefs = {}; worldZones = []; resetConfirm = false; importText = ""; importStatus = "" } }
+            Button { text: "Confirm reset"; onTap: { letter = highlightedLetter; appTracking = false; prefs = {}; worldZones = []; resetConfirm = false; importText = ""; importStatus = "" } }
             Button { text: "Cancel"; onTap: resetConfirm = false }
           }
         }
