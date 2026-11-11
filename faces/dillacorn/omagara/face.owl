@@ -1,0 +1,773 @@
+face "Omagara" {
+  meta { owl: 21; description: "Omagara: a transparent home face with grouped notifications, curved app navigation, search, calendar, timers and world clocks"; version: "1.0"; license: "MIT"; category: "home" }
+  page: 0
+  edge: true
+  padding: 0
+  background: transparent
+  requires { pacman: [] }
+
+  source now = clock every 1m
+  source seconds = clock every 1s
+  source drawer = android.drawer
+  source installed = android.apps
+  source notices = android.notifications
+  source agenda = android.calendar
+  source nextAlarm = android.alarm
+  // Transient navigation only: no favorites, saved app lists or polling.
+  state screenMode = "search"
+  state browsing = false
+  state queryText = ""
+  state letter = "A"
+  state activeSide = 0
+  state draggingSide = 0
+  state fingerPosition = 0
+  // Screen-space dp, updated only by stationary rail touch handlers.
+  state touchY = 0
+  state expandedStack = ""
+  state replyKey = ""
+  state replyDraft = ""
+  state noticeDragKey = ""
+  state noticeDragX = 0
+
+  state prefs = {} persist
+  state worldZones = [] persist
+  state heldAlphabet = []
+  state railHeld = false
+  state menu = ""
+  state menuShortcuts = null
+  state pickedEvent = null
+  state calendarDay = ""
+  state upcoming = true
+  state resetConfirm = false
+  state importText = ""
+  state importStatus = ""
+  state clockTab = "alarms"
+  state timerMinutes = "5"
+  state timerDeadline = 0 persist
+  state timerLeft = 0 persist
+  state watchStarted = 0
+  state watchElapsed = 0
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, tintIcons: false, clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true}
+  let cfg = merge(defaults, prefs)
+  let zoneChoices = ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland"]
+  let preferenceRows = [
+    {section: "Appearance", key: "icons", name: "Show application icons"},
+    {key: "tintIcons", name: "Themed icons (monochrome)"},
+    {key: "clock", name: "Show clock"}, {key: "date", name: "Show date"},
+    {key: "event", name: "Show today's calendar event"},
+    {key: "reduceMotion", name: "Reduce motion"},
+    {section: "Navigation", key: "idleAlphabet", name: "Show alphabet while idle"},
+    {key: "hideEmpty", name: "Hide empty alphabet letters"},
+    {key: "leftInput", name: "Enable left-edge input"},
+    {key: "curve", name: "Curved alphabet magnification"},
+    {section: "Notifications", key: "notifications", name: "Show notifications"},
+    {key: "previews", name: "Show notification content previews"},
+    {key: "grouping", name: "Group notifications by application"},
+    {key: "actions", name: "Show notification action buttons"},
+    {section: "Header interactions", key: "clockTap", name: "Clock tap action"},
+    {key: "dateTap", name: "Date / calendar tap action"},
+    {key: "eventTap", name: "Calendar event tap action"}
+  ]
+  let remaining = timerDeadline > 0 ? max(0, ceil(timerDeadline - seconds)) : timerLeft
+  let elapsed = watchElapsed + (watchStarted > 0 ? max(0, seconds - watchStarted) : 0)
+  // Deadline trigger, not a polling handler. Android sleep may delay delivery.
+  at timerDeadline { timerDeadline = 0; timerLeft = 0; notify("Omagara timer", "Time is up") }
+
+  let fullAlphabet = split("A B C D E F G H I J K L M N O P Q R S T U V W X Y Z #", " ")
+  let apps = (installed ?? []).sortBy(a => lower(a.name))
+  let groups = groupBy(apps, a => contains(fullAlphabet, upper(sub(trim(a.name), 0, 1))) ? upper(sub(trim(a.name), 0, 1)) : "#")
+  // Freeze mapping and geometry for the entire touch, even if apps update.
+  let liveAlphabet = cfg.hideEmpty ? fullAlphabet.filter(c => len(get(groups, c, [])) > 0) : fullAlphabet
+  let alphabet = railHeld ? heldAlphabet : liveAlphabet
+  let shown = get(groups, letter, [])
+  let searchResults = trim(queryText) == "" ? apps : rank(apps, trim(queryText))
+  let availableHeight = (tileHeight ?? 800) - screenTop - screenInset
+  let compact = availableHeight < 560
+  let availableWidth = (tileWidth ?? 400) - screenLeft - screenRight
+  // First/last letter centers sit at 31%/90% of the inset-safe height.
+  // Include half a cell above/below them so both endpoint hit regions are full-sized.
+  let railStep = availableHeight * 0.59 / max(1, len(alphabet) - 1)
+  let railHeight = railStep * max(1, len(alphabet))
+  let railTop = screenTop + availableHeight * 0.31 - (len(alphabet) > 1 ? railStep / 2 : 0)
+  // Handlers receive y local to this same rail: each center is (i + 0.5)
+  // * railStep. floor(y / railStep) selects i; no screen offset is subtracted.
+
+  // The source preserves post/update order; package + profile identifies a stack.
+  // Never replace the native key: open, action, dismiss and reply all need it.
+  let noticeItems = notices.items ?? []
+  let noticeGroups = groupBy(noticeItems, n => toJson([n.package, n.profile]))
+  let noticeGroupKeys = unique(noticeItems.map(n => toJson([n.package, n.profile])))
+  // Flatten before the lazy list, so even a large expanded stack virtualizes
+  // each notification separately (and doesn't load every icon at once).
+  let groupedNoticeRows = flatten(noticeGroupKeys.map(k => [{id: "group:" + k, stack: k, summary: true, item: first(get(noticeGroups, k, []))}] + (expandedStack == k && len(get(noticeGroups, k, [])) > 1 ? get(noticeGroups, k, []).map(n => {id: n.key, stack: k, summary: false, item: n}) : [])))
+  let noticeRows = cfg.grouping ? groupedNoticeRows : noticeItems.map(n => {id: n.key, stack: toJson([n.package, n.profile]), summary: false, item: n})
+  let clearableNotices = count(noticeItems, n => n.clearable)
+  let dayStart = parseTime(fmtTime(now, "yyyy-MM-dd"), "yyyy-MM-dd")
+  let dayEnd = parseTime(fmtTime(now, "yyyy-MM-dd") + " 23:59:59", "yyyy-MM-dd HH:mm:ss") + 1
+  // Only one event is displayed: duplicate calendar copies cannot repeat the line.
+  // Prefer timed current/upcoming events, then an all-day event covering today.
+  let todayEvents = (agenda.events ?? []).filter(e => trim(e.title ?? "") != "" && e.start < dayEnd && e.end > now && e.end > dayStart).sortBy(e => e.allDay ? dayEnd : max(now, e.start))
+  let todayEvent = first(todayEvents)
+  let headerBottom = screenTop + (cfg.clock ? (compact ? 64 : 100) : 0) + (cfg.date ? 36 : 0) + (cfg.event && todayEvent != null ? 32 : 0) + 36
+  let noticeTop = max(headerBottom, screenTop + availableHeight * 0.24)
+  let controlRight = screenRight + 60
+  // Center at 89% of inset-safe height, with at least 24dp below the button.
+  let searchBottom = screenInset + max(24, availableHeight * 0.11 - 24)
+  let noticeBottom = (tileHeight ?? 800) - searchBottom - 64
+  // One source of truth: 20dp outer left; 12dp clear of the 44dp right rail.
+  let noticeWidth = max(0, availableWidth - 80)
+
+  // A compact viewport surrounds the finger; long groups scroll inside it.
+  // Reserve a separate right control lane so lower rows can reach near the
+  // navigation inset without passing behind Search or Close.
+  let appRowHeight = 64
+  let appLabelHeight = 32
+  let appSafeTop = headerBottom + 12
+  let appSafeBottom = max(appSafeTop, (tileHeight ?? 800) - screenInset - 16)
+  let appPanelHeight = min(max(0, appSafeBottom - appSafeTop), appLabelHeight + max(1, min(4, len(shown))) * appRowHeight)
+  let appPanelTop = clamp(touchY - appLabelHeight - (appPanelHeight - appLabelHeight) / 2, appSafeTop, max(appSafeTop, appSafeBottom - appPanelHeight))
+  let appPanelWidth = max(80, availableWidth - 168)
+
+  let selectedDate = calendarDay == "" ? fmtTime(now, "yyyy-MM-dd") : calendarDay
+  // Noon avoids crossing a DST boundary when stepping a local calendar day.
+  let selectedNoon = parseTime(selectedDate + " 12:00", "yyyy-MM-dd HH:mm")
+  let calendarEvents = (agenda.events ?? []).filter(e => upcoming || fmtTime(e.start, "yyyy-MM-dd") <= selectedDate && fmtTime(e.end - 1, "yyyy-MM-dd") >= selectedDate)
+  on railHeld { if !value && !contains(liveAlphabet, letter) { letter = first(liveAlphabet) ?? "A" } }
+  on liveAlphabet { if !railHeld && !contains(liveAlphabet, letter) { letter = first(liveAlphabet) ?? "A" } }
+
+  on notices {
+    if !contains(noticeGroupKeys, expandedStack) { expandedStack = "" }
+    if !any(noticeItems, n => n.key == replyKey && any(n.actions ?? [], a => a.reply)) {
+      replyKey = ""
+      replyDraft = ""
+    }
+    if !any(noticeItems, n => n.key == noticeDragKey) { noticeDragKey = ""; noticeDragX = 0 }
+  }
+
+  component NotificationRow(item, stack, summary) {
+    Column {
+      fill: width
+      gap: 8
+      padding: [16, 16]
+      radius: 14
+      background: alpha(background, 0.48)
+      onTap: {
+        if summary && len(get(noticeGroups, stack, [])) > 1 {
+          expandedStack = expandedStack == stack ? "" : stack
+          replyKey = ""
+          replyDraft = ""
+        } else {
+          let notificationKey = item.key
+          queryText = ""
+          browsing = false
+          activeSide = 0
+          expandedStack = ""
+          replyKey = ""
+          replyDraft = ""
+          notification("open", notificationKey)
+        }
+      }
+      // Horizontal consumption leaves the enclosing lazy Column free to scroll.
+      // Clip at the notification viewport, clear of both Android screen edges.
+      drag: horizontal
+      offset: [noticeDragKey == item.key && (!summary || len(get(noticeGroups, stack, [])) == 1) ? noticeDragX : 0, 0]
+      animate offset: cfg.reduceMotion ? tween(0ms) : spring(0.8, 400)
+      onDrag: {
+        if item.clearable && (!summary || len(get(noticeGroups, stack, [])) == 1) {
+          if noticeDragKey != item.key { noticeDragX = 0 }
+          noticeDragKey = item.key
+          noticeDragX = clamp(noticeDragX + dx, -noticeWidth, noticeWidth)
+        }
+      }
+      onDragEnd: {
+        if noticeDragKey == item.key && item.clearable && (abs(noticeDragX) > noticeWidth / 3 || abs(noticeDragX) > 16 && abs(vx) > 1000 && sign(vx) == sign(noticeDragX)) {
+          notification("dismiss", item.key)
+        }
+        noticeDragKey = ""
+        noticeDragX = 0
+      }
+      Row {
+        fill: width
+        gap: 14
+        align: center
+        Image { src: item.icon; size: 32; label: (item.app ?? "Notification") + (item.profile == null ? "" : " · " + item.profile) }
+        Text { text: (item.app ?? item.package) + (item.profile == null ? "" : " · " + item.profile); weight: 1; font: sans; fontSize: 12; color: muted; maxLines: 1 }
+        if item.clearable && (!summary || len(get(noticeGroups, stack, [])) == 1) {
+          Text { text: "×"; width: 44; height: 44; padding: [0, 10]; align: center; fontSize: 18; color: muted; onTap: notification("dismiss", item.key) }
+        }
+      }
+      if !summary || expandedStack != stack || len(get(noticeGroups, stack, [])) == 1 {
+        Text { text: cfg.previews ? (item.title ?? "") : "Notification content hidden"; font: sans; fontSize: 16; bold: true; maxLines: 2 }
+        if cfg.previews && (item.text ?? "") != "" { Text { text: item.text; font: sans; fontSize: 14; color: muted; maxLines: 3 } }
+      }
+      if summary && len(get(noticeGroups, stack, [])) > 1 {
+        Text { text: expandedStack == stack ? "${len(get(noticeGroups, stack, []))} notifications · collapse ▴" : "${len(get(noticeGroups, stack, []))} notifications · expand ▾"; font: sans; fontSize: 13; color: accent; maxLines: 1; padding: [0, 10] }
+      }
+      if cfg.previews && cfg.actions && (!summary || len(get(noticeGroups, stack, [])) == 1) && len(item.actions ?? []) > 0 {
+        Flow {
+          fill: width
+          gap: 8
+          padding: [0, 6, 0, 0]
+          for action, actionIndex in item.actions ?? [] {
+            Text {
+              text: action.title
+              font: sans
+              fontSize: 13
+              color: accent
+              padding: [10, 14]
+              onTap: {
+                if action.reply {
+                  replyKey = replyKey == item.key ? "" : item.key
+                  replyDraft = ""
+                } else {
+                  queryText = ""
+                  browsing = false
+                  activeSide = 0
+                  notification("action", item.key, actionIndex)
+                }
+              }
+            }
+          }
+        }
+        if replyKey == item.key && any(item.actions ?? [], a => a.reply) {
+          Row {
+            fill: width
+            gap: 6
+            Input {
+              weight: 1
+              text: replyDraft
+              placeholder: "Reply…"
+              fontSize: 14
+              onChange: replyDraft = value
+              onSubmit: {
+                if trim(value) != "" {
+                  notification("reply", item.key, value)
+                  replyDraft = ""
+                  replyKey = ""
+                }
+              }
+            }
+            Text {
+              text: "Send"
+              font: sans
+              fontSize: 14
+              color: accent
+              padding: [12, 14]
+              onTap: {
+                if trim(replyDraft) != "" {
+                  notification("reply", item.key, replyDraft)
+                  replyDraft = ""
+                  replyKey = ""
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  component AlphabetRail(side) {
+    Column {
+      width: side == 1 ? 44 : 20
+      height: railHeight
+      gap: 0
+      drag: vertical
+      ripple: false
+      onPress: {
+        heldAlphabet = liveAlphabet
+        railHeld = true
+        draggingSide = 0
+        touchY = railTop + clamp(y, 0, railHeight)
+        fingerPosition = clamp(y / railStep - 0.5, 0, max(0, len(alphabet) - 1))
+        letter = get(alphabet, clamp(floor(y / railStep), 0, max(0, len(alphabet) - 1)), letter)
+        activeSide = 1
+        browsing = true
+        expandedStack = ""
+        replyKey = ""
+        replyDraft = ""
+      }
+      onDrag: {
+        railHeld = true
+        draggingSide = 1
+        touchY = railTop + clamp(y, 0, railHeight)
+        fingerPosition = clamp(y / railStep - 0.5, 0, max(0, len(alphabet) - 1))
+        letter = get(alphabet, clamp(floor(y / railStep), 0, max(0, len(alphabet) - 1)), letter)
+        activeSide = 1
+        browsing = true
+        expandedStack = ""
+        replyKey = ""
+        replyDraft = ""
+      }
+      onTap: { browsing = true; activeSide = 0; railHeld = false }
+      // A press is cancelled when the drag detector consumes its first move.
+      // Keep the curve active in either detector order at that transition;
+      // a real drag release/cancellation always clears both states below.
+      onRelease: { if draggingSide == 0 { activeSide = 0; railHeld = false } }
+      onDragEnd: { draggingSide = 0; activeSide = 0; railHeld = false }
+      // Left input has no glyph nodes; either edge drives the right feedback.
+      if side == 1 && (cfg.idleAlphabet || activeSide != 0) {
+        for character, i in alphabet {
+          let distance = abs(i - fingerPosition)
+          let curve = activeSide != 0 && cfg.curve && !cfg.reduceMotion ? (1 + cos(rad(min(distance / 4, 1) * 180))) / 2 : 0
+          Box {
+            height: railStep
+            fill: width
+            align: center
+            // Only the glyph moves. The rail and its children never move or resize.
+            // No spring/tween on these descendants: that would trail the parent's
+            // drag. Direct draw-time transforms track each native move immediately.
+            Text {
+              text: character
+              width: 18
+              font: sans
+              fontSize: 11
+              bold: letter == character && browsing
+              color: letter == character && browsing ? accent : curve > 0 ? foreground : len(get(groups, character, [])) > 0 ? muted : alpha(muted, 0.35)
+              align: center
+              background: curve > 0 ? alpha(background, 0.9) : transparent
+              radius: 4
+              offset: [-72 * curve, 6 * sin(rad(clamp((i - fingerPosition) / 4, -1, 1) * 180)) * curve]
+              scale: 1 + 0.85 * curve
+            }
+          }
+        }
+      }
+    }
+  }
+
+  component AppRows(choices, searchView = false, thumbView = false) {
+    Column {
+      lazy: true
+      fill: true
+      gap: 0
+      for a in choices key a.key {
+        Row {
+          fill: width
+          height: thumbView ? appRowHeight : null
+          align: center
+          gap: 16
+          padding: [4, thumbView ? 8 : 12]
+          onTap: {
+            let launchKey = a.key
+            browsing = false
+            activeSide = 0
+            queryText = ""
+            if searchView { close() }
+            androidApp(launchKey)
+          }
+          onLongPress: {
+            menuShortcuts = null
+            menu = a.key
+            menuShortcuts = shortcuts(a.key)
+          }
+          Popup {
+            visible: menu == a.key && menuShortcuts != null
+            position: above
+            onDismiss: menu = ""
+            width: 220
+            gap: 0
+            for shortcut in menuShortcuts ?? [] key shortcut.key {
+              Text { text: shortcut.name; fill: width; padding: [12, 14]; maxLines: 2; onTap: { menu = ""; open(shortcut.key) } }
+            }
+            for actionWord in (find(drawer.apps ?? [], d => d.key == a.key || d.key == "a:" + a.key).actions ?? []) {
+              Text {
+                text: get({pin: "Add to home", info: "App info", uninstall: "Uninstall", remove: "Remove", edit: "Edit", share: "Share"}, actionWord, actionWord)
+                fill: width
+                padding: [12, 14]
+                onTap: { menu = ""; appAction(actionWord, a.key) }
+              }
+            }
+          }
+          if cfg.icons {
+            Box {
+              size: 36
+              align: center
+              // OWL selects original/mask icons globally, not per Image.
+              // Tint only native Alpha8 masks; never tint original opaque icons.
+              if cfg.tintIcons && drawer.monochrome != true {
+                Text { text: upper(sub(trim(a.name), 0, 2)); font: sans; fontSize: 16; color: foreground; align: center }
+              } else if a.icon != null && a.icon != "" {
+                Image { src: a.icon; size: 36; tint: cfg.tintIcons ? foreground : null; label: a.name + (a.profile == null ? "" : " · " + a.profile) }
+              } else {
+                Text { text: upper(sub(trim(a.name), 0, 2)); font: sans; fontSize: 16; color: foreground; align: center }
+              }
+            }
+          }
+          Column {
+            weight: 1
+            gap: 1
+            Text { text: a.name; font: sans; fontSize: 20; maxLines: 1 }
+            if a.profile != null { Text { text: a.profile; font: sans; fontSize: 11; color: muted; maxLines: 1 } }
+          }
+        }
+      }
+      if len(choices) == 0 {
+        Text { text: installed == null ? "Loading apps…" : searchView ? "No matching apps" : "No apps under ${letter}"; font: sans; fontSize: 14; color: muted; padding: [4, 20] }
+      }
+    }
+  }
+
+  Box {
+    fill: true
+    ripple: false
+    onTap: { browsing = false; activeSide = 0; expandedStack = ""; replyKey = ""; replyDraft = "" }
+    Column {
+      fill: true
+      gap: 0
+      padding: [screenLeft + 24, screenTop + 12, screenRight + 24, 0]
+      // Both taps open views inside this face’s native launcher screen.
+      Column {
+        fill: width
+        gap: 6
+        padding: [0, compact ? 0 : 20, 0, 20]
+        Text { text: fmtTime(now, "HH:mm"); font: sans; fontSize: compact ? 36 : 48; fontWeight: 300; align: center; maxLines: 1; visible: cfg.clock; onTap: { if cfg.clockTap { queryText = ""; screenMode = "clock"; screen() } } }
+        Text { text: fmtTime(now, "EEEE, d MMMM"); font: sans; fontSize: 16; color: muted; align: center; maxLines: 1; visible: cfg.date; onTap: { if cfg.dateTap { pickedEvent = null; queryText = ""; screenMode = "calendar"; screen() } } }
+        if cfg.event && todayEvent != null {
+          Text {
+            text: todayEvent.title + " · " + (todayEvent.allDay ? "Today" : fmtTime(todayEvent.start, "HH:mm"))
+            font: sans
+            fontSize: 13
+            color: muted
+            align: center
+            maxLines: 1
+            padding: [0, 6]
+            onTap: { if cfg.eventTap { pickedEvent = todayEvent; queryText = ""; screenMode = "calendar"; screen() } }
+          }
+        }
+      }
+    }
+    if browsing {
+      Column {
+        width: appPanelWidth
+        height: appPanelHeight
+        offset: [screenLeft + 48, appPanelTop]
+        clip: true
+        gap: 0
+        Text { text: letter; height: appLabelHeight; font: sans; fontSize: 22; color: accent; maxLines: 1 }
+        // Only the list resets when the selected group changes. Rail bounds,
+        // gesture detectors, and viewport identity stay stationary/stable.
+        for groupKey in [letter] key groupKey {
+          AppRows { choices: shown; thumbView: true; weight: 1; fill: width }
+        }
+      }
+    }
+    // The notification viewport stops above the search button, and starts
+    // below the clock. Hide it during alphabet browsing/magnification.
+    Box {
+      fill: true
+      align: topStart
+      padding: [screenLeft + 20, noticeTop, screenRight + 60, 0]
+      visible: cfg.notifications && !browsing && activeSide == 0
+      Column {
+        width: noticeWidth
+        height: max(0, noticeBottom - noticeTop)
+        clip: true
+        gap: 6
+        if notices == null {
+          Text { text: "Loading notifications…"; font: sans; fontSize: 12; color: muted }
+        } else if !notices.available {
+          Text {
+            text: "Enable notifications"
+            font: sans
+            fontSize: 12
+            color: accent
+            padding: [8, 12]
+            onTap: { queryText = ""; notification("open", "") }
+          }
+        } else if len(noticeItems) > 0 {
+          if clearableNotices > 0 {
+            Row {
+              fill: width
+              Text { text: "Notifications"; font: sans; fontSize: 13; color: muted; weight: 1; padding: [0, 10] }
+              Text { text: "Clear all"; font: sans; fontSize: 13; color: accent; padding: [12, 10]; onTap: notification("clear") }
+            }
+          }
+          Column {
+            lazy: true
+            weight: 1
+            fill: width
+            gap: 12
+            for noticeRow in noticeRows key noticeRow.id {
+              NotificationRow { item: noticeRow.item; stack: noticeRow.stack; summary: noticeRow.summary }
+            }
+          }
+        }
+      }
+    }
+    Box {
+      fill: true
+      align: topStart
+      padding: [screenLeft, railTop, 0, 0]
+      AlphabetRail { side: -1; visible: cfg.leftInput }
+    }
+    Box {
+      fill: true
+      align: topEnd
+      padding: [0, railTop, screenRight + 4, 0]
+      AlphabetRail { side: 1 }
+    }
+    Box {
+      fill: true
+      align: bottomEnd
+      padding: [0, 0, controlRight, searchBottom + 64]
+      visible: browsing && activeSide == 0
+      Box {
+        size: 48
+        radius: 24
+        background: alpha(surface, 0.85)
+        align: center
+        onTap: { browsing = false; activeSide = 0 }
+        Text { text: "×"; font: sans; fontSize: 26; align: center }
+      }
+    }
+    Box {
+      fill: true
+      align: bottomEnd
+      padding: [0, 0, controlRight, searchBottom]
+      Box {
+        size: 48
+        // Lower-letter magnification crosses this area; restore on release.
+        visible: activeSide == 0
+        radius: 24
+        background: alpha(surface, 0.85)
+        align: center
+        onTap: { activeSide = 0; browsing = false; queryText = ""; expandedStack = ""; replyKey = ""; replyDraft = ""; screenMode = "search"; screen() }
+        onLongPress: { menu = ""; activeSide = 0; browsing = false; resetConfirm = false; screenMode = "settings"; screen() }
+        // A native Canvas magnifier avoids relying on an unsupported icon glyph.
+        Canvas {
+          size: 24
+          circle(10, 10, 6, stroke: foreground, width: 2)
+          line(14.5, 14.5, 21, 21, stroke: foreground, width: 2, cap: round)
+        }
+      }
+    }
+  }
+
+  // OWL 21 exposes no activity-focus or screen-dismiss event to this face.
+  // Reset on explicit close, app launches, and each new search opening; Back,
+  // the frame's X and external focus loss cannot clear state through OWL.
+  // screenWidth/screenHeight stay cached after dismissal, so are not signals.
+  // OWL 21 rejects Input.focus on a face and disables automatic focus there.
+  // A native screen is the supported single-tap keyboard path; it is framed
+  // by the launcher, rather than an inline transparent search overlay.
+  screen {
+    title: screenMode == "calendarAdd" ? "Add event · calendar app" : screenMode == "settings" ? "Omagara Settings" : screenMode == "clock" ? "Clock" : screenMode == "calendar" ? "Calendar" : "Search apps"
+    if screenMode == "search" {
+      Column {
+        fill: true
+        gap: 12
+        Input {
+          text: queryText
+          placeholder: "App name…"
+          fontSize: 18
+          focus: true
+          onChange: queryText = value
+          onSubmit: {
+            if len(searchResults) > 0 {
+              let launchKey = searchResults[0].key
+              browsing = false
+              activeSide = 0
+              queryText = ""
+              close()
+              androidApp(launchKey)
+            }
+          }
+        }
+        Text {
+          text: "Close search"
+          font: sans
+          fontSize: 12
+          color: muted
+          onTap: { queryText = ""; browsing = false; activeSide = 0; close() }
+        }
+        for searchKey in [queryText] key searchKey {
+          AppRows { choices: searchResults; searchView: true; weight: 1; fill: width }
+        }
+      }
+    } else if screenMode == "settings" {
+      Column {
+        fill: true
+        scroll: true
+        gap: 8
+        Text { text: "Omagara only"; font: sans; fontSize: 20; color: accent }
+        Text { text: "Long-press Search to return here. Themed icons use native monochrome masks when available through launcher styling; otherwise neutral initials replace icons. No original app colors are shown in themed mode."; font: sans; color: muted; fontSize: 13 }
+        for pref in preferenceRows {
+          Column {
+            fill: width
+            gap: 0
+            if pref.section != null { Text { text: pref.section; color: accent; padding: [0, 18, 0, 6]; font: sans } }
+            Row {
+              fill: width
+              align: center
+              padding: [8, 14]
+              onTap: { prefs = set(prefs, pref.key, !get(cfg, pref.key)); menu = "" }
+              Text { text: pref.name; font: sans; fontSize: 15; weight: 1 }
+              Text { text: get(cfg, pref.key) ? "ON" : "OFF"; color: get(cfg, pref.key) ? accent : muted; fontSize: 14 }
+            }
+          }
+        }
+        Text { text: "World clocks"; color: accent; padding: [0, 18, 0, 6] }
+        Text { text: "Select zones; daylight-saving changes follow Android's time-zone database."; font: sans; fontSize: 13; color: muted }
+        for zone in zoneChoices {
+          Text { text: (contains(worldZones, zone) ? "✓ " : "+ ") + zone; font: sans; padding: [8, 14]; color: contains(worldZones, zone) ? accent : foreground; onTap: worldZones = contains(worldZones, zone) ? worldZones.filter(z => z != zone) : worldZones + [zone] }
+        }
+        Text { text: "Home"; color: accent; padding: [0, 18, 0, 6] }
+        Button { text: "Go to face page 0"; onTap: launcher("page:0") }
+        Button { text: "Go to widget page 1"; onTap: launcher("page:1") }
+        Text { text: "These buttons open existing pages without changing your default home page or page layout. Choose your default home page in launcher settings."; font: sans; fontSize: 13; color: muted }
+        Button { text: "Android default launcher / launcher settings"; onTap: launcher("settings") }
+        Text { text: "Preferences"; color: accent; padding: [0, 18, 0, 6] }
+        Button { text: "Export Omagara settings to clipboard"; onTap: copy(toJson({version: 1, prefs: cfg, zones: worldZones})) }
+        Input { text: importText; placeholder: "Paste Omagara settings JSON"; lines: 3; onChange: importText = value }
+        Button {
+          text: "Import Omagara settings"
+          onTap: {
+            let imported = parseJson(importText)
+            if imported.version == 1 && all(keys(defaults), k => get(imported.prefs, k) == true || get(imported.prefs, k) == false) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
+              prefs = reduce(keys(defaults), (m, k) => set(m, k, get(imported.prefs, k)), {})
+              worldZones = unique(imported.zones ?? [])
+              importStatus = "Settings imported"
+            } else { importStatus = "Invalid settings: export version 1 with boolean preferences and supported zones required" }
+          }
+        }
+        if importStatus != "" { Text { text: importStatus; fontSize: 13; color: muted } }
+        Button { text: "Reset Omagara settings to defaults…"; onTap: resetConfirm = true }
+        if resetConfirm {
+          Text { text: "Reset Omagara appearance and world clocks?"; font: sans }
+          Row {
+            Button { text: "Confirm reset"; onTap: { prefs = {}; worldZones = []; resetConfirm = false; importText = ""; importStatus = "" } }
+            Button { text: "Cancel"; onTap: resetConfirm = false }
+          }
+        }
+      }
+    } else if screenMode == "clock" {
+      Column {
+        fill: true
+        gap: 12
+        Flow {
+          fill: width
+          gap: 4
+          for tabName in ["alarms", "timer", "stopwatch", "world"] {
+            Text { text: tabName; font: sans; color: clockTab == tabName ? accent : muted; padding: [10, 14]; onTap: clockTab = tabName }
+          }
+        }
+        Column {
+          weight: 1
+          fill: width
+          scroll: true
+          gap: 16
+          if clockTab == "alarms" {
+            Text { text: fmtTime(now, "HH:mm"); font: sans; fontSize: 56; fontWeight: 300; align: center }
+            Text { text: fmtTime(now, "EEEE, d MMMM"); font: sans; fontSize: 18; align: center }
+            Text { text: nextAlarm.set ? "Next alarm · " + fmtTime(nextAlarm.time, "EEE HH:mm") : "No upcoming alarm"; font: sans; fontSize: 16; align: center; color: muted }
+            if nextAlarm.set && nextAlarm.app != null {
+              Button { text: "Manage alarms in clock app"; onTap: androidApp(nextAlarm.app) }
+              Button { text: "+ New alarm in clock app"; onTap: androidApp(nextAlarm.app) }
+            }
+            Text { text: "Android exposes only the next alarm here. New alarms and reminders must be created in your clock or calendar app; Omagara cannot register them."; font: sans; fontSize: 14; color: muted }
+            Button { text: "Find a clock or reminder app"; onTap: { queryText = ""; screenMode = "search" } }
+          } else if clockTab == "timer" {
+            Text { text: "${floor(remaining / 3600)}:${pad(floor(remaining / 60) % 60, 2, "0")}:${pad(floor(remaining) % 60, 2, "0")}"; font: sans; fontSize: 42; align: center }
+            Text { text: "Duration (minutes, 1–1440)"; font: sans; fontSize: 14; color: muted }
+            Input { text: timerMinutes; placeholder: "Duration in minutes (1–1440)"; onChange: timerMinutes = value }
+            Flow {
+              Button { text: timerDeadline > 0 ? "Pause" : timerLeft > 0 ? "Resume" : "Start"; onTap: {
+                if timerDeadline > 0 { timerLeft = remaining; timerDeadline = 0 }
+                else if timerLeft > 0 { timerDeadline = seconds + timerLeft; timerLeft = 0 }
+                else if num(timerMinutes) >= 1 && num(timerMinutes) <= 1440 { timerDeadline = seconds + num(timerMinutes) * 60 }
+              } }
+              Button { text: "Reset"; onTap: { timerDeadline = 0; timerLeft = 0 } }
+            }
+            Text { text: "A local deadline survives launcher restarts. Its notification needs launcher notification permission and may arrive late after sleep. Use your clock app for a reliable waking alarm."; font: sans; fontSize: 14; color: muted }
+          } else if clockTab == "stopwatch" {
+            Text { text: "${floor(elapsed / 3600)}:${pad(floor(elapsed / 60) % 60, 2, "0")}:${pad(floor(elapsed) % 60, 2, "0")}"; font: sans; fontSize: 42; align: center }
+            Row {
+              Button { text: watchStarted > 0 ? "Pause" : "Start / resume"; onTap: { if watchStarted > 0 { watchElapsed = elapsed; watchStarted = 0 } else { watchStarted = seconds } } }
+              Button { text: "Reset"; onTap: { watchStarted = 0; watchElapsed = 0 } }
+            }
+            Text { text: "Elapsed wall-clock time, to the second. Manual system clock changes affect it; not intended for precision timing."; font: sans; fontSize: 13; color: muted }
+          } else {
+            for zone in worldZones {
+              Row {
+                fill: width
+                align: center
+                padding: [0, 10]
+                Column { weight: 1; Text { text: zone; font: sans; fontSize: 14; color: muted }; Text { text: fmtTime(now, "EEE d MMM · HH:mm", zone); font: sans; fontSize: 22 } }
+                Text { text: "×"; padding: [16, 14]; onTap: worldZones = worldZones.filter(z => z != zone) }
+              }
+            }
+            Button { text: "Add / select world clocks"; onTap: { resetConfirm = false; screenMode = "settings" } }
+          }
+        }
+      }
+    } else {
+      Column {
+        fill: true
+        gap: 12
+        if pickedEvent != null {
+          Button { text: "‹ Back to events"; onTap: pickedEvent = null }
+          Column {
+            weight: 1
+            fill: width
+            scroll: true
+            gap: 16
+            Text { text: pickedEvent.title; font: sans; fontSize: 26 }
+            Text { text: fmtTime(pickedEvent.start, "EEEE d MMMM yyyy"); font: sans; fontSize: 18 }
+            Text { text: pickedEvent.allDay ? "All day · through " + fmtTime(pickedEvent.end - 1, "EEE d MMM") : fmtTime(pickedEvent.start, "HH:mm") + " – " + fmtTime(pickedEvent.end, "EEE d MMM HH:mm"); font: sans; fontSize: 18 }
+            Text { text: pickedEvent.calendar; font: sans; color: muted }
+            if (pickedEvent.description ?? "") != "" { Text { text: pickedEvent.description; font: sans } }
+            if (pickedEvent.location ?? "") != "" { Text { text: pickedEvent.location; font: sans; fontSize: 16 } }
+            Text { text: "Full details and editing are available in your calendar app."; font: sans; fontSize: 13; color: muted }
+            Button { text: "Open event in calendar app"; onTap: calendar("open", pickedEvent) }
+          }
+        } else {
+          Row {
+            fill: width
+            Text { text: "Upcoming events"; font: sans; fontSize: 20; weight: 1 }
+            Text { text: "+ Add in calendar app"; font: sans; fontSize: 14; color: accent; padding: [8, 14]; onTap: screenMode = "calendarAdd" }
+          }
+          if screenMode == "calendarAdd" {
+            Text { text: "OWL 21 cannot create events or prefill a new event. Open your calendar app, then use its + control to choose a date, time, title and description. Nothing has been created here."; font: sans }
+            Button { text: "Open calendar app"; onTap: calendar("open") }
+            Button { text: "Back to integrated calendar"; onTap: screenMode = "calendar" }
+          } else if !agenda.granted {
+            Text { text: "Show upcoming events from your phone’s calendars here."; font: sans; fontSize: 16 }
+            Button { text: "Allow calendar access"; onTap: calendar("request") }
+          } else {
+            Flow {
+              Button { text: "‹ Day"; onTap: { calendarDay = fmtTime(selectedNoon - 86400, "yyyy-MM-dd"); upcoming = false } }
+              Button { text: "Today"; onTap: { calendarDay = ""; upcoming = false } }
+              Button { text: "Day ›"; onTap: { calendarDay = fmtTime(selectedNoon + 86400, "yyyy-MM-dd"); upcoming = false } }
+              Button { text: "Upcoming"; onTap: upcoming = true }
+            }
+            Text { text: upcoming ? "Next two weeks" : fmtTime(selectedNoon, "EEEE d MMMM"); font: sans; color: accent }
+            Text { text: "Phone calendars expose only unended events from today through the next 14 days."; font: sans; fontSize: 12; color: muted }
+            if len(calendarEvents) == 0 { Text { text: "No events in the available calendar data"; font: sans; color: muted } }
+            Column {
+              lazy: true
+              weight: 1
+              fill: width
+              gap: 8
+              for event in calendarEvents key event.id {
+                Column {
+                  fill: width
+                  padding: [12, 16]
+                  radius: 12
+                  background: surface
+                  gap: 6
+                  onTap: pickedEvent = event
+                  Text { text: event.allDay ? fmtTime(event.start, "EEE d MMM") + " · All day" : fmtTime(event.start, "EEE d MMM HH:mm"); font: sans; fontSize: 13; color: muted }
+                  Text { text: event.title; font: sans; fontSize: 18; bold: true }
+                  Text { text: event.calendar; font: sans; fontSize: 12; color: muted }
+                  if event.location != "" { Text { text: event.location; font: sans; fontSize: 13; color: muted } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+  }
+}
