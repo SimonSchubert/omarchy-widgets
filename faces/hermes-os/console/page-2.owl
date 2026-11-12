@@ -62,6 +62,8 @@ face "console comms" {
   let gp = 4
   let topH = 64
   let botH = 64
+  // The height of every sidebar key.
+  let bh = 48
   let eX = sw + 52
 
   let yr = num(fmtTime(now, "yyyy"), 2026)
@@ -489,7 +491,7 @@ face "console comms" {
     background: alpha(background, tileOpacity)
     frost: bgBlur
     padding: [8 + screenLeft, screenTop + 6, 8 + screenRight, 0]
-    Top { name: "comms"; code: "02-4410"; cA: lilac; cB: amber; cC: periw }
+    Top { name: "comms"; code: "02-00"; cA: lilac; cB: amber; cC: periw }
     Row {
       weight: 1
       fill: width
@@ -499,14 +501,17 @@ face "console comms" {
         fill: height
         gap: gp
         padding: [0, gp, 0, gp]
-        Box { onTap: media("open"); Side { label: "media"; code: "07-2209"; tint: peach; h: 64 } }
-        Box { onTap: settings("output"); Side { label: "output"; code: "08-1163"; tint: amber; h: 48 } }
-        Box { onTap: notification("open", ""); Side { label: "alerts"; code: "09-${pad(str(n.count ?? 0), 4, "0")}"; tint: n.count > 0 ? gold : tan; h: 64 } }
-        Box { onTap: androidApp("com.google.android.apps.messaging"); Side { label: "messages"; code: "09-1138"; tint: sky; h: 48 } }
-        Box { onTap: androidApp("com.google.android.gm"); Side { label: "gmail"; code: "09-2257"; tint: rose; h: 48 } }
-        Box { onTap: launcher("drawer"); Side { label: "apps"; code: "10-8875"; tint: periw; h: 96 } }
+        // Every key the same height (bh), numbered page and place, top to bottom; a live reading follows its number.
+        // The phone is the last key on every page, under the filler.
+        Box { onTap: { haptic(); media("open") }; Side { label: "media"; code: "02-01"; tint: peach; h: bh } }
+        Box { onTap: { haptic(); settings("output") }; Side { label: "output"; code: "02-02"; tint: amber; h: bh } }
+        Box { onTap: { haptic(); notification("open", "") }; Side { label: "alerts"; code: "02-03 · ${n.count ?? 0}"; tint: n.count > 0 ? gold : tan; h: bh } }
+        Box { onTap: { haptic(); androidApp("com.google.android.apps.messaging") }; Side { label: "messages"; code: "02-04"; tint: sky; h: bh } }
+        Box { onTap: { haptic(); androidApp("com.google.android.gm") }; Side { label: "gmail"; code: "02-05"; tint: rose; h: bh } }
+        Box { onTap: { haptic(); launcher("drawer") }; Side { label: "apps"; code: "02-06"; tint: periw; h: bh } }
+        Box { onTap: { haptic(); settings("sound") }; Side { label: "sound"; code: "02-07"; tint: violet; h: bh } }
         Column { width: sw; weight: 1; background: alpha(lilac, gA); frost: fz }
-        Box { onTap: settings("sound"); Side { label: "sound"; code: "11-0316"; tint: violet; h: 56 } }
+        Box { onTap: { haptic(); androidApp("com.google.android.dialer") }; Side { label: "phone"; code: "02-08"; tint: violet; h: bh } }
       }
       Column {
         weight: 1

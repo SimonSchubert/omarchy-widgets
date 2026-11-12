@@ -65,6 +65,8 @@ face "console engineering" {
   let gp = 4
   let topH = 64
   let botH = 64
+  // The height of every sidebar key.
+  let bh = 48
   let eX = sw + 52
 
   let yr = num(fmtTime(now, "yyyy"), 2026)
@@ -519,7 +521,7 @@ face "console engineering" {
     background: alpha(background, tileOpacity)
     frost: bgBlur
     padding: [8 + screenLeft, screenTop + 6, 8 + screenRight, 0]
-    Top { name: "engineering"; code: "03-7741"; cA: peach; cB: periw; cC: amber }
+    Top { name: "engineering"; code: "03-00"; cA: peach; cB: periw; cC: amber }
     Row {
       weight: 1
       fill: width
@@ -529,16 +531,19 @@ face "console engineering" {
         fill: height
         gap: gp
         padding: [0, gp, 0, gp]
-        Box { onTap: settings("battery"); Side { label: "power"; code: "12-${pad(str(level), 4, "0")}"; tint: batTint; h: 64 } }
-        Box { onTap: settings("internet"); Side { label: "network"; code: "13-5530"; tint: sky; h: 64 } }
-        Box { onTap: settings("display"); Side { label: "display"; code: modes.brightness == null ? "14-2271" : "14-${pad(str(round(modes.brightness)), 4, "0")}"; tint: lilac; h: 48 } }
-        Box { onTap: settings("volume"); Side { label: "volume"; code: "15-${pad(str(volLv), 4, "0")}"; tint: periw; h: 96 } }
-        Box { onTap: androidApp("com.android.chrome"); Side { label: "chrome"; code: "15-8080"; tint: gold; h: 48 } }
-        Box { onTap: { haptic(); settings("dark") }; Side { label: "dark"; code: modes.dark == true ? "17-01 · ON" : "17-00 · OFF"; tint: modes.dark == true ? periw : violet; h: 48 } }
-        Box { onTap: { haptic(); settings("location") }; Side { label: "location"; code: modes.location == true ? "18-01 · ON" : "18-00 · OFF"; tint: modes.location == true ? tan : violet; h: 48 } }
-        Box { onTap: { haptic(); settings("airplane") }; Side { label: "airplane"; code: modes.airplane == true ? "19-01 · ON" : "19-00 · OFF"; tint: modes.airplane == true ? rose : violet; h: 48 } }
+        // Every key the same height (bh), numbered page and place, top to bottom; a live reading follows its number.
+        // The phone is the last key on every page, under the filler.
+        Box { onTap: { haptic(); settings("battery") }; Side { label: "power"; code: "03-01 · ${level}%"; tint: batTint; h: bh } }
+        Box { onTap: { haptic(); settings("internet") }; Side { label: "network"; code: "03-02"; tint: sky; h: bh } }
+        Box { onTap: { haptic(); settings("display") }; Side { label: "display"; code: modes.brightness == null ? "03-03" : "03-03 · ${round(modes.brightness)}%"; tint: lilac; h: bh } }
+        Box { onTap: { haptic(); settings("volume") }; Side { label: "volume"; code: "03-04 · ${volLv}%"; tint: periw; h: bh } }
+        Box { onTap: { haptic(); androidApp("com.android.chrome") }; Side { label: "chrome"; code: "03-05"; tint: gold; h: bh } }
+        Box { onTap: { haptic(); settings("dark") }; Side { label: "dark"; code: modes.dark == true ? "03-06 · ON" : "03-06 · OFF"; tint: modes.dark == true ? periw : violet; h: bh } }
+        Box { onTap: { haptic(); settings("location") }; Side { label: "location"; code: modes.location == true ? "03-07 · ON" : "03-07 · OFF"; tint: modes.location == true ? tan : violet; h: bh } }
+        Box { onTap: { haptic(); settings("airplane") }; Side { label: "airplane"; code: modes.airplane == true ? "03-08 · ON" : "03-08 · OFF"; tint: modes.airplane == true ? rose : violet; h: bh } }
+        Box { onTap: { haptic(); launcher("settings") }; Side { label: "launcher"; code: "03-09"; tint: violet; h: bh } }
         Column { width: sw; weight: 1; background: alpha(amber, gA); frost: fz }
-        Box { onTap: launcher("settings"); Side { label: "launcher"; code: "16-0089"; tint: violet; h: 56 } }
+        Box { onTap: { haptic(); androidApp("com.google.android.dialer") }; Side { label: "phone"; code: "03-10"; tint: violet; h: bh } }
       }
       Column {
         weight: 1

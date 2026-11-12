@@ -164,6 +164,8 @@ face "console ops" {
   let gp = 4
   let topH = 64
   let botH = 64
+  // The height of every sidebar key.
+  let bh = 48
   let eX = sw + 52
 
   let yr = num(fmtTime(now, "yyyy"), 2026)
@@ -705,7 +707,7 @@ face "console ops" {
     background: alpha(background, tileOpacity)
     frost: bgBlur
     padding: [8 + screenLeft, screenTop + 6, 8 + screenRight, 0]
-    Top { name: "ops"; code: "01-1701"; cA: amber; cB: lilac; cC: tan }
+    Top { name: "ops"; code: "01-00"; cA: amber; cB: lilac; cC: tan }
     Row {
       weight: 1
       fill: width
@@ -715,32 +717,19 @@ face "console ops" {
         fill: height
         gap: gp
         padding: [0, gp, 0, gp]
-        Box {
-          onTap: androidApp("com.anthropic.claude")
-          Side { label: "claude"; code: "02-5521"; tint: peach; h: 64 }
-        }
-        Box {
-          onTap: androidApp("com.openai.chatgpt")
-          Side { label: "chatgpt"; code: "03-0447"; tint: periw; h: 64 }
-        }
-        Box {
-          onTap: launcher("agents")
-          Side { label: "agents"; code: "04-3318"; tint: lilac; h: 48 }
-        }
-        Box {
-          onTap: terminal("bash -l", "arch")
-          Side { label: "terminal"; code: "05-9902"; tint: amber; h: 96 }
-        }
-        Box { onTap: { haptic(); terminal("btop", "monitor") }; Side { label: "monitor"; code: "05-4471"; tint: rose; h: 48 } }
-        Box { onTap: { haptic(); terminal("fastfetch", "system") }; Side { label: "system"; code: "05-6620"; tint: sky; h: 48 } }
-        Box { onTap: { haptic(); run("omarchy-files") }; Side { label: "files"; code: "06-1180"; tint: gold; h: 48 } }
-        Box { onTap: { haptic(); launcher("store") }; Side { label: "store"; code: "06-2207"; tint: lilac; h: 48 } }
-        Box { onTap: { haptic(); launcher("style") }; Side { label: "style"; code: "06-3315"; tint: peach; h: 48 } }
+        // Every key the same height (bh), numbered page and place, top to bottom; a live reading follows its number.
+        // The phone is the last key on every page, under the filler.
+        Box { onTap: { haptic(); androidApp("com.anthropic.claude") }; Side { label: "claude"; code: "01-01"; tint: peach; h: bh } }
+        Box { onTap: { haptic(); androidApp("com.openai.chatgpt") }; Side { label: "chatgpt"; code: "01-02"; tint: periw; h: bh } }
+        Box { onTap: { haptic(); launcher("agents") }; Side { label: "agents"; code: "01-03"; tint: lilac; h: bh } }
+        Box { onTap: { haptic(); terminal("bash -l", "arch") }; Side { label: "terminal"; code: "01-04"; tint: amber; h: bh } }
+        Box { onTap: { haptic(); terminal("btop", "monitor") }; Side { label: "monitor"; code: "01-05"; tint: rose; h: bh } }
+        Box { onTap: { haptic(); terminal("fastfetch", "system") }; Side { label: "system"; code: "01-06"; tint: sky; h: bh } }
+        Box { onTap: { haptic(); run("omarchy-files") }; Side { label: "files"; code: "01-07"; tint: gold; h: bh } }
+        Box { onTap: { haptic(); launcher("store") }; Side { label: "store"; code: "01-08"; tint: lilac; h: bh } }
+        Box { onTap: { haptic(); launcher("style") }; Side { label: "style"; code: "01-09"; tint: peach; h: bh } }
         Column { width: sw; weight: 1; background: alpha(tan, gA); frost: fz }
-        Box {
-          onTap: androidApp("com.google.android.dialer")
-          Side { label: "phone"; code: "06-5550"; tint: violet; h: 56 }
-        }
+        Box { onTap: { haptic(); androidApp("com.google.android.dialer") }; Side { label: "phone"; code: "01-10"; tint: violet; h: bh } }
       }
       Column {
         weight: 1
