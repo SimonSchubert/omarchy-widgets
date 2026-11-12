@@ -132,7 +132,7 @@ face "Omagara" {
   let railEnterDone = railEntering && railEnterAge >= 0.16
   on railEnterDone { if value { railEntering = false } }
   let railReturnAge = railReturning ? max(0, time - railReturnStart) : 0
-  let railVisualY = cfg.reduceMotion ? 0 : railHeld ? railOverpull : railReturning ? railReturnFrom * pow(2.718281828459045, -12 * railReturnAge) * cos(20 * railReturnAge) : 0
+  let railVisualY = railHeld ? railOverpull : railReturning && !cfg.reduceMotion ? railReturnFrom * pow(2.718281828459045, -12 * railReturnAge) * cos(20 * railReturnAge) : 0
   let railReturnDone = railReturning && railReturnAge >= 0.42
   on railReturnDone { if value { railReturning = false; railReturnFrom = 0 } }
   // Handlers receive y local to this same rail: each center is (i + 0.5)
@@ -410,7 +410,7 @@ face "Omagara" {
         railReturning = false
         // Rubber-band only past the first/last letter center, max 68dp.
         let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railHeight - railStep / 2 ? y - (railHeight - railStep / 2) : 0
-        railOverpull = cfg.reduceMotion || len(alphabet) < 2 ? 0 : clamp(edgeY * 0.48, -68, 68)
+        railOverpull = len(alphabet) < 2 ? 0 : clamp(edgeY * 0.48, -68, 68)
         railEnterStart = time
         railEntering = cfg.curve && !cfg.reduceMotion
         hapticSteps = 0
@@ -436,7 +436,7 @@ face "Omagara" {
         railHeld = true
         draggingSide = 1
         let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railHeight - railStep / 2 ? y - (railHeight - railStep / 2) : 0
-        railOverpull = cfg.reduceMotion || len(alphabet) < 2 ? 0 : clamp(edgeY * 0.48, -68, 68)
+        railOverpull = len(alphabet) < 2 ? 0 : clamp(edgeY * 0.48, -68, 68)
         // Track absolute thumb position while the rail's hit cells stay fixed.
         // Aim the peak 84dp left of the thumb until the screen edge limits it.
         railPull = side == 1 ? clamp(106 - x, 0, railMaxReach) : min(84, railMaxReach)
@@ -495,7 +495,7 @@ face "Omagara" {
               // sharp kink at the selected letter. The curve follows the finger
               // continuously; unchanged cells keep the same touch targets.
               let distance = abs(i - fingerPosition)
-              let expanded = activeSide != 0 && cfg.curve && !cfg.reduceMotion
+              let expanded = activeSide != 0 && cfg.curve
               let radius = max(10, min(14, len(alphabet) * 0.58))
               let curve = expanded ? (1 + cos(rad(min(distance / radius, 1) * 180))) / 2 * railEnterEase : 0
               Box {

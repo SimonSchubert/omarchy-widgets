@@ -14,7 +14,7 @@ Notifications have more compact vertical spacing and can scroll behind the Searc
 
 App rows are tappable across the unused space to the right edge; the alphabet rail and Search/Close controls remain on top.
 
-Alphabet navigation eases into the mountain curve, rubber-bands at both ends, and springs back on release. Reduce motion disables these effects. Haptics, app search, calendar and clock tools remain.
+Alphabet navigation eases into the mountain curve, follows the thumb past both ends, and springs back on release. Reduce motion keeps the mountain and thumb-following movement but skips the entrance and spring-back animations (immediate snap on release). Haptics, app search, calendar and clock tools remain.
 
 ## Screenshots
 
