@@ -33,6 +33,14 @@ face "Omagara" {
   state railReturnScale = 0
   state railReturnStart = 0
   state railReturning = false
+  // Optional gesture-only ripple. No persistent state, timers or polling.
+  state railFlickStartY = 0
+  state railFlickLastY = 0
+  state railFlickStarted = 0
+  state railWiggling = false
+  state railWiggleStarted = 0
+  state railWiggleOrigin = 0
+  state railWiggleDirection = 0
   // Brief mountain entrance, then full-speed thumb tracking.
   state railEnterStart = 0
   state railEntering = false
@@ -153,7 +161,7 @@ face "Omagara" {
   // Freeze mapping and geometry for the entire touch, even if apps update.
   let liveAlphabet = cfg.hideEmpty ? fullAlphabet.filter(c => len(get(groups, c, [])) > 0) : fullAlphabet
   // Freeze letters through the return, so changing available apps cannot reshape the worm mid-snap.
-  let alphabet = railHeld || railReturning ? heldAlphabet : liveAlphabet
+  let alphabet = railHeld || railReturning || railWiggling ? heldAlphabet : liveAlphabet
   // Put the single most recently opened Android app first only when Search is empty.
   // android.apps.last is launcher-maintained history; no new permission needed.
   let lastOpenedApp = first(apps.filter(a => a.last != null).sortBy(a => -(a.last ?? 0)))
@@ -182,10 +190,15 @@ face "Omagara" {
   let railEnterDone = railEntering && railEnterAge >= 0.16
   on railEnterDone { if value { railEntering = false } }
   let railReturnAge = railReturning ? max(0, time - railReturnStart) : 0
-  // Fast spring-like return with a smooth finish; never reverse or overshoot.
+  // Keep the approved 110ms release animation regardless of flick direction.
   let railReturnT = clamp(railReturnAge / 0.11, 0, 1)
   let railReturnEase = pow(1 - railReturnT, 3)
-  // Share the exact deformation between the letters and their continuous shade.
+  // Directional travel starts at the touched letter: up goes toward A,
+  // down goes toward Z. A new alphabet gesture cancels the whole effect.
+  let railWiggleAge = railWiggling ? max(0, time - railWiggleStarted) : 0
+  let railWiggleDone = railWiggling && railWiggleAge >= 1.70
+  on railWiggleDone { if value { railWiggling = false } }
+  // Share deformation between the glyphs and the single Canvas ribbon.
   let railCurveStrength = !cfg.curve ? 0 : activeSide != 0 ? railEnterEase : railReturning && !cfg.reduceMotion ? railReturnScale * railReturnEase : 0
   let railCurvePull = activeSide != 0 ? railPull : railReturning && !cfg.reduceMotion ? railReturnPull : 0
   let railVisualY = railHeld ? railOverpull : railReturning && !cfg.reduceMotion ? railReturnFrom * railReturnEase : 0
@@ -710,6 +723,11 @@ face "Omagara" {
         railHeld = true
         draggingSide = 0
         railReturning = false
+        // A new touch cancels the optional ripple immediately.
+        railWiggling = false
+        railFlickStartY = y
+        railFlickLastY = y
+        railFlickStarted = time
         // Beyond an endpoint, the worm follows the thumb 1:1 up to the screen edge.
         let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railHeight - railStep / 2 ? y - (railHeight - railStep / 2) : 0
         railOverpull = len(alphabet) < 2 ? 0 : clamp(edgeY, -railUpperReach, railLowerReach)
@@ -736,6 +754,7 @@ face "Omagara" {
         appTracking = false
         appVelocity = 0
         railReturning = false
+        railFlickLastY = y
         railHeld = true
         draggingSide = 1
         let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railHeight - railStep / 2 ? y - (railHeight - railStep / 2) : 0
@@ -778,6 +797,17 @@ face "Omagara" {
         }
       }
       onDragEnd: {
+        // Lower-to-upper and upper-to-lower flicks create opposite ripples.
+        let flickTravel = railFlickLastY - railFlickStartY
+        let flickAge = max(0.04, time - railFlickStarted)
+        let upFlick = railFlickStartY >= railHeight * 0.60 && flickTravel <= -max(70, railStep * 4)
+        let downFlick = railFlickStartY <= railHeight * 0.40 && flickTravel >= max(70, railStep * 4)
+        railWiggling = !cfg.reduceMotion && draggingSide == 1 && (upFlick || downFlick) && flickAge <= 0.55 && abs(flickTravel) / flickAge >= 850
+        if railWiggling {
+          railWiggleStarted = time
+          railWiggleOrigin = clamp(railFlickStartY / railStep - 0.5, 0, max(0, len(alphabet) - 1))
+          railWiggleDirection = upFlick ? -1 : 1
+        }
         railReturnFrom = railOverpull
         railReturnPull = railPull
         railReturnScale = railEnterEase
@@ -789,23 +819,29 @@ face "Omagara" {
       }
       // The selected edge draws the glyphs; the other edge is optional input.
       // Keep showing the worm during its release return even if idle alphabet is hidden.
-      if visual && (cfg.idleAlphabet || activeSide != 0 || railReturning) {
+      if visual && (cfg.idleAlphabet || activeSide != 0 || railReturning || railWiggling) {
         // Only move the visual worm: the rail's touch area stays put.
         Box {
           width: 44
           height: railHeight
           offset: [0, railVisualY]
+          // Two contour segments per letter while wiggling, four otherwise.
+          // Compute the wave once; letter centers reuse the same Canvas samples.
+          let wiggleActive = railWiggling && !cfg.reduceMotion
+          let contourSteps = wiggleActive ? 2 : 4
+          let wigglePhases = wiggleActive ? map(range(len(alphabet) * contourSteps + 1), j => railWiggleAge - abs(j / contourSteps - 0.5 - railWiggleOrigin) * 0.015) : []
+          let wiggleOffsets = wiggleActive ? map(wigglePhases, phase => phase > 0 && phase < 1.34 ? railWiggleDirection * 11 * pow(1 - phase / 1.34, 2) * sin(phase * 36) : 0) : []
           if cfg.shadeAlphabet && len(alphabet) > 0 {
             Canvas {
               width: railMaxReach + 44
               height: railHeight
               offset: [alphabetSide == 1 ? -railMaxReach : 0, 0]
-              // Four connected contour samples per letter. Geometry and curve
-              // strength match the Text offsets below, including left mirroring.
-              let wormSamples = map(range(len(alphabet) * 4 + 1), j => {
+              // Use the same wave as the glyphs, sampled at every letter center.
+              // In idle/drag states, retain the original four-point contour.
+              let wormSamples = map(range(len(alphabet) * contourSteps + 1), j => {
                 x: (alphabetSide == 1 ? railMaxReach + 22 : 22) - alphabetSide * railCurvePull *
-                  (1 + cos(rad(min(abs(j / 4 - 0.5 - fingerPosition) / max(10, min(14, len(alphabet) * 0.58)), 1) * 180))) / 2 * railCurveStrength,
-                y: cfg.roundAlphabet ? 12 + j / max(1, len(alphabet) * 4) * max(0, railHeight - 24) : j * railStep / 4
+                  (railCurveStrength > 0 ? (1 + cos(rad(min(abs(j / contourSteps - 0.5 - fingerPosition) / max(10, min(14, len(alphabet) * 0.58)), 1) * 180))) / 2 * railCurveStrength : 0) - alphabetSide * (wiggleActive ? wiggleOffsets[j] : 0),
+                y: cfg.roundAlphabet ? 12 + j / max(1, len(alphabet) * contourSteps) * max(0, railHeight - 24) : j * railStep / contourSteps
               })
               path(map(wormSamples, p => [p.x - 12, p.y]) + reverse(map(wormSamples, p => [p.x + 12, p.y])), closed: true, fill: legibilityShade)
               if cfg.roundAlphabet {
@@ -824,7 +860,9 @@ face "Omagara" {
               // continuously; unchanged cells keep the same touch targets.
               let distance = abs(i - fingerPosition)
               let radius = max(10, min(14, len(alphabet) * 0.58))
-              let curve = (1 + cos(rad(min(distance / radius, 1) * 180))) / 2 * railCurveStrength
+              let curve = railCurveStrength > 0 ? (1 + cos(rad(min(distance / radius, 1) * 180))) / 2 * railCurveStrength : 0
+              // Sample the shared contour at this glyph's exact center.
+              let wiggleX = wiggleActive ? wiggleOffsets[i * contourSteps + contourSteps / 2] : 0
               Box {
                 height: railStep
                 fill: width
@@ -837,7 +875,7 @@ face "Omagara" {
                   bold: highlightedLetter == character && browsing
                   color: highlightedLetter == character && browsing ? accent : curve > 0 ? primaryText : len(get(groups, character, [])) > 0 ? secondaryText : alpha(secondaryText, cfg.textContrast == "High" ? 0.72 : 0.35)
                   align: center
-                  offset: [-alphabetSide * railCurvePull * curve, 0]
+                  offset: [-alphabetSide * (railCurvePull * curve + wiggleX), 0]
                   scale: 1 + 0.16 * curve
                 }
               }
