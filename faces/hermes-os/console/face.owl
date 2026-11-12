@@ -1,22 +1,25 @@
 face "console ops" {
-  // A starship-bridge console in three pages, the bauhaus face's content in a new look: black glass, rounded
-  // elbows framing the screen, a sidebar of coloured buttons, readouts in a tall condensed face (Antonio) and a
-  // cascade of numbers that never stops scrolling. This first page: Arch's packages and updates, Claude Code's
-  // sessions and limits, ChatGPT's plan and limits, and the agents' latest sessions.
-  // Pages two and three are console.2.owl (comms) and console.3.owl (engineering).
+  // A starship-bridge console in three pages, the bauhaus face's content in a new look: rounded elbows framing the
+  // screen, a sidebar of console buttons, readouts in a tall condensed face (Antonio) and a cascade of numbers that
+  // never stops scrolling. It follows the Omarchy theme: every coloured part is frosted glass in one of its colours,
+  // over the wallpaper. This first page: Arch's packages and updates, Claude Code's sessions and limits, Codex's plan
+  // and limits, and the latest Claude Code, Codex and Grok sessions to resume; the sidebar opens the agents' apps,
+  // a terminal, btop, fastfetch, files, the store and the style menu. Pages two and three are page-2.owl (comms)
+  // and page-3.owl (engineering); the tabs at the foot turn between them.
   // Built on simonschubert/bauhaus (MIT): the same readouts and logins, read from the agents' own files and only
   // sent to their own servers.
 
   meta {
     owl: 19
-    description: "A starship-bridge console in three pages: Arch, Claude Code, ChatGPT and agent sessions; music, messages and apps; battery, storage, network and switches"
-    version: "1.0"
+    description: "A starship-bridge console in three pages, in frosted glass of your theme's colours: Arch, Claude Code and Codex sessions and limits; music, notifications and apps; battery, network and switches"
+    version: "2.0"
     license: "MIT"
     category: "dev"
   }
-  requires { pacman: ["bash", "coreutils", "grep", "sed", "pacman", "curl"] }
+  requires { pacman: ["bash", "coreutils", "grep", "sed", "pacman", "curl", "jq", "procps-ng", "btop", "fastfetch"] }
 
   source now = clock every 1m
+  source bat = android.battery
   source drawer = android.drawer
   source ag = android.agents
 
@@ -55,6 +58,38 @@ face "console ops" {
     cat "$c" 2>/dev/null || echo '{"error":"offline"}'
   """) every 10m json timeout 30s optional
 
+  // Claude Code's latest sessions, from its transcripts: the folder, the title Claude gave each and when it was last
+  // written. One that isn't running now opens where it left off.
+  source ch = cmd("""
+    sep=""
+    printf '['
+    for f in $(ls -t ~/.claude/projects/*/*.jsonl 2>/dev/null | head -8); do
+      id=${f##*/}; id=${id%.jsonl}
+      w=$(grep -m1 -o '"cwd":"\([^"\\]\|\\.\)*"' "$f" | sed 's/^"cwd"://')
+      t=$(tail -c 300000 "$f" | grep -o '"aiTitle":"\([^"\\]\|\\.\)*"' | tail -1 | sed 's/^"aiTitle"://')
+      [ -n "$t" ] || t=$(grep -m1 -o '"aiTitle":"\([^"\\]\|\\.\)*"' "$f" | sed 's/^"aiTitle"://')
+      printf '%s{"id":"%s","cwd":%s,"title":%s,"mtime":%s}' "$sep" "$id" "${w:-null}" "${t:-null}" "$(stat -c %Y "$f")"
+      sep=,
+    done
+    printf ']\n'
+  """) every 60s json timeout 20s optional
+
+  // The latest four Codex sessions, from its rollout logs: folder, first prompt, model, how full the context is and
+  // when it last wrote; and how many codex processes run.
+  source xs = cmd("""
+    n=$(pgrep -x codex 2>/dev/null | wc -l)
+    ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl 2>/dev/null | head -4 | while read -r f; do
+      jq -cs --arg m "$(stat -c %Y "$f")" '
+        (map(select(.type == "session_meta"))[0].payload) as $s |
+        ([.[] | select(.type == "event_msg" and .payload.type == "token_count" and .payload.info != null) | .payload.info] | last) as $i |
+        {id: $s.id, cwd: $s.cwd,
+         title: ([.[] | select(.type == "event_msg" and .payload.type == "user_message") | .payload.message][0] // null),
+         model: ([.[] | select(.type == "turn_context") | .payload.model] | last),
+         ctx: (if $i == null or $i.model_context_window == null then null else ($i.last_token_usage.total_tokens / $i.model_context_window * 100) end),
+         mtime: ($m | tonumber)}' "$f" 2>/dev/null
+    done | jq -cs --argjson n "$n" '{running: $n, sessions: .}'
+  """) every 30s json timeout 20s optional
+
   // The latest four Grok sessions: their summary and signals (how full the context is).
   source gs = cmd("""
     sep=""
@@ -78,11 +113,10 @@ face "console ops" {
     case $r in '{'*) printf '%s\n' "$r" ;; *) echo '{"error":"offline"}' ;; esac
   """) every 15m json timeout 30s optional
 
-  // The console has its own colours whatever the theme, so the status bar steps aside.
+  // The console draws straight on the wallpaper in the theme's colours, so the status bar steps aside.
   statusBar: false
   edge: true
   padding: 0
-  background: #000000
   // The number cascade scrolls a row every half second; two frames a second is all it needs.
   fps: 2
 
@@ -91,21 +125,33 @@ face "console ops" {
 
   // ---- the console's look, the same on all three pages ----
   let antonio = "https://raw.githubusercontent.com/google/fonts/main/ofl/antonio/Antonio%5Bwght%5D.ttf"
-  let void = #000000
-  let amber = #F5A050
-  let peach = #EC9478
-  let tan = #F3CB9F
-  let lilac = #C79AC6
-  let violet = #9C7DAD
-  let periw = #9C9CE6
-  let sky = #A0C4EA
-  let rose = #CC6B6B
-  let gold = #F2C46E
-  // Text and unlit parts as solid colours, never a faded tan: on black that turns brown, which the console never was.
-  let txLabel = #B08BB0
-  let txNote = #8F7AA6
-  let dim = #5E5A86
-  let off = #24203A
+  // The theme's colours: the console follows the Omarchy theme. Every coloured part is a pane of frosted glass in
+  // its colour (gA, from home's widget opacity); behind them the wallpaper shows clear, darkened by the theme's
+  // background at widgets.opacity in style.toml.
+  let void = background
+  let amber = orange
+  let peach = bright_red
+  let tan = bright_yellow
+  let lilac = magenta
+  let violet = mix(magenta, blue, 0.5)
+  let periw = blue
+  let sky = cyan
+  let rose = red
+  let gold = yellow
+  let gA = clamp(tileOpacity + 0.1, 0.45, 0.85)
+  // The coloured parts are frosted glass, never less than 20 dp of blur; the screen behind them is clear glass.
+  let fz = max(num(tileFrost, 0), 20)
+  // The screen behind them: the wallpaper Omarchy puts behind home, diffused (frost reads it live, so it follows
+  // the theme picker). Below about 10 dp the launcher's small copy of it shows as blotches.
+  let bgBlur = 1
+  // Text and unlit parts: the theme's foreground, stepped back toward its background.
+  let txLabel = mix(foreground, background, 0.22)
+  let txNote = mix(foreground, background, 0.42)
+  let dim = mix(foreground, background, 0.62)
+  let off = mix(foreground, background, 0.8)
+  // The three pages on home, left to right, as layout.toml numbers them: faces left of the first page of tiles
+  // count down from 0. Change these if the pages are moved.
+  let pages = [-2, -1, 0]
   let deco = [amber, peach, tan, lilac, periw, gold, violet, sky]
 
   let W = tileWidth ?? 412
@@ -113,16 +159,35 @@ face "console ops" {
   let wide = W > H
   let sw = wide ? 120 : 80
   let bar = 18
-  let R = 36
+  let R = 32
   let ri = 14
   let gp = 4
   let topH = 64
-  let botH = 40
+  let botH = 64
+  let eX = sw + 52
 
   let yr = num(fmtTime(now, "yyyy"), 2026)
   let doy = num(fmtTime(now, "D"), 1)
   let mins = num(fmtTime(now, "H"), 0) * 60 + num(fmtTime(now, "m"), 0)
   let stardate = fixed((yr - 1946) * 1000 + (doy - 1 + mins / 1440) / 365.25 * 1000, 1)
+
+  // A half-pill of frosted glass, round at the right (side 1) or the left (side -1).
+  component Cap(w, h, c, side) {
+    Box {
+      width: w
+      height: h
+      // Plain frost in its shape, a square and a disc, then its tint over both at once.
+      Box { width: w - h / 2; height: h; offset: [side > 0 ? 0 : h / 2, 0]; frost: fz }
+      Box { width: h; height: h; radius: h / 2; offset: [side > 0 ? w - h : 0, 0]; frost: fz }
+      Canvas {
+        fill: true
+        layer(gA) {
+          rect(side > 0 ? 0 : h / 2, 0, w - h / 2, h, fill: c)
+          circle(side > 0 ? w - h / 2 : h / 2, h / 2, h / 2, fill: c)
+        }
+      }
+    }
+  }
 
   // The top of the frame: the elbow into the sidebar, the bar in three segments, the page's name and an end cap.
   component Top(name, code, cA, cB, cC) {
@@ -133,37 +198,39 @@ face "console ops" {
       Box {
         weight: 1
         height: topH
+        // The elbow's frost: boxes of plain frosted glass whose union is its shape (the outer curve from a rounded
+        // box), and over them its tint, drawn once as one shape so no two panes darken each other.
+        Box { width: sw; height: topH; radius: R; frost: fz }
+        Box { width: sw; height: topH - R; offset: [0, R]; frost: fz }
+        Box { width: sw - R; height: R; offset: [R, 0]; frost: fz }
+        Box { width: eX - R; height: bar; offset: [R, 0]; frost: fz }
         Canvas {
-          let e = sw + 52
-          rect(0, 0, sw, height, fill: cA)
-          rect(0, 0, e, bar, fill: cA)
-          rect(0, 0, R, R, fill: void)
-          arc(R, R, R, 270, 90, fill: cA)
-          rect(sw, bar, ri, ri, fill: cA)
-          arc(sw + ri, bar + ri, ri, 270, 90, fill: void)
-          rect(e + gp, 0, 26, bar, fill: cB)
-          rect(e + 2 * gp + 26, 0, max(width - e - 2 * gp - 26 - 8, 0), bar, fill: cC)
+          fill: true
+          path([[0, height]] + range(9).map(i => [R + R * cos(rad(180 + i * 11.25)), R + R * sin(rad(180 + i * 11.25))]) + [[eX, 0], [eX, bar]] + range(9).map(i => [sw + ri + ri * cos(rad(270 - i * 11.25)), bar + ri + ri * sin(rad(270 - i * 11.25))]) + [[sw, height]], closed: true, fill: alpha(cA, gA))
+        }
+        Row {
+          fill: width
+          height: bar
+          gap: gp
+          padding: [eX + gp, 0, 8, 0]
+          Box { width: 26; height: bar; frost: fz; background: alpha(cB, gA) }
+          Box { weight: 1; height: bar; frost: fz; background: alpha(cC, gA) }
         }
         Box {
           width: sw
           height: topH
           align: bottomEnd
           padding: [0, 0, 6, 3]
-          Text { text: code; font: antonio; fontSize: 13; fontWeight: 500; color: void; align: end }
+          Text { text: code; font: antonio; fontSize: 14.5; fontWeight: 500; color: void; align: end }
         }
       }
       Text { text: upper(name); font: antonio; fontSize: 28; fontWeight: 500; letterSpacing: 1; color: cA; maxLines: 1; offset: [0, -7] }
-      Canvas {
-        width: bar + 6
-        height: bar
-        rect(6, 0, bar / 2, bar, fill: cA)
-        circle(6 + bar / 2, bar / 2, bar / 2, fill: cA)
-      }
+      Row { gap: 0; Spacer { width: 6 }; Cap { w: bar; h: bar; c: cA; side: 1 } }
     }
   }
 
   // The bottom of the frame, the top's mirror.
-  component Bottom(name, cA, cB, cC) {
+  component Bottom(name, cA, cB, cC, here = 0) {
     Row {
       gap: 0
       align: bottom
@@ -171,25 +238,40 @@ face "console ops" {
       Box {
         weight: 1
         height: botH
+        // The elbow's frost and its tint, as at the top.
+        Box { width: sw; height: botH; radius: R; frost: fz }
+        Box { width: sw; height: botH - R; frost: fz }
+        Box { width: sw - R; height: R; offset: [R, botH - R]; frost: fz }
+        Box { width: eX - R; height: bar; offset: [R, botH - bar]; frost: fz }
         Canvas {
-          let e = sw + 52
-          rect(0, 0, sw, height, fill: cA)
-          rect(0, height - bar, e, bar, fill: cA)
-          rect(0, height - R, R, R, fill: void)
-          arc(R, height - R, R, 180, 90, fill: cA)
-          rect(sw, height - bar - ri, ri, ri, fill: cA)
-          arc(sw + ri, height - bar - ri, ri, 180, 90, fill: void)
-          rect(e + gp, height - bar, 64, bar, fill: cB)
-          rect(e + 2 * gp + 64, height - bar, max(width - e - 2 * gp - 64 - 8, 0), bar, fill: cC)
+          fill: true
+          path([[0, 0]] + range(9).map(i => [R + R * cos(rad(180 - i * 11.25)), height - R + R * sin(rad(180 - i * 11.25))]) + [[eX, height], [eX, height - bar]] + range(9).map(i => [sw + ri + ri * cos(rad(90 + i * 11.25)), height - bar - ri + ri * sin(rad(90 + i * 11.25))]) + [[sw, 0]], closed: true, fill: alpha(cA, gA))
+        }
+        // The bar under the screen is the three pages' tabs: the one showing lit in cB, a tap on another turns to it.
+        Box {
+          fill: true
+          align: bottomStart
+          padding: [sw + 52 + gp, 0, 8, 0]
+          Row {
+            gap: gp
+            fill: width
+            height: bar
+            for i in range(3) {
+              Box {
+                weight: i == here ? 2 : 1
+                height: bar
+                background: alpha(i == here ? cB : cC, gA); frost: fz
+                align: end
+                padding: [0, 0, 5, 0]
+                onTap: if i != here { haptic(); launcher("page:${pages[i]}") }
+                Text { text: "${pad(i + 1, 2, "0")}"; font: antonio; fontSize: 13.5; fontWeight: 600; letterSpacing: 1; color: void; maxLines: 1; align: end }
+              }
+            }
+          }
         }
       }
-      Text { text: upper(name); font: antonio; fontSize: 16; fontWeight: 500; letterSpacing: 2; color: cB; maxLines: 1; offset: [0, 2] }
-      Canvas {
-        width: bar + 6
-        height: bar
-        rect(6, 0, bar / 2, bar, fill: cA)
-        circle(6 + bar / 2, bar / 2, bar / 2, fill: cA)
-      }
+      Text { text: upper(name); font: antonio; fontSize: 17.5; fontWeight: 500; letterSpacing: 2; color: cB; maxLines: 1; offset: [0, 2] }
+      Row { gap: 0; Spacer { width: 6 }; Cap { w: bar; h: bar; c: cA; side: 1 } }
     }
   }
 
@@ -199,11 +281,11 @@ face "console ops" {
       width: sw
       height: h
       gap: 0
-      background: tint
+      background: alpha(tint, gA); frost: fz
       padding: [6, 4, 6, 4]
       Spacer { weight: 1 }
-      Text { text: upper(label); font: antonio; fontSize: 15; fontWeight: 600; color: void; align: end; maxLines: 1 }
-      Text { text: code; font: antonio; fontSize: 11; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+      Text { text: upper(label); font: antonio; fontSize: 16.5; fontWeight: 600; color: void; align: end; maxLines: 1 }
+      Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
     }
   }
 
@@ -213,10 +295,10 @@ face "console ops" {
       gap: 8
       align: center
       fill: width
-      Canvas { width: 22; height: 14; rect(7, 0, 15, 14, fill: tint); circle(7, 7, 7, fill: tint) }
-      Text { text: upper(t); font: antonio; fontSize: 17; fontWeight: 500; letterSpacing: 1; color: tint; maxLines: 1 }
-      Box { weight: 1; height: 14; background: tint }
-      Canvas { width: 14; height: 14; rect(0, 0, 7, 14, fill: tint); circle(7, 7, 7, fill: tint) }
+      Cap { w: 22; h: 14; c: tint; side: -1 }
+      Text { text: upper(t); font: antonio; fontSize: 19; fontWeight: 500; letterSpacing: 1; color: tint; maxLines: 1 }
+      Box { weight: 1; height: 14; background: alpha(tint, gA); frost: fz }
+      Cap { w: 14; h: 14; c: tint; side: 1 }
     }
   }
 
@@ -225,8 +307,8 @@ face "console ops" {
     Row {
       gap: 8
       fill: width
-      Text { text: upper(k); font: antonio; fontSize: 13; color: txLabel; maxLines: 1; weight: 1 }
-      Text { text: upper(v); font: antonio; fontSize: 14; fontWeight: 500; color: vc; maxLines: 1 }
+      Text { text: upper(k); font: antonio; fontSize: 14.5; color: txLabel; maxLines: 1; weight: 1 }
+      Text { text: upper(v); font: antonio; fontSize: 15.5; fontWeight: 500; color: vc; maxLines: 1 }
     }
   }
 
@@ -239,7 +321,7 @@ face "console ops" {
         fill: width
         align: bottom
         gap: 4
-        Text { text: upper(label); font: antonio; fontSize: 13; color: txLabel; weight: 1; maxLines: 1 }
+        Text { text: upper(label); font: antonio; fontSize: 14.5; color: txLabel; weight: 1; maxLines: 1 }
         Text { text: pct == null ? "——" : "${round(pct)}%"; font: antonio; fontSize: 22; fontWeight: 500; color: pct != null && pct >= 90 ? rose : tint; maxLines: 1 }
       }
       Canvas {
@@ -249,10 +331,10 @@ face "console ops" {
         let sg = (width - (n - 1) * 2) / n
         let lit = pct == null ? 0 : round(clamp(pct, 0, 100) / 100 * n)
         for i in range(n) {
-          rect(i * (sg + 2), 0, sg, height, fill: i < lit ? (pct >= 90 ? rose : tint) : off)
+          rect(i * (sg + 2), 0, sg, height, fill: alpha(i < lit ? (pct >= 90 ? rose : tint) : off, gA))
         }
       }
-      Text { text: upper(note ?? ""); font: antonio; fontSize: 11; color: txNote; maxLines: 1 }
+      Text { text: upper(note ?? ""); font: antonio; fontSize: 12.5; color: txNote; maxLines: 1 }
     }
   }
 
@@ -265,9 +347,9 @@ face "console ops" {
       Column {
         weight: 1
         gap: 0
-        Text { text: "STARDATE"; font: antonio; fontSize: 13; letterSpacing: 2; color: txLabel }
+        Text { text: "STARDATE"; font: antonio; fontSize: 14.5; letterSpacing: 2; color: txLabel }
         Text { text: stardate; font: antonio; fontSize: 24; fontWeight: 500; color: gold }
-        Text { text: upper(fmtTime(now, "EEE d MMM yyyy")); font: antonio; fontSize: 12; letterSpacing: 1; color: lilac }
+        Text { text: upper(fmtTime(now, "EEE d MMM yyyy")) + (bat.level == null ? "" : " · ${bat.level}%"); font: antonio; fontSize: 13.5; letterSpacing: 1; color: bat.level != null && bat.level < 20 && bat.charging != true ? rose : lilac; maxLines: 1 }
       }
       Text { text: fmtTime(now, "HH:mm"); font: antonio; fontSize: 60; fontWeight: 400; color: amber; maxLines: 1 }
     }
@@ -294,7 +376,7 @@ face "console ops" {
             let d = 2 + floor(hash(seed, salt, r + tick, k, 1) * 5)
             let x = width - k * cw - 2
             if h < 0.06 {
-              rect(x - cw + 6, r * rh + 1, cw - 6, rh - 2, fill: deco[floor(h * 100) % 8])
+              rect(x - cw + 6, r * rh + 1, cw - 6, rh - 2, fill: alpha(deco[floor(h * 100) % 8], gA))
             }
             text(pad(str(floor(hash(seed, salt, r + tick, k, 2) * pow(10, d))), d, "0"), x - 3, r * rh + rh / 2, size: 13, align: end, font: antonio, color: h < 0.06 ? void : h < 0.3 ? deco[floor(h * 1000) % 8] : dim)
           }
@@ -335,24 +417,57 @@ face "console ops" {
   let gpt5Name = g1s < 86400 ? "${round(g1s / 3600)} hours" : g1s <= 691200 ? (g1s < 518400 ? "${round(g1s / 86400)} days" : "week") : g1s <= 2851200 ? "month" : "${round(g1s / 86400)} days"
   let gptWkName = g2s < 86400 ? "${round(g2s / 3600)} hours" : g2s <= 691200 ? (g2s < 518400 ? "${round(g2s / 86400)} days" : "week") : g2s <= 2851200 ? "month" : "${round(g2s / 86400)} days"
 
-  // Claude's running sessions, then Grok's latest, four in all.
-  let strips = (sess.map(s => {
+  let claudeCodeAg = agents.find(a => a.bin == "claude")
+  let codexAg = agents.find(a => a.bin == "codex")
+  let xsess = (xs.sessions ?? []).filter(x => x != null && x.id != null)
+  let xRunning = num(xs.running, 0)
+  let hist = (ch ?? []).filter(h => h != null && h.id != null)
+  let past = hist.filter(h => !sess.any(s => s.sessionId == h.id))
+
+  // Claude's running sessions first, then the latest past ones of Claude, Codex and Grok, newest first; four in all.
+  let running = sess.map(s => {
     kind: "claude",
-    name: s.name ?? "claude",
+    run: true,
+    name: (hist.find(h => h.id == s.sessionId)).title ?? s.name ?? "claude",
     cwd: s.cwd ?? "",
     note: s.status == "idle" ? "idle" : "${s.status} ${fmtDuration(max(0, now - num(s.statusUpdatedAt, 0) / 1000))}",
     hot: s.status != "idle",
-    id: s.sessionId
+    id: s.sessionId,
+    last: now
+  })
+  let resumable = (past.map(h => {
+    kind: "claude",
+    run: false,
+    name: h.title ?? "claude code session",
+    cwd: h.cwd ?? "",
+    note: h.mtime == null ? "" : "${fmtAgo(h.mtime, now)} ago",
+    hot: false,
+    id: h.id,
+    last: num(h.mtime, 0)
+  }) + xsess.map(x => {
+    kind: "codex",
+    run: false,
+    name: trim(first(lines(x.title ?? "")) ?? "") == "" ? "codex session" : trim(first(lines(x.title))),
+    cwd: x.cwd ?? "",
+    note: x.mtime == null ? "" : now - x.mtime < 180 ? "active" : "${fmtAgo(x.mtime, now)} ago",
+    hot: x.mtime != null && now - x.mtime < 180,
+    id: x.id,
+    model: x.model,
+    ctx: x.ctx,
+    last: num(x.mtime, 0)
   }) + grok.map(g => {
     kind: "grok",
+    run: false,
     name: g.name,
     cwd: g.cwd ?? "",
     note: g.last == null ? "" : now - g.last < 180 ? "active" : fmtAgo(g.last, now),
     hot: g.last != null && now - g.last < 180,
     id: g.id,
     model: g.model,
-    ctx: g.ctx
-  })).take(4)
+    ctx: g.ctx,
+    last: num(g.last, 0)
+  })).sortBy(r => -r.last)
+  let strips = (running + resumable).take(4)
 
   // Arch: the packages as a big number, the rest as readouts, and the updates as a bar to tap.
   component Arch() {
@@ -365,11 +480,11 @@ face "console ops" {
           fill: width
           height: 34
           radius: 17
-          background: rose
+          background: alpha(rose, gA); frost: fz
           align: end
           padding: [14, 0]
           onTap: launcher("linux")
-          Text { text: "LINUX OFFLINE · INSTALL"; font: antonio; fontSize: 15; fontWeight: 600; color: void }
+          Text { text: "LINUX OFFLINE · INSTALL"; font: antonio; fontSize: 16.5; fontWeight: 600; color: void }
         }
       } else {
         Row {
@@ -382,8 +497,8 @@ face "console ops" {
               gap: 0
               width: 86
               Text { text: lx == null ? "…" : str(lx.pkgs); font: antonio; fontSize: 40; fontWeight: 500; color: amber; maxLines: 1 }
-              Text { text: "PACKAGES"; font: antonio; fontSize: 12; letterSpacing: 1; color: txLabel }
-              Text { text: lx == null ? "" : "${lx.explicit} EXPLICIT"; font: antonio; fontSize: 12; color: lilac }
+              Text { text: "PACKAGES"; font: antonio; fontSize: 13.5; letterSpacing: 1; color: txLabel }
+              Text { text: lx == null ? "" : "${lx.explicit} EXPLICIT"; font: antonio; fontSize: 13.5; color: lilac }
             }
           }
           Column {
@@ -399,11 +514,11 @@ face "console ops" {
           fill: width
           height: 30
           radius: 15
-          background: updates > 0 ? gold : off
+          background: alpha(updates > 0 ? gold : off, gA); frost: fz
           align: end
           padding: [14, 0]
-          onTap: if updates > 0 { terminal("pacman -Syu", "update") }
-          Text { text: updates > 0 ? "${updates} ${updates == 1 ? "UPDATE" : "UPDATES"} · UPGRADE" : "ALL SYSTEMS NOMINAL"; font: antonio; fontSize: 15; fontWeight: 600; letterSpacing: 1; color: updates > 0 ? void : periw }
+          onTap: { haptic(); terminal("pacman -Syu", "update") }
+          Text { text: updates > 0 ? "${updates} ${updates == 1 ? "UPDATE" : "UPDATES"} · UPGRADE" : "ALL SYSTEMS NOMINAL · CHECK"; font: antonio; fontSize: 16.5; fontWeight: 600; letterSpacing: 1; color: updates > 0 ? void : periw }
         }
       }
     }
@@ -420,13 +535,14 @@ face "console ops" {
         fill: width
         align: top
         Box {
-          onTap: launcher("agents")
+          onTap: { haptic(); if claudeCodeAg != null { open(claudeCodeAg.key) } else { launcher("agents") } }
+          onLongPress: launcher("agents")
           Column {
             gap: 0
             width: 64
             Text { text: linux ? str(len(sess)) : "—"; font: antonio; fontSize: 34; fontWeight: 500; color: peach }
-            Text { text: "SESSIONS"; font: antonio; fontSize: 12; letterSpacing: 1; color: txLabel }
-            Text { text: busy > 0 ? "${busy} ACTIVE" : "STANDBY"; font: antonio; fontSize: 12; color: busy > 0 ? gold : txNote }
+            Text { text: "SESSIONS"; font: antonio; fontSize: 13.5; letterSpacing: 1; color: txLabel }
+            Text { text: busy > 0 ? "${busy} ACTIVE" : "STANDBY"; font: antonio; fontSize: 13.5; color: busy > 0 ? gold : txNote }
           }
         }
         Meter {
@@ -450,18 +566,20 @@ face "console ops" {
     Column {
       gap: 6
       fill: width
-      Head { t: "chatgpt"; tint: periw }
+      Head { t: "chatgpt · codex"; tint: periw }
       Row {
         gap: 12
         fill: width
         align: top
         Box {
-          onTap: androidApp("com.openai.chatgpt")
+          onTap: { haptic(); url("https://chatgpt.com/codex/settings/usage") }
+          onLongPress: androidApp("com.openai.chatgpt")
           Column {
             gap: 0
             width: 64
-            Text { text: gptErr != null ? "—" : upper(gu.plan_type ?? "chatgpt"); font: antonio; fontSize: 20; fontWeight: 500; color: periw; maxLines: 1 }
-            Text { text: "PLAN"; font: antonio; fontSize: 12; letterSpacing: 1; color: txLabel }
+            Text { text: gptErr != null ? "—" : upper(gu.plan_type ?? "chatgpt"); font: antonio; fontSize: 22; fontWeight: 500; color: periw; maxLines: 1 }
+            Text { text: "PLAN"; font: antonio; fontSize: 13.5; letterSpacing: 1; color: txLabel }
+            Text { text: "USAGE ↗"; font: antonio; fontSize: 13.5; fontWeight: 600; letterSpacing: 1; color: periw }
           }
         }
         Meter {
@@ -483,34 +601,63 @@ face "console ops" {
   // The running Claude sessions and the latest Grok ones; a Grok one taps open where it left off.
   component Sessions() {
     Column {
-      gap: 4
+      gap: 3
       fill: width
-      Head { t: "active sessions"; tint: amber }
+      // The heading's bar holds the keys that start a new session of each agent, as console buttons.
+      Row {
+        gap: 6
+        align: center
+        fill: width
+        Cap { w: 22; h: 14; c: amber; side: -1 }
+        Text { text: "SESSIONS"; font: antonio; fontSize: 19; fontWeight: 500; letterSpacing: 1; color: amber; maxLines: 1 }
+        Box {
+          weight: 1
+          height: 24
+          radius: 12
+          background: alpha(peach, gA); frost: fz
+          align: end
+          padding: [10, 0]
+          onTap: { haptic(); if claudeCodeAg != null { open(claudeCodeAg.key) } else { launcher("agents") } }
+          Text { text: claudeCodeAg == null ? "GET CLAUDE" : "+ CLAUDE"; font: antonio; fontSize: 14.5; fontWeight: 600; letterSpacing: 1; color: void; maxLines: 1; align: end }
+        }
+        Box {
+          weight: 1
+          height: 24
+          radius: 12
+          background: alpha(sky, gA); frost: fz
+          align: end
+          padding: [10, 0]
+          onTap: { haptic(); if codexAg != null { open(codexAg.key) } else { launcher("agents") } }
+          Text { text: codexAg == null ? "GET CODEX" : xRunning > 0 ? "+ CODEX · ${xRunning}" : "+ CODEX"; font: antonio; fontSize: 14.5; fontWeight: 600; letterSpacing: 1; color: void; maxLines: 1; align: end }
+        }
+        Cap { w: 14; h: 14; c: amber; side: 1 }
+      }
       if len(strips) == 0 {
-        Text { text: linux ? "NO SESSIONS ON RECORD" : "LINUX OFFLINE"; font: antonio; fontSize: 15; letterSpacing: 1; color: lilac; padding: [0, 4] }
+        Text { text: linux ? "NO SESSIONS ON RECORD" : "LINUX OFFLINE"; font: antonio; fontSize: 16.5; letterSpacing: 1; color: lilac; padding: [0, 4] }
       } else {
         for s in strips key s.id {
           Row {
             gap: 8
             fill: width
-            height: 34
+            height: 37
             align: center
-            onTap: if s.kind == "grok" { terminal("cd ${sh(s.cwd)} && grok -r ${sh(s.id)}", "grok") } else { launcher("agents") }
+            onTap: { haptic(); if s.kind == "grok" { terminal("cd ${sh(s.cwd)} && grok -r ${sh(s.id)}", "grok") } else if s.kind == "codex" { terminal("cd ${sh(s.cwd)} && codex resume ${sh(s.id)}", "codex") } else if s.run { terminal("cd ${sh(s.cwd)}", "shell") } else { terminal("cd ${sh(s.cwd)} && claude --resume ${sh(s.id)}", "claude") } }
+            onLongPress: launcher("agents")
             Box {
               width: 42
               height: 28
               radius: 14
               align: center
-              background: s.hot ? (s.kind == "claude" ? peach : periw) : off
-              Text { text: s.kind == "claude" ? "CC" : "GK"; font: antonio; fontSize: 14; fontWeight: 600; color: s.hot ? void : (s.kind == "claude" ? peach : periw); align: center }
+              background: alpha(s.hot ? (s.kind == "claude" ? peach : s.kind == "codex" ? sky : periw) : off, gA); frost: fz
+              Text { text: s.kind == "claude" ? "CC" : s.kind == "codex" ? "CX" : "GK"; font: antonio; fontSize: 15.5; fontWeight: 600; color: s.hot ? void : (s.kind == "claude" ? peach : s.kind == "codex" ? sky : periw); align: center }
             }
             Column {
               gap: 0
               weight: 1
-              Text { text: upper(s.name); font: antonio; fontSize: 15; fontWeight: 500; color: amber; maxLines: 1 }
-              Text { text: upper([last(split(s.cwd, "/")), s.model, s.ctx == null ? null : "${round(s.ctx)}% context"].filter(x => x != null && x != "").join(" · ")); font: antonio; fontSize: 11; color: txNote; maxLines: 1 }
+              Text { text: upper(s.name); font: antonio; fontSize: 16.5; fontWeight: 500; color: amber; maxLines: 1 }
+              Text { text: upper([last(split(s.cwd, "/")), s.model, s.ctx == null ? null : "${round(s.ctx)}% context"].filter(x => x != null && x != "").join(" · ")); font: antonio; fontSize: 12.5; color: txNote; maxLines: 1 }
             }
-            Text { text: upper(s.note); font: antonio; fontSize: 12; fontWeight: 500; color: s.hot ? gold : txNote; maxLines: 1 }
+            Text { text: upper(s.note) + (s.run ? "  ›_" : "  ▶"); font: antonio; fontSize: 13.5; fontWeight: 500; color: s.hot ? gold : txNote; maxLines: 1 }
           }
         }
       }
@@ -541,7 +688,7 @@ face "console ops" {
     } else {
       Column {
         fill: true
-        gap: 14
+        gap: 10
         Clock { }
         Arch { }
         ClaudeBlock { }
@@ -555,6 +702,8 @@ face "console ops" {
   Column {
     fill: true
     gap: 0
+    background: alpha(background, tileOpacity)
+    frost: bgBlur
     padding: [8 + screenLeft, screenTop + 6, 8 + screenRight, 0]
     Top { name: "ops"; code: "01-1701"; cA: amber; cB: lilac; cC: tan }
     Row {
@@ -582,7 +731,12 @@ face "console ops" {
           onTap: terminal("bash -l", "arch")
           Side { label: "terminal"; code: "05-9902"; tint: amber; h: 96 }
         }
-        Column { width: sw; weight: 1; background: tan }
+        Box { onTap: { haptic(); terminal("btop", "monitor") }; Side { label: "monitor"; code: "05-4471"; tint: rose; h: 48 } }
+        Box { onTap: { haptic(); terminal("fastfetch", "system") }; Side { label: "system"; code: "05-6620"; tint: sky; h: 48 } }
+        Box { onTap: { haptic(); run("omarchy-files") }; Side { label: "files"; code: "06-1180"; tint: gold; h: 48 } }
+        Box { onTap: { haptic(); launcher("store") }; Side { label: "store"; code: "06-2207"; tint: lilac; h: 48 } }
+        Box { onTap: { haptic(); launcher("style") }; Side { label: "style"; code: "06-3315"; tint: peach; h: 48 } }
+        Column { width: sw; weight: 1; background: alpha(tan, gA); frost: fz }
         Box {
           onTap: androidApp("com.google.android.dialer")
           Side { label: "phone"; code: "06-5550"; tint: violet; h: 56 }
@@ -596,7 +750,7 @@ face "console ops" {
         Content { weight: 1; fill: width }
       }
     }
-    Bottom { name: "linux · agents"; cA: violet; cB: amber; cC: peach }
+    Bottom { name: "linux · agents"; cA: violet; cB: amber; cC: peach; here: 0 }
     Spacer { height: screenInset }
   }
 }

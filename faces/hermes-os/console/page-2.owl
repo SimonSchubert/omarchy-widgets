@@ -1,20 +1,20 @@
 face "console comms" {
-  // The console's second page (see console.owl): what's playing with its cover and keys, the newest notifications
-  // as incoming transmissions (tap to open, hold to dismiss) and your most used apps as console buttons.
+  // The console's second page (see face.owl): what's playing with its cover and keys, the newest notifications
+  // as incoming transmissions (tap to open, hold or X to dismiss, clear or snooze them all) and your most used apps as console buttons.
 
   meta { owl: 19 }
 
   source now = clock every 1m
+  source bat = android.battery
   source mp = android.media
   source n = android.notifications
   // Ranked as the drawer's search ranks them: opened often and lately first.
   source apps = android.apps
 
-  // The console has its own colours whatever the theme, so the status bar steps aside.
+  // The console draws straight on the wallpaper in the theme's colours, so the status bar steps aside.
   statusBar: false
   edge: true
   padding: 0
-  background: #000000
   // The number cascade scrolls a row every half second; two frames a second is all it needs.
   fps: 2
 
@@ -23,21 +23,33 @@ face "console comms" {
 
   // ---- the console's look, the same on all three pages ----
   let antonio = "https://raw.githubusercontent.com/google/fonts/main/ofl/antonio/Antonio%5Bwght%5D.ttf"
-  let void = #000000
-  let amber = #F5A050
-  let peach = #EC9478
-  let tan = #F3CB9F
-  let lilac = #C79AC6
-  let violet = #9C7DAD
-  let periw = #9C9CE6
-  let sky = #A0C4EA
-  let rose = #CC6B6B
-  let gold = #F2C46E
-  // Text and unlit parts as solid colours, never a faded tan: on black that turns brown, which the console never was.
-  let txLabel = #B08BB0
-  let txNote = #8F7AA6
-  let dim = #5E5A86
-  let off = #24203A
+  // The theme's colours: the console follows the Omarchy theme. Every coloured part is a pane of frosted glass in
+  // its colour (gA, from home's widget opacity); behind them the wallpaper shows clear, darkened by the theme's
+  // background at widgets.opacity in style.toml.
+  let void = background
+  let amber = orange
+  let peach = bright_red
+  let tan = bright_yellow
+  let lilac = magenta
+  let violet = mix(magenta, blue, 0.5)
+  let periw = blue
+  let sky = cyan
+  let rose = red
+  let gold = yellow
+  let gA = clamp(tileOpacity + 0.1, 0.45, 0.85)
+  // The coloured parts are frosted glass, never less than 20 dp of blur; the screen behind them is clear glass.
+  let fz = max(num(tileFrost, 0), 20)
+  // The screen behind them: the wallpaper Omarchy puts behind home, diffused (frost reads it live, so it follows
+  // the theme picker). Below about 10 dp the launcher's small copy of it shows as blotches.
+  let bgBlur = 1
+  // Text and unlit parts: the theme's foreground, stepped back toward its background.
+  let txLabel = mix(foreground, background, 0.22)
+  let txNote = mix(foreground, background, 0.42)
+  let dim = mix(foreground, background, 0.62)
+  let off = mix(foreground, background, 0.8)
+  // The three pages on home, left to right, as layout.toml numbers them: faces left of the first page of tiles
+  // count down from 0. Change these if the pages are moved.
+  let pages = [-2, -1, 0]
   let deco = [amber, peach, tan, lilac, periw, gold, violet, sky]
 
   let W = tileWidth ?? 412
@@ -45,16 +57,35 @@ face "console comms" {
   let wide = W > H
   let sw = wide ? 120 : 80
   let bar = 18
-  let R = 36
+  let R = 32
   let ri = 14
   let gp = 4
   let topH = 64
-  let botH = 40
+  let botH = 64
+  let eX = sw + 52
 
   let yr = num(fmtTime(now, "yyyy"), 2026)
   let doy = num(fmtTime(now, "D"), 1)
   let mins = num(fmtTime(now, "H"), 0) * 60 + num(fmtTime(now, "m"), 0)
   let stardate = fixed((yr - 1946) * 1000 + (doy - 1 + mins / 1440) / 365.25 * 1000, 1)
+
+  // A half-pill of frosted glass, round at the right (side 1) or the left (side -1).
+  component Cap(w, h, c, side) {
+    Box {
+      width: w
+      height: h
+      // Plain frost in its shape, a square and a disc, then its tint over both at once.
+      Box { width: w - h / 2; height: h; offset: [side > 0 ? 0 : h / 2, 0]; frost: fz }
+      Box { width: h; height: h; radius: h / 2; offset: [side > 0 ? w - h : 0, 0]; frost: fz }
+      Canvas {
+        fill: true
+        layer(gA) {
+          rect(side > 0 ? 0 : h / 2, 0, w - h / 2, h, fill: c)
+          circle(side > 0 ? w - h / 2 : h / 2, h / 2, h / 2, fill: c)
+        }
+      }
+    }
+  }
 
   // The top of the frame: the elbow into the sidebar, the bar in three segments, the page's name and an end cap.
   component Top(name, code, cA, cB, cC) {
@@ -65,37 +96,39 @@ face "console comms" {
       Box {
         weight: 1
         height: topH
+        // The elbow's frost: boxes of plain frosted glass whose union is its shape (the outer curve from a rounded
+        // box), and over them its tint, drawn once as one shape so no two panes darken each other.
+        Box { width: sw; height: topH; radius: R; frost: fz }
+        Box { width: sw; height: topH - R; offset: [0, R]; frost: fz }
+        Box { width: sw - R; height: R; offset: [R, 0]; frost: fz }
+        Box { width: eX - R; height: bar; offset: [R, 0]; frost: fz }
         Canvas {
-          let e = sw + 52
-          rect(0, 0, sw, height, fill: cA)
-          rect(0, 0, e, bar, fill: cA)
-          rect(0, 0, R, R, fill: void)
-          arc(R, R, R, 270, 90, fill: cA)
-          rect(sw, bar, ri, ri, fill: cA)
-          arc(sw + ri, bar + ri, ri, 270, 90, fill: void)
-          rect(e + gp, 0, 26, bar, fill: cB)
-          rect(e + 2 * gp + 26, 0, max(width - e - 2 * gp - 26 - 8, 0), bar, fill: cC)
+          fill: true
+          path([[0, height]] + range(9).map(i => [R + R * cos(rad(180 + i * 11.25)), R + R * sin(rad(180 + i * 11.25))]) + [[eX, 0], [eX, bar]] + range(9).map(i => [sw + ri + ri * cos(rad(270 - i * 11.25)), bar + ri + ri * sin(rad(270 - i * 11.25))]) + [[sw, height]], closed: true, fill: alpha(cA, gA))
+        }
+        Row {
+          fill: width
+          height: bar
+          gap: gp
+          padding: [eX + gp, 0, 8, 0]
+          Box { width: 26; height: bar; frost: fz; background: alpha(cB, gA) }
+          Box { weight: 1; height: bar; frost: fz; background: alpha(cC, gA) }
         }
         Box {
           width: sw
           height: topH
           align: bottomEnd
           padding: [0, 0, 6, 3]
-          Text { text: code; font: antonio; fontSize: 13; fontWeight: 500; color: void; align: end }
+          Text { text: code; font: antonio; fontSize: 14.5; fontWeight: 500; color: void; align: end }
         }
       }
       Text { text: upper(name); font: antonio; fontSize: 28; fontWeight: 500; letterSpacing: 1; color: cA; maxLines: 1; offset: [0, -7] }
-      Canvas {
-        width: bar + 6
-        height: bar
-        rect(6, 0, bar / 2, bar, fill: cA)
-        circle(6 + bar / 2, bar / 2, bar / 2, fill: cA)
-      }
+      Row { gap: 0; Spacer { width: 6 }; Cap { w: bar; h: bar; c: cA; side: 1 } }
     }
   }
 
   // The bottom of the frame, the top's mirror.
-  component Bottom(name, cA, cB, cC) {
+  component Bottom(name, cA, cB, cC, here = 0) {
     Row {
       gap: 0
       align: bottom
@@ -103,25 +136,40 @@ face "console comms" {
       Box {
         weight: 1
         height: botH
+        // The elbow's frost and its tint, as at the top.
+        Box { width: sw; height: botH; radius: R; frost: fz }
+        Box { width: sw; height: botH - R; frost: fz }
+        Box { width: sw - R; height: R; offset: [R, botH - R]; frost: fz }
+        Box { width: eX - R; height: bar; offset: [R, botH - bar]; frost: fz }
         Canvas {
-          let e = sw + 52
-          rect(0, 0, sw, height, fill: cA)
-          rect(0, height - bar, e, bar, fill: cA)
-          rect(0, height - R, R, R, fill: void)
-          arc(R, height - R, R, 180, 90, fill: cA)
-          rect(sw, height - bar - ri, ri, ri, fill: cA)
-          arc(sw + ri, height - bar - ri, ri, 180, 90, fill: void)
-          rect(e + gp, height - bar, 64, bar, fill: cB)
-          rect(e + 2 * gp + 64, height - bar, max(width - e - 2 * gp - 64 - 8, 0), bar, fill: cC)
+          fill: true
+          path([[0, 0]] + range(9).map(i => [R + R * cos(rad(180 - i * 11.25)), height - R + R * sin(rad(180 - i * 11.25))]) + [[eX, height], [eX, height - bar]] + range(9).map(i => [sw + ri + ri * cos(rad(90 + i * 11.25)), height - bar - ri + ri * sin(rad(90 + i * 11.25))]) + [[sw, 0]], closed: true, fill: alpha(cA, gA))
+        }
+        // The bar under the screen is the three pages' tabs: the one showing lit in cB, a tap on another turns to it.
+        Box {
+          fill: true
+          align: bottomStart
+          padding: [sw + 52 + gp, 0, 8, 0]
+          Row {
+            gap: gp
+            fill: width
+            height: bar
+            for i in range(3) {
+              Box {
+                weight: i == here ? 2 : 1
+                height: bar
+                background: alpha(i == here ? cB : cC, gA); frost: fz
+                align: end
+                padding: [0, 0, 5, 0]
+                onTap: if i != here { haptic(); launcher("page:${pages[i]}") }
+                Text { text: "${pad(i + 1, 2, "0")}"; font: antonio; fontSize: 13.5; fontWeight: 600; letterSpacing: 1; color: void; maxLines: 1; align: end }
+              }
+            }
+          }
         }
       }
-      Text { text: upper(name); font: antonio; fontSize: 16; fontWeight: 500; letterSpacing: 2; color: cB; maxLines: 1; offset: [0, 2] }
-      Canvas {
-        width: bar + 6
-        height: bar
-        rect(6, 0, bar / 2, bar, fill: cA)
-        circle(6 + bar / 2, bar / 2, bar / 2, fill: cA)
-      }
+      Text { text: upper(name); font: antonio; fontSize: 17.5; fontWeight: 500; letterSpacing: 2; color: cB; maxLines: 1; offset: [0, 2] }
+      Row { gap: 0; Spacer { width: 6 }; Cap { w: bar; h: bar; c: cA; side: 1 } }
     }
   }
 
@@ -131,11 +179,11 @@ face "console comms" {
       width: sw
       height: h
       gap: 0
-      background: tint
+      background: alpha(tint, gA); frost: fz
       padding: [6, 4, 6, 4]
       Spacer { weight: 1 }
-      Text { text: upper(label); font: antonio; fontSize: 15; fontWeight: 600; color: void; align: end; maxLines: 1 }
-      Text { text: code; font: antonio; fontSize: 11; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+      Text { text: upper(label); font: antonio; fontSize: 16.5; fontWeight: 600; color: void; align: end; maxLines: 1 }
+      Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
     }
   }
 
@@ -145,10 +193,10 @@ face "console comms" {
       gap: 8
       align: center
       fill: width
-      Canvas { width: 22; height: 14; rect(7, 0, 15, 14, fill: tint); circle(7, 7, 7, fill: tint) }
-      Text { text: upper(t); font: antonio; fontSize: 17; fontWeight: 500; letterSpacing: 1; color: tint; maxLines: 1 }
-      Box { weight: 1; height: 14; background: tint }
-      Canvas { width: 14; height: 14; rect(0, 0, 7, 14, fill: tint); circle(7, 7, 7, fill: tint) }
+      Cap { w: 22; h: 14; c: tint; side: -1 }
+      Text { text: upper(t); font: antonio; fontSize: 19; fontWeight: 500; letterSpacing: 1; color: tint; maxLines: 1 }
+      Box { weight: 1; height: 14; background: alpha(tint, gA); frost: fz }
+      Cap { w: 14; h: 14; c: tint; side: 1 }
     }
   }
 
@@ -157,8 +205,8 @@ face "console comms" {
     Row {
       gap: 8
       fill: width
-      Text { text: upper(k); font: antonio; fontSize: 13; color: txLabel; maxLines: 1; weight: 1 }
-      Text { text: upper(v); font: antonio; fontSize: 14; fontWeight: 500; color: vc; maxLines: 1 }
+      Text { text: upper(k); font: antonio; fontSize: 14.5; color: txLabel; maxLines: 1; weight: 1 }
+      Text { text: upper(v); font: antonio; fontSize: 15.5; fontWeight: 500; color: vc; maxLines: 1 }
     }
   }
 
@@ -171,7 +219,7 @@ face "console comms" {
         fill: width
         align: bottom
         gap: 4
-        Text { text: upper(label); font: antonio; fontSize: 13; color: txLabel; weight: 1; maxLines: 1 }
+        Text { text: upper(label); font: antonio; fontSize: 14.5; color: txLabel; weight: 1; maxLines: 1 }
         Text { text: pct == null ? "——" : "${round(pct)}%"; font: antonio; fontSize: 22; fontWeight: 500; color: pct != null && pct >= 90 ? rose : tint; maxLines: 1 }
       }
       Canvas {
@@ -181,10 +229,10 @@ face "console comms" {
         let sg = (width - (n - 1) * 2) / n
         let lit = pct == null ? 0 : round(clamp(pct, 0, 100) / 100 * n)
         for i in range(n) {
-          rect(i * (sg + 2), 0, sg, height, fill: i < lit ? (pct >= 90 ? rose : tint) : off)
+          rect(i * (sg + 2), 0, sg, height, fill: alpha(i < lit ? (pct >= 90 ? rose : tint) : off, gA))
         }
       }
-      Text { text: upper(note ?? ""); font: antonio; fontSize: 11; color: txNote; maxLines: 1 }
+      Text { text: upper(note ?? ""); font: antonio; fontSize: 12.5; color: txNote; maxLines: 1 }
     }
   }
 
@@ -197,9 +245,9 @@ face "console comms" {
       Column {
         weight: 1
         gap: 0
-        Text { text: "STARDATE"; font: antonio; fontSize: 13; letterSpacing: 2; color: txLabel }
+        Text { text: "STARDATE"; font: antonio; fontSize: 14.5; letterSpacing: 2; color: txLabel }
         Text { text: stardate; font: antonio; fontSize: 24; fontWeight: 500; color: gold }
-        Text { text: upper(fmtTime(now, "EEE d MMM yyyy")); font: antonio; fontSize: 12; letterSpacing: 1; color: lilac }
+        Text { text: upper(fmtTime(now, "EEE d MMM yyyy")) + (bat.level == null ? "" : " · ${bat.level}%"); font: antonio; fontSize: 13.5; letterSpacing: 1; color: bat.level != null && bat.level < 20 && bat.charging != true ? rose : lilac; maxLines: 1 }
       }
       Text { text: fmtTime(now, "HH:mm"); font: antonio; fontSize: 60; fontWeight: 400; color: amber; maxLines: 1 }
     }
@@ -226,7 +274,7 @@ face "console comms" {
             let d = 2 + floor(hash(seed, salt, r + tick, k, 1) * 5)
             let x = width - k * cw - 2
             if h < 0.06 {
-              rect(x - cw + 6, r * rh + 1, cw - 6, rh - 2, fill: deco[floor(h * 100) % 8])
+              rect(x - cw + 6, r * rh + 1, cw - 6, rh - 2, fill: alpha(deco[floor(h * 100) % 8], gA))
             }
             text(pad(str(floor(hash(seed, salt, r + tick, k, 2) * pow(10, d))), d, "0"), x - 3, r * rh + rh / 2, size: 13, align: end, font: antonio, color: h < 0.06 ? void : h < 0.3 ? deco[floor(h * 1000) % 8] : dim)
           }
@@ -239,7 +287,7 @@ face "console comms" {
   // ---- this page ----
   let has = mp != null && mp.title != null && mp.title != ""
   let playing = has && mp.playing == true
-  let notes = n.available ? n.items.take(4) : []
+  let notes = n.available ? n.items.take(3) : []
   let top = (apps ?? []).filter(a => !a.system || a.score > 0).sortBy(a => -a.score).take(8)
   let tints = [amber, lilac, periw, peach, tan, sky, gold, violet]
 
@@ -249,10 +297,10 @@ face "console comms" {
       fill: width
       height: 32
       radius: 16
-      background: tint
+      background: alpha(tint, gA); frost: fz
       align: end
       padding: [14, 0]
-      Text { text: upper(label); font: antonio; fontSize: 15; fontWeight: 600; letterSpacing: 1; color: void; maxLines: 1; align: end }
+      Text { text: upper(label); font: antonio; fontSize: 16.5; fontWeight: 600; letterSpacing: 1; color: void; maxLines: 1; align: end }
     }
   }
 
@@ -270,7 +318,7 @@ face "console comms" {
           size: 96
           radius: 16
           clip: true
-          background: off
+          background: alpha(off, gA); frost: fz
           align: center
           onTap: media("open")
           if has && mp.art != null {
@@ -285,10 +333,10 @@ face "console comms" {
         Column {
           weight: 1
           gap: 1
-          Text { text: !has ? (mp.available == false ? "NO ACCESS" : "NO SIGNAL") : playing ? "NOW PLAYING" : "PAUSED"; font: antonio; fontSize: 12; letterSpacing: 2; color: playing ? gold : txLabel }
+          Text { text: !has ? (mp.available == false ? "NO ACCESS" : "NO SIGNAL") : playing ? "NOW PLAYING" : "PAUSED"; font: antonio; fontSize: 13.5; letterSpacing: 2; color: playing ? gold : txLabel }
           Text { text: upper(has ? mp.title : mp.available == false ? "allow notification access to see music here" : "play something and it shows here"); font: antonio; fontSize: has ? 20 : 15; fontWeight: 500; color: amber; maxLines: 3 }
           if has {
-            Text { text: upper(mp.artist ?? mp.app ?? ""); font: antonio; fontSize: 13; color: lilac; maxLines: 1 }
+            Text { text: upper(mp.artist ?? mp.app ?? ""); font: antonio; fontSize: 14.5; color: lilac; maxLines: 1 }
           }
         }
       }
@@ -302,7 +350,8 @@ face "console comms" {
     }
   }
 
-  // The newest four notifications.
+  // The newest three notifications: tap one to open it, hold it or tap its X to dismiss it; under them, keys that
+  // clear them all or snooze them all for an hour.
   component Comms() {
     Column {
       gap: 4
@@ -311,13 +360,13 @@ face "console comms" {
       if !n.available {
         Box { onTap: notification("open", ""); Pill { label: "access denied · tap to grant"; tint: rose } }
       } else if n.count == 0 {
-        Text { text: "NO INCOMING TRANSMISSIONS"; font: antonio; fontSize: 15; letterSpacing: 1; color: lilac; padding: [0, 4] }
+        Text { text: "NO INCOMING TRANSMISSIONS"; font: antonio; fontSize: 16.5; letterSpacing: 1; color: lilac; padding: [0, 4] }
       } else {
         for item, i in notes key item.key {
           Row {
             gap: 8
             fill: width
-            height: 40
+            height: 42
             align: center
             onTap: notification("open", item.key)
             onLongPress: { haptic(); notification("dismiss", item.key) }
@@ -326,22 +375,57 @@ face "console comms" {
               height: 30
               radius: 15
               align: center
-              background: tints[i % 8]
+              background: alpha(tints[i % 8], gA); frost: fz
               Box { size: 22; radius: 11; background: void; align: center; Image { src: item.icon; size: 16 } }
             }
             Column {
               gap: 0
               weight: 1
-              Text { text: upper(item.title); font: antonio; fontSize: 15; fontWeight: 500; color: amber; maxLines: 1 }
+              Text { text: upper(item.title); font: antonio; fontSize: 16.5; fontWeight: 500; color: amber; maxLines: 1 }
               if item.text != "" {
-                Text { text: item.text; font: antonio; fontSize: 12; color: txLabel; maxLines: 1 }
+                Text { text: item.text; font: antonio; fontSize: 13.5; color: txLabel; maxLines: 1 }
               }
             }
-            Text { text: upper(fmtAgo(item.time, now)); font: antonio; fontSize: 12; fontWeight: 500; color: txNote }
+            Text { text: upper(fmtAgo(item.time, now)); font: antonio; fontSize: 13.5; fontWeight: 500; color: txNote }
+            if item.clearable != false {
+              Box {
+                width: 34
+                height: 26
+                radius: 13
+                background: alpha(rose, gA); frost: fz
+                align: center
+                onTap: { haptic(); notification("dismiss", item.key) }
+                Text { text: "X"; font: antonio; fontSize: 15.5; fontWeight: 600; color: void; align: center }
+              }
+            }
           }
         }
-        if n.count > 4 {
-          Text { text: "+ ${n.count - 4} MORE"; font: antonio; fontSize: 12; letterSpacing: 1; color: txNote; align: end }
+        if n.count > 3 {
+          Text { text: "+ ${n.count - 3} MORE"; font: antonio; fontSize: 13.5; letterSpacing: 1; color: txNote; align: end }
+        }
+        Row {
+          gap: 6
+          fill: width
+          Box {
+            weight: 1
+            height: 28
+            radius: 14
+            background: alpha(rose, gA); frost: fz
+            align: end
+            padding: [12, 0]
+            onTap: { haptic(); notification("clear") }
+            Text { text: "CLEAR ALL"; font: antonio; fontSize: 15.5; fontWeight: 600; letterSpacing: 1; color: void; maxLines: 1; align: end }
+          }
+          Box {
+            weight: 1
+            height: 28
+            radius: 14
+            background: alpha(gold, gA); frost: fz
+            align: end
+            padding: [12, 0]
+            onTap: { haptic(); notification("snoozeAll", 3600) }
+            Text { text: "SNOOZE ALL 1H"; font: antonio; fontSize: 15.5; fontWeight: 600; letterSpacing: 1; color: void; maxLines: 1; align: end }
+          }
         }
       }
     }
@@ -402,6 +486,8 @@ face "console comms" {
   Column {
     fill: true
     gap: 0
+    background: alpha(background, tileOpacity)
+    frost: bgBlur
     padding: [8 + screenLeft, screenTop + 6, 8 + screenRight, 0]
     Top { name: "comms"; code: "02-4410"; cA: lilac; cB: amber; cC: periw }
     Row {
@@ -419,7 +505,7 @@ face "console comms" {
         Box { onTap: androidApp("com.google.android.apps.messaging"); Side { label: "messages"; code: "09-1138"; tint: sky; h: 48 } }
         Box { onTap: androidApp("com.google.android.gm"); Side { label: "gmail"; code: "09-2257"; tint: rose; h: 48 } }
         Box { onTap: launcher("drawer"); Side { label: "apps"; code: "10-8875"; tint: periw; h: 96 } }
-        Column { width: sw; weight: 1; background: lilac }
+        Column { width: sw; weight: 1; background: alpha(lilac, gA); frost: fz }
         Box { onTap: settings("sound"); Side { label: "sound"; code: "11-0316"; tint: violet; h: 56 } }
       }
       Column {
@@ -430,7 +516,7 @@ face "console comms" {
         Content { weight: 1; fill: width }
       }
     }
-    Bottom { name: !n.available || n.count == 0 ? "comms · today" : n.count == 1 ? "1 transmission" : "${n.count} transmissions"; cA: periw; cB: lilac; cC: amber }
+    Bottom { name: !n.available || n.count == 0 ? "comms · today" : n.count == 1 ? "1 transmission" : "${n.count} transmissions"; cA: periw; cB: lilac; cC: amber; here: 1 }
     Spacer { height: screenInset }
   }
 }
