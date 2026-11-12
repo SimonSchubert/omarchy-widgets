@@ -4,7 +4,7 @@ face "console ops" {
   // never stops scrolling. It follows the Omarchy theme: every coloured part is frosted glass in one of its colours,
   // over the wallpaper. This first page: Arch's packages and updates, Claude Code's sessions and limits, Codex's plan
   // and limits, and the latest Claude Code, Codex and Grok sessions to resume; the sidebar opens the agents' apps,
-  // a terminal, files, the store and the style menu, and the phone. Pages two and three are page-2.owl (comms)
+  // herdr, files, the store and the style menu, and the phone. Pages two and three are page-2.owl (comms)
   // and page-3.owl (engineering); the tabs at the foot turn between them.
   // Built on simonschubert/bauhaus (MIT): the same readouts and logins, read from the agents' own files and only
   // sent to their own servers.
@@ -741,7 +741,8 @@ face "console ops" {
         Box { onTap: { haptic(); launcher("agents") }; Side { label: "agents"; code: "01-04"; tint: lilac; h: bh } }
         Box { onTap: { haptic(); androidApp("com.anthropic.claude") }; Side { label: "claude"; code: "01-05"; tint: peach; h: 2 * bh } }
         Box { onTap: { haptic(); androidApp("com.openai.chatgpt") }; Side { label: "chatgpt"; code: "01-06"; tint: periw; h: 2 * bh } }
-        Box { onTap: { haptic(); terminal("bash -l", "arch") }; Side { label: "terminal"; code: "01-07"; tint: amber; h: 2 * bh } }
+        // herdr, the terminal multiplexer for coding agents; a plain shell where it isn't installed.
+        Box { onTap: { haptic(); terminal("if command -v herdr >/dev/null; then herdr; else bash -l; fi", "herdr") }; Side { label: "herdr"; code: "01-07"; tint: amber; h: 2 * bh } }
         Column { width: sw; weight: 1; background: alpha(tan, gA); frost: fz }
         Box { width: sw; height: bh; background: alpha(violet, gA); frost: fz; onTap: { haptic(); androidApp("com.google.android.dialer") } }
       }

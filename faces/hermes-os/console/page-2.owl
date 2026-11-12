@@ -306,6 +306,7 @@ face "console comms" {
   let playing = has && mp.playing == true
   let notes = n.available ? n.items.take(3) : []
   let top = (apps ?? []).filter(a => !a.system || a.score > 0).sortBy(a => -a.score).take(8)
+  let spotify = (apps ?? []).find(a => a.package == "com.spotify.music")
   let tints = [amber, lilac, periw, peach, tan, sky, gold, violet]
 
   // A rounded console button: its name at the right, in black.
@@ -520,7 +521,8 @@ face "console comms" {
         // a live reading after its number. Under the filler, past a gap, the phone: a key that runs on into the elbow,
         // where its name sits.
         Box { onTap: { haptic(); launcher("drawer") }; Side { label: "apps"; code: "02-01"; tint: periw; h: bh } }
-        Box { onTap: { haptic(); media("open") }; Side { label: "media"; code: "02-02"; tint: peach; h: bh } }
+        // Spotify, or the player that's playing where Spotify isn't installed.
+        Box { onTap: { haptic(); if spotify != null { androidApp(spotify.key) } else { media("open") } }; Side { label: "media"; code: "02-02"; tint: peach; h: bh } }
         Box { onTap: { haptic(); settings("output") }; Side { label: "output"; code: "02-03"; tint: amber; h: bh } }
         Box { onTap: { haptic(); settings("sound") }; Side { label: "sound"; code: "02-04"; tint: violet; h: bh } }
         Box { onTap: { haptic(); androidApp("com.android.chrome") }; Side { label: "chrome"; code: "02-05"; tint: gold; h: 2 * bh } }
