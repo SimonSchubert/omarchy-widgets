@@ -1,24 +1,27 @@
-# Omagara screenshots
+# Omagara
 
-## Current face
+A Niagara-inspired OWL 21 home face for Omalauncher.
 
-OWL 21, version 1.1. Includes thumb-responsive elastic alphabet navigation, selected-letter bubble, adjustable per-letter haptics, 80% default app-list scale, kinetic scrolling, app search with a calculator, notifications, and calendar/clock tools.
+## Appearance
 
-## Wanted upstream support
+Square backgrounds are the default. The previous rounded, shaded bubble style is optional in Settings, with an independent border toggle. This applies to Search, Close, the selected-letter indicator, notifications and calendar cards.
 
-- **Home / Back reset:** Re-pressing Android Home or pressing system Back should dismiss alphabet browsing or search and return to the idle face, like the existing X button. OWL 21 does not expose these launcher navigation events to faces.
-- **Contact search:** Search phone contacts alongside installed apps. Omalauncher 1.2.0 / OWL 21 does not expose contacts or request Android's contacts permission, so the face cannot provide this yet.
+Includes elastic alphabet navigation, haptic feedback, app search, calendar, notifications and clock tools.
 
-Screenshots taken on an Android phone, resized and WebP-compressed without recoloring. These show several appearances, but their exact Omarchy theme names are unverified. They are **not** the store’s named `previews/<theme>.webp` renders.
+## Screenshots
 
-The themed Jade Horse preview and main `preview.png` remain in the submission.
-
-| Light | Cyan grid |
+| Dark | Light |
 |:--:|:--:|
-| <img src="https://raw.githubusercontent.com/dillacorn/omarchy-widgets/668608bba951348ea32b9236914ac33c9bcbcd3a/showcase/omagara/light.webp" width="185" alt="Omagara light screenshot" /> | <img src="https://raw.githubusercontent.com/dillacorn/omarchy-widgets/668608bba951348ea32b9236914ac33c9bcbcd3a/showcase/omagara/cyan-grid.webp" width="185" alt="Omagara cyan grid screenshot" /> |
-| Blue Spiral | Pink City |
-| <img src="https://raw.githubusercontent.com/dillacorn/omarchy-widgets/668608bba951348ea32b9236914ac33c9bcbcd3a/showcase/omagara/blue-spiral.webp" width="185" alt="Omagara blue spiral screenshot" /> | <img src="https://raw.githubusercontent.com/dillacorn/omarchy-widgets/668608bba951348ea32b9236914ac33c9bcbcd3a/showcase/omagara/pink-city.webp" width="185" alt="Omagara pink city screenshot" /> |
-| Retro Crt | Blue Texture |
-| <img src="https://raw.githubusercontent.com/dillacorn/omarchy-widgets/668608bba951348ea32b9236914ac33c9bcbcd3a/showcase/omagara/retro-crt.webp" width="185" alt="Omagara retro crt screenshot" /> | <img src="https://raw.githubusercontent.com/dillacorn/omarchy-widgets/668608bba951348ea32b9236914ac33c9bcbcd3a/showcase/omagara/blue-texture.webp" width="185" alt="Omagara blue texture screenshot" /> |
+| <img src="https://raw.githubusercontent.com/dillacorn/omarchy-widgets/391a433151daab9e16af9e38c5d55d783287001e/showcase/omagara-v1.2/dark.webp" width="215" alt="Dark square style" /> | <img src="https://raw.githubusercontent.com/dillacorn/omarchy-widgets/391a433151daab9e16af9e38c5d55d783287001e/showcase/omagara-v1.2/light.webp" width="215" alt="Light square style" /> |
 
-The remaining named theme previews can be generated with the store’s debug-emulator tooling when available.
+| Wallpaper | Alphabet movement |
+|:--:|:--:|
+| <img src="https://raw.githubusercontent.com/dillacorn/omarchy-widgets/391a433151daab9e16af9e38c5d55d783287001e/showcase/omagara-v1.2/wallpaper.webp" width="215" alt="Square styling with wallpaper" /> | <img src="https://raw.githubusercontent.com/dillacorn/omarchy-widgets/391a433151daab9e16af9e38c5d55d783287001e/showcase/omagara-v1.2/alphabet-movement.webp" width="215" alt="Elastic alphabet navigation" /> |
+
+These are actual Android phone screenshots, not generated Omarchy theme previews.
+
+## Launcher limitations
+
+- Home or Back cannot dismiss alphabet browsing through OWL 21.
+- Contact search is not exposed to OWL 21.
+- Haptic feedback strength cannot be adjusted by OWL 21.

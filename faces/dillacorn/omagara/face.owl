@@ -1,5 +1,5 @@
 face "Omagara" {
-  meta { owl: 21; description: "A transparent home face with grouped interactive notifications, curved alphabetical navigation and on-demand search"; version: "1.1"; license: "MIT"; category: "home" }
+  meta { owl: 21; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.2"; license: "MIT"; category: "home" }
   fps: 60
   page: 0
   edge: true
@@ -59,10 +59,11 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, tintIcons: false, clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, hapticFeedback: "Every letter"}
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, tintIcons: false, clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, hapticFeedback: "Every letter", bubbleShape: "Square", bubbleBorder: false}
   let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
   let hapticChoices = ["Off", "Reduced", "Every letter"]
-  let cfg = merge(defaults, prefs, {searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter"})
+  let bubbleShapeChoices = ["Square", "Rounded"]
+  let cfg = merge(defaults, prefs, {searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter", bubbleShape: contains(bubbleShapeChoices, prefs.bubbleShape) ? prefs.bubbleShape : "Square", bubbleBorder: prefs.bubbleBorder == true})
   let zoneChoices = ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland"]
   let preferenceRows = [
     {section: "Appearance", key: "icons", name: "Show application icons"},
@@ -241,7 +242,9 @@ face "Omagara" {
       fill: width
       gap: 8
       padding: [16, 16]
-      radius: 14
+      radius: cfg.bubbleShape == "Rounded" ? 14 : 0
+      border: cfg.bubbleBorder ? 1 : 0
+      borderColor: border
       background: alpha(background, 0.48)
       onTap: {
         if summary && len(get(noticeGroups, stack, [])) > 1 {
@@ -723,7 +726,9 @@ face "Omagara" {
         let bubbleLift = peakLift + 66 * clamp((screenLeft + 60 - peakX) / 46, 0, 1)
         Box {
           size: 42
-          radius: 21
+          radius: cfg.bubbleShape == "Rounded" ? 21 : 0
+          border: cfg.bubbleBorder ? 1 : 0
+          borderColor: border
           background: alpha(surface, 0.94)
           align: center
           offset: [bubbleX - railBaseX - 1, clamp(touchY - railTop - 21 - bubbleLift, 0, max(0, appSafeBottom - railTop - 42))]
@@ -738,7 +743,9 @@ face "Omagara" {
       visible: browsing && activeSide == 0
       Box {
         size: 48
-        radius: 24
+        radius: cfg.bubbleShape == "Rounded" ? 24 : 0
+        border: cfg.bubbleBorder ? 1 : 0
+        borderColor: border
         background: alpha(surface, 0.85)
         align: center
         onTap: { appVelocity = 0; browsing = false; activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; queryText = ""; menu = ""; expandedStack = ""; replyKey = ""; replyDraft = "" }
@@ -753,7 +760,9 @@ face "Omagara" {
         size: 48
         // Lower-letter magnification crosses this area; restore on release.
         visible: activeSide == 0
-        radius: 24
+        radius: cfg.bubbleShape == "Rounded" ? 24 : 0
+        border: cfg.bubbleBorder ? 1 : 0
+        borderColor: border
         background: alpha(surface, 0.85)
         align: center
         onTap: { activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; menu = ""; appVelocity = 0; browsing = false; queryText = ""; expandedStack = ""; replyKey = ""; replyDraft = ""; screenMode = "search"; screen() }
@@ -839,6 +848,23 @@ face "Omagara" {
             }
           }
         }
+        Text { text: "Bubble style"; color: accent; padding: [0, 18, 0, 6] }
+        Flow {
+          fill: width
+          gap: 8
+          for shape in bubbleShapeChoices {
+            Button { text: (cfg.bubbleShape == shape ? "✓ " : "") + shape; onTap: prefs = set(prefs, "bubbleShape", shape) }
+          }
+        }
+        Row {
+          fill: width
+          align: center
+          padding: [8, 14]
+          onTap: prefs = set(prefs, "bubbleBorder", !cfg.bubbleBorder)
+          Text { text: "Show bubble borders"; font: sans; fontSize: 15; weight: 1 }
+          Text { text: cfg.bubbleBorder ? "ON" : "OFF"; color: cfg.bubbleBorder ? accent : muted; fontSize: 14 }
+        }
+        Text { text: "Styles Search, Close, the selected letter, notification cards, and calendar cards. Square without borders is the default."; font: sans; fontSize: 13; color: muted }
         Text { text: "Alphabet touch feedback"; color: accent; padding: [0, 18, 0, 6] }
         Flow {
           fill: width
@@ -878,12 +904,12 @@ face "Omagara" {
           text: "Import Omagara settings"
           onTap: {
             let imported = parseJson(importText)
-            if imported.version == 1 && all(keys(defaults), k => k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
+            if imported.version == 1 && all(keys(defaults), k => k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleShape" ? get(imported.prefs, k) == null || contains(bubbleShapeChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
               letter = highlightedLetter; appTracking = false
               prefs = reduce(keys(defaults), (m, k) => set(m, k, k == "searchContacts" ? false : (get(imported.prefs, k) ?? get(defaults, k))), {})
               worldZones = unique(imported.zones ?? [])
               importStatus = "Settings imported"
-            } else { importStatus = "Invalid settings: export version 1 with boolean preferences, Application Scale 75–115 in steps of 5, valid haptic mode, and supported zones required" }
+            } else { importStatus = "Invalid settings: export version 1 with boolean preferences, Application Scale 75–115 in steps of 5, valid haptic mode, bubble shape/border, and supported zones required" }
           }
         }
         if importStatus != "" { Text { text: importStatus; fontSize: 13; color: muted } }
@@ -1008,7 +1034,9 @@ face "Omagara" {
                 Column {
                   fill: width
                   padding: [12, 16]
-                  radius: 12
+                  radius: cfg.bubbleShape == "Rounded" ? 12 : 0
+                  border: cfg.bubbleBorder ? 1 : 0
+                  borderColor: border
                   background: surface
                   gap: 6
                   onTap: pickedEvent = event
