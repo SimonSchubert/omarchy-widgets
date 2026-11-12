@@ -26,6 +26,14 @@ face "Omagara" {
   // Horizontal mountain travel (dp), driven by the thumb’s absolute drag position.
   state railPull = 0
   state railThumbX = 0
+  // The letters follow a vertical edge pull; the stationary rail retains input.
+  state railOverpull = 0
+  state railReturnFrom = 0
+  state railReturnStart = 0
+  state railReturning = false
+  // Brief mountain entrance, then full-speed thumb tracking.
+  state railEnterStart = 0
+  state railEntering = false
   state hapticSteps = 0
   state appScroll = 0
   state appVelocity = 0
@@ -117,6 +125,16 @@ face "Omagara" {
   let railStep = availableHeight * 0.59 / max(1, len(alphabet) - 1)
   let railHeight = railStep * max(1, len(alphabet))
   let railTop = screenTop + availableHeight * 0.31 - (len(alphabet) > 1 ? railStep / 2 : 0)
+  // Only read the frame clock during a 160ms entrance or a 420ms return.
+  let railEnterAge = railEntering ? max(0, time - railEnterStart) : 0
+  let railEnterT = railEntering ? clamp(railEnterAge / 0.16, 0, 1) : 1
+  let railEnterEase = 1 - pow(1 - railEnterT, 3)
+  let railEnterDone = railEntering && railEnterAge >= 0.16
+  on railEnterDone { if value { railEntering = false } }
+  let railReturnAge = railReturning ? max(0, time - railReturnStart) : 0
+  let railVisualY = cfg.reduceMotion ? 0 : railHeld ? railOverpull : railReturning ? railReturnFrom * pow(2.718281828459045, -12 * railReturnAge) * cos(20 * railReturnAge) : 0
+  let railReturnDone = railReturning && railReturnAge >= 0.42
+  on railReturnDone { if value { railReturning = false; railReturnFrom = 0 } }
   // Handlers receive y local to this same rail: each center is (i + 0.5)
   // * railStep. floor(y / railStep) selects i; no screen offset is subtracted.
 
@@ -389,6 +407,12 @@ face "Omagara" {
         heldAlphabet = liveAlphabet
         railHeld = true
         draggingSide = 0
+        railReturning = false
+        // Rubber-band only past the first/last letter center, max 68dp.
+        let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railHeight - railStep / 2 ? y - (railHeight - railStep / 2) : 0
+        railOverpull = cfg.reduceMotion || len(alphabet) < 2 ? 0 : clamp(edgeY * 0.48, -68, 68)
+        railEnterStart = time
+        railEntering = cfg.curve && !cfg.reduceMotion
         hapticSteps = 0
         // Track absolute thumb position while the rail's hit cells stay fixed.
         // Aim the peak 84dp left of the thumb until the screen edge limits it.
@@ -411,6 +435,8 @@ face "Omagara" {
         appVelocity = 0
         railHeld = true
         draggingSide = 1
+        let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railHeight - railStep / 2 ? y - (railHeight - railStep / 2) : 0
+        railOverpull = cfg.reduceMotion || len(alphabet) < 2 ? 0 : clamp(edgeY * 0.48, -68, 68)
         // Track absolute thumb position while the rail's hit cells stay fixed.
         // Aim the peak 84dp left of the thumb until the screen edge limits it.
         railPull = side == 1 ? clamp(106 - x, 0, railMaxReach) : min(84, railMaxReach)
@@ -435,35 +461,61 @@ face "Omagara" {
       // A press is cancelled when the drag detector consumes its first move.
       // Keep the curve active in either detector order at that transition;
       // a real drag release/cancellation always clears both states below.
-      onRelease: { if draggingSide == 0 { activeSide = 0; railHeld = false; railPull = 0 } }
-      onDragEnd: { draggingSide = 0; activeSide = 0; railHeld = false; railPull = 0 }
+      onRelease: {
+        if draggingSide == 0 {
+          railReturnFrom = railOverpull
+          railReturnStart = time
+          railReturning = !cfg.reduceMotion && abs(railOverpull) > 0.5
+          railOverpull = 0
+          railEntering = false
+          activeSide = 0; railHeld = false; railPull = 0
+        }
+      }
+      onDragEnd: {
+        railReturnFrom = railOverpull
+        railReturnStart = time
+        railReturning = !cfg.reduceMotion && abs(railOverpull) > 0.5
+        railOverpull = 0
+        railEntering = false
+        draggingSide = 0; activeSide = 0; railHeld = false; railPull = 0
+      }
       // Left input has no glyph nodes; either edge drives the right feedback.
       if side == 1 && (cfg.idleAlphabet || activeSide != 0) {
-        for character, i in alphabet {
-          // One continuous elastic arc. A broad half-cosine spreads the
-          // outward travel across many adjacent letters instead of making a
-          // sharp kink at the selected letter. The curve follows the finger
-          // continuously; unchanged cells keep the same touch targets.
-          let distance = abs(i - fingerPosition)
-          let expanded = activeSide != 0 && cfg.curve && !cfg.reduceMotion
-          let radius = max(10, min(14, len(alphabet) * 0.58))
-          let curve = expanded ? (1 + cos(rad(min(distance / radius, 1) * 180))) / 2 : 0
-          Box {
-            height: railStep
-            fill: width
-            align: center
-            Text {
-              text: character
-              width: 18
-              font: chosenFont
-              fontSize: 11
-              bold: highlightedLetter == character && browsing
-              color: highlightedLetter == character && browsing ? accent : curve > 0 ? primaryText : len(get(groups, character, [])) > 0 ? secondaryText : alpha(secondaryText, cfg.textContrast == "High" ? 0.72 : 0.35)
-              align: center
-              background: transparent
-              radius: 4
-              offset: [-railPull * curve, 0]
-              scale: 1 + 0.16 * curve
+        // Only move the visual worm: the rail's touch area stays put.
+        Box {
+          width: 44
+          height: railHeight
+          offset: [0, railVisualY]
+          Column {
+            fill: true
+            gap: 0
+            for character, i in alphabet {
+              // One continuous elastic arc. A broad half-cosine spreads the
+              // outward travel across many adjacent letters instead of making a
+              // sharp kink at the selected letter. The curve follows the finger
+              // continuously; unchanged cells keep the same touch targets.
+              let distance = abs(i - fingerPosition)
+              let expanded = activeSide != 0 && cfg.curve && !cfg.reduceMotion
+              let radius = max(10, min(14, len(alphabet) * 0.58))
+              let curve = expanded ? (1 + cos(rad(min(distance / radius, 1) * 180))) / 2 * railEnterEase : 0
+              Box {
+                height: railStep
+                fill: width
+                align: center
+                Text {
+                  text: character
+                  width: 18
+                  font: chosenFont
+                  fontSize: 11
+                  bold: highlightedLetter == character && browsing
+                  color: highlightedLetter == character && browsing ? accent : curve > 0 ? primaryText : len(get(groups, character, [])) > 0 ? secondaryText : alpha(secondaryText, cfg.textContrast == "High" ? 0.72 : 0.35)
+                  align: center
+                  background: transparent
+                  radius: 4
+                  offset: [-railPull * curve, 0]
+                  scale: 1 + 0.16 * curve
+                }
+              }
             }
           }
         }
