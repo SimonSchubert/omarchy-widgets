@@ -1,5 +1,5 @@
 face "Omagara" {
-  meta { owl: 21; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.2"; license: "MIT"; category: "home" }
+  meta { owl: 21; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.3"; license: "MIT"; category: "home" }
   fps: 60
   page: 0
   edge: true
@@ -48,6 +48,21 @@ face "Omagara" {
   state replyDraft = ""
   state noticeDragKey = ""
   state noticeDragX = 0
+  // One single-notification pulse; a stack schedules a second distinct tap.
+  state noticeSwipeHapticFired = false
+  state noticeExitKey = ""
+  state noticeExitX = 0
+  // Capture where the notification physically is at finger release.
+  state noticeExitFromX = 0
+  state noticeReturnKey = ""
+  state noticeReturnFromX = 0
+  state noticeReturnStarted = 0
+  state noticeExitStarted = 0
+  state noticeExitKeys = []
+  state noticeExitSent = false
+  state stackSecondHapticAt = 0
+  // Snapshot of clearable keys in a selected app/profile stack.
+  state pendingStackDismiss = []
 
   state prefs = {} persist
   state worldZones = [] persist
@@ -112,7 +127,10 @@ face "Omagara" {
   // Freeze mapping and geometry for the entire touch, even if apps update.
   let liveAlphabet = cfg.hideEmpty ? fullAlphabet.filter(c => len(get(groups, c, [])) > 0) : fullAlphabet
   let alphabet = railHeld ? heldAlphabet : liveAlphabet
-  let searchResults = trim(queryText) == "" ? apps : rank(apps, trim(queryText))
+  // Put the single most recently opened Android app first only when Search is empty.
+  // android.apps.last is launcher-maintained history; no new permission needed.
+  let lastOpenedApp = first(apps.filter(a => a.last != null).sortBy(a => -(a.last ?? 0)))
+  let searchResults = trim(queryText) == "" ? (lastOpenedApp == null ? apps : [lastOpenedApp] + apps.filter(a => a.key != lastOpenedApp.key)) : rank(apps, trim(queryText))
   let availableHeight = (tileHeight ?? 800) - screenTop - screenInset
   let compact = availableHeight < 560
   let availableWidth = (tileWidth ?? 400) - screenLeft - screenRight
@@ -125,6 +143,10 @@ face "Omagara" {
   let railStep = availableHeight * 0.59 / max(1, len(alphabet) - 1)
   let railHeight = railStep * max(1, len(alphabet))
   let railTop = screenTop + availableHeight * 0.31 - (len(alphabet) > 1 ? railStep / 2 : 0)
+  // While held, let the first/last glyph reach the usable screen edge.
+  // The fixed touch rail does not move; only its displayed letters do.
+  let railUpperReach = max(0, railTop + railStep / 2 - screenTop - 10)
+  let railLowerReach = max(0, (tileHeight ?? 800) - screenInset - 10 - (railTop + railHeight - railStep / 2))
   // Only read the frame clock during a 160ms entrance or a 420ms return.
   let railEnterAge = railEntering ? max(0, time - railEnterStart) : 0
   let railEnterT = railEntering ? clamp(railEnterAge / 0.16, 0, 1) : 1
@@ -264,17 +286,133 @@ face "Omagara" {
       replyKey = ""
       replyDraft = ""
     }
-    if !any(noticeItems, n => n.key == noticeDragKey) { noticeDragKey = ""; noticeDragX = 0 }
+    if !any(noticeItems, n => n.key == noticeDragKey) && !any(noticeGroupKeys, k => "stack-drag:" + k == noticeDragKey) { noticeDragKey = ""; noticeDragX = 0; noticeSwipeHapticFired = false }
+    if noticeExitKey != "" && noticeExitSent && !any(noticeItems, n => contains(noticeExitKeys, n.key)) {
+      noticeExitKey = ""; noticeExitX = 0; noticeExitKeys = []; noticeExitSent = false
+    }
+  }
+
+  // The second stack tap runs after a short gap, not in the same handler.
+  // `time` is only observed while a pulse is pending; no idle polling.
+  when stackSecondHapticAt > 0 && time >= stackSecondHapticAt {
+    stackSecondHapticAt = 0
+    if cfg.hapticFeedback != "Off" { haptic() }
+  }
+
+  // A committed swipe continues off the card's current position.
+  // Native dismissal happens only after the outward animation completes.
+  // Animate the actual position, NOT an animated offset property. The
+  // latter could restart/spring toward zero when the drag ended.
+  // Both formulas are monotone: committed swipes always travel outward.
+  let noticeExitAge = noticeExitKey != "" ? max(0, time - noticeExitStarted) : 0
+  // Only a released, committed swipe starts the outbound animation.
+  // Its first frame matches the card's position at finger-up.
+  let noticeExitT = cfg.reduceMotion ? 1 : clamp(noticeExitAge / 0.24, 0, 1)
+  let noticeExitEase = 1 - pow(1 - noticeExitT, 3)
+  let noticeExitPosition = noticeExitFromX + (noticeExitX - noticeExitFromX) * noticeExitEase
+  let noticeReturnAge = noticeReturnKey != "" ? max(0, time - noticeReturnStarted) : 0
+  let noticeReturnT = cfg.reduceMotion ? 1 : clamp(noticeReturnAge / 0.24, 0, 1)
+  let noticeReturnPosition = noticeReturnFromX * pow(1 - noticeReturnT, 3)
+  let noticeReturnDone = noticeReturnKey != "" && noticeReturnT >= 1
+  on noticeReturnDone { if value { noticeReturnKey = ""; noticeReturnFromX = 0 } }
+  // Give the outbound slide time to finish before native removal.
+  let noticeExitDue = noticeExitKey != "" && !noticeExitSent && (cfg.reduceMotion || time - noticeExitStarted >= 0.32)
+  on noticeExitDue { if value { noticeExitSent = true; pendingStackDismiss = noticeExitKeys } }
+  let noticeExitExpired = noticeExitKey != "" && noticeExitSent && time - noticeExitStarted >= 2.0
+  on noticeExitExpired {
+    if value {
+      noticeDragKey = ""; noticeDragX = 0; noticeSwipeHapticFired = false
+      noticeExitKey = ""; noticeExitX = 0; noticeExitKeys = []; noticeExitSent = false
+    }
+  }
+
+  // OWL 21 handler statements have no for-loop. The native notifications
+  // source exposes at most 50 items; one batch can cover every visible key.
+  // Never call notification("clear"): it would affect unrelated apps.
+  on pendingStackDismiss {
+    if len(value) > 0 {
+      // Forget the request first so a later touch cannot replay old keys.
+      pendingStackDismiss = []
+      if len(value) > 0 { notification("dismiss", value[0]) }
+      if len(value) > 1 { notification("dismiss", value[1]) }
+      if len(value) > 2 { notification("dismiss", value[2]) }
+      if len(value) > 3 { notification("dismiss", value[3]) }
+      if len(value) > 4 { notification("dismiss", value[4]) }
+      if len(value) > 5 { notification("dismiss", value[5]) }
+      if len(value) > 6 { notification("dismiss", value[6]) }
+      if len(value) > 7 { notification("dismiss", value[7]) }
+      if len(value) > 8 { notification("dismiss", value[8]) }
+      if len(value) > 9 { notification("dismiss", value[9]) }
+      if len(value) > 10 { notification("dismiss", value[10]) }
+      if len(value) > 11 { notification("dismiss", value[11]) }
+      if len(value) > 12 { notification("dismiss", value[12]) }
+      if len(value) > 13 { notification("dismiss", value[13]) }
+      if len(value) > 14 { notification("dismiss", value[14]) }
+      if len(value) > 15 { notification("dismiss", value[15]) }
+      if len(value) > 16 { notification("dismiss", value[16]) }
+      if len(value) > 17 { notification("dismiss", value[17]) }
+      if len(value) > 18 { notification("dismiss", value[18]) }
+      if len(value) > 19 { notification("dismiss", value[19]) }
+      if len(value) > 20 { notification("dismiss", value[20]) }
+      if len(value) > 21 { notification("dismiss", value[21]) }
+      if len(value) > 22 { notification("dismiss", value[22]) }
+      if len(value) > 23 { notification("dismiss", value[23]) }
+      if len(value) > 24 { notification("dismiss", value[24]) }
+      if len(value) > 25 { notification("dismiss", value[25]) }
+      if len(value) > 26 { notification("dismiss", value[26]) }
+      if len(value) > 27 { notification("dismiss", value[27]) }
+      if len(value) > 28 { notification("dismiss", value[28]) }
+      if len(value) > 29 { notification("dismiss", value[29]) }
+      if len(value) > 30 { notification("dismiss", value[30]) }
+      if len(value) > 31 { notification("dismiss", value[31]) }
+      if len(value) > 32 { notification("dismiss", value[32]) }
+      if len(value) > 33 { notification("dismiss", value[33]) }
+      if len(value) > 34 { notification("dismiss", value[34]) }
+      if len(value) > 35 { notification("dismiss", value[35]) }
+      if len(value) > 36 { notification("dismiss", value[36]) }
+      if len(value) > 37 { notification("dismiss", value[37]) }
+      if len(value) > 38 { notification("dismiss", value[38]) }
+      if len(value) > 39 { notification("dismiss", value[39]) }
+      if len(value) > 40 { notification("dismiss", value[40]) }
+      if len(value) > 41 { notification("dismiss", value[41]) }
+      if len(value) > 42 { notification("dismiss", value[42]) }
+      if len(value) > 43 { notification("dismiss", value[43]) }
+      if len(value) > 44 { notification("dismiss", value[44]) }
+      if len(value) > 45 { notification("dismiss", value[45]) }
+      if len(value) > 46 { notification("dismiss", value[46]) }
+      if len(value) > 47 { notification("dismiss", value[47]) }
+      if len(value) > 48 { notification("dismiss", value[48]) }
+      if len(value) > 49 { notification("dismiss", value[49]) }
+    }
   }
 
   component NotificationRow(item, stack, summary) {
+    let groupItems = get(noticeGroups, stack, [])
+    let stacked = summary && len(groupItems) > 1
+    let groupClearables = groupItems.filter(n => n.clearable)
+    let canDismiss = stacked ? len(groupClearables) > 0 : item.clearable
+    // The summary and its first expanded child share item.key, but not a drag ID.
+    let dragId = stacked ? "stack-drag:" + stack : item.key
+    // Singles have a small catch; whole stacks resist more strongly.
+    // Crossing the threshold gives a bounded 12dp outward snap, not a dismissal.
+    // Crossing back inward re-engages resistance; only finger-up can dismiss.
+    let singleThreshold = max(1, min(noticeWidth * 0.65, max(30, noticeWidth * 0.26)))
+    let stackThreshold = max(1, min(noticeWidth * 0.75, max(48, noticeWidth * 0.38)))
+    let dismissThreshold = stacked ? stackThreshold : singleThreshold
+    let draggingHere = canDismiss && noticeDragKey == dragId
+    let exitingHere = noticeExitKey == dragId
+    let swipeDistance = abs(noticeDragX)
+    // Both branches share the same resistant baseline. No zero reset at haptic.
+    let magneticX = sign(noticeDragX) * min(noticeWidth, min(swipeDistance, dismissThreshold) * (stacked ? 0.54 : 0.32) + max(0, swipeDistance - dismissThreshold) * (stacked ? 1.65 : 1.30) + (swipeDistance >= dismissThreshold ? 12 : 0))
+    let swipeArmed = draggingHere && swipeDistance >= dismissThreshold
+    let stackArmed = stacked && swipeArmed
     Column {
       fill: width
       gap: 5
       padding: [16, 10]
       radius: cfg.bubbleShape == "Rounded" ? 14 : 0
-      border: cfg.bubbleBorder ? 1 : 0
-      borderColor: border
+      border: stackArmed ? 1 : cfg.bubbleBorder ? 1 : 0
+      borderColor: stackArmed ? accent : border
       background: alpha(background, 0.48)
       onTap: {
         if summary && len(get(noticeGroups, stack, [])) > 1 {
@@ -295,21 +433,59 @@ face "Omagara" {
       // Horizontal consumption leaves the enclosing lazy Column free to scroll.
       // Clip at the notification viewport, clear of both Android screen edges.
       drag: horizontal
-      offset: [noticeDragKey == item.key && (!summary || len(get(noticeGroups, stack, [])) == 1) ? noticeDragX : 0, 0]
-      animate offset: cfg.reduceMotion ? tween(0ms) : spring(0.8, 400)
+      // Direct position while swiping; time-based continuation after
+      // release. No native offset spring to reverse the card direction.
+      offset: [exitingHere ? noticeExitPosition : draggingHere ? magneticX : noticeReturnKey == dragId ? noticeReturnPosition : 0, 0]
       onDrag: {
-        if item.clearable && (!summary || len(get(noticeGroups, stack, [])) == 1) {
-          if noticeDragKey != item.key { noticeDragX = 0 }
-          noticeDragKey = item.key
+        if canDismiss && noticeExitKey == "" {
+          if noticeReturnKey != "" { noticeReturnKey = ""; noticeReturnFromX = 0 }
+          if noticeDragKey != dragId { noticeDragX = 0; noticeSwipeHapticFired = false }
+          noticeDragKey = dragId
           noticeDragX = clamp(noticeDragX + dx, -noticeWidth, noticeWidth)
+          // Latch once; do not buzz again when the finger oscillates.
+          if !noticeSwipeHapticFired && abs(noticeDragX) >= dismissThreshold {
+            noticeSwipeHapticFired = true
+            // Haptic feedback only; keep tracking the finger and allow reversal.
+            if cfg.hapticFeedback != "Off" {
+              haptic()
+              if stacked { stackSecondHapticAt = time + 0.12 }
+            }
+          }
         }
       }
       onDragEnd: {
-        if noticeDragKey == item.key && item.clearable && (abs(noticeDragX) > noticeWidth / 3 || abs(noticeDragX) > 16 && abs(vx) > 1000 && sign(vx) == sign(noticeDragX)) {
-          notification("dismiss", item.key)
+        // No velocity-only dismissal of a stack; its whole group needs a
+        // deliberate threshold crossing. Preserve quick flicks for singles.
+        let committed = noticeDragKey == dragId && canDismiss && (abs(noticeDragX) >= dismissThreshold || !stacked && abs(noticeDragX) > 16 && abs(vx) > 1000 && sign(vx) == sign(noticeDragX))
+        if committed && noticeExitKey == "" {
+          // Start at the displayed magnetic drag position.
+          noticeExitFromX = magneticX
+          noticeExitX = sign(noticeDragX) * (noticeWidth + 64)
+          noticeExitStarted = time
+          noticeExitSent = false
+          noticeExitKey = dragId
+          // Singles get one release tap only if the fast flick bypassed breakaway.
+          // Stacks already got their two timed taps at the threshold.
+          if cfg.hapticFeedback != "Off" && !noticeSwipeHapticFired {
+            haptic()
+            if stacked { stackSecondHapticAt = time + 0.12 }
+          }
+          if stacked {
+            noticeExitKeys = groupClearables.map(n => n.key)
+          } else {
+            noticeExitKeys = [item.key]
+          }
         }
-        noticeDragKey = ""
-        noticeDragX = 0
+        // An incomplete swipe eases back. Committed swipes keep their
+        // existing position and move only farther away from the origin.
+        if !committed && noticeExitKey == "" {
+          noticeReturnKey = dragId
+          noticeReturnFromX = magneticX
+          noticeReturnStarted = time
+          noticeDragKey = ""
+          noticeDragX = 0
+          noticeSwipeHapticFired = false
+        }
       }
       Row {
         fill: width
@@ -317,8 +493,28 @@ face "Omagara" {
         align: center
         Image { src: item.icon; size: 32; label: (item.app ?? "Notification") + (item.profile == null ? "" : " · " + item.profile) }
         Text { text: (item.app ?? item.package) + (item.profile == null ? "" : " · " + item.profile); weight: 1; font: chosenFont; fontSize: 12; color: secondaryText; maxLines: 1 }
-        if item.clearable && (!summary || len(get(noticeGroups, stack, [])) == 1) {
-          Text { text: "×"; width: 44; height: 44; padding: [0, 10]; align: center; fontSize: 18; color: primaryText; onTap: notification("dismiss", item.key) }
+        if canDismiss {
+          // The collapsed summary clears only this app/profile's clearable keys.
+          Text {
+            text: "×"
+            width: 44
+            height: 44
+            padding: [0, 10]
+            align: center
+            fontSize: 18
+            color: primaryText
+            onTap: {
+              if cfg.hapticFeedback != "Off" {
+                haptic()
+                if stacked { stackSecondHapticAt = time + 0.12 }
+              }
+              if stacked {
+                pendingStackDismiss = groupClearables.map(n => n.key)
+              } else {
+                notification("dismiss", item.key)
+              }
+            }
+          }
         }
       }
       if !summary || expandedStack != stack || len(get(noticeGroups, stack, [])) == 1 {
@@ -326,7 +522,14 @@ face "Omagara" {
         if cfg.previews && (item.text ?? "") != "" { Text { text: item.text; font: chosenFont; fontSize: 14; color: secondaryText; maxLines: 3 } }
       }
       if summary && len(get(noticeGroups, stack, [])) > 1 {
-        Text { text: expandedStack == stack ? "${len(get(noticeGroups, stack, []))} notifications · collapse ▴" : "${len(get(noticeGroups, stack, []))} notifications · expand ▾"; font: chosenFont; fontSize: 13; color: accent; maxLines: 1; padding: [0, 5] }
+        Text {
+          text: stackArmed ? "Release to dismiss ${len(groupClearables)} notifications" : draggingHere ? "Swipe farther to dismiss ${len(groupClearables)} notifications" : expandedStack == stack ? "${len(groupItems)} notifications · collapse ▴" : "${len(groupItems)} notifications · expand ▾"
+          font: chosenFont
+          fontSize: 13
+          color: accent
+          maxLines: 1
+          padding: [0, 5]
+        }
       }
       if cfg.previews && cfg.actions && (!summary || len(get(noticeGroups, stack, [])) == 1) && len(item.actions ?? []) > 0 {
         Flow {
@@ -408,9 +611,9 @@ face "Omagara" {
         railHeld = true
         draggingSide = 0
         railReturning = false
-        // Rubber-band only past the first/last letter center, max 68dp.
+        // Beyond an endpoint, the worm follows the thumb 1:1 up to the screen edge.
         let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railHeight - railStep / 2 ? y - (railHeight - railStep / 2) : 0
-        railOverpull = len(alphabet) < 2 ? 0 : clamp(edgeY * 0.48, -68, 68)
+        railOverpull = len(alphabet) < 2 ? 0 : clamp(edgeY, -railUpperReach, railLowerReach)
         railEnterStart = time
         railEntering = cfg.curve && !cfg.reduceMotion
         hapticSteps = 0
@@ -418,7 +621,7 @@ face "Omagara" {
         // Aim the peak 84dp left of the thumb until the screen edge limits it.
         railPull = side == 1 ? clamp(106 - x, 0, railMaxReach) : min(84, railMaxReach)
         railThumbX = side == 1 ? railBaseX - 22 + x : screenLeft + x
-        touchY = railTop + clamp(y, 0, railHeight)
+        touchY = clamp(railTop + y, screenTop, (tileHeight ?? 800) - screenInset)
         fingerPosition = clamp(y / railStep - 0.5, 0, max(0, len(alphabet) - 1))
         letter = get(alphabet, clamp(floor(y / railStep), 0, max(0, len(alphabet) - 1)), letter)
         if cfg.hapticFeedback != "Off" { haptic() }
@@ -436,12 +639,12 @@ face "Omagara" {
         railHeld = true
         draggingSide = 1
         let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railHeight - railStep / 2 ? y - (railHeight - railStep / 2) : 0
-        railOverpull = len(alphabet) < 2 ? 0 : clamp(edgeY * 0.48, -68, 68)
+        railOverpull = len(alphabet) < 2 ? 0 : clamp(edgeY, -railUpperReach, railLowerReach)
         // Track absolute thumb position while the rail's hit cells stay fixed.
         // Aim the peak 84dp left of the thumb until the screen edge limits it.
         railPull = side == 1 ? clamp(106 - x, 0, railMaxReach) : min(84, railMaxReach)
         railThumbX = side == 1 ? railBaseX - 22 + x : screenLeft + x
-        touchY = railTop + clamp(y, 0, railHeight)
+        touchY = clamp(railTop + y, screenTop, (tileHeight ?? 800) - screenInset)
         fingerPosition = clamp(y / railStep - 0.5, 0, max(0, len(alphabet) - 1))
         let nextLetter = get(alphabet, clamp(floor(y / railStep), 0, max(0, len(alphabet) - 1)), letter)
         if nextLetter != letter {
@@ -797,7 +1000,7 @@ face "Omagara" {
           borderColor: border
           background: alpha(surface, 0.94)
           align: center
-          offset: [bubbleX - railBaseX - 1, clamp(touchY - railTop - 21 - bubbleLift, 0, max(0, appSafeBottom - railTop - 42))]
+          offset: [bubbleX - railBaseX - 1, clamp(touchY - railTop - 21 - bubbleLift, screenTop + 4 - railTop, max(0, appSafeBottom - railTop - 42))]
           Text { text: letter; font: chosenFont; fontSize: 20; color: accent; bold: true; align: center }
         }
       }
