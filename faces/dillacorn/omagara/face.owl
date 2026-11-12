@@ -59,15 +59,23 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, tintIcons: false, clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, hapticFeedback: "Every letter", bubbleShape: "Square", bubbleBorder: false}
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, tintIcons: false, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, hapticFeedback: "Every letter", bubbleShape: "Square", bubbleBorder: false, textTone: "Theme", textContrast: "High"}
   let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
   let hapticChoices = ["Off", "Reduced", "Every letter"]
   let bubbleShapeChoices = ["Square", "Rounded"]
-  let cfg = merge(defaults, prefs, {searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter", bubbleShape: contains(bubbleShapeChoices, prefs.bubbleShape) ? prefs.bubbleShape : "Square", bubbleBorder: prefs.bubbleBorder == true})
+  let iconStyleChoices = ["Colored", "Theme overlay", "Monochrome"]
+  let iconOverlayChoices = [0, 10, 20, 30, 40, 50, 60]
+  let faceFontChoices = ["Sans", "Serif", "Launcher"]
+  let textToneChoices = ["Theme", "Light", "Dark"]
+  let textContrastChoices = ["High", "Standard"]
+  let cfg = merge(defaults, prefs, {searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter", bubbleShape: contains(bubbleShapeChoices, prefs.bubbleShape) ? prefs.bubbleShape : "Square", bubbleBorder: prefs.bubbleBorder == true, iconStyle: contains(iconStyleChoices, prefs.iconStyle) ? prefs.iconStyle : "Theme overlay", iconOverlayOpacity: contains(iconOverlayChoices, prefs.iconOverlayOpacity) ? prefs.iconOverlayOpacity : 30, faceFont: contains(faceFontChoices, prefs.faceFont) ? prefs.faceFont : "Sans", textTone: contains(textToneChoices, prefs.textTone) ? prefs.textTone : "Theme", textContrast: contains(textContrastChoices, prefs.textContrast) ? prefs.textContrast : "High"})
+  // OWL cannot sample wallpaper brightness; explicit overrides keep text legible.
+  let primaryText = cfg.textTone == "Light" ? #FAFAFA : cfg.textTone == "Dark" ? #101010 : foreground
+  let secondaryText = cfg.textContrast == "High" ? primaryText : cfg.textTone == "Light" ? #CECECE : cfg.textTone == "Dark" ? #474747 : muted
+  let chosenFont = cfg.faceFont == "Serif" ? "serif" : cfg.faceFont == "Launcher" ? "mono" : "sans"
   let zoneChoices = ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland"]
   let preferenceRows = [
     {section: "Appearance", key: "icons", name: "Show application icons"},
-    {key: "tintIcons", name: "Themed icons (monochrome)"},
     {key: "clock", name: "Show clock"}, {key: "date", name: "Show date"},
     {key: "event", name: "Show today's calendar event"},
     {key: "reduceMotion", name: "Reduce motion"},
@@ -133,7 +141,9 @@ face "Omagara" {
   let controlRight = screenRight + 60
   // Center at 89% of inset-safe height, with at least 24dp below the button.
   let searchBottom = screenInset + max(24, availableHeight * 0.11 - 24)
-  let noticeBottom = (tileHeight ?? 800) - searchBottom - 64
+  // Notifications can scroll behind the Search button down to the safe bottom.
+  // OWL 21 has no child-alpha masking API for a wallpaper-preserving edge fade.
+  let noticeBottom = max(noticeTop, (tileHeight ?? 800) - screenInset - 10)
   // One source of truth: 20dp outer left; 12dp clear of the 44dp right rail.
   let noticeWidth = max(0, availableWidth - 80)
 
@@ -240,8 +250,8 @@ face "Omagara" {
   component NotificationRow(item, stack, summary) {
     Column {
       fill: width
-      gap: 8
-      padding: [16, 16]
+      gap: 5
+      padding: [16, 10]
       radius: cfg.bubbleShape == "Rounded" ? 14 : 0
       border: cfg.bubbleBorder ? 1 : 0
       borderColor: border
@@ -286,27 +296,27 @@ face "Omagara" {
         gap: 14
         align: center
         Image { src: item.icon; size: 32; label: (item.app ?? "Notification") + (item.profile == null ? "" : " · " + item.profile) }
-        Text { text: (item.app ?? item.package) + (item.profile == null ? "" : " · " + item.profile); weight: 1; font: sans; fontSize: 12; color: muted; maxLines: 1 }
+        Text { text: (item.app ?? item.package) + (item.profile == null ? "" : " · " + item.profile); weight: 1; font: chosenFont; fontSize: 12; color: secondaryText; maxLines: 1 }
         if item.clearable && (!summary || len(get(noticeGroups, stack, [])) == 1) {
-          Text { text: "×"; width: 44; height: 44; padding: [0, 10]; align: center; fontSize: 18; color: muted; onTap: notification("dismiss", item.key) }
+          Text { text: "×"; width: 44; height: 44; padding: [0, 10]; align: center; fontSize: 18; color: primaryText; onTap: notification("dismiss", item.key) }
         }
       }
       if !summary || expandedStack != stack || len(get(noticeGroups, stack, [])) == 1 {
-        Text { text: cfg.previews ? (item.title ?? "") : "Notification content hidden"; font: sans; fontSize: 16; bold: true; maxLines: 2 }
-        if cfg.previews && (item.text ?? "") != "" { Text { text: item.text; font: sans; fontSize: 14; color: muted; maxLines: 3 } }
+        Text { text: cfg.previews ? (item.title ?? "") : "Notification content hidden"; font: chosenFont; fontSize: 16; bold: true; color: primaryText; maxLines: 2 }
+        if cfg.previews && (item.text ?? "") != "" { Text { text: item.text; font: chosenFont; fontSize: 14; color: secondaryText; maxLines: 3 } }
       }
       if summary && len(get(noticeGroups, stack, [])) > 1 {
-        Text { text: expandedStack == stack ? "${len(get(noticeGroups, stack, []))} notifications · collapse ▴" : "${len(get(noticeGroups, stack, []))} notifications · expand ▾"; font: sans; fontSize: 13; color: accent; maxLines: 1; padding: [0, 10] }
+        Text { text: expandedStack == stack ? "${len(get(noticeGroups, stack, []))} notifications · collapse ▴" : "${len(get(noticeGroups, stack, []))} notifications · expand ▾"; font: chosenFont; fontSize: 13; color: accent; maxLines: 1; padding: [0, 5] }
       }
       if cfg.previews && cfg.actions && (!summary || len(get(noticeGroups, stack, [])) == 1) && len(item.actions ?? []) > 0 {
         Flow {
           fill: width
           gap: 8
-          padding: [0, 6, 0, 0]
+          padding: [0, 4, 0, 0]
           for action, actionIndex in item.actions ?? [] {
             Text {
               text: action.title
-              font: sans
+              font: chosenFont
               fontSize: 13
               color: accent
               padding: [10, 14]
@@ -344,7 +354,7 @@ face "Omagara" {
             }
             Text {
               text: "Send"
-              font: sans
+              font: chosenFont
               fontSize: 14
               color: accent
               padding: [12, 14]
@@ -443,10 +453,10 @@ face "Omagara" {
             Text {
               text: character
               width: 18
-              font: sans
+              font: chosenFont
               fontSize: 11
               bold: highlightedLetter == character && browsing
-              color: highlightedLetter == character && browsing ? accent : curve > 0 ? foreground : len(get(groups, character, [])) > 0 ? muted : alpha(muted, 0.35)
+              color: highlightedLetter == character && browsing ? accent : curve > 0 ? primaryText : len(get(groups, character, [])) > 0 ? secondaryText : alpha(secondaryText, cfg.textContrast == "High" ? 0.72 : 0.35)
               align: center
               background: transparent
               radius: 4
@@ -489,9 +499,9 @@ face "Omagara" {
         Row {
           fill: width
           gap: 12
-          Text { text: error == "" ? "= " + answerText : error; font: sans; fontSize: error == "" ? 24 : 13; color: error == "" ? accent : muted; weight: 1 }
+          Text { text: error == "" ? "= " + answerText : error; font: chosenFont; fontSize: error == "" ? 24 : 13; color: error == "" ? accent : muted; weight: 1 }
           if answer != null {
-            Text { text: "Copy"; font: sans; fontSize: 14; color: accent; padding: [12, 10]; onTap: copy(answerText) }
+            Text { text: "Copy"; font: chosenFont; fontSize: 14; color: accent; padding: [12, 10]; onTap: copy(answerText) }
           }
         }
       }
@@ -554,22 +564,26 @@ face "Omagara" {
         Box {
           size: 36 * rowScale
           align: center
-          // OWL selects original/mask icons globally, not per Image.
-          // Tint only native Alpha8 masks; never tint original opaque icons.
-          if cfg.tintIcons && drawer.monochrome != true {
-            Text { text: upper(sub(trim(a.name), 0, 2)); font: sans; fontSize: 16 * rowScale; color: foreground; align: center }
+          // The launcher supplies either full-color icons or alpha-only masks.
+          // Colored + Theme overlay require Colored icons in launcher Style.
+          // Blend a light accent silhouette over the original without replacing its colors.
+          if cfg.iconStyle == "Monochrome" && drawer.monochrome != true {
+            Text { text: upper(sub(trim(a.name), 0, 2)); font: chosenFont; fontSize: 16 * rowScale; color: primaryText; align: center }
           } else if a.icon != null && a.icon != "" {
-            Image { src: a.icon; size: 36 * rowScale; tint: cfg.tintIcons ? foreground : null; label: a.name + (a.profile == null ? "" : " · " + a.profile) }
+            Image { src: a.icon; size: 36 * rowScale; tint: cfg.iconStyle == "Monochrome" ? primaryText : null; label: a.name + (a.profile == null ? "" : " · " + a.profile) }
+            if cfg.iconStyle == "Theme overlay" && cfg.iconOverlayOpacity > 0 && drawer.monochrome != true {
+              Image { src: a.icon; size: 36 * rowScale; tint: alpha(accent, cfg.iconOverlayOpacity / 100); opacity: 1; label: a.name }
+            }
           } else {
-            Text { text: upper(sub(trim(a.name), 0, 2)); font: sans; fontSize: 16 * rowScale; color: foreground; align: center }
+            Text { text: upper(sub(trim(a.name), 0, 2)); font: chosenFont; fontSize: 16 * rowScale; color: primaryText; align: center }
           }
         }
       }
       Column {
         weight: 1
         gap: rowScale
-        Text { text: a.name; font: sans; fontSize: 20 * rowScale; maxLines: 1 }
-        if a.profile != null { Text { text: a.profile; font: sans; fontSize: 11 * rowScale; color: muted; maxLines: 1 } }
+        Text { text: a.name; font: chosenFont; fontSize: 20 * rowScale; color: primaryText; maxLines: 1 }
+        if a.profile != null { Text { text: a.profile; font: chosenFont; fontSize: 11 * rowScale; color: secondaryText; maxLines: 1 } }
       }
     }
   }
@@ -583,7 +597,7 @@ face "Omagara" {
         AppRow { a: a; searchView: searchView }
       }
       if len(choices) == 0 {
-        Text { text: installed == null ? "Loading apps…" : "No matching apps"; font: sans; fontSize: 14; color: muted; padding: [4, 20] }
+        Text { text: installed == null ? "Loading apps…" : "No matching apps"; font: chosenFont; fontSize: 14; color: muted; padding: [4, 20] }
       }
     }
   }
@@ -603,14 +617,14 @@ face "Omagara" {
         fill: width
         gap: 6
         padding: [0, compact ? 0 : 20, 0, 20]
-        Text { text: fmtTime(now, "HH:mm"); font: sans; fontSize: compact ? 36 : 48; fontWeight: 300; align: center; maxLines: 1; visible: cfg.clock; onTap: { if cfg.clockTap { queryText = ""; screenMode = "clock"; screen() } } }
-        Text { text: fmtTime(now, "EEEE, d MMMM"); font: sans; fontSize: 16; color: muted; align: center; maxLines: 1; visible: cfg.date; onTap: { if cfg.dateTap { pickedEvent = null; queryText = ""; screenMode = "calendar"; screen() } } }
+        Text { text: fmtTime(now, "HH:mm"); font: chosenFont; fontSize: compact ? 36 : 48; fontWeight: 300; color: primaryText; align: center; maxLines: 1; visible: cfg.clock; onTap: { if cfg.clockTap { queryText = ""; screenMode = "clock"; screen() } } }
+        Text { text: fmtTime(now, "EEEE, d MMMM"); font: chosenFont; fontSize: 16; color: secondaryText; align: center; maxLines: 1; visible: cfg.date; onTap: { if cfg.dateTap { pickedEvent = null; queryText = ""; screenMode = "calendar"; screen() } } }
         if cfg.event && todayEvent != null {
           Text {
             text: todayEvent.title + " · " + (todayEvent.allDay ? "Today" : fmtTime(todayEvent.start, "HH:mm"))
-            font: sans
+            font: chosenFont
             fontSize: 13
-            color: muted
+            color: secondaryText
             align: center
             maxLines: 1
             padding: [0, 6]
@@ -652,19 +666,19 @@ face "Omagara" {
             offset: [0, row.top - appOffset]
             opacity: rowAlpha
             if row.heading {
-              Text { text: row.section; height: appLabelHeight; font: sans; fontSize: 22 * appScale; color: accent; maxLines: 1 }
+              Text { text: row.section; height: appLabelHeight; font: chosenFont; fontSize: 22 * appScale; color: secondaryText; maxLines: 1 }
             } else {
               AppRow { a: row.app; thumbView: true; interactive: rowAlpha > 0.08 && row.top >= appOffset && row.top + row.height <= appOffset + appPanelHeight }
             }
           }
         }
         if len(apps) == 0 {
-          Text { text: installed == null ? "Loading apps…" : "No installed apps"; font: sans; fontSize: 14; color: muted }
+          Text { text: installed == null ? "Loading apps…" : "No installed apps"; font: chosenFont; fontSize: 14; color: muted }
         }
       }
     }
-    // The notification viewport stops above the search button, and starts
-    // below the clock. Hide it during alphabet browsing/magnification.
+    // The notification viewport scrolls underneath Search and stops near the
+    // navigation inset. Search draws later and therefore stays on top.
     Box {
       fill: true
       align: topStart
@@ -676,11 +690,11 @@ face "Omagara" {
         clip: true
         gap: 6
         if notices == null {
-          Text { text: "Loading notifications…"; font: sans; fontSize: 12; color: muted }
+          Text { text: "Loading notifications…"; font: chosenFont; fontSize: 12; color: muted }
         } else if !notices.available {
           Text {
             text: "Enable notifications"
-            font: sans
+            font: chosenFont
             fontSize: 12
             color: accent
             padding: [8, 12]
@@ -690,15 +704,15 @@ face "Omagara" {
           if clearableNotices > 0 {
             Row {
               fill: width
-              Text { text: "Notifications"; font: sans; fontSize: 13; color: muted; weight: 1; padding: [0, 10] }
-              Text { text: "Clear all"; font: sans; fontSize: 13; color: accent; padding: [12, 10]; onTap: notification("clear") }
+              Text { text: "Notifications"; font: chosenFont; fontSize: 13; color: secondaryText; weight: 1; padding: [0, 6] }
+              Text { text: "Clear all"; font: chosenFont; fontSize: 13; color: accent; padding: [12, 6]; onTap: notification("clear") }
             }
           }
           Column {
             lazy: true
             weight: 1
             fill: width
-            gap: 12
+            gap: 8
             for noticeRow in noticeRows key noticeRow.id {
               NotificationRow { item: noticeRow.item; stack: noticeRow.stack; summary: noticeRow.summary }
             }
@@ -732,7 +746,7 @@ face "Omagara" {
           background: alpha(surface, 0.94)
           align: center
           offset: [bubbleX - railBaseX - 1, clamp(touchY - railTop - 21 - bubbleLift, 0, max(0, appSafeBottom - railTop - 42))]
-          Text { text: letter; font: sans; fontSize: 20; color: accent; bold: true; align: center }
+          Text { text: letter; font: chosenFont; fontSize: 20; color: accent; bold: true; align: center }
         }
       }
     }
@@ -749,7 +763,7 @@ face "Omagara" {
         background: alpha(surface, 0.85)
         align: center
         onTap: { appVelocity = 0; browsing = false; activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; queryText = ""; menu = ""; expandedStack = ""; replyKey = ""; replyDraft = "" }
-        Text { text: "×"; font: sans; fontSize: 26; align: center }
+        Text { text: "×"; font: chosenFont; fontSize: 26; color: primaryText; align: center }
       }
     }
     Box {
@@ -770,8 +784,8 @@ face "Omagara" {
         // A native Canvas magnifier avoids relying on an unsupported icon glyph.
         Canvas {
           size: 24
-          circle(10, 10, 6, stroke: foreground, width: 2)
-          line(14.5, 14.5, 21, 21, stroke: foreground, width: 2, cap: round)
+          circle(10, 10, 6, stroke: primaryText, width: 2)
+          line(14.5, 14.5, 21, 21, stroke: primaryText, width: 2, cap: round)
         }
       }
     }
@@ -815,13 +829,13 @@ face "Omagara" {
         }
         Text {
           text: "Close search"
-          font: sans
+          font: chosenFont
           fontSize: 12
           color: muted
           onTap: { queryText = ""; appVelocity = 0; browsing = false; activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; menu = ""; close() }
         }
         Calculator { expression: queryText }
-        Text { text: "Applications"; font: sans; fontSize: 13; color: muted }
+        Text { text: "Applications"; font: chosenFont; fontSize: 13; color: muted }
         for searchKey in [queryText] key searchKey {
           AppRows { choices: searchResults; searchView: true; weight: 1; fill: width }
         }
@@ -831,23 +845,47 @@ face "Omagara" {
         fill: true
         scroll: true
         gap: 8
-        Text { text: "Omagara only"; font: sans; fontSize: 20; color: accent }
-        Text { text: "Long-press Search to return here. Themed icons use native monochrome masks when available through launcher styling; otherwise neutral initials replace icons. No original app colors are shown in themed mode."; font: sans; color: muted; fontSize: 13 }
+        Text { text: "Omagara only"; font: chosenFont; fontSize: 20; color: accent }
+        Text { text: "Long-press Search to return here. Colored icons retain their original colors; Theme overlay blends the selected theme color over them. Monochrome uses the launcher-provided icon masks."; font: chosenFont; color: muted; fontSize: 13 }
         for pref in preferenceRows {
           Column {
             fill: width
             gap: 0
-            if pref.section != null { Text { text: pref.section; color: accent; padding: [0, 18, 0, 6]; font: sans } }
+            if pref.section != null { Text { text: pref.section; color: accent; padding: [0, 18, 0, 6]; font: chosenFont } }
             Row {
               fill: width
               align: center
               padding: [8, 14]
               onTap: { if pref.key != "searchContacts" { prefs = set(prefs, pref.key, !get(cfg, pref.key)) }; menu = "" }
-              Text { text: pref.name; font: sans; fontSize: 15; weight: 1 }
+              Text { text: pref.name; font: chosenFont; fontSize: 15; weight: 1 }
               Text { text: get(cfg, pref.key) ? "ON" : "OFF"; color: get(cfg, pref.key) ? accent : muted; fontSize: 14 }
             }
           }
         }
+        Text { text: "Application icon style"; color: accent; padding: [0, 18, 0, 6] }
+        Flow {
+          fill: width
+          gap: 8
+          for iconOption in iconStyleChoices {
+            Button { text: (cfg.iconStyle == iconOption ? "✓ " : "") + iconOption; onTap: prefs = set(prefs, "iconStyle", iconOption) }
+          }
+        }
+        if cfg.iconStyle == "Theme overlay" {
+          Text { text: "Theme overlay strength · " + str(cfg.iconOverlayOpacity) + "%"; font: chosenFont; fontSize: 15 }
+          Slider { value: cfg.iconOverlayOpacity; min: 0; max: 60; step: 10; live: true; onChange: prefs = set(prefs, "iconOverlayOpacity", clamp(round(value / 10) * 10, 0, 60)) }
+        }
+        if drawer.monochrome == true {
+          Text { text: "Omalauncher Style currently supplies monochrome icon masks. Select Colored icons in the launcher's Style settings to retain original app colors in Theme overlay mode."; font: chosenFont; fontSize: 13; color: secondaryText }
+        }
+        Text { text: "Face font"; color: accent; padding: [0, 18, 0, 6] }
+        Flow {
+          fill: width
+          gap: 8
+          for faceFontName in faceFontChoices {
+            Button { text: (cfg.faceFont == faceFontName ? "✓ " : "") + faceFontName; onTap: prefs = set(prefs, "faceFont", faceFontName) }
+          }
+        }
+        Text { text: "Launcher uses the font selected in Omalauncher's Style settings."; font: chosenFont; fontSize: 13; color: secondaryText }
         Text { text: "Bubble style"; color: accent; padding: [0, 18, 0, 6] }
         Flow {
           fill: width
@@ -861,10 +899,27 @@ face "Omagara" {
           align: center
           padding: [8, 14]
           onTap: prefs = set(prefs, "bubbleBorder", !cfg.bubbleBorder)
-          Text { text: "Show bubble borders"; font: sans; fontSize: 15; weight: 1 }
+          Text { text: "Show bubble borders"; font: chosenFont; fontSize: 15; weight: 1 }
           Text { text: cfg.bubbleBorder ? "ON" : "OFF"; color: cfg.bubbleBorder ? accent : muted; fontSize: 14 }
         }
-        Text { text: "Styles Search, Close, the selected letter, notification cards, and calendar cards. Square without borders is the default."; font: sans; fontSize: 13; color: muted }
+        Text { text: "Styles Search, Close, the selected letter, notification cards, and calendar cards. Square without borders is the default."; font: chosenFont; fontSize: 13; color: muted }
+        Text { text: "Home text color"; color: accent; padding: [0, 18, 0, 6] }
+        Flow {
+          fill: width
+          gap: 8
+          for tone in textToneChoices {
+            Button { text: (cfg.textTone == tone ? "✓ " : "") + tone; onTap: prefs = set(prefs, "textTone", tone) }
+          }
+        }
+        Text { text: "Secondary text contrast"; color: accent; padding: [0, 18, 0, 6] }
+        Flow {
+          fill: width
+          gap: 8
+          for level in textContrastChoices {
+            Button { text: (cfg.textContrast == level ? "✓ " : "") + level; onTap: prefs = set(prefs, "textContrast", level) }
+          }
+        }
+        Text { text: "High is the default for readable dates, alphabet letters, and notifications. Use Light or Dark for wallpaper contrast; OWL cannot detect wallpaper brightness."; font: chosenFont; fontSize: 13; color: muted }
         Text { text: "Alphabet touch feedback"; color: accent; padding: [0, 18, 0, 6] }
         Flow {
           fill: width
@@ -873,9 +928,9 @@ face "Omagara" {
             Button { text: (cfg.hapticFeedback == mode ? "✓ " : "") + mode; onTap: prefs = set(prefs, "hapticFeedback", mode) }
           }
         }
-        Text { text: "Reduced vibrates on every second letter change. Every letter vibrates on each change. Android controls vibration strength and may disable touch feedback."; font: sans; fontSize: 13; color: muted }
+        Text { text: "Reduced vibrates on every second letter change. Every letter vibrates on each change. Android controls vibration strength and may disable touch feedback."; font: chosenFont; fontSize: 13; color: muted }
         Text { text: "Application Browser"; color: accent; padding: [0, 18, 0, 6] }
-        Text { text: "Application Scale · " + str(cfg.appScale) + "%"; font: sans; fontSize: 15 }
+        Text { text: "Application Scale · " + str(cfg.appScale) + "%"; font: chosenFont; fontSize: 15 }
         Slider {
           value: cfg.appScale
           min: 75
@@ -884,18 +939,18 @@ face "Omagara" {
           live: true
           onChange: { letter = highlightedLetter; appTracking = false; prefs = set(prefs, "appScale", clamp(round(value / 5) * 5, 75, 115)) }
         }
-        Text { text: "80% is the default. 100% restores the previous browser sizing. Search and home content keep their size."; font: sans; fontSize: 13; color: muted }
+        Text { text: "80% is the default. 100% restores the previous browser sizing. Search and home content keep their size."; font: chosenFont; fontSize: 13; color: muted }
         Button { text: "Reset Application Scale to 80%"; onTap: { letter = highlightedLetter; appTracking = false; prefs = set(prefs, "appScale", 80) } }
-        Text { text: "Contact search is unavailable in this launcher: OWL 21 has no contacts source or permission action. It stays OFF and reads no contacts."; font: sans; fontSize: 13; color: muted }
+        Text { text: "Contact search is unavailable in this launcher: OWL 21 has no contacts source or permission action. It stays OFF and reads no contacts."; font: chosenFont; fontSize: 13; color: muted }
         Text { text: "World clocks"; color: accent; padding: [0, 18, 0, 6] }
-        Text { text: "Select zones; daylight-saving changes follow Android's time-zone database."; font: sans; fontSize: 13; color: muted }
+        Text { text: "Select zones; daylight-saving changes follow Android's time-zone database."; font: chosenFont; fontSize: 13; color: muted }
         for zone in zoneChoices {
-          Text { text: (contains(worldZones, zone) ? "✓ " : "+ ") + zone; font: sans; padding: [8, 14]; color: contains(worldZones, zone) ? accent : foreground; onTap: worldZones = contains(worldZones, zone) ? worldZones.filter(z => z != zone) : worldZones + [zone] }
+          Text { text: (contains(worldZones, zone) ? "✓ " : "+ ") + zone; font: chosenFont; padding: [8, 14]; color: contains(worldZones, zone) ? accent : foreground; onTap: worldZones = contains(worldZones, zone) ? worldZones.filter(z => z != zone) : worldZones + [zone] }
         }
         Text { text: "Home"; color: accent; padding: [0, 18, 0, 6] }
         Button { text: "Go to face page 0"; onTap: launcher("page:0") }
         Button { text: "Go to widget page 1"; onTap: launcher("page:1") }
-        Text { text: "These buttons open existing pages without changing your default home page or page layout. Choose your default home page in launcher settings."; font: sans; fontSize: 13; color: muted }
+        Text { text: "These buttons open existing pages without changing your default home page or page layout. Choose your default home page in launcher settings."; font: chosenFont; fontSize: 13; color: muted }
         Button { text: "Android default launcher / launcher settings"; onTap: launcher("settings") }
         Text { text: "Preferences"; color: accent; padding: [0, 18, 0, 6] }
         Button { text: "Export Omagara settings to clipboard"; onTap: copy(toJson({version: 1, prefs: cfg, zones: worldZones})) }
@@ -904,18 +959,18 @@ face "Omagara" {
           text: "Import Omagara settings"
           onTap: {
             let imported = parseJson(importText)
-            if imported.version == 1 && all(keys(defaults), k => k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleShape" ? get(imported.prefs, k) == null || contains(bubbleShapeChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
+            if imported.version == 1 && all(keys(defaults), k => k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleShape" ? get(imported.prefs, k) == null || contains(bubbleShapeChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : k == "iconStyle" ? get(imported.prefs, k) == null || contains(iconStyleChoices, get(imported.prefs, k)) : k == "iconOverlayOpacity" ? get(imported.prefs, k) == null || contains(iconOverlayChoices, get(imported.prefs, k)) : k == "faceFont" ? get(imported.prefs, k) == null || contains(faceFontChoices, get(imported.prefs, k)) : k == "textTone" ? get(imported.prefs, k) == null || contains(textToneChoices, get(imported.prefs, k)) : k == "textContrast" ? get(imported.prefs, k) == null || contains(textContrastChoices, get(imported.prefs, k)) : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
               letter = highlightedLetter; appTracking = false
               prefs = reduce(keys(defaults), (m, k) => set(m, k, k == "searchContacts" ? false : (get(imported.prefs, k) ?? get(defaults, k))), {})
               worldZones = unique(imported.zones ?? [])
               importStatus = "Settings imported"
-            } else { importStatus = "Invalid settings: export version 1 with boolean preferences, Application Scale 75–115 in steps of 5, valid haptic mode, bubble shape/border, and supported zones required" }
+            } else { importStatus = "Invalid settings: export version 1 with boolean preferences, Application Scale 75–115 in steps of 5, valid haptic mode, icon style/overlay, face font, text color/contrast, bubble shape/border, and supported zones required" }
           }
         }
         if importStatus != "" { Text { text: importStatus; fontSize: 13; color: muted } }
         Button { text: "Reset Omagara settings to defaults…"; onTap: resetConfirm = true }
         if resetConfirm {
-          Text { text: "Reset Omagara appearance and world clocks?"; font: sans }
+          Text { text: "Reset Omagara appearance and world clocks?"; font: chosenFont }
           Row {
             Button { text: "Confirm reset"; onTap: { letter = highlightedLetter; appTracking = false; prefs = {}; worldZones = []; resetConfirm = false; importText = ""; importStatus = "" } }
             Button { text: "Cancel"; onTap: resetConfirm = false }
@@ -930,7 +985,7 @@ face "Omagara" {
           fill: width
           gap: 4
           for tabName in ["alarms", "timer", "stopwatch", "world"] {
-            Text { text: tabName; font: sans; color: clockTab == tabName ? accent : muted; padding: [10, 14]; onTap: clockTab = tabName }
+            Text { text: tabName; font: chosenFont; color: clockTab == tabName ? accent : muted; padding: [10, 14]; onTap: clockTab = tabName }
           }
         }
         Column {
@@ -939,18 +994,18 @@ face "Omagara" {
           scroll: true
           gap: 16
           if clockTab == "alarms" {
-            Text { text: fmtTime(now, "HH:mm"); font: sans; fontSize: 56; fontWeight: 300; align: center }
-            Text { text: fmtTime(now, "EEEE, d MMMM"); font: sans; fontSize: 18; align: center }
-            Text { text: nextAlarm.set ? "Next alarm · " + fmtTime(nextAlarm.time, "EEE HH:mm") : "No upcoming alarm"; font: sans; fontSize: 16; align: center; color: muted }
+            Text { text: fmtTime(now, "HH:mm"); font: chosenFont; fontSize: 56; fontWeight: 300; align: center }
+            Text { text: fmtTime(now, "EEEE, d MMMM"); font: chosenFont; fontSize: 18; align: center }
+            Text { text: nextAlarm.set ? "Next alarm · " + fmtTime(nextAlarm.time, "EEE HH:mm") : "No upcoming alarm"; font: chosenFont; fontSize: 16; align: center; color: muted }
             if nextAlarm.set && nextAlarm.app != null {
               Button { text: "Manage alarms in clock app"; onTap: androidApp(nextAlarm.app) }
               Button { text: "+ New alarm in clock app"; onTap: androidApp(nextAlarm.app) }
             }
-            Text { text: "Android exposes only the next alarm here. New alarms and reminders must be created in your clock or calendar app; Omagara cannot register them."; font: sans; fontSize: 14; color: muted }
+            Text { text: "Android exposes only the next alarm here. New alarms and reminders must be created in your clock or calendar app; Omagara cannot register them."; font: chosenFont; fontSize: 14; color: muted }
             Button { text: "Find a clock or reminder app"; onTap: { queryText = ""; screenMode = "search" } }
           } else if clockTab == "timer" {
-            Text { text: "${floor(remaining / 3600)}:${pad(floor(remaining / 60) % 60, 2, "0")}:${pad(floor(remaining) % 60, 2, "0")}"; font: sans; fontSize: 42; align: center }
-            Text { text: "Duration (minutes, 1–1440)"; font: sans; fontSize: 14; color: muted }
+            Text { text: "${floor(remaining / 3600)}:${pad(floor(remaining / 60) % 60, 2, "0")}:${pad(floor(remaining) % 60, 2, "0")}"; font: chosenFont; fontSize: 42; align: center }
+            Text { text: "Duration (minutes, 1–1440)"; font: chosenFont; fontSize: 14; color: muted }
             Input { text: timerMinutes; placeholder: "Duration in minutes (1–1440)"; onChange: timerMinutes = value }
             Flow {
               Button { text: timerDeadline > 0 ? "Pause" : timerLeft > 0 ? "Resume" : "Start"; onTap: {
@@ -960,21 +1015,21 @@ face "Omagara" {
               } }
               Button { text: "Reset"; onTap: { timerDeadline = 0; timerLeft = 0 } }
             }
-            Text { text: "A local deadline survives launcher restarts. Its notification needs launcher notification permission and may arrive late after sleep. Use your clock app for a reliable waking alarm."; font: sans; fontSize: 14; color: muted }
+            Text { text: "A local deadline survives launcher restarts. Its notification needs launcher notification permission and may arrive late after sleep. Use your clock app for a reliable waking alarm."; font: chosenFont; fontSize: 14; color: muted }
           } else if clockTab == "stopwatch" {
-            Text { text: "${floor(elapsed / 3600)}:${pad(floor(elapsed / 60) % 60, 2, "0")}:${pad(floor(elapsed) % 60, 2, "0")}"; font: sans; fontSize: 42; align: center }
+            Text { text: "${floor(elapsed / 3600)}:${pad(floor(elapsed / 60) % 60, 2, "0")}:${pad(floor(elapsed) % 60, 2, "0")}"; font: chosenFont; fontSize: 42; align: center }
             Row {
               Button { text: watchStarted > 0 ? "Pause" : "Start / resume"; onTap: { if watchStarted > 0 { watchElapsed = elapsed; watchStarted = 0 } else { watchStarted = seconds } } }
               Button { text: "Reset"; onTap: { watchStarted = 0; watchElapsed = 0 } }
             }
-            Text { text: "Elapsed wall-clock time, to the second. Manual system clock changes affect it; not intended for precision timing."; font: sans; fontSize: 13; color: muted }
+            Text { text: "Elapsed wall-clock time, to the second. Manual system clock changes affect it; not intended for precision timing."; font: chosenFont; fontSize: 13; color: muted }
           } else {
             for zone in worldZones {
               Row {
                 fill: width
                 align: center
                 padding: [0, 10]
-                Column { weight: 1; Text { text: zone; font: sans; fontSize: 14; color: muted }; Text { text: fmtTime(now, "EEE d MMM · HH:mm", zone); font: sans; fontSize: 22 } }
+                Column { weight: 1; Text { text: zone; font: chosenFont; fontSize: 14; color: muted }; Text { text: fmtTime(now, "EEE d MMM · HH:mm", zone); font: chosenFont; fontSize: 22 } }
                 Text { text: "×"; padding: [16, 14]; onTap: worldZones = worldZones.filter(z => z != zone) }
               }
             }
@@ -993,27 +1048,27 @@ face "Omagara" {
             fill: width
             scroll: true
             gap: 16
-            Text { text: pickedEvent.title; font: sans; fontSize: 26 }
-            Text { text: fmtTime(pickedEvent.start, "EEEE d MMMM yyyy"); font: sans; fontSize: 18 }
-            Text { text: pickedEvent.allDay ? "All day · through " + fmtTime(pickedEvent.end - 1, "EEE d MMM") : fmtTime(pickedEvent.start, "HH:mm") + " – " + fmtTime(pickedEvent.end, "EEE d MMM HH:mm"); font: sans; fontSize: 18 }
-            Text { text: pickedEvent.calendar; font: sans; color: muted }
-            if (pickedEvent.description ?? "") != "" { Text { text: pickedEvent.description; font: sans } }
-            if (pickedEvent.location ?? "") != "" { Text { text: pickedEvent.location; font: sans; fontSize: 16 } }
-            Text { text: "Full details and editing are available in your calendar app."; font: sans; fontSize: 13; color: muted }
+            Text { text: pickedEvent.title; font: chosenFont; fontSize: 26 }
+            Text { text: fmtTime(pickedEvent.start, "EEEE d MMMM yyyy"); font: chosenFont; fontSize: 18 }
+            Text { text: pickedEvent.allDay ? "All day · through " + fmtTime(pickedEvent.end - 1, "EEE d MMM") : fmtTime(pickedEvent.start, "HH:mm") + " – " + fmtTime(pickedEvent.end, "EEE d MMM HH:mm"); font: chosenFont; fontSize: 18 }
+            Text { text: pickedEvent.calendar; font: chosenFont; color: muted }
+            if (pickedEvent.description ?? "") != "" { Text { text: pickedEvent.description; font: chosenFont } }
+            if (pickedEvent.location ?? "") != "" { Text { text: pickedEvent.location; font: chosenFont; fontSize: 16 } }
+            Text { text: "Full details and editing are available in your calendar app."; font: chosenFont; fontSize: 13; color: muted }
             Button { text: "Open event in calendar app"; onTap: calendar("open", pickedEvent) }
           }
         } else {
           Row {
             fill: width
-            Text { text: "Upcoming events"; font: sans; fontSize: 20; weight: 1 }
-            Text { text: "+ Add in calendar app"; font: sans; fontSize: 14; color: accent; padding: [8, 14]; onTap: screenMode = "calendarAdd" }
+            Text { text: "Upcoming events"; font: chosenFont; fontSize: 20; weight: 1 }
+            Text { text: "+ Add in calendar app"; font: chosenFont; fontSize: 14; color: accent; padding: [8, 14]; onTap: screenMode = "calendarAdd" }
           }
           if screenMode == "calendarAdd" {
-            Text { text: "OWL 21 cannot create events or prefill a new event. Open your calendar app, then use its + control to choose a date, time, title and description. Nothing has been created here."; font: sans }
+            Text { text: "OWL 21 cannot create events or prefill a new event. Open your calendar app, then use its + control to choose a date, time, title and description. Nothing has been created here."; font: chosenFont }
             Button { text: "Open calendar app"; onTap: calendar("open") }
             Button { text: "Back to integrated calendar"; onTap: screenMode = "calendar" }
           } else if !agenda.granted {
-            Text { text: "Show upcoming events from your phone’s calendars here."; font: sans; fontSize: 16 }
+            Text { text: "Show upcoming events from your phone’s calendars here."; font: chosenFont; fontSize: 16 }
             Button { text: "Allow calendar access"; onTap: calendar("request") }
           } else {
             Flow {
@@ -1022,9 +1077,9 @@ face "Omagara" {
               Button { text: "Day ›"; onTap: { calendarDay = fmtTime(selectedNoon + 86400, "yyyy-MM-dd"); upcoming = false } }
               Button { text: "Upcoming"; onTap: upcoming = true }
             }
-            Text { text: upcoming ? "Next two weeks" : fmtTime(selectedNoon, "EEEE d MMMM"); font: sans; color: accent }
-            Text { text: "Phone calendars expose only unended events from today through the next 14 days."; font: sans; fontSize: 12; color: muted }
-            if len(calendarEvents) == 0 { Text { text: "No events in the available calendar data"; font: sans; color: muted } }
+            Text { text: upcoming ? "Next two weeks" : fmtTime(selectedNoon, "EEEE d MMMM"); font: chosenFont; color: accent }
+            Text { text: "Phone calendars expose only unended events from today through the next 14 days."; font: chosenFont; fontSize: 12; color: muted }
+            if len(calendarEvents) == 0 { Text { text: "No events in the available calendar data"; font: chosenFont; color: muted } }
             Column {
               lazy: true
               weight: 1
@@ -1040,10 +1095,10 @@ face "Omagara" {
                   background: surface
                   gap: 6
                   onTap: pickedEvent = event
-                  Text { text: event.allDay ? fmtTime(event.start, "EEE d MMM") + " · All day" : fmtTime(event.start, "EEE d MMM HH:mm"); font: sans; fontSize: 13; color: muted }
-                  Text { text: event.title; font: sans; fontSize: 18; bold: true }
-                  Text { text: event.calendar; font: sans; fontSize: 12; color: muted }
-                  if event.location != "" { Text { text: event.location; font: sans; fontSize: 13; color: muted } }
+                  Text { text: event.allDay ? fmtTime(event.start, "EEE d MMM") + " · All day" : fmtTime(event.start, "EEE d MMM HH:mm"); font: chosenFont; fontSize: 13; color: muted }
+                  Text { text: event.title; font: chosenFont; fontSize: 18; bold: true }
+                  Text { text: event.calendar; font: chosenFont; fontSize: 12; color: muted }
+                  if event.location != "" { Text { text: event.location; font: chosenFont; fontSize: 13; color: muted } }
                 }
               }
             }
