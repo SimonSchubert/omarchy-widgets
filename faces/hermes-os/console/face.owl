@@ -4,7 +4,7 @@ face "console ops" {
   // never stops scrolling. It follows the Omarchy theme: every coloured part is frosted glass in one of its colours,
   // over the wallpaper. This first page: Arch's packages and updates, Claude Code's sessions and limits, Codex's plan
   // and limits, and the latest Claude Code, Codex and Grok sessions to resume; the sidebar opens the agents' apps,
-  // a terminal, btop, fastfetch, files, the store and the style menu. Pages two and three are page-2.owl (comms)
+  // a terminal, files, the store and the style menu, and the phone. Pages two and three are page-2.owl (comms)
   // and page-3.owl (engineering); the tabs at the foot turn between them.
   // Built on simonschubert/bauhaus (MIT): the same readouts and logins, read from the agents' own files and only
   // sent to their own servers.
@@ -16,7 +16,7 @@ face "console ops" {
     license: "MIT"
     category: "dev"
   }
-  requires { pacman: ["bash", "coreutils", "grep", "sed", "pacman", "curl", "jq", "procps-ng", "btop", "fastfetch"] }
+  requires { pacman: ["bash", "coreutils", "grep", "sed", "pacman", "curl", "jq", "procps-ng"] }
 
   source now = clock every 1m
   source bat = android.battery
@@ -232,7 +232,7 @@ face "console ops" {
   }
 
   // The bottom of the frame, the top's mirror.
-  component Bottom(name, cA, cB, cC, here = 0) {
+  component Bottom(name, cA, cB, cC, here = 0, phone = "") {
     Row {
       gap: 0
       align: bottom
@@ -271,6 +271,21 @@ face "console ops" {
             }
           }
         }
+        // The phone's name and number, in the elbow: the elbow and the key above it are the phone.
+        if phone != "" {
+          Box {
+            width: sw
+            height: botH
+            align: bottomEnd
+            padding: [0, 0, 6, 3]
+            onTap: { haptic(); androidApp("com.google.android.dialer") }
+            Column {
+              gap: 0
+              Text { text: "PHONE"; font: antonio; fontSize: 24; fontWeight: 600; color: void; align: end; maxLines: 1 }
+              Text { text: phone; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+            }
+          }
+        }
       }
       Text { text: upper(name); font: antonio; fontSize: 17.5; fontWeight: 500; letterSpacing: 2; color: cB; maxLines: 1; offset: [0, 2] }
       Row { gap: 0; Spacer { width: 6 }; Cap { w: bar; h: bar; c: cA; side: 1 } }
@@ -288,25 +303,6 @@ face "console ops" {
       Spacer { weight: 1 }
       Text { text: upper(label); font: antonio; fontSize: 16.5; fontWeight: 600; color: void; align: end; maxLines: 1 }
       Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
-    }
-  }
-
-  // The phone key: the last on every page's sidebar, filling it down to the elbow, its name larger.
-  component PhoneKey(code, tint) {
-    Box {
-      width: sw
-      weight: 1
-      onTap: { haptic(); androidApp("com.google.android.dialer") }
-      Column {
-        width: sw
-        fill: height
-        gap: 0
-        background: alpha(tint, gA); frost: fz
-        padding: [6, 4, 6, 6]
-        Spacer { weight: 1 }
-        Text { text: "PHONE"; font: antonio; fontSize: 24; fontWeight: 600; color: void; align: end; maxLines: 1 }
-        Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
-      }
     }
   }
 
@@ -735,19 +731,19 @@ face "console ops" {
         width: sw
         fill: height
         gap: gp
-        padding: [0, gp, 0, gp]
+        padding: [0, gp, 0, 0]
         // Grouped by what they do, the most used at the foot twice as tall; numbered page and place, top to bottom,
-        // a live reading after its number. The phone is the last key on every page and fills down to the elbow.
+        // a live reading after its number. Under the filler, past a gap, the phone: a key that runs on into the elbow,
+        // where its name sits.
         Box { onTap: { haptic(); launcher("style") }; Side { label: "style"; code: "01-01"; tint: peach; h: bh } }
         Box { onTap: { haptic(); launcher("store") }; Side { label: "store"; code: "01-02"; tint: lilac; h: bh } }
         Box { onTap: { haptic(); run("omarchy-files") }; Side { label: "files"; code: "01-03"; tint: gold; h: bh } }
-        Box { onTap: { haptic(); terminal("btop", "monitor") }; Side { label: "monitor"; code: "01-04"; tint: rose; h: bh } }
-        Box { onTap: { haptic(); terminal("fastfetch", "system") }; Side { label: "system"; code: "01-05"; tint: sky; h: bh } }
-        Box { onTap: { haptic(); launcher("agents") }; Side { label: "agents"; code: "01-06"; tint: lilac; h: bh } }
-        Box { onTap: { haptic(); androidApp("com.anthropic.claude") }; Side { label: "claude"; code: "01-07"; tint: peach; h: 2 * bh } }
-        Box { onTap: { haptic(); androidApp("com.openai.chatgpt") }; Side { label: "chatgpt"; code: "01-08"; tint: periw; h: 2 * bh } }
-        Box { onTap: { haptic(); terminal("bash -l", "arch") }; Side { label: "terminal"; code: "01-09"; tint: amber; h: 2 * bh } }
-        PhoneKey { code: "01-10"; tint: violet }
+        Box { onTap: { haptic(); launcher("agents") }; Side { label: "agents"; code: "01-04"; tint: lilac; h: bh } }
+        Box { onTap: { haptic(); androidApp("com.anthropic.claude") }; Side { label: "claude"; code: "01-05"; tint: peach; h: 2 * bh } }
+        Box { onTap: { haptic(); androidApp("com.openai.chatgpt") }; Side { label: "chatgpt"; code: "01-06"; tint: periw; h: 2 * bh } }
+        Box { onTap: { haptic(); terminal("bash -l", "arch") }; Side { label: "terminal"; code: "01-07"; tint: amber; h: 2 * bh } }
+        Column { width: sw; weight: 1; background: alpha(tan, gA); frost: fz }
+        Box { width: sw; height: bh; background: alpha(violet, gA); frost: fz; onTap: { haptic(); androidApp("com.google.android.dialer") } }
       }
       Column {
         weight: 1
@@ -757,7 +753,7 @@ face "console ops" {
         Content { weight: 1; fill: width }
       }
     }
-    Bottom { name: "linux · agents"; cA: violet; cB: amber; cC: peach; here: 0 }
+    Bottom { name: "linux · agents"; cA: violet; cB: amber; cC: peach; here: 0; phone: "01-08" }
     Spacer { height: screenInset }
   }
 }

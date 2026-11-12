@@ -1,7 +1,7 @@
 face "console engineering" {
   // The console's third page (see face.owl): the battery, memory and storage, the network's speed and signal,
   // switches for Wi-Fi, Bluetooth, Do Not Disturb and the torch, the volume in ten steps with a mute key and the phone
-  // itself; the sidebar adds the brightness and Android's dark theme, location and airplane panels.
+  // itself; the sidebar adds Android's location and airplane panels, and the phone.
 
   meta { owl: 19 }
 
@@ -133,7 +133,7 @@ face "console engineering" {
   }
 
   // The bottom of the frame, the top's mirror.
-  component Bottom(name, cA, cB, cC, here = 0) {
+  component Bottom(name, cA, cB, cC, here = 0, phone = "") {
     Row {
       gap: 0
       align: bottom
@@ -172,6 +172,21 @@ face "console engineering" {
             }
           }
         }
+        // The phone's name and number, in the elbow: the elbow and the key above it are the phone.
+        if phone != "" {
+          Box {
+            width: sw
+            height: botH
+            align: bottomEnd
+            padding: [0, 0, 6, 3]
+            onTap: { haptic(); androidApp("com.google.android.dialer") }
+            Column {
+              gap: 0
+              Text { text: "PHONE"; font: antonio; fontSize: 24; fontWeight: 600; color: void; align: end; maxLines: 1 }
+              Text { text: phone; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+            }
+          }
+        }
       }
       Text { text: upper(name); font: antonio; fontSize: 17.5; fontWeight: 500; letterSpacing: 2; color: cB; maxLines: 1; offset: [0, 2] }
       Row { gap: 0; Spacer { width: 6 }; Cap { w: bar; h: bar; c: cA; side: 1 } }
@@ -189,25 +204,6 @@ face "console engineering" {
       Spacer { weight: 1 }
       Text { text: upper(label); font: antonio; fontSize: 16.5; fontWeight: 600; color: void; align: end; maxLines: 1 }
       Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
-    }
-  }
-
-  // The phone key: the last on every page's sidebar, filling it down to the elbow, its name larger.
-  component PhoneKey(code, tint) {
-    Box {
-      width: sw
-      weight: 1
-      onTap: { haptic(); androidApp("com.google.android.dialer") }
-      Column {
-        width: sw
-        fill: height
-        gap: 0
-        background: alpha(tint, gA); frost: fz
-        padding: [6, 4, 6, 6]
-        Spacer { weight: 1 }
-        Text { text: "PHONE"; font: antonio; fontSize: 24; fontWeight: 600; color: void; align: end; maxLines: 1 }
-        Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
-      }
     }
   }
 
@@ -549,19 +545,18 @@ face "console engineering" {
         width: sw
         fill: height
         gap: gp
-        padding: [0, gp, 0, gp]
+        padding: [0, gp, 0, 0]
         // Grouped by what they do, the most used at the foot twice as tall; numbered page and place, top to bottom,
-        // a live reading after its number. The phone is the last key on every page and fills down to the elbow.
+        // a live reading after its number. Under the filler, past a gap, the phone: a key that runs on into the elbow,
+        // where its name sits.
         Box { onTap: { haptic(); launcher("settings") }; Side { label: "launcher"; code: "03-01"; tint: violet; h: bh } }
-        Box { onTap: { haptic(); androidApp("com.android.chrome") }; Side { label: "chrome"; code: "03-02"; tint: gold; h: bh } }
-        Box { onTap: { haptic(); settings("dark") }; Side { label: "dark"; code: modes.dark == true ? "03-03 · ON" : "03-03 · OFF"; tint: modes.dark == true ? periw : violet; h: bh } }
-        Box { onTap: { haptic(); settings("display") }; Side { label: "display"; code: modes.brightness == null ? "03-04" : "03-04 · ${round(modes.brightness)}%"; tint: lilac; h: bh } }
-        Box { onTap: { haptic(); settings("location") }; Side { label: "location"; code: modes.location == true ? "03-05 · ON" : "03-05 · OFF"; tint: modes.location == true ? tan : violet; h: bh } }
-        Box { onTap: { haptic(); settings("airplane") }; Side { label: "airplane"; code: modes.airplane == true ? "03-06 · ON" : "03-06 · OFF"; tint: modes.airplane == true ? rose : violet; h: bh } }
-        Box { onTap: { haptic(); settings("internet") }; Side { label: "network"; code: "03-07"; tint: sky; h: 2 * bh } }
-        Box { onTap: { haptic(); settings("volume") }; Side { label: "volume"; code: "03-08 · ${volLv}%"; tint: periw; h: 2 * bh } }
-        Box { onTap: { haptic(); settings("battery") }; Side { label: "power"; code: "03-09 · ${level}%"; tint: batTint; h: 2 * bh } }
-        PhoneKey { code: "03-10"; tint: violet }
+        Box { onTap: { haptic(); settings("location") }; Side { label: "location"; code: modes.location == true ? "03-02 · ON" : "03-02 · OFF"; tint: modes.location == true ? tan : violet; h: bh } }
+        Box { onTap: { haptic(); settings("airplane") }; Side { label: "airplane"; code: modes.airplane == true ? "03-03 · ON" : "03-03 · OFF"; tint: modes.airplane == true ? rose : violet; h: bh } }
+        Box { onTap: { haptic(); settings("internet") }; Side { label: "network"; code: "03-04"; tint: sky; h: 2 * bh } }
+        Box { onTap: { haptic(); settings("volume") }; Side { label: "volume"; code: "03-05 · ${volLv}%"; tint: periw; h: 2 * bh } }
+        Box { onTap: { haptic(); settings("battery") }; Side { label: "power"; code: "03-06 · ${level}%"; tint: batTint; h: 2 * bh } }
+        Column { width: sw; weight: 1; background: alpha(amber, gA); frost: fz }
+        Box { width: sw; height: bh; background: alpha(violet, gA); frost: fz; onTap: { haptic(); androidApp("com.google.android.dialer") } }
       }
       Column {
         weight: 1
@@ -571,7 +566,7 @@ face "console engineering" {
         Content { weight: 1; fill: width }
       }
     }
-    Bottom { name: "phone · systems"; cA: violet; cB: peach; cC: periw; here: 2 }
+    Bottom { name: "phone · systems"; cA: violet; cB: peach; cC: periw; here: 2; phone: "03-07" }
     Spacer { height: screenInset }
   }
 }
