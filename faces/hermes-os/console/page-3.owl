@@ -69,8 +69,8 @@ face "console engineering" {
 
   let yr = num(fmtTime(now, "yyyy"), 2026)
   let doy = num(fmtTime(now, "D"), 1)
-  let mins = num(fmtTime(now, "H"), 0) * 60 + num(fmtTime(now, "m"), 0)
-  let stardate = fixed((yr - 1946) * 1000 + (doy - 1 + mins / 1440) / 365.25 * 1000, 1)
+  // The stardate in the Kelvin style: the year, a point and the day of the year (2026.315), so it turns each day.
+  let stardate = "${int(yr)}.${int(doy)}"
 
   // A half-pill of frosted glass, round at the right (side 1) or the left (side -1).
   component Cap(w, h, c, side) {
