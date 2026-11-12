@@ -29,6 +29,8 @@ face "Omagara" {
   // The letters follow a vertical edge pull; the stationary rail retains input.
   state railOverpull = 0
   state railReturnFrom = 0
+  state railReturnPull = 0
+  state railReturnScale = 0
   state railReturnStart = 0
   state railReturning = false
   // Brief mountain entrance, then full-speed thumb tracking.
@@ -150,7 +152,8 @@ face "Omagara" {
   let groups = groupBy(apps, a => contains(fullAlphabet, upper(sub(trim(a.name), 0, 1))) ? upper(sub(trim(a.name), 0, 1)) : "#")
   // Freeze mapping and geometry for the entire touch, even if apps update.
   let liveAlphabet = cfg.hideEmpty ? fullAlphabet.filter(c => len(get(groups, c, [])) > 0) : fullAlphabet
-  let alphabet = railHeld ? heldAlphabet : liveAlphabet
+  // Freeze letters through the return, so changing available apps cannot reshape the worm mid-snap.
+  let alphabet = railHeld || railReturning ? heldAlphabet : liveAlphabet
   // Put the single most recently opened Android app first only when Search is empty.
   // android.apps.last is launcher-maintained history; no new permission needed.
   let lastOpenedApp = first(apps.filter(a => a.last != null).sortBy(a => -(a.last ?? 0)))
@@ -172,16 +175,22 @@ face "Omagara" {
   // The fixed touch rail does not move; only its displayed letters do.
   let railUpperReach = max(0, railTop + railStep / 2 - screenTop - 10)
   let railLowerReach = max(0, (tileHeight ?? 800) - screenInset - 10 - (railTop + railHeight - railStep / 2))
-  // Only read the frame clock during a 160ms entrance or a 420ms return.
+  // Animate only the 160ms curve entrance and 110ms release return.
   let railEnterAge = railEntering ? max(0, time - railEnterStart) : 0
   let railEnterT = railEntering ? clamp(railEnterAge / 0.16, 0, 1) : 1
   let railEnterEase = 1 - pow(1 - railEnterT, 3)
   let railEnterDone = railEntering && railEnterAge >= 0.16
   on railEnterDone { if value { railEntering = false } }
   let railReturnAge = railReturning ? max(0, time - railReturnStart) : 0
-  let railVisualY = railHeld ? railOverpull : railReturning && !cfg.reduceMotion ? railReturnFrom * pow(2.718281828459045, -12 * railReturnAge) * cos(20 * railReturnAge) : 0
-  let railReturnDone = railReturning && railReturnAge >= 0.42
-  on railReturnDone { if value { railReturning = false; railReturnFrom = 0 } }
+  // Fast spring-like return with a smooth finish; never reverse or overshoot.
+  let railReturnT = clamp(railReturnAge / 0.11, 0, 1)
+  let railReturnEase = pow(1 - railReturnT, 3)
+  // Share the exact deformation between the letters and their continuous shade.
+  let railCurveStrength = !cfg.curve ? 0 : activeSide != 0 ? railEnterEase : railReturning && !cfg.reduceMotion ? railReturnScale * railReturnEase : 0
+  let railCurvePull = activeSide != 0 ? railPull : railReturning && !cfg.reduceMotion ? railReturnPull : 0
+  let railVisualY = railHeld ? railOverpull : railReturning && !cfg.reduceMotion ? railReturnFrom * railReturnEase : 0
+  let railReturnDone = railReturning && railReturnAge >= 0.11
+  on railReturnDone { if value { railReturning = false; railReturnFrom = 0; railReturnPull = 0; railReturnScale = 0 } }
   // Handlers receive y local to this same rail: each center is (i + 0.5)
   // * railStep. floor(y / railStep) selects i; no screen offset is subtracted.
 
@@ -726,6 +735,7 @@ face "Omagara" {
       onDrag: {
         appTracking = false
         appVelocity = 0
+        railReturning = false
         railHeld = true
         draggingSide = 1
         let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railHeight - railStep / 2 ? y - (railHeight - railStep / 2) : 0
@@ -756,9 +766,12 @@ face "Omagara" {
       // a real drag release/cancellation always clears both states below.
       onRelease: {
         if draggingSide == 0 {
+          // Capture the actual visible shape, including partial entrance.
           railReturnFrom = railOverpull
+          railReturnPull = railPull
+          railReturnScale = railEnterEase
           railReturnStart = time
-          railReturning = !cfg.reduceMotion && abs(railOverpull) > 0.5
+          railReturning = !cfg.reduceMotion && (abs(railOverpull) > 0.5 || cfg.curve && railPull * railEnterEase > 0.5)
           railOverpull = 0
           railEntering = false
           activeSide = 0; railHeld = false; railPull = 0
@@ -766,14 +779,17 @@ face "Omagara" {
       }
       onDragEnd: {
         railReturnFrom = railOverpull
+        railReturnPull = railPull
+        railReturnScale = railEnterEase
         railReturnStart = time
-        railReturning = !cfg.reduceMotion && abs(railOverpull) > 0.5
+        railReturning = !cfg.reduceMotion && (abs(railOverpull) > 0.5 || cfg.curve && railPull * railEnterEase > 0.5)
         railOverpull = 0
         railEntering = false
         draggingSide = 0; activeSide = 0; railHeld = false; railPull = 0
       }
-      // Left input has no glyph nodes; either edge drives the right feedback.
-      if visual && (cfg.idleAlphabet || activeSide != 0) {
+      // The selected edge draws the glyphs; the other edge is optional input.
+      // Keep showing the worm during its release return even if idle alphabet is hidden.
+      if visual && (cfg.idleAlphabet || activeSide != 0 || railReturning) {
         // Only move the visual worm: the rail's touch area stays put.
         Box {
           width: 44
@@ -787,8 +803,8 @@ face "Omagara" {
               // Four connected contour samples per letter. Geometry and curve
               // strength match the Text offsets below, including left mirroring.
               let wormSamples = map(range(len(alphabet) * 4 + 1), j => {
-                x: (alphabetSide == 1 ? railMaxReach + 22 : 22) - alphabetSide * railPull *
-                  (activeSide != 0 && cfg.curve ? (1 + cos(rad(min(abs(j / 4 - 0.5 - fingerPosition) / max(10, min(14, len(alphabet) * 0.58)), 1) * 180))) / 2 * railEnterEase : 0),
+                x: (alphabetSide == 1 ? railMaxReach + 22 : 22) - alphabetSide * railCurvePull *
+                  (1 + cos(rad(min(abs(j / 4 - 0.5 - fingerPosition) / max(10, min(14, len(alphabet) * 0.58)), 1) * 180))) / 2 * railCurveStrength,
                 y: cfg.roundAlphabet ? 12 + j / max(1, len(alphabet) * 4) * max(0, railHeight - 24) : j * railStep / 4
               })
               path(map(wormSamples, p => [p.x - 12, p.y]) + reverse(map(wormSamples, p => [p.x + 12, p.y])), closed: true, fill: legibilityShade)
@@ -807,9 +823,8 @@ face "Omagara" {
               // sharp kink at the selected letter. The curve follows the finger
               // continuously; unchanged cells keep the same touch targets.
               let distance = abs(i - fingerPosition)
-              let expanded = activeSide != 0 && cfg.curve
               let radius = max(10, min(14, len(alphabet) * 0.58))
-              let curve = expanded ? (1 + cos(rad(min(distance / radius, 1) * 180))) / 2 * railEnterEase : 0
+              let curve = (1 + cos(rad(min(distance / radius, 1) * 180))) / 2 * railCurveStrength
               Box {
                 height: railStep
                 fill: width
@@ -822,7 +837,7 @@ face "Omagara" {
                   bold: highlightedLetter == character && browsing
                   color: highlightedLetter == character && browsing ? accent : curve > 0 ? primaryText : len(get(groups, character, [])) > 0 ? secondaryText : alpha(secondaryText, cfg.textContrast == "High" ? 0.72 : 0.35)
                   align: center
-                  offset: [-alphabetSide * railPull * curve, 0]
+                  offset: [-alphabetSide * railCurvePull * curve, 0]
                   scale: 1 + 0.16 * curve
                 }
               }
