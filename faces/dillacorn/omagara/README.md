@@ -6,11 +6,13 @@ A Niagara-inspired OWL 21 home face for Omalauncher.
 
 Square backgrounds are the default. The previous rounded, shaded bubble style is optional in Settings, with an independent border toggle. This applies to Search, Close, the selected-letter indicator, notifications and calendar cards.
 
-Icon styles: Colored, Theme overlay (default, 30% adjustable strength) and Monochrome. The overlay requires Colored icons in Omalauncher's Style settings.
+Icon styles: Colored or Theme overlay (default, 30% adjustable strength). The overlay requires Colored icons in Omalauncher's Style settings.
 
 Fonts: Sans (default), Serif or the launcher's chosen font. Home text can use Theme, Light or Dark with High or Standard secondary-text contrast.
 
 Notifications have more compact vertical spacing and can scroll behind the Search button. There is no bottom transparency fade in OWL 21.
+
+App rows are tappable across the unused space to the right edge; the alphabet rail and Search/Close controls remain on top.
 
 Elastic alphabet navigation, haptics, app search, calendar and clock tools remain.
 

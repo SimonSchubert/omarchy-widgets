@@ -59,11 +59,11 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, tintIcons: false, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, hapticFeedback: "Every letter", bubbleShape: "Square", bubbleBorder: false, textTone: "Theme", textContrast: "High"}
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, hapticFeedback: "Every letter", bubbleShape: "Square", bubbleBorder: false, textTone: "Theme", textContrast: "High"}
   let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
   let hapticChoices = ["Off", "Reduced", "Every letter"]
   let bubbleShapeChoices = ["Square", "Rounded"]
-  let iconStyleChoices = ["Colored", "Theme overlay", "Monochrome"]
+  let iconStyleChoices = ["Colored", "Theme overlay"]
   let iconOverlayChoices = [0, 10, 20, 30, 40, 50, 60]
   let faceFontChoices = ["Sans", "Serif", "Launcher"]
   let textToneChoices = ["Theme", "Light", "Dark"]
@@ -157,7 +157,9 @@ face "Omagara" {
   let appPanelHeight = max(0, appSafeBottom - appSafeTop)
   let appFade = min(60, appPanelHeight / 5)
   let appEdgeSpace = appFade + 8
-  let appPanelWidth = max(80, availableWidth - 168)
+  // Let app rows accept taps all the way to the right safe edge. The
+  // alphabet rail and Search/Close buttons are rendered above the list.
+  let appPanelWidth = max(80, availableWidth - 48)
   let appSections = fullAlphabet.filter(c => !cfg.hideEmpty || len(get(groups, c, [])) > 0)
   let appSectionEnds = scan(appSections, (height, c) => height + appLabelHeight + len(get(groups, c, [])) * appRowHeight, 0)
   let appSectionStarts = map(appSections, (c, i) => appEdgeSpace + (i == 0 ? 0 : appSectionEnds[i - 1]))
@@ -564,17 +566,15 @@ face "Omagara" {
         Box {
           size: 36 * rowScale
           align: center
-          // The launcher supplies either full-color icons or alpha-only masks.
-          // Colored + Theme overlay require Colored icons in launcher Style.
-          // Blend a light accent silhouette over the original without replacing its colors.
-          if cfg.iconStyle == "Monochrome" && drawer.monochrome != true {
-            Text { text: upper(sub(trim(a.name), 0, 2)); font: chosenFont; fontSize: 16 * rowScale; color: primaryText; align: center }
-          } else if a.icon != null && a.icon != "" {
-            Image { src: a.icon; size: 36 * rowScale; tint: cfg.iconStyle == "Monochrome" ? primaryText : null; label: a.name + (a.profile == null ? "" : " · " + a.profile) }
+          // Keep the original icon; theme overlay is optional and requires
+          // Colored icons in the launcher's Style settings.
+          if a.icon != null && a.icon != "" {
+            Image { src: a.icon; size: 36 * rowScale; label: a.name + (a.profile == null ? "" : " · " + a.profile) }
             if cfg.iconStyle == "Theme overlay" && cfg.iconOverlayOpacity > 0 && drawer.monochrome != true {
               Image { src: a.icon; size: 36 * rowScale; tint: alpha(accent, cfg.iconOverlayOpacity / 100); opacity: 1; label: a.name }
             }
           } else {
+            // Missing icons still have a label so each app remains recognizable.
             Text { text: upper(sub(trim(a.name), 0, 2)); font: chosenFont; fontSize: 16 * rowScale; color: primaryText; align: center }
           }
         }
@@ -846,7 +846,7 @@ face "Omagara" {
         scroll: true
         gap: 8
         Text { text: "Omagara only"; font: chosenFont; fontSize: 20; color: accent }
-        Text { text: "Long-press Search to return here. Colored icons retain their original colors; Theme overlay blends the selected theme color over them. Monochrome uses the launcher-provided icon masks."; font: chosenFont; color: muted; fontSize: 13 }
+        Text { text: "Long-press Search to return here. Colored icons retain their original colors; Theme overlay blends the selected theme color over them."; font: chosenFont; color: muted; fontSize: 13 }
         for pref in preferenceRows {
           Column {
             fill: width
