@@ -63,7 +63,7 @@ face "console comms" {
   let topH = 64
   let botH = 64
   // The height of every sidebar key.
-  let bh = 48
+  let bh = 44
   let eX = sw + 52
 
   let yr = num(fmtTime(now, "yyyy"), 2026)
@@ -186,6 +186,25 @@ face "console comms" {
       Spacer { weight: 1 }
       Text { text: upper(label); font: antonio; fontSize: 16.5; fontWeight: 600; color: void; align: end; maxLines: 1 }
       Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+    }
+  }
+
+  // The phone key: the last on every page's sidebar, filling it down to the elbow, its name larger.
+  component PhoneKey(code, tint) {
+    Box {
+      width: sw
+      weight: 1
+      onTap: { haptic(); androidApp("com.google.android.dialer") }
+      Column {
+        width: sw
+        fill: height
+        gap: 0
+        background: alpha(tint, gA); frost: fz
+        padding: [6, 4, 6, 6]
+        Spacer { weight: 1 }
+        Text { text: "PHONE"; font: antonio; fontSize: 24; fontWeight: 600; color: void; align: end; maxLines: 1 }
+        Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+      }
     }
   }
 
@@ -501,17 +520,16 @@ face "console comms" {
         fill: height
         gap: gp
         padding: [0, gp, 0, gp]
-        // Every key the same height (bh), numbered page and place, top to bottom; a live reading follows its number.
-        // The phone is the last key on every page, under the filler.
-        Box { onTap: { haptic(); media("open") }; Side { label: "media"; code: "02-01"; tint: peach; h: bh } }
-        Box { onTap: { haptic(); settings("output") }; Side { label: "output"; code: "02-02"; tint: amber; h: bh } }
-        Box { onTap: { haptic(); notification("open", "") }; Side { label: "alerts"; code: "02-03 · ${n.count ?? 0}"; tint: n.count > 0 ? gold : tan; h: bh } }
-        Box { onTap: { haptic(); androidApp("com.google.android.apps.messaging") }; Side { label: "messages"; code: "02-04"; tint: sky; h: bh } }
-        Box { onTap: { haptic(); androidApp("com.google.android.gm") }; Side { label: "gmail"; code: "02-05"; tint: rose; h: bh } }
-        Box { onTap: { haptic(); launcher("drawer") }; Side { label: "apps"; code: "02-06"; tint: periw; h: bh } }
-        Box { onTap: { haptic(); settings("sound") }; Side { label: "sound"; code: "02-07"; tint: violet; h: bh } }
-        Column { width: sw; weight: 1; background: alpha(lilac, gA); frost: fz }
-        Box { onTap: { haptic(); androidApp("com.google.android.dialer") }; Side { label: "phone"; code: "02-08"; tint: violet; h: bh } }
+        // Grouped by what they do, the most used at the foot twice as tall; numbered page and place, top to bottom,
+        // a live reading after its number. The phone is the last key on every page and fills down to the elbow.
+        Box { onTap: { haptic(); launcher("drawer") }; Side { label: "apps"; code: "02-01"; tint: periw; h: bh } }
+        Box { onTap: { haptic(); media("open") }; Side { label: "media"; code: "02-02"; tint: peach; h: bh } }
+        Box { onTap: { haptic(); settings("output") }; Side { label: "output"; code: "02-03"; tint: amber; h: bh } }
+        Box { onTap: { haptic(); settings("sound") }; Side { label: "sound"; code: "02-04"; tint: violet; h: bh } }
+        Box { onTap: { haptic(); notification("open", "") }; Side { label: "alerts"; code: "02-05 · ${n.count ?? 0}"; tint: n.count > 0 ? gold : tan; h: 2 * bh } }
+        Box { onTap: { haptic(); androidApp("com.google.android.gm") }; Side { label: "gmail"; code: "02-06"; tint: rose; h: 2 * bh } }
+        Box { onTap: { haptic(); androidApp("com.google.android.apps.messaging") }; Side { label: "messages"; code: "02-07"; tint: sky; h: 2 * bh } }
+        PhoneKey { code: "02-08"; tint: violet }
       }
       Column {
         weight: 1
@@ -521,7 +539,7 @@ face "console comms" {
         Content { weight: 1; fill: width }
       }
     }
-    Bottom { name: !n.available || n.count == 0 ? "comms · today" : n.count == 1 ? "1 transmission" : "${n.count} transmissions"; cA: periw; cB: lilac; cC: amber; here: 1 }
+    Bottom { name: !n.available || n.count == 0 ? "comms · today" : n.count == 1 ? "1 transmission" : "${n.count} transmissions"; cA: violet; cB: lilac; cC: amber; here: 1 }
     Spacer { height: screenInset }
   }
 }

@@ -165,7 +165,7 @@ face "console ops" {
   let topH = 64
   let botH = 64
   // The height of every sidebar key.
-  let bh = 48
+  let bh = 44
   let eX = sw + 52
 
   let yr = num(fmtTime(now, "yyyy"), 2026)
@@ -288,6 +288,25 @@ face "console ops" {
       Spacer { weight: 1 }
       Text { text: upper(label); font: antonio; fontSize: 16.5; fontWeight: 600; color: void; align: end; maxLines: 1 }
       Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+    }
+  }
+
+  // The phone key: the last on every page's sidebar, filling it down to the elbow, its name larger.
+  component PhoneKey(code, tint) {
+    Box {
+      width: sw
+      weight: 1
+      onTap: { haptic(); androidApp("com.google.android.dialer") }
+      Column {
+        width: sw
+        fill: height
+        gap: 0
+        background: alpha(tint, gA); frost: fz
+        padding: [6, 4, 6, 6]
+        Spacer { weight: 1 }
+        Text { text: "PHONE"; font: antonio; fontSize: 24; fontWeight: 600; color: void; align: end; maxLines: 1 }
+        Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+      }
     }
   }
 
@@ -717,19 +736,18 @@ face "console ops" {
         fill: height
         gap: gp
         padding: [0, gp, 0, gp]
-        // Every key the same height (bh), numbered page and place, top to bottom; a live reading follows its number.
-        // The phone is the last key on every page, under the filler.
-        Box { onTap: { haptic(); androidApp("com.anthropic.claude") }; Side { label: "claude"; code: "01-01"; tint: peach; h: bh } }
-        Box { onTap: { haptic(); androidApp("com.openai.chatgpt") }; Side { label: "chatgpt"; code: "01-02"; tint: periw; h: bh } }
-        Box { onTap: { haptic(); launcher("agents") }; Side { label: "agents"; code: "01-03"; tint: lilac; h: bh } }
-        Box { onTap: { haptic(); terminal("bash -l", "arch") }; Side { label: "terminal"; code: "01-04"; tint: amber; h: bh } }
-        Box { onTap: { haptic(); terminal("btop", "monitor") }; Side { label: "monitor"; code: "01-05"; tint: rose; h: bh } }
-        Box { onTap: { haptic(); terminal("fastfetch", "system") }; Side { label: "system"; code: "01-06"; tint: sky; h: bh } }
-        Box { onTap: { haptic(); run("omarchy-files") }; Side { label: "files"; code: "01-07"; tint: gold; h: bh } }
-        Box { onTap: { haptic(); launcher("store") }; Side { label: "store"; code: "01-08"; tint: lilac; h: bh } }
-        Box { onTap: { haptic(); launcher("style") }; Side { label: "style"; code: "01-09"; tint: peach; h: bh } }
-        Column { width: sw; weight: 1; background: alpha(tan, gA); frost: fz }
-        Box { onTap: { haptic(); androidApp("com.google.android.dialer") }; Side { label: "phone"; code: "01-10"; tint: violet; h: bh } }
+        // Grouped by what they do, the most used at the foot twice as tall; numbered page and place, top to bottom,
+        // a live reading after its number. The phone is the last key on every page and fills down to the elbow.
+        Box { onTap: { haptic(); launcher("style") }; Side { label: "style"; code: "01-01"; tint: peach; h: bh } }
+        Box { onTap: { haptic(); launcher("store") }; Side { label: "store"; code: "01-02"; tint: lilac; h: bh } }
+        Box { onTap: { haptic(); run("omarchy-files") }; Side { label: "files"; code: "01-03"; tint: gold; h: bh } }
+        Box { onTap: { haptic(); terminal("btop", "monitor") }; Side { label: "monitor"; code: "01-04"; tint: rose; h: bh } }
+        Box { onTap: { haptic(); terminal("fastfetch", "system") }; Side { label: "system"; code: "01-05"; tint: sky; h: bh } }
+        Box { onTap: { haptic(); launcher("agents") }; Side { label: "agents"; code: "01-06"; tint: lilac; h: bh } }
+        Box { onTap: { haptic(); androidApp("com.anthropic.claude") }; Side { label: "claude"; code: "01-07"; tint: peach; h: 2 * bh } }
+        Box { onTap: { haptic(); androidApp("com.openai.chatgpt") }; Side { label: "chatgpt"; code: "01-08"; tint: periw; h: 2 * bh } }
+        Box { onTap: { haptic(); terminal("bash -l", "arch") }; Side { label: "terminal"; code: "01-09"; tint: amber; h: 2 * bh } }
+        PhoneKey { code: "01-10"; tint: violet }
       }
       Column {
         weight: 1

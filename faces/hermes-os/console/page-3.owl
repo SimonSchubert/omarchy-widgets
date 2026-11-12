@@ -66,7 +66,7 @@ face "console engineering" {
   let topH = 64
   let botH = 64
   // The height of every sidebar key.
-  let bh = 48
+  let bh = 44
   let eX = sw + 52
 
   let yr = num(fmtTime(now, "yyyy"), 2026)
@@ -189,6 +189,25 @@ face "console engineering" {
       Spacer { weight: 1 }
       Text { text: upper(label); font: antonio; fontSize: 16.5; fontWeight: 600; color: void; align: end; maxLines: 1 }
       Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+    }
+  }
+
+  // The phone key: the last on every page's sidebar, filling it down to the elbow, its name larger.
+  component PhoneKey(code, tint) {
+    Box {
+      width: sw
+      weight: 1
+      onTap: { haptic(); androidApp("com.google.android.dialer") }
+      Column {
+        width: sw
+        fill: height
+        gap: 0
+        background: alpha(tint, gA); frost: fz
+        padding: [6, 4, 6, 6]
+        Spacer { weight: 1 }
+        Text { text: "PHONE"; font: antonio; fontSize: 24; fontWeight: 600; color: void; align: end; maxLines: 1 }
+        Text { text: code; font: antonio; fontSize: 12.5; fontWeight: 500; color: alpha(void, 0.7); align: end; maxLines: 1 }
+      }
     }
   }
 
@@ -531,19 +550,18 @@ face "console engineering" {
         fill: height
         gap: gp
         padding: [0, gp, 0, gp]
-        // Every key the same height (bh), numbered page and place, top to bottom; a live reading follows its number.
-        // The phone is the last key on every page, under the filler.
-        Box { onTap: { haptic(); settings("battery") }; Side { label: "power"; code: "03-01 · ${level}%"; tint: batTint; h: bh } }
-        Box { onTap: { haptic(); settings("internet") }; Side { label: "network"; code: "03-02"; tint: sky; h: bh } }
-        Box { onTap: { haptic(); settings("display") }; Side { label: "display"; code: modes.brightness == null ? "03-03" : "03-03 · ${round(modes.brightness)}%"; tint: lilac; h: bh } }
-        Box { onTap: { haptic(); settings("volume") }; Side { label: "volume"; code: "03-04 · ${volLv}%"; tint: periw; h: bh } }
-        Box { onTap: { haptic(); androidApp("com.android.chrome") }; Side { label: "chrome"; code: "03-05"; tint: gold; h: bh } }
-        Box { onTap: { haptic(); settings("dark") }; Side { label: "dark"; code: modes.dark == true ? "03-06 · ON" : "03-06 · OFF"; tint: modes.dark == true ? periw : violet; h: bh } }
-        Box { onTap: { haptic(); settings("location") }; Side { label: "location"; code: modes.location == true ? "03-07 · ON" : "03-07 · OFF"; tint: modes.location == true ? tan : violet; h: bh } }
-        Box { onTap: { haptic(); settings("airplane") }; Side { label: "airplane"; code: modes.airplane == true ? "03-08 · ON" : "03-08 · OFF"; tint: modes.airplane == true ? rose : violet; h: bh } }
-        Box { onTap: { haptic(); launcher("settings") }; Side { label: "launcher"; code: "03-09"; tint: violet; h: bh } }
-        Column { width: sw; weight: 1; background: alpha(amber, gA); frost: fz }
-        Box { onTap: { haptic(); androidApp("com.google.android.dialer") }; Side { label: "phone"; code: "03-10"; tint: violet; h: bh } }
+        // Grouped by what they do, the most used at the foot twice as tall; numbered page and place, top to bottom,
+        // a live reading after its number. The phone is the last key on every page and fills down to the elbow.
+        Box { onTap: { haptic(); launcher("settings") }; Side { label: "launcher"; code: "03-01"; tint: violet; h: bh } }
+        Box { onTap: { haptic(); androidApp("com.android.chrome") }; Side { label: "chrome"; code: "03-02"; tint: gold; h: bh } }
+        Box { onTap: { haptic(); settings("dark") }; Side { label: "dark"; code: modes.dark == true ? "03-03 · ON" : "03-03 · OFF"; tint: modes.dark == true ? periw : violet; h: bh } }
+        Box { onTap: { haptic(); settings("display") }; Side { label: "display"; code: modes.brightness == null ? "03-04" : "03-04 · ${round(modes.brightness)}%"; tint: lilac; h: bh } }
+        Box { onTap: { haptic(); settings("location") }; Side { label: "location"; code: modes.location == true ? "03-05 · ON" : "03-05 · OFF"; tint: modes.location == true ? tan : violet; h: bh } }
+        Box { onTap: { haptic(); settings("airplane") }; Side { label: "airplane"; code: modes.airplane == true ? "03-06 · ON" : "03-06 · OFF"; tint: modes.airplane == true ? rose : violet; h: bh } }
+        Box { onTap: { haptic(); settings("internet") }; Side { label: "network"; code: "03-07"; tint: sky; h: 2 * bh } }
+        Box { onTap: { haptic(); settings("volume") }; Side { label: "volume"; code: "03-08 · ${volLv}%"; tint: periw; h: 2 * bh } }
+        Box { onTap: { haptic(); settings("battery") }; Side { label: "power"; code: "03-09 · ${level}%"; tint: batTint; h: 2 * bh } }
+        PhoneKey { code: "03-10"; tint: violet }
       }
       Column {
         weight: 1
@@ -553,7 +571,7 @@ face "console engineering" {
         Content { weight: 1; fill: width }
       }
     }
-    Bottom { name: "phone · systems"; cA: tan; cB: peach; cC: periw; here: 2 }
+    Bottom { name: "phone · systems"; cA: violet; cB: peach; cC: periw; here: 2 }
     Spacer { height: screenInset }
   }
 }
