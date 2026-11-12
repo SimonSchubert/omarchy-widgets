@@ -405,6 +405,7 @@ face "console ops" {
   // ---- this page ----
   let agents = ag.installed ?? []
   let updates = num(drawer.updates, 0)
+  let herdrApp = (drawer.apps ?? []).find(a => contains(lower(a.name ?? ""), "herdr"))
   let upgraded = parseTime(lx.upgraded ?? "")
 
   let sess = (cs ?? []).sortBy(s => s.status == "idle" ? 1 : 0)
@@ -741,8 +742,8 @@ face "console ops" {
         Box { onTap: { haptic(); launcher("agents") }; Side { label: "agents"; code: "01-04"; tint: lilac; h: bh } }
         Box { onTap: { haptic(); androidApp("com.anthropic.claude") }; Side { label: "claude"; code: "01-05"; tint: peach; h: 2 * bh } }
         Box { onTap: { haptic(); androidApp("com.openai.chatgpt") }; Side { label: "chatgpt"; code: "01-06"; tint: periw; h: 2 * bh } }
-        // herdr, the terminal multiplexer for coding agents; a plain shell where it isn't installed.
-        Box { onTap: { haptic(); terminal("if command -v herdr >/dev/null; then herdr; else bash -l; fi", "herdr") }; Side { label: "herdr"; code: "01-07"; tint: amber; h: 2 * bh } }
+        // The herdr app, found in the drawer by its name; a plain shell where there's none.
+        Box { onTap: { haptic(); if herdrApp != null { open(herdrApp.key) } else { terminal("bash -l", "arch") } }; Side { label: "herdr"; code: "01-07"; tint: amber; h: 2 * bh } }
         Column { width: sw; weight: 1; background: alpha(tan, gA); frost: fz }
         Box { width: sw; height: bh; background: alpha(violet, gA); frost: fz; onTap: { haptic(); androidApp("com.google.android.dialer") } }
       }
