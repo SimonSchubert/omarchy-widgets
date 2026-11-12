@@ -1,0 +1,223 @@
+widget "Lichess correspondence" {
+ meta { owl: 18; description: "Pinned correspondence board with direct Lichess moves"; version: "2.0"; license: "MIT"; category: "games" }
+ size: 7x10
+ minSize: 5x9
+ padding: 8
+ state token = null secret
+ state pinned = "" persist
+ state pieceOverride = "" persist
+ state screenMode = "games"
+ state accountPieces = "cburnett" persist
+ state cachedGame = null persist
+ state choosing = false
+ state settingsOpen = false
+ state selected = -1
+ state destination = -1
+ state promotion = "q"
+ state result = null
+ state sending = false
+ state message = ""
+ state gamesSampledAt = 0
+ source now = clock every 1s
+ source games = http(token == null ? null : "https://lichess.org/api/account/playing?nb=50", {Authorization: "Bearer ${token}"}) every 15s json status
+ source preferences = http(token == null ? null : "https://lichess.org/api/account/preferences", {Authorization: "Bearer ${token}"}) every 5m json status
+ requires { pacman: [] }
+ let chosenPieceSet = pieceOverride == "" ? accountPieces : pieceOverride
+ let pieceSet = chosenPieceSet
+ let lightSquare = mix(background, accent, 0.78)
+ let darkSquare = mix(background, accent, 0.42)
+ let available = (games.out.nowPlaying ?? []).filter(g => g.speed == "correspondence")
+ let liveGame = available.find(g => g.gameId == pinned)
+ let game = liveGame ?? (cachedGame.gameId == pinned ? cachedGame : null)
+ let canPlay = games.ok && liveGame != null && liveGame.isMyTurn
+ let clockFresh = games.ok && liveGame != null && gamesSampledAt > 0 && now - gamesSampledAt < 45
+ let clockSeconds = game.secondsLeft == null ? null : max(0, floor(game.secondsLeft - (game.isMyTurn && liveGame != null && gamesSampledAt > 0 ? max(0, now - gamesSampledAt) : 0)))
+ let clockText = clockSeconds == null ? "No clock · unlimited time" : (clockFresh ? "" : "~ ") + (clockSeconds >= 86400 ? str(floor(clockSeconds / 86400)) + "d " : "") + fmtTime(clockSeconds, "HH:mm:ss", "UTC")
+ let fen = game.fen ?? "8/8/8/8/8/8/8/8"
+ let squares = flatten(split(split(fen, " ")[0], "/").map(row => flatten(split(row, "").map(p => contains("12345678", p) ? range(int(p)).map(i => "") : [p]))))
+ let lastMove = game.lastMove ?? ""
+ let hasLastMove = match(lastMove, "^[a-h][1-8][a-h][1-8][qrbn]?$") != null
+ let lastFrom = hasLastMove ? sub(lastMove, 0, 2) : ""
+ let lastTo = hasLastMove ? sub(lastMove, 2, 4) : ""
+ let flipped = game.color == "black"
+ let origin = selected < 0 ? "" : sub("abcdefgh", selected % 8, selected % 8 + 1) + str(8 - floor(selected / 8))
+ let target = destination < 0 ? "" : sub("abcdefgh", destination % 8, destination % 8 + 1) + str(8 - floor(destination / 8))
+ let promotes = selected >= 0 && lower(squares[selected]) == "p" && (destination < 8 || destination >= 56) && destination >= 0
+ let move = origin + target + (promotes ? promotion : "")
+ on preferences first { if preferences.ok && preferences.out.prefs.pieceSet != null { accountPieces = preferences.out.prefs.pieceSet } }
+ on games first { if games.ok { gamesSampledAt = now; if liveGame != null { cachedGame = liveGame } } }
+ on game.fen { selected = -1; destination = -1 }
+ on result first {
+   sending = false
+   if value.ok { message = "Move sent"; selected = -1; destination = -1; refresh() }
+   else { message = value.out.error ?? value.err ?? "Move rejected" }
+ }
+ Column {
+  gap: 4
+  Row {
+   Text { text: "♞ CHESS"; bold: true; weight: 1 }
+   Button { text: "Games"; onTap: { if !sending { screenMode = "games"; screen(); refresh() } } }
+   Button { text: "↻"; onTap: refresh() }
+   Button { text: "⚙"; onTap: settingsOpen = !settingsOpen }
+  }
+  if token == null || settingsOpen {
+   Text { text: "Connect Lichess to play on this board"; style: small }
+   Button { text: "Create Lichess token"; onTap: url("https://lichess.org/account/oauth/token/create?description=Home%20chess%20widget&scopes%5B%5D=board%3Aplay&scopes%5B%5D=preference%3Aread") }
+   Text { text: "Enable ‘Play games with the board API’ and ‘Read your preferences’. Paste the new token below and press Enter."; style: small }
+   Input { placeholder: "Lichess access token"; password: true; onSubmit: { token = trim(value); settingsOpen = false; message = "" } }
+   Text { text: "Pieces: ${chosenPieceSet} · account: ${accountPieces}"; style: small }
+   Button { text: "Choose piece shapes"; onTap: { screenMode = "pieces"; screen() } }
+   if token != null { Button { text: "Disconnect"; onTap: { token = null; pinned = ""; cachedGame = null; choosing = false; selected = -1; destination = -1 } } }
+  } else if game == null || choosing {
+   if games == null { Text { text: "Loading your games…" } }
+   else if !games.ok { Text { text: games.code == 401 ? "Token rejected. Open ⚙ to reconnect." : "Can't refresh (${games.code}). Tap ↻ to retry."; color: red } }
+   else {
+    Text { text: pinned == "" || choosing ? "Choose a game to pin" : "Refreshing pinned game — its status is not yet confirmed."; style: small }
+    Column {
+     scroll: true
+     weight: 1
+     for g in available key g.gameId {
+      Button { text: "${g.opponent.username} · ${g.isMyTurn ? 'your turn' : 'waiting'}"; onTap: { let pickedGame = g; let pickedId = g.gameId; cachedGame = pickedGame; pinned = pickedId; choosing = false; selected = -1; destination = -1; message = "" } }
+     }
+     if len(available) == 0 { Text { text: "No ongoing correspondence games found." } }
+    }
+   }
+  } else {
+   Row {
+    Text { text: "vs ${game.opponent.username}"; weight: 1; maxLines: 1 }
+    Text { text: game.isMyTurn ? "YOUR TURN" : "Their turn"; color: game.isMyTurn ? accent : muted; style: small }
+   }
+   if preferences.code == 403 { Text { text: "Account pieces need ‘Read your preferences’ permission. Open ⚙ to update token."; style: small; color: muted } }
+   if !games.ok || liveGame == null { Text { text: "Showing saved board — waiting for current game status"; color: red; style: small } }
+   Row {
+    Text { text: clockSeconds == null ? clockText : "Your clock · " + clockText; bold: clockSeconds != null; color: clockSeconds != null && clockSeconds < 3600 && game.isMyTurn ? yellow : foreground; weight: 1 }
+    if clockSeconds != null { Text { text: !clockFresh ? "Last known" : game.isMyTurn ? "Running" : "Paused"; style: small; color: muted } }
+   }
+   Grid {
+    columns: 8
+    gap: 0
+    for display in range(64) {
+     let index = flipped ? 63 - display : display
+     let piece = squares[index]
+     let square = sub("abcdefgh", index % 8, index % 8 + 1) + str(8 - floor(index / 8))
+     let isLastFrom = hasLastMove && square == lastFrom
+     let isLastTo = hasLastMove && square == lastTo
+     let squareColor = (floor(index / 8) + index % 8) % 2 == 0 ? lightSquare : darkSquare
+     Box {
+      width: (tileWidth - 16) / 8
+      height: (tileWidth - 16) / 8
+      background: index == selected ? mix(lightSquare, accent, 0.65) : index == destination ? mix(lightSquare, accent, 0.45) : isLastTo ? mix(squareColor, green, 0.42) : isLastFrom ? mix(squareColor, green, 0.25) : squareColor
+      border: index == selected || index == destination ? 2 : isLastTo ? 2 : isLastFrom ? 1 : 0
+      borderColor: index == selected || index == destination ? accent : green
+      radius: 0
+      align: center
+      onTap: {
+       if canPlay && !sending {
+        if piece != "" && (game.color == "white" ? piece == upper(piece) : piece == lower(piece)) {
+         selected = index; destination = -1; message = ""
+        } else if selected >= 0 { destination = index; promotion = "q"; message = "" }
+       }
+      }
+      if piece != "" {
+       Image { src: "https://lichess1.org/assets/piece/${enc(pieceSet)}/${enc((piece == upper(piece) ? 'w' : 'b') + upper(piece))}.svg"; width: (tileWidth - 16) / 8 * 0.9; height: (tileWidth - 16) / 8 * 0.9; fit: contain; label: (piece == upper(piece) ? "White " : "Black ") + piece }
+      }
+     }
+    }
+   }
+   if destination >= 0 {
+    if promotes {
+     Row {
+      for p in ["q", "r", "b", "n"] {
+       Button { text: upper(p); color: promotion == p ? accent : muted; onTap: promotion = p }
+      }
+     }
+    }
+    Row {
+     Button {
+      text: sending ? "Sending…" : "Play ${origin} → ${target}"
+      onTap: {
+       if !sending && canPlay {
+        sending = true
+        result = null
+        result = post("https://lichess.org/api/board/game/${enc(pinned)}/move/${enc(move)}", "", {Authorization: "Bearer ${token}"})
+       }
+      }
+     }
+     Button { text: "Cancel"; onTap: { if !sending { selected = -1; destination = -1 } } }
+    }
+   } else {
+    Text { text: selected >= 0 ? "${origin} selected · tap destination" : game.isMyTurn ? "Tap a piece, then its destination" : "Waiting for your opponent"; style: small }
+   }
+
+  }
+  if message != "" { Text { text: message; style: small; color: accent; maxLines: 2 } }
+ }
+ screen {
+  title: screenMode == "pieces" ? "Choose chess pieces" : "Choose correspondence game"
+  if screenMode == "pieces" {
+   Column {
+    gap: 10
+    Text { text: "Account reports: ${accountPieces}. Pick the shapes you use in your app."; style: small }
+    Button { text: "Sync with account"; onTap: { pieceOverride = ""; refresh(); close() } }
+    Column {
+     weight: 1
+     scroll: true
+     for choice in ["cburnett", "merida", "alpha", "chessnut", "maestro", "staunty", "horsey", "pixel", "governor", "tatiana", "cardinal", "kosal", "leipzig", "companion", "fresca"] {
+      Row {
+       padding: 8
+       background: chosenPieceSet == choice ? mix(background, accent, 0.2) : surface
+       onTap: { let chosen = choice; pieceOverride = chosen; close() }
+       Image { src: "https://lichess1.org/assets/piece/${enc(choice)}/wN.svg"; width: 48; height: 48; fit: contain }
+       Text { text: capitalize(choice) + (chosenPieceSet == choice ? " · selected" : ""); weight: 1 }
+      }
+     }
+    }
+    Input { placeholder: "Other Lichess set name ↵"; onSubmit: { if match(trim(value), "^[a-zA-Z0-9_-]+$") != null { pieceOverride = trim(value); close() } } }
+    Button { text: "Back to board"; onTap: close() }
+   }
+  } else {
+  Column {
+   gap: 10
+   Row {
+    Text { text: "Your games"; style: title; weight: 1 }
+    Button { text: "Refresh"; onTap: refresh() }
+   }
+   Text { text: "Tap a game to display and play it on your home board."; style: small }
+   if games != null && !games.ok { Text { text: "Unable to refresh games. Try Refresh."; color: red } }
+   Column {
+    weight: 1
+    scroll: true
+    for g in available key g.gameId {
+     Box {
+      padding: 12
+      border: 1
+      borderColor: g.gameId == pinned ? accent : border
+      background: g.gameId == pinned ? mix(background, accent, 0.15) : surface
+      onTap: {
+       if !sending {
+        let pickedGame = g
+        let pickedId = g.gameId
+        cachedGame = pickedGame
+        pinned = pickedId
+        choosing = false
+        selected = -1
+        destination = -1
+        message = ""
+        close()
+       }
+      }
+      Column {
+       Text { text: g.opponent.username; bold: true }
+       Text { text: (g.isMyTurn ? "Your turn" : "Opponent’s turn") + " · You play " + g.color; style: small }
+       Text { text: (g.gameId == pinned ? "Selected · " : "") + g.gameId; style: small; color: muted }
+      }
+     }
+    }
+    if len(available) == 0 { Text { text: games == null ? "Loading…" : "No ongoing correspondence games found." } }
+   }
+   Button { text: "Back to board"; onTap: close() }
+  }
+  }
+ }
+
+}
