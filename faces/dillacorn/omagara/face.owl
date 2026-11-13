@@ -1,5 +1,7 @@
 face "Omagara" {
-  meta { owl: 21; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.3"; license: "MIT"; category: "home" }
+  meta { owl: 21; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.4"; license: "MIT"; category: "home" }
+  // Omalauncher OWL time animations are capped at 60 FPS, regardless of display Hz.
+  // Keep the highest supported rate; reduce work rather than reducing responsiveness.
   fps: 60
   page: 0
   edge: true
@@ -46,6 +48,20 @@ face "Omagara" {
   state railEntering = false
   state hapticSteps = 0
   state appScroll = 0
+  // Only a user pull or a fling at a boundary activates app rubber-banding.
+  state appElastic = 0
+  state appElasticFrom = 0
+  state appElasticStarted = 0
+  state appElasticReturning = false
+  // The native notification list keeps its own scroll and variable row heights.
+  state noticeEndPull = 0
+  state noticeEndFrom = 0
+  state noticeEndStarted = 0
+  state noticeEndReturning = false
+  state noticeTopPull = 0
+  state noticeTopFrom = 0
+  state noticeTopStarted = 0
+  state noticeTopReturning = false
   state appVelocity = 0
   state appGlideStarted = 0
   state appAnchor = ""
@@ -233,6 +249,18 @@ face "Omagara" {
   let noticeBottom = max(noticeTop, (tileHeight ?? 800) - screenInset - 10)
   // One source of truth: 20dp outer left; 12dp clear of the 44dp right rail.
   let noticeWidth = max(0, availableWidth - 80)
+  // Additional content after the last card: it can scroll above the Search
+  // button rather than remaining partly hidden underneath it.
+  let noticeTailSpace = max(120, searchBottom - screenInset + 100)
+  // No per-frame update at rest; each return samples time for only 240ms.
+  let noticeEndAge = noticeEndReturning ? max(0, time - noticeEndStarted) : 0
+  let noticeEndVisual = cfg.reduceMotion ? 0 : noticeEndReturning ? noticeEndFrom * pow(max(0, 1 - noticeEndAge / 0.24), 3) : noticeEndPull
+  let noticeEndDone = noticeEndReturning && noticeEndAge >= 0.24
+  on noticeEndDone { if value { noticeEndReturning = false; noticeEndPull = 0; noticeEndFrom = 0 } }
+  let noticeTopAge = noticeTopReturning ? max(0, time - noticeTopStarted) : 0
+  let noticeTopVisual = cfg.reduceMotion ? 0 : noticeTopReturning ? noticeTopFrom * pow(max(0, 1 - noticeTopAge / 0.24), 3) : noticeTopPull
+  let noticeTopDone = noticeTopReturning && noticeTopAge >= 0.24
+  on noticeTopDone { if value { noticeTopReturning = false; noticeTopPull = 0; noticeTopFrom = 0 } }
 
   // One stable viewport, one continuous A–Z/# document. Only intersecting
   // rows are instantiated: OWL 21 lazy Columns expose no scroll controller.
@@ -254,6 +282,10 @@ face "Omagara" {
   let appMaxScroll = max(0, appDocumentHeight - appPanelHeight)
   // Read time ONLY while gliding. An every-frame trigger would keep OWL's
   // frame clock awake even at rest. This analytic integral is exact at any fps.
+  let appElasticAge = appElasticReturning ? max(0, time - appElasticStarted) : 0
+  let appElasticVisual = cfg.reduceMotion ? 0 : appElasticReturning ? appElasticFrom * pow(max(0, 1 - appElasticAge / 0.24), 3) : appElastic
+  let appElasticDone = appElasticReturning && appElasticAge >= 0.24
+  on appElasticDone { if value { appElasticReturning = false; appElastic = 0; appElasticFrom = 0 } }
   let appGliding = browsing && !railHeld && menu == "" && appVelocity != 0
   let appGlideAge = appGliding ? max(0, time - appGlideStarted) : 0
   let appDecay = pow(2.718281828459045, -5 * min(appGlideAge, 1.6))
@@ -262,19 +294,30 @@ face "Omagara" {
   on appGlideDone {
     if value {
       appScroll = appOffset
+      // A rapid fling that reaches either end rebounds once, then settles.
+      if !cfg.reduceMotion && (appVelocity < 0 && appOffset <= 0 || appVelocity > 0 && appOffset >= appMaxScroll) {
+        appElasticFrom = -sign(appVelocity) * min(54, abs(appVelocity) * appDecay * 0.016)
+        appElasticStarted = time
+        appElasticReturning = true
+      }
       appVelocity = 0
       if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top }
     }
   }
-  on browsing { if !value { appVelocity = 0; appTracking = false } }
+  on browsing { if !value { appVelocity = 0; appTracking = false; appElastic = 0; appElasticReturning = false } }
   // Keep section metadata separate from the window: headings must not use
   // up the engine's 1,000-item app-list allowance.
   let appDocument = map(appSections, (c, i) => {section: c, top: appSectionStarts[i], height: appLabelHeight + len(get(groups, c, [])) * appRowHeight})
   let appKeyGroups = reduce(appSections, (m, c) => set(m, c, get(groups, c, []).map(a => a.key)), {})
   // Render a continuous slice of the WHOLE document, with two guard rows
   // beyond each edge. Never derive this span from letter or railHeld.
-  let appRenderTop = max(0, appOffset - 2 * appRowHeight)
-  let appRenderBottom = min(appDocumentHeight, appOffset + appPanelHeight + 2 * appRowHeight)
+  // Keep the keyed rows alive across longer flings without regenerating
+  // the section/row window every few frames. Buffer three rows above and
+  // at least three below even at the end of a five-row stride. The actual
+  // row offset still follows every drag event and time-based glide frame.
+  let appWindowStride = appRowHeight * 5
+  let appRenderTop = max(0, floor(appOffset / appWindowStride) * appWindowStride - 3 * appRowHeight)
+  let appRenderBottom = min(appDocumentHeight, appRenderTop + appPanelHeight + 11 * appRowHeight)
   let visibleSections = appDocument.filter(s => s.top + s.height > appRenderTop && s.top < appRenderBottom).map(s => merge(s, {firstRow: max(0, floor((appRenderTop - s.top - appLabelHeight) / appRowHeight))}))
   let appWindow = flatten(visibleSections.map(s => (
     s.top + appLabelHeight > appRenderTop ? [{id: "heading:" + s.section, section: s.section, heading: true, top: s.top, height: appLabelHeight}] : []
@@ -651,6 +694,8 @@ face "Omagara" {
       height: max(0, noticeBottom - noticeTop)
       clip: true
       gap: 6
+      // Pulling the header down stretches the whole panel gently at its top.
+      offset: [0, noticeTopVisual]
       if notices == null {
         Text { text: "Loading notifications…"; font: chosenFont; fontSize: 12; color: muted }
       } else if !notices.available {
@@ -669,6 +714,21 @@ face "Omagara" {
           fill: width
           gap: 8
           align: center
+          drag: vertical
+          onDrag: {
+            if !cfg.reduceMotion && dy > 0 {
+              noticeTopReturning = false
+              noticeTopPull = min(44, noticeTopPull + dy * (0.48 / (1 + noticeTopPull / 60)))
+            } else if dy < 0 {
+              noticeTopPull = max(0, noticeTopPull + dy * 0.75)
+            }
+          }
+          onDragEnd: {
+            noticeTopFrom = noticeTopPull
+            noticeTopStarted = time
+            noticeTopReturning = !cfg.reduceMotion && noticeTopPull > 0
+            if cfg.reduceMotion { noticeTopPull = 0 }
+          }
           Text {
             text: "Notifications"
             font: chosenFont
@@ -700,6 +760,28 @@ face "Omagara" {
           gap: 4
           for noticeRow in noticeRows key noticeRow.id {
             NotificationRow { item: noticeRow.item; stack: noticeRow.stack; summary: noticeRow.summary }
+          }
+          // Scrollable footer makes the last notification readable ABOVE Search.
+          // The shadow only appears when the footer itself is pulled upward.
+          Box {
+            width: noticeWidth
+            height: noticeTailSpace
+            drag: vertical
+            onDrag: {
+              noticeEndReturning = false
+              if !cfg.reduceMotion && dy < 0 {
+                noticeEndPull = min(70, noticeEndPull - dy * (0.42 / (1 + noticeEndPull / 72)))
+              } else if dy > 0 {
+                noticeEndPull = max(0, noticeEndPull - dy * 0.7)
+              }
+            }
+            onDragEnd: {
+              noticeEndFrom = noticeEndPull
+              noticeEndStarted = time
+              noticeEndReturning = !cfg.reduceMotion && noticeEndPull > 0
+              if cfg.reduceMotion { noticeEndPull = 0 }
+            }
+            // Feedback will render at the physical display edge, not in the footer.
           }
         }
       }
@@ -1104,21 +1186,49 @@ face "Omagara" {
       Box {
         width: appPanelWidth
         height: appPanelHeight
-        offset: [screenLeft + 48, appSafeTop]
+        offset: [screenLeft + 48, appSafeTop + appElasticVisual]
         clip: true
         drag: vertical
-        onPress: { appScroll = appOffset; appVelocity = 0; if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top } }
-        onDrag: {
-          let position = appOffset
+        onPress: {
+          appScroll = appOffset
           appVelocity = 0
-          appScroll = clamp(position - dy, 0, appMaxScroll)
+          appElastic = appElasticVisual
+          appElasticReturning = false
+          if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top }
+        }
+        onDrag: {
+          appVelocity = 0
+          appElasticReturning = false
+          // Unwind existing stretch before scrolling in the other direction.
+          // All local let values are immutable in OWL handlers.
+          let oldElastic = appElastic
+          let nextElastic = oldElastic + dy * 0.55
+          let stillElastic = oldElastic != 0 && sign(nextElastic) == sign(oldElastic)
+          let move = oldElastic == 0 ? dy : stillElastic ? 0 : dy + oldElastic / 0.55
+          if oldElastic != 0 {
+            appElastic = stillElastic ? clamp(nextElastic, -64, 64) : 0
+          }
+          if move != 0 {
+            let nextOffset = appOffset - move
+            appScroll = clamp(nextOffset, 0, appMaxScroll)
+            if !cfg.reduceMotion && nextOffset < 0 {
+              appElastic = min(64, (0 - nextOffset) * 0.55)
+            } else if !cfg.reduceMotion && nextOffset > appMaxScroll {
+              appElastic = -min(64, (nextOffset - appMaxScroll) * 0.55)
+            }
+          }
           if dy != 0 { appTracking = true }
           menu = ""
-          if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top }
+          // Do not rewrite anchor-derived state on every pointer sample.
+          // Press and release capture it; drag updates only position.
         }
         onDragEnd: {
           appScroll = appOffset
-          appVelocity = !browsing || railHeld || cfg.reduceMotion || abs(vy) < 160 || vy > 0 && appOffset <= 0 || vy < 0 && appOffset >= appMaxScroll ? 0 : clamp(-vy, -6000, 6000)
+          appElasticFrom = appElastic
+          appElasticStarted = time
+          appElasticReturning = !cfg.reduceMotion && abs(appElastic) > 0.1
+          if cfg.reduceMotion { appElastic = 0 }
+          appVelocity = appElasticReturning || !browsing || railHeld || cfg.reduceMotion || abs(vy) < 160 || vy > 0 && appOffset <= 0 || vy < 0 && appOffset >= appMaxScroll ? 0 : clamp(-vy, -6000, 6000)
           if appVelocity != 0 { appGlideStarted = time }
           if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top }
         }
@@ -1132,23 +1242,27 @@ face "Omagara" {
             height: row.height
             offset: [0, row.top - appOffset]
             opacity: rowAlpha
-            if row.heading {
-              Row {
-                fill: width
-                Text {
-                  text: row.section
-                  height: appLabelHeight
-                  font: chosenFont
-                  fontSize: 22 * appScale
-                  color: secondaryText
-                  maxLines: 1
-                  padding: cfg.shadeAppLabels ? [0, 5 * appScale] : [0, 0]
-                  background: cfg.shadeAppLabels ? appLabelShade : transparent
-                  radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 4 * appScale : 0
+            // Offscreen buffer rows retain only lightweight keyed boxes:
+            // avoid composing their icon and text subtrees every frame.
+            if rowAlpha > 0.005 {
+              if row.heading {
+                Row {
+                  fill: width
+                  Text {
+                    text: row.section
+                    height: appLabelHeight
+                    font: chosenFont
+                    fontSize: 22 * appScale
+                    color: secondaryText
+                    maxLines: 1
+                    padding: cfg.shadeAppLabels ? [0, 5 * appScale] : [0, 0]
+                    background: cfg.shadeAppLabels ? appLabelShade : transparent
+                    radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 4 * appScale : 0
+                  }
                 }
+              } else {
+                AppRow { a: row.app; thumbView: true; interactive: rowAlpha > 0.08 && row.top >= appOffset && row.top + row.height <= appOffset + appPanelHeight }
               }
-            } else {
-              AppRow { a: row.app; thumbView: true; interactive: rowAlpha > 0.08 && row.top >= appOffset && row.top + row.height <= appOffset + appPanelHeight }
             }
           }
         }
@@ -1178,6 +1292,17 @@ face "Omagara" {
         offset: [noticePanelShift, 0]
         animate offset: tween(260ms, "ease")
         NotificationPanel {}
+      }
+    }
+    // Grow the end-pull glow UP from the physical bottom edge of the face,
+    // not from the scrolling native list's footer. Draw behind all controls.
+    if cfg.notifications && !browsing && activeSide == 0 && !cfg.reduceMotion && noticeEndVisual > 0.1 {
+      let edgeGlowHeight = min(176, noticeEndVisual * 2.45)
+      Box {
+        width: tileWidth ?? 400
+        height: edgeGlowHeight
+        offset: [0, (tileHeight ?? 800) - edgeGlowHeight]
+        background: linear(0, 0, 0, 1, [transparent, alpha(primaryText, min(0.26, noticeEndVisual / 230))])
       }
     }
     Box {
