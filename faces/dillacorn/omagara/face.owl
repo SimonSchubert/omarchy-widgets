@@ -363,9 +363,20 @@ face "Omagara" {
   let fullAppWindow = flatten(visibleSections.map(s => (
     s.top + appLabelHeight > appRenderTop ? [{id: "heading:" + s.section, section: s.section, heading: true, top: s.top, height: appLabelHeight}] : []
   ) + map(take(drop(get(groups, s.section, []), s.firstRow), ceil((appRenderBottom - appRenderTop) / appRowHeight) + 1), (a, j) => {id: a.key, section: s.section, heading: false, app: a, top: s.top + appLabelHeight + (s.firstRow + j) * appRowHeight, height: appRowHeight}).filter(r => r.top + r.height > appRenderTop && r.top < appRenderBottom))) + appMenuRows.filter(r => r.top + r.height > appRenderTop && r.top < appRenderBottom)
-  // Preview only the selected letter while the worm is held; on release
-  // restore the complete document, including its bottom settings section.
-  let appWindow = railHeld && browsing && activeSide != 0 ? fullAppWindow.filter(r => r.section == letter) : fullAppWindow
+  // While touching the worm, center the selected letter's app group alongside
+  // its actual glyph position, not a fixed 33%-height focus line. A long
+  // group moves up to keep its rows in view. The normal continuous browser
+  // and its trailing Settings section are unchanged after finger release.
+  let appPreviewing = railHeld && browsing && activeSide != 0
+  let appPreviewApps = get(groups, letter, [])
+  let appPreviewHeight = appLabelHeight + len(appPreviewApps) * appRowHeight
+  let appPreviewIndex = max(0, indexOf(alphabet, letter))
+  let appPreviewCenter = railTop + railVisualY + (appPreviewIndex + 0.5) * railStep - appSafeTop
+  let appPreviewTop = clamp(appPreviewCenter - appPreviewHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - appPreviewHeight))
+  // Materialize only the rows fitting on screen, even if one letter owns
+  // hundreds of apps. Keyed rows keep their identity in and out of preview.
+  let appPreviewRows = [{id: "heading:" + letter, section: letter, heading: true, top: appPreviewTop, height: appLabelHeight}] + map(take(appPreviewApps, max(0, ceil((appPanelHeight - appPreviewTop - appLabelHeight) / appRowHeight) + 1)), (a, j) => {id: a.key, section: letter, heading: false, app: a, top: appPreviewTop + appLabelHeight + j * appRowHeight, height: appRowHeight})
+  let appWindow = appPreviewing ? appPreviewRows : fullAppWindow
   // Anchoring must use the unfiltered document even during a preview.
   let appVisibleRows = fullAppWindow.filter(r => r.top + r.height > appOffset && r.top < appOffset + appPanelHeight)
   let appFirst = first(appVisibleRows)
@@ -872,7 +883,11 @@ face "Omagara" {
         let pressedLetter = get(alphabet, clamp(floor(y / railStep), 0, max(0, len(alphabet) - 1)), letter)
         letter = pressedLetter
         if cfg.hapticFeedback != "Off" { haptic() }
-        appScroll = clamp(get(appSectionStarts, max(0, indexOf(appSections, pressedLetter)), 0) - appFocusY, 0, appMaxScroll)
+        // Keep the continuous list near the same position on release.
+        let pressedHeight = appLabelHeight + len(get(groups, pressedLetter, [])) * appRowHeight
+        let pressedCenter = railTop + railOverpull + (max(0, indexOf(alphabet, pressedLetter)) + 0.5) * railStep - appSafeTop
+        let pressedTop = clamp(pressedCenter - pressedHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - pressedHeight))
+        appScroll = clamp(get(appSectionStarts, max(0, indexOf(appSections, pressedLetter)), 0) - pressedTop, 0, appMaxScroll)
         menu = ""
         activeSide = 1
         browsing = true
@@ -901,7 +916,10 @@ face "Omagara" {
           if cfg.hapticFeedback == "Every letter" || (cfg.hapticFeedback == "Reduced" && hapticSteps % 2 == 0) { haptic() }
           letter = nextLetter
         }
-        appScroll = clamp(get(appSectionStarts, max(0, indexOf(appSections, nextLetter)), 0) - appFocusY, 0, appMaxScroll)
+        let nextHeight = appLabelHeight + len(get(groups, nextLetter, [])) * appRowHeight
+        let nextCenter = railTop + railOverpull + (max(0, indexOf(alphabet, nextLetter)) + 0.5) * railStep - appSafeTop
+        let nextTop = clamp(nextCenter - nextHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - nextHeight))
+        appScroll = clamp(get(appSectionStarts, max(0, indexOf(appSections, nextLetter)), 0) - nextTop, 0, appMaxScroll)
         menu = ""
         activeSide = 1
         browsing = true
@@ -1346,14 +1364,17 @@ face "Omagara" {
           if appFirst != null { appAnchor = appFirst.id; appAnchorSection = appFirst.section; appAnchorOffset = appOffset - appFirst.top }
         }
         for row in appWindow key row.id {
+          // Preview rows use their own bounded screen positions; ordinary
+          // scrolling still uses continuous document coordinates.
+          let rowY = appPreviewing ? row.top : row.top - appOffset
           // Fade by row centre: a partly clipped row must not vanish whole.
-          let rowCentre = row.top - appOffset + row.height / 2
+          let rowCentre = rowY + row.height / 2
           let edge = clamp(min(rowCentre, appPanelHeight - rowCentre) / max(1, appFade), 0, 1)
           let rowAlpha = edge * edge * (3 - 2 * edge)
           Box {
             width: appPanelWidth
             height: row.height
-            offset: [0, row.top - appOffset]
+            offset: [0, rowY]
             opacity: rowAlpha
             // Offscreen buffer rows retain only lightweight keyed boxes:
             // avoid composing their icon and text subtrees every frame.
@@ -1396,7 +1417,7 @@ face "Omagara" {
                   gap: 12 * appScale
                   padding: [4 * appScale, 8 * appScale]
                   onTap: {
-                    if rowAlpha > 0.08 && row.top >= appOffset && row.top + row.height <= appOffset + appPanelHeight {
+                    if rowAlpha > 0.08 && rowY >= 0 && rowY + row.height <= appPanelHeight {
                       appVelocity = 0
                       browsing = false
                       activeSide = 0
@@ -1446,7 +1467,7 @@ face "Omagara" {
                   }
                 }
               } else {
-                AppRow { a: row.app; thumbView: true; interactive: rowAlpha > 0.08 && row.top >= appOffset && row.top + row.height <= appOffset + appPanelHeight }
+                AppRow { a: row.app; thumbView: true; interactive: rowAlpha > 0.08 && rowY >= 0 && rowY + row.height <= appPanelHeight }
               }
             }
           }
