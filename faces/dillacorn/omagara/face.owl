@@ -384,7 +384,7 @@ face "Omagara" {
   let appPreviewBias = appPreviewFavorite == null ? 0 : clamp(((appPreviewFavorite.score ?? 0) / 4), 0, 1) * clamp((appPreviewHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1)
   let appPreviewTargetY = clamp(appPreviewCenter * 0.84, appEdgeSpace + appLabelHeight + appRowHeight / 2, max(appEdgeSpace + appLabelHeight + appRowHeight / 2, appPanelHeight - appEdgeSpace - appRowHeight / 2))
   let appPreviewShift = appPreviewFavoriteIndex < 0 ? 0 : clamp((appPreviewTargetY - (appPreviewBaseTop + appLabelHeight + (appPreviewFavoriteIndex + 0.5) * appRowHeight)) * appPreviewBias, -appPanelHeight * 0.50, appPanelHeight * 0.50)
-  let appPreviewTop = appPreviewFavoriteIndex < 0 ? appPreviewBaseTop : clamp(appPreviewBaseTop + appPreviewShift, appEdgeSpace - appLabelHeight - appPreviewFavoriteIndex * appRowHeight, max(appEdgeSpace - appLabelHeight - appPreviewFavoriteIndex * appRowHeight, appPanelHeight - appEdgeSpace - appLabelHeight - (appPreviewFavoriteIndex + 1) * appRowHeight))
+  let appPreviewTop = appPreviewBaseTop + appPreviewShift
   // A shifted tall group may start above the screen. Virtualize the actual
   // visible slice instead of permanently taking only its first N apps.
   let appPreviewFirstRow = max(0, floor((-appPreviewTop - appLabelHeight) / appRowHeight) - 2)
@@ -908,7 +908,7 @@ face "Omagara" {
         let pressedBias = pressedFavorite == null ? 0 : clamp(((pressedFavorite.score ?? 0) / 4), 0, 1) * clamp((pressedHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1)
         let pressedTargetY = clamp(pressedCenter * 0.84, appEdgeSpace + appLabelHeight + appRowHeight / 2, max(appEdgeSpace + appLabelHeight + appRowHeight / 2, appPanelHeight - appEdgeSpace - appRowHeight / 2))
         let pressedShift = pressedFavoriteIndex < 0 ? 0 : clamp((pressedTargetY - (pressedBaseTop + appLabelHeight + (pressedFavoriteIndex + 0.5) * appRowHeight)) * pressedBias, -appPanelHeight * 0.50, appPanelHeight * 0.50)
-        let pressedTop = pressedFavoriteIndex < 0 ? pressedBaseTop : clamp(pressedBaseTop + pressedShift, appEdgeSpace - appLabelHeight - pressedFavoriteIndex * appRowHeight, max(appEdgeSpace - appLabelHeight - pressedFavoriteIndex * appRowHeight, appPanelHeight - appEdgeSpace - appLabelHeight - (pressedFavoriteIndex + 1) * appRowHeight))
+        let pressedTop = pressedBaseTop + pressedShift
         // Sliding onto the cog navigates to the actual bottom settings menu.
         appScroll = railSettingsSelected ? appMaxScroll : clamp(get(appSectionStarts, max(0, indexOf(appSections, pressedLetter)), 0) - pressedTop, 0, appMaxScroll)
         menu = ""
@@ -951,7 +951,7 @@ face "Omagara" {
         let nextBias = nextFavorite == null ? 0 : clamp(((nextFavorite.score ?? 0) / 4), 0, 1) * clamp((nextHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1)
         let nextTargetY = clamp(nextCenter * 0.84, appEdgeSpace + appLabelHeight + appRowHeight / 2, max(appEdgeSpace + appLabelHeight + appRowHeight / 2, appPanelHeight - appEdgeSpace - appRowHeight / 2))
         let nextShift = nextFavoriteIndex < 0 ? 0 : clamp((nextTargetY - (nextBaseTop + appLabelHeight + (nextFavoriteIndex + 0.5) * appRowHeight)) * nextBias, -appPanelHeight * 0.50, appPanelHeight * 0.50)
-        let nextTop = nextFavoriteIndex < 0 ? nextBaseTop : clamp(nextBaseTop + nextShift, appEdgeSpace - appLabelHeight - nextFavoriteIndex * appRowHeight, max(appEdgeSpace - appLabelHeight - nextFavoriteIndex * appRowHeight, appPanelHeight - appEdgeSpace - appLabelHeight - (nextFavoriteIndex + 1) * appRowHeight))
+        let nextTop = nextBaseTop + nextShift
         appScroll = nextSettings ? appMaxScroll : clamp(get(appSectionStarts, max(0, indexOf(appSections, nextLetter)), 0) - nextTop, 0, appMaxScroll)
         menu = ""
         activeSide = 1
