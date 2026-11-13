@@ -1373,7 +1373,7 @@ face "Omagara" {
         for row in appWindow key row.id {
           // Preview rows use their own bounded screen positions; ordinary
           // scrolling still uses continuous document coordinates.
-          let rowY = appPreviewing ? row.top : row.top - appOffset
+          let rowY = appPreviewing && !railSettingsSelected ? row.top : row.top - appOffset
           // Fade by row centre: a partly clipped row must not vanish whole.
           let rowCentre = rowY + row.height / 2
           let edge = clamp(min(rowCentre, appPanelHeight - rowCentre) / max(1, appFade), 0, 1)
