@@ -2,13 +2,13 @@
 
 A full-page OWL face with Merriam-Webster's word of the day and a daily selection of sourced college mathematics problems from Mathematics Stack Exchange. Scroll to see diagrams, attribution and links to the original entry or solution. Colors follow the launcher theme.
 
-Requires Arch Linux with `nodejs`. The self-contained command fetches the two public sources and caches their responses in `~/.cache/daily-learning` for offline reading. No account or API key is needed. A failed refresh keeps previously cached content and shows an error. The refresh button retries failed requests; successfully cached selections remain fixed for the day.
+Requires Arch Linux with `python` and `python-matplotlib`, both declared in `requires` and installed through pacman. All executable code is included in `face.owl`: no Node.js, npm, pip, external helper scripts or downloaded code. The inline Python command fetches the two public sources and caches their responses and generated formula images in `~/.cache/daily-learning` for offline reading. No account or API key is needed. A failed refresh keeps previously cached content and shows an error. The refresh button retries failed requests; successfully cached selections remain fixed for the day.
 
-Mathematical notation is simplified for plain text; use the source link for full typesetting and community answers. Math selections rotate among geometry, calculus, linear algebra, differential equations, integration and optimization.
+Equations are rendered locally with Matplotlib MathText as transparent PNG masks. OWL applies the current theme foreground at display time, so cached images also follow theme changes. MathText supports a subset of LaTeX: unsupported expressions remain visible as source TeX, with a notice linking readers to full typesetting and community answers. A failed equation does not hide the rest of the content. Wide expressions scale to the card width. Math selections rotate among geometry, calculus, linear algebra, differential equations, integration and optimization.
 
 ## Content attribution
 
-The MIT license below applies to this face's code, not to fetched third-party content. Word entries belong to Merriam-Webster. Mathematics Stack Exchange contributions retain their original authors and Creative Commons licenses, displayed in the face alongside the source link. The plain-text math rendering modifies formatting; diagrams remain linked to their original hosts.
+The MIT license below applies to this face's code, not to fetched third-party content. Word entries belong to Merriam-Webster. Mathematics Stack Exchange contributions retain their original authors and Creative Commons licenses, displayed in the face alongside the source link. MathText rendering and source-TeX fallbacks modify formatting; diagrams remain linked to their original hosts.
 
 ## MIT License
 
