@@ -305,17 +305,16 @@ face "Omagara" {
   let appSections = fullAlphabet.filter(c => !cfg.hideEmpty || len(get(groups, c, [])) > 0)
   let appSectionEnds = scan(appSections, (height, c) => height + appLabelHeight + len(get(groups, c, [])) * appRowHeight, 0)
   let appSectionStarts = map(appSections, (c, i) => appEdgeSpace + (i == 0 ? 0 : appSectionEnds[i - 1]))
-  // Niagara-style settings section is a genuine end of the scrollable
-  // document, not a fixed overlay or a letter in the alphabet rail.
-  let appMenuTop = (last(appSectionEnds) ?? 0) + appEdgeSpace + 12 * appScale
+  // Keep the original end-of-list settings section, but shorten the gap
+  // after the last letter's apps so the final apps remain thumb-reachable.
+  let appMenuTop = (last(appSectionEnds) ?? 0) + 26 * appScale
   let appMenuHeadingHeight = appLabelHeight + 8 * appScale
   let appMenuBottom = appMenuTop + appMenuHeadingHeight + 2 * appRowHeight
-  // At maximum scroll the last menu row clears the floating Close control,
-  // not just Search: Close sits 64dp above Search and is 48dp tall.
-  let appMenuTail = max(appEdgeSpace, searchBottom - screenInset + 64 + 48 + 24)
-  // Keep menu text to the left of the floating controls on narrow screens.
-  // Text wraps inside this constraint rather than becoming a long banner.
-  let appMenuTextWidth = max(32, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 52 * appScale)
+  // At the end of the list, align the last Settings action beside the
+  // alphabet cog. Keep a small bottom inset rather than the old oversized
+  // padding. Close and Search stay on the right, clear of the menu text.
+  let appMenuTail = max(28, appSafeBottom - (railTop + railHeight + railStep / 2) - appRowHeight / 2)
+  let appMenuTextWidth = max(32, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 46 * appScale)
   let appDocumentHeight = appMenuBottom + appMenuTail
   let appMaxScroll = max(0, appDocumentHeight - appPanelHeight)
   // Read time ONLY while gliding. An every-frame trigger would keep OWL's
@@ -373,6 +372,8 @@ face "Omagara" {
   let appPreviewApps = get(groups, letter, [])
   let appPreviewHeight = appLabelHeight + len(appPreviewApps) * appRowHeight
   let appPreviewIndex = max(0, indexOf(alphabet, letter))
+  // A is less aggressively biased than Y/Z; preserve exact A–Z app order.
+  let appPreviewAlphabetWeight = 0.80 + 0.20 * appPreviewIndex / max(1, len(alphabet) - 1)
   let appPreviewCenter = railTop + railVisualY + (appPreviewIndex + 0.5) * railStep - appSafeTop
   let appPreviewBaseTop = clamp(appPreviewCenter - appPreviewHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - appPreviewHeight))
   // Omalauncher already supplies time-decayed per-app launch scores. Bias the
@@ -381,7 +382,7 @@ face "Omagara" {
   // Small groups retain their ordinary letter-centered positioning.
   let appPreviewFavorite = first(appPreviewApps.filter(a => (a.score ?? 0) > 0).sortBy(a => -(a.score ?? 0)))
   let appPreviewFavoriteIndex = appPreviewFavorite == null ? -1 : indexOf(appPreviewApps.map(a => a.key), appPreviewFavorite.key)
-  let appPreviewBias = appPreviewFavorite == null ? 0 : clamp(((appPreviewFavorite.score ?? 0) / 4), 0, 1) * clamp((appPreviewHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1)
+  let appPreviewBias = appPreviewFavorite == null ? 0 : clamp(((appPreviewFavorite.score ?? 0) / 4), 0, 1) * clamp((appPreviewHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1) * appPreviewAlphabetWeight
   let appPreviewTargetY = clamp(appPreviewCenter * 0.84, appEdgeSpace + appLabelHeight + appRowHeight / 2, max(appEdgeSpace + appLabelHeight + appRowHeight / 2, appPanelHeight - appEdgeSpace - appRowHeight / 2))
   let appPreviewShift = appPreviewFavoriteIndex < 0 ? 0 : clamp((appPreviewTargetY - (appPreviewBaseTop + appLabelHeight + (appPreviewFavoriteIndex + 0.5) * appRowHeight)) * appPreviewBias, -appPanelHeight * 0.50, appPanelHeight * 0.50)
   let appPreviewTop = appPreviewBaseTop + appPreviewShift
@@ -874,7 +875,7 @@ face "Omagara" {
         appVelocity = 0
         heldAlphabet = liveAlphabet
         railHeld = true
-        railSettingsSelected = y >= railHeight && visual
+        railSettingsSelected = y >= railHeight + railStep * 0.25 && visual
         draggingSide = 0
         railReturning = false
         // A new touch cancels the optional ripple immediately.
@@ -905,7 +906,8 @@ face "Omagara" {
         let pressedBaseTop = clamp(pressedCenter - pressedHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - pressedHeight))
         let pressedFavorite = first(pressedApps.filter(a => (a.score ?? 0) > 0).sortBy(a => -(a.score ?? 0)))
         let pressedFavoriteIndex = pressedFavorite == null ? -1 : indexOf(pressedApps.map(a => a.key), pressedFavorite.key)
-        let pressedBias = pressedFavorite == null ? 0 : clamp(((pressedFavorite.score ?? 0) / 4), 0, 1) * clamp((pressedHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1)
+        let pressedAlphabetWeight = 0.80 + 0.20 * max(0, indexOf(alphabet, pressedLetter)) / max(1, len(alphabet) - 1)
+        let pressedBias = pressedFavorite == null ? 0 : clamp(((pressedFavorite.score ?? 0) / 4), 0, 1) * clamp((pressedHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1) * pressedAlphabetWeight
         let pressedTargetY = clamp(pressedCenter * 0.84, appEdgeSpace + appLabelHeight + appRowHeight / 2, max(appEdgeSpace + appLabelHeight + appRowHeight / 2, appPanelHeight - appEdgeSpace - appRowHeight / 2))
         let pressedShift = pressedFavoriteIndex < 0 ? 0 : clamp((pressedTargetY - (pressedBaseTop + appLabelHeight + (pressedFavoriteIndex + 0.5) * appRowHeight)) * pressedBias, -appPanelHeight * 0.50, appPanelHeight * 0.50)
         let pressedTop = pressedBaseTop + pressedShift
@@ -925,7 +927,7 @@ face "Omagara" {
         railFlickLastY = y
         railHeld = true
         draggingSide = 1
-        let nextSettings = y >= railHeight && visual
+        let nextSettings = y >= railHeight + railStep * 0.25 && visual
         let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railPaintHeight - railStep / 2 ? y - (railPaintHeight - railStep / 2) : 0
         railOverpull = len(alphabet) < 2 ? 0 : clamp(edgeY, -railUpperReach, railLowerReach)
         // Track absolute thumb position while the rail's hit cells stay fixed.
@@ -948,7 +950,8 @@ face "Omagara" {
         let nextBaseTop = clamp(nextCenter - nextHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - nextHeight))
         let nextFavorite = first(nextApps.filter(a => (a.score ?? 0) > 0).sortBy(a => -(a.score ?? 0)))
         let nextFavoriteIndex = nextFavorite == null ? -1 : indexOf(nextApps.map(a => a.key), nextFavorite.key)
-        let nextBias = nextFavorite == null ? 0 : clamp(((nextFavorite.score ?? 0) / 4), 0, 1) * clamp((nextHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1)
+        let nextAlphabetWeight = 0.80 + 0.20 * max(0, indexOf(alphabet, nextLetter)) / max(1, len(alphabet) - 1)
+        let nextBias = nextFavorite == null ? 0 : clamp(((nextFavorite.score ?? 0) / 4), 0, 1) * clamp((nextHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1) * nextAlphabetWeight
         let nextTargetY = clamp(nextCenter * 0.84, appEdgeSpace + appLabelHeight + appRowHeight / 2, max(appEdgeSpace + appLabelHeight + appRowHeight / 2, appPanelHeight - appEdgeSpace - appRowHeight / 2))
         let nextShift = nextFavoriteIndex < 0 ? 0 : clamp((nextTargetY - (nextBaseTop + appLabelHeight + (nextFavoriteIndex + 0.5) * appRowHeight)) * nextBias, -appPanelHeight * 0.50, appPanelHeight * 0.50)
         let nextTop = nextBaseTop + nextShift
@@ -1447,7 +1450,7 @@ face "Omagara" {
                   fill: width
                   height: appRowHeight
                   align: center
-                  gap: 12 * appScale
+                  gap: 8 * appScale
                   padding: [4 * appScale, 8 * appScale]
                   onTap: {
                     if rowAlpha > 0.08 && rowY >= 0 && rowY + row.height <= appPanelHeight {
@@ -1471,18 +1474,18 @@ face "Omagara" {
                     }
                   }
                   Box {
-                    size: 36 * appScale
+                    size: 32 * appScale
                     align: center
                     // Theme-aware settings gear, drawn without font glyphs.
                     Canvas {
-                      size: 24 * appScale
+                      size: 22 * appScale
                       for i in range(8) {
-                        rotate(i * 45, 12 * appScale, 12 * appScale) {
-                          line(12 * appScale, 2 * appScale, 12 * appScale, 5 * appScale, stroke: secondaryText, width: 2 * appScale, cap: round)
+                        rotate(i * 45, 11 * appScale, 11 * appScale) {
+                          line(11 * appScale, 2 * appScale, 11 * appScale, 4 * appScale, stroke: secondaryText, width: 2 * appScale, cap: round)
                         }
                       }
-                      circle(12 * appScale, 12 * appScale, 7 * appScale, stroke: secondaryText, width: 2 * appScale)
-                      circle(12 * appScale, 12 * appScale, 2 * appScale, fill: secondaryText)
+                      circle(11 * appScale, 11 * appScale, 6.5 * appScale, stroke: secondaryText, width: 2 * appScale)
+                      circle(11 * appScale, 11 * appScale, 2 * appScale, fill: secondaryText)
                     }
                   }
                   Row {
@@ -1490,7 +1493,7 @@ face "Omagara" {
                     Text {
                       text: row.id == "omagara:settings" ? "Omagara settings" : "Omalauncher settings"
                       font: chosenFont
-                      fontSize: 18 * appScale
+                      fontSize: 17 * appScale
                       color: primaryText
                       maxLines: 2
                       padding: cfg.shadeAppLabels ? [2 * appScale, 5 * appScale] : [0, 0]
