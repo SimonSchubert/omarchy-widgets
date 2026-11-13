@@ -374,10 +374,22 @@ face "Omagara" {
   let appPreviewHeight = appLabelHeight + len(appPreviewApps) * appRowHeight
   let appPreviewIndex = max(0, indexOf(alphabet, letter))
   let appPreviewCenter = railTop + railVisualY + (appPreviewIndex + 0.5) * railStep - appSafeTop
-  let appPreviewTop = clamp(appPreviewCenter - appPreviewHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - appPreviewHeight))
-  // Materialize only the rows fitting on screen, even if one letter owns
-  // hundreds of apps. Keyed rows keep their identity in and out of preview.
-  let appPreviewRows = [{id: "heading:" + letter, section: letter, heading: true, top: appPreviewTop, height: appLabelHeight}] + map(take(appPreviewApps, max(0, ceil((appPanelHeight - appPreviewTop - appLabelHeight) / appRowHeight) + 1)), (a, j) => {id: a.key, section: letter, heading: false, app: a, top: appPreviewTop + appLabelHeight + j * appRowHeight, height: appRowHeight})
+  let appPreviewBaseTop = clamp(appPreviewCenter - appPreviewHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - appPreviewHeight))
+  // Omalauncher already supplies time-decayed per-app launch scores. Bias the
+  // position of a crowded letter's MOST USED app toward the thumb, without
+  // changing alphabetical order, asking permissions, or tracking users here.
+  // Small groups retain their ordinary letter-centered positioning.
+  let appPreviewFavorite = first(appPreviewApps.filter(a => (a.score ?? 0) > 0).sortBy(a => -(a.score ?? 0)))
+  let appPreviewFavoriteIndex = appPreviewFavorite == null ? -1 : indexOf(appPreviewApps.map(a => a.key), appPreviewFavorite.key)
+  let appPreviewBias = appPreviewFavorite == null ? 0 : clamp(((appPreviewFavorite.score ?? 0) / 4), 0, 1) * clamp((appPreviewHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1)
+  let appPreviewTargetY = clamp(appPreviewCenter * 0.84, appEdgeSpace + appLabelHeight + appRowHeight / 2, max(appEdgeSpace + appLabelHeight + appRowHeight / 2, appPanelHeight - appEdgeSpace - appRowHeight / 2))
+  let appPreviewShift = appPreviewFavoriteIndex < 0 ? 0 : clamp((appPreviewTargetY - (appPreviewBaseTop + appLabelHeight + (appPreviewFavoriteIndex + 0.5) * appRowHeight)) * appPreviewBias, -appPanelHeight * 0.50, appPanelHeight * 0.50)
+  let appPreviewTop = appPreviewFavoriteIndex < 0 ? appPreviewBaseTop : clamp(appPreviewBaseTop + appPreviewShift, appEdgeSpace - appLabelHeight - appPreviewFavoriteIndex * appRowHeight, max(appEdgeSpace - appLabelHeight - appPreviewFavoriteIndex * appRowHeight, appPanelHeight - appEdgeSpace - appLabelHeight - (appPreviewFavoriteIndex + 1) * appRowHeight))
+  // A shifted tall group may start above the screen. Virtualize the actual
+  // visible slice instead of permanently taking only its first N apps.
+  let appPreviewFirstRow = max(0, floor((-appPreviewTop - appLabelHeight) / appRowHeight) - 2)
+  let appPreviewCount = max(0, ceil((appPanelHeight - appPreviewTop - appLabelHeight - appPreviewFirstRow * appRowHeight) / appRowHeight) + 2)
+  let appPreviewRows = (appPreviewTop + appLabelHeight > 0 ? [{id: "heading:" + letter, section: letter, heading: true, top: appPreviewTop, height: appLabelHeight}] : []) + map(take(drop(appPreviewApps, appPreviewFirstRow), appPreviewCount), (a, j) => {id: a.key, section: letter, heading: false, app: a, top: appPreviewTop + appLabelHeight + (appPreviewFirstRow + j) * appRowHeight, height: appRowHeight})
   let appWindow = appPreviewing && !railSettingsSelected ? appPreviewRows : fullAppWindow
   // Anchoring must use the unfiltered document even during a preview.
   let appVisibleRows = fullAppWindow.filter(r => r.top + r.height > appOffset && r.top < appOffset + appPanelHeight)
@@ -887,9 +899,16 @@ face "Omagara" {
         letter = pressedLetter
         if cfg.hapticFeedback != "Off" { haptic() }
         // Keep the continuous list near the same position on release.
-        let pressedHeight = appLabelHeight + len(get(groups, pressedLetter, [])) * appRowHeight
+        let pressedApps = get(groups, pressedLetter, [])
+        let pressedHeight = appLabelHeight + len(pressedApps) * appRowHeight
         let pressedCenter = railTop + railOverpull + (max(0, indexOf(alphabet, pressedLetter)) + 0.5) * railStep - appSafeTop
-        let pressedTop = clamp(pressedCenter - pressedHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - pressedHeight))
+        let pressedBaseTop = clamp(pressedCenter - pressedHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - pressedHeight))
+        let pressedFavorite = first(pressedApps.filter(a => (a.score ?? 0) > 0).sortBy(a => -(a.score ?? 0)))
+        let pressedFavoriteIndex = pressedFavorite == null ? -1 : indexOf(pressedApps.map(a => a.key), pressedFavorite.key)
+        let pressedBias = pressedFavorite == null ? 0 : clamp(((pressedFavorite.score ?? 0) / 4), 0, 1) * clamp((pressedHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1)
+        let pressedTargetY = clamp(pressedCenter * 0.84, appEdgeSpace + appLabelHeight + appRowHeight / 2, max(appEdgeSpace + appLabelHeight + appRowHeight / 2, appPanelHeight - appEdgeSpace - appRowHeight / 2))
+        let pressedShift = pressedFavoriteIndex < 0 ? 0 : clamp((pressedTargetY - (pressedBaseTop + appLabelHeight + (pressedFavoriteIndex + 0.5) * appRowHeight)) * pressedBias, -appPanelHeight * 0.50, appPanelHeight * 0.50)
+        let pressedTop = pressedFavoriteIndex < 0 ? pressedBaseTop : clamp(pressedBaseTop + pressedShift, appEdgeSpace - appLabelHeight - pressedFavoriteIndex * appRowHeight, max(appEdgeSpace - appLabelHeight - pressedFavoriteIndex * appRowHeight, appPanelHeight - appEdgeSpace - appLabelHeight - (pressedFavoriteIndex + 1) * appRowHeight))
         // Sliding onto the cog navigates to the actual bottom settings menu.
         appScroll = railSettingsSelected ? appMaxScroll : clamp(get(appSectionStarts, max(0, indexOf(appSections, pressedLetter)), 0) - pressedTop, 0, appMaxScroll)
         menu = ""
@@ -923,9 +942,16 @@ face "Omagara" {
         }
         railSettingsSelected = nextSettings
         if !nextSettings { letter = nextLetter }
-        let nextHeight = appLabelHeight + len(get(groups, nextLetter, [])) * appRowHeight
+        let nextApps = get(groups, nextLetter, [])
+        let nextHeight = appLabelHeight + len(nextApps) * appRowHeight
         let nextCenter = railTop + railOverpull + (max(0, indexOf(alphabet, nextLetter)) + 0.5) * railStep - appSafeTop
-        let nextTop = clamp(nextCenter - nextHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - nextHeight))
+        let nextBaseTop = clamp(nextCenter - nextHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - nextHeight))
+        let nextFavorite = first(nextApps.filter(a => (a.score ?? 0) > 0).sortBy(a => -(a.score ?? 0)))
+        let nextFavoriteIndex = nextFavorite == null ? -1 : indexOf(nextApps.map(a => a.key), nextFavorite.key)
+        let nextBias = nextFavorite == null ? 0 : clamp(((nextFavorite.score ?? 0) / 4), 0, 1) * clamp((nextHeight - appPanelHeight * 0.50) / max(1, appPanelHeight * 0.30), 0, 1)
+        let nextTargetY = clamp(nextCenter * 0.84, appEdgeSpace + appLabelHeight + appRowHeight / 2, max(appEdgeSpace + appLabelHeight + appRowHeight / 2, appPanelHeight - appEdgeSpace - appRowHeight / 2))
+        let nextShift = nextFavoriteIndex < 0 ? 0 : clamp((nextTargetY - (nextBaseTop + appLabelHeight + (nextFavoriteIndex + 0.5) * appRowHeight)) * nextBias, -appPanelHeight * 0.50, appPanelHeight * 0.50)
+        let nextTop = nextFavoriteIndex < 0 ? nextBaseTop : clamp(nextBaseTop + nextShift, appEdgeSpace - appLabelHeight - nextFavoriteIndex * appRowHeight, max(appEdgeSpace - appLabelHeight - nextFavoriteIndex * appRowHeight, appPanelHeight - appEdgeSpace - appLabelHeight - (nextFavoriteIndex + 1) * appRowHeight))
         appScroll = nextSettings ? appMaxScroll : clamp(get(appSectionStarts, max(0, indexOf(appSections, nextLetter)), 0) - nextTop, 0, appMaxScroll)
         menu = ""
         activeSide = 1
