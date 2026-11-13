@@ -13,12 +13,6 @@ Niagara-inspired OWL 21 home face for [Omalauncher](https://github.com/SimonSchu
 
 Long-press Search to open Omagara Settings.
 
-## Limitations
+## Limitation
 
-- Contact search: OWL 21 exposes no Android contacts source or permission action.
-- Home/Back or focus-loss dismissal of alphabet browsing: no face-level event is exposed.
-- Haptic strength: controlled by Android; Omagara can adjust feedback frequency only.
-- Automatic wallpaper brightness sampling and a true bottom alpha-mask fade: unavailable.
-- Full-list notification overscroll: native lazy lists expose no scroll offset/controller; v1.4 uses header/footer pull feedback.
-- High-refresh animation: OWL is capped at 60 FPS, including on 90/120 Hz displays, and slow widgets may run slower. Higher FPS requires an Omalauncher engine change.
-- Automatic home-face sound effects for gesture/animation events: restricted; the abandoned coin/game experiments are not part of v1.4.
+OWL animations are capped at 60 FPS, including on 90/120 Hz displays. Higher frame rates require an Omalauncher engine change.
