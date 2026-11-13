@@ -1,8 +1,10 @@
 face "Daily learning" {
-  meta { owl: 18; description: "Published daily word and a daily selection of sourced college math problems"; version: "4.1"; license: "MIT"; category: "productivity" }
+  meta { owl: 18; description: "Published daily word and a daily selection of sourced college math problems"; version: "4.1.1"; license: "MIT"; category: "productivity" }
   page: 0
   padding: 0
   background: linear(0, 0, 1, 1, [background, mix(background, blue, 0.12), background])
+  state problemOffset = 0 persist
+  state reload = 0
   source now = clock every 1m
   let date = fmtTime(now, "yyyy-MM-dd")
   requires { pacman: ["nodejs", "npm"] }
@@ -10,11 +12,21 @@ face "Daily learning" {
 const dir=require('"'"'path'"'"').join(require('"'"'os'"'"').homedir(),'"'"'.cache'"'"','"'"'daily-learning'"'"');
 fs.mkdirSync(dir,{recursive:true});
 const date=/^\d{4}-\d{2}-\d{2}$/.test(process.argv[1]||'"'"''"'"') ? process.argv[1] : new Date().toISOString().slice(0,10);
+const selection=String(process.argv[2]||0);
+const force=Number(process.argv[3]||0);
 const decode=s=>s.replace(/&#x([0-9a-f]+);/gi,(_,n)=>String.fromCodePoint(parseInt(n,16))).replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(+n)).replace(/&(amp|lt|gt|quot|apos|nbsp);/g,(_,n)=>({amp:'"'"'&'"'"',lt:'"'"'<'"'"',gt:'"'"'>'"'"',quot:'"'"'"'"'"',apos:"'"'"'",nbsp:'"'"' '"'"'})[n]);
 const plain=s=>decode(s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'"'"'$1'"'"').replace(/<\/(p|div|blockquote|li|h\d)>/g,'"'"'\n\n'"'"').replace(/<br\s*\/?>/g,'"'"'\n'"'"').replace(/<[^>]+>/g,'"'"''"'"')).replace(/\n\s*\n\s*\n/g,'"'"'\n\n'"'"').trim();
 const math=s=>plain(s);
 const get=async u=>{let r=await fetch(u,{signal:AbortSignal.timeout(18000),headers:{'"'"'User-Agent'"'"':'"'"'DailyLearningPersonalWidget/1.0'"'"'}});if(!r.ok)throw Error('"'"'HTTP '"'"'+r.status);return r.text()};
-async function cached(name,fn){const p=dir+'"'"'/'"'"'+name+'"'"'.json'"'"';let old={};try{old=JSON.parse(fs.readFileSync(p,'"'"'utf8'"'"'))}catch{};if(old.checked===date&&!old.error&&(name!=="math"||old.rawTex))return old;try{const fresh={...await fn(),checked:date,fetched:new Date().toISOString()};fs.writeFileSync(p,JSON.stringify(fresh));return fresh}catch(e){return {...old,error:'"'"'Could not refresh: '"'"'+e.message,stale:!!old.title}}}
+async function cached(name,fn){const p=dir+'"'"'/'"'"'+name+'"'"'.json'"'"';let old={};try{old=JSON.parse(fs.readFileSync(p,'"'"'utf8'"'"'))}catch{};if(old.checked===date&&!old.error&&(name!=="math"||old.rawTex&&old.selection===selection)&&(name!=="word"||Date.now()-Date.parse(old.fetched)<28800000&&Number(old.force||0)===force))return old;if(name==="word"){
+const budgetPath=dir+"/word-requests.json";
+let budget={date,count:old.checked===date?1:0,last:old.checked===date?old.fetched:null,force:old.force||0};
+try{const saved=JSON.parse(fs.readFileSync(budgetPath,"utf8"));if(saved.date===date)budget=saved;else budget={date,count:0,last:null,force:0}}catch{}
+if(budget.count>=3||(budget.force===force&&Date.now()-Date.parse(budget.last)<28800000))return old;
+budget={date,count:budget.count+1,last:new Date().toISOString(),force};
+fs.writeFileSync(budgetPath,JSON.stringify(budget));
+}
+try{const fresh={...await fn(old),checked:date,selection,force,fetched:new Date().toISOString()};fs.writeFileSync(p,JSON.stringify(fresh));return fresh}catch(e){return {...old,error:'"'"'Could not refresh: '"'"'+e.message,stale:!!old.title}}}
 async function libraries() {
   const path=require('"'"'path'"'"');
   const crypto=require('"'"'crypto'"'"');
@@ -95,14 +107,14 @@ const dir=path.join(require('"'"'os'"'"').homedir(),'"'"'.cache/daily-learning/e
 (async()=>{
 const [word,problem]=await Promise.all([
 cached('"'"'word'"'"',async()=>{const xml=await get('"'"'https://www.merriam-webster.com/wotd/feed/rss2'"'"');const item=xml.match(/<item>([\s\S]*?)<\/item>/)?.[1];if(!item)throw Error('"'"'No word in feed'"'"');const tag=n=>item.match(new RegExp('"'"'<'"'"'+n+'"'"'[^>]*>([\\s\\S]*?)<\/'"'"'+n+'"'"'>'"'"'))?.[1]||'"'"''"'"';const desc=tag('"'"'description'"'"').replace(/<!\[CDATA\[|\]\]>/g,'"'"''"'"');const short=tag('"'"'merriam:shortdef'"'"');let body=plain(short||desc);if(!short)body=body.split(/Did You Know\?/i)[0].replace(/^Merriam-Webster'"'"'s Word of the Day[^\n]*\n+/,'"'"''"'"');return {title:plain(tag('"'"'title'"'"')),body:body.split(/\s+/).slice(0,100).join('"'"' '"'"'),url:plain(tag('"'"'link'"'"')),published:plain(tag('"'"'pubDate'"'"')),source:'"'"'Merriam-Webster'"'"'};}),
-cached('"'"'math'"'"',async()=>{const topics=['"'"'geometry'"'"','"'"'multivariable-calculus'"'"','"'"'linear-algebra'"'"','"'"'geometry'"'"','"'"'ordinary-differential-equations'"'"','"'"'integration'"'"','"'"'optimization'"'"'];const day=Math.floor(Date.parse(date+'"'"'T00:00:00Z'"'"')/86400000);const topic=topics[day%topics.length];const api='"'"'https://api.stackexchange.com/2.3/questions?site=math&pagesize=100&order=desc&sort=votes&min=5&tagged='"'"'+encodeURIComponent(topic)+'"'"'&filter=withbody'"'"';const j=JSON.parse(await get(api));if(j.error_message)throw Error(j.error_message);let pool=(j.items||[]).filter(x=>x.accepted_answer_id&&x.body.length<7000&&/find|calculat|determin|prove|evaluat|area|volume|integral|solve/i.test(x.title));if(topic==='"'"'geometry'"'"'){const illustrated=pool.filter(x=>/<img /i.test(x.body));if(illustrated.length)pool=illustrated;}if(!pool.length)throw Error('"'"'No matching problems'"'"');const q=pool[Math.floor(day/7)%pool.length];const images=[...q.body.matchAll(/<img[^>]+src="(https:[^"]+)"/g)].map(x=>decode(x[1])).slice(0,3);return {rawTex:true,title:math(q.title),body:math(q.body),images,url:q.link,id:q.question_id,author:decode(q.owner?.display_name||'"'"'Community contributor'"'"'),topic,source:'"'"'Mathematics Stack Exchange'"'"',license:q.content_license||'"'"'CC BY-SA'"'"',published:new Date(q.creation_date*1000).toISOString().slice(0,10)};})]);
+cached('"'"'math'"'"',async(old)=>{const topics=['"'"'geometry'"'"','"'"'multivariable-calculus'"'"','"'"'linear-algebra'"'"','"'"'geometry'"'"','"'"'ordinary-differential-equations'"'"','"'"'integration'"'"','"'"'optimization'"'"'];const day=Math.floor(Date.parse(date+'"'"'T00:00:00Z'"'"')/86400000);const topic=topics[day%topics.length];const api='"'"'https://api.stackexchange.com/2.3/questions?site=math&pagesize=100&order=desc&sort=votes&min=5&tagged='"'"'+encodeURIComponent(topic)+'"'"'&filter=withbody'"'"';const j=JSON.parse(await get(api));if(j.error_message)throw Error(j.error_message);let pool=(j.items||[]).filter(x=>x.accepted_answer_id&&x.body.length<7000&&/find|calculat|determin|prove|evaluat|area|volume|integral|solve/i.test(x.title));if(topic==='"'"'geometry'"'"'){const illustrated=pool.filter(x=>/<img /i.test(x.body));if(illustrated.length)pool=illustrated;}if(!pool.length)throw Error('"'"'No matching problems'"'"');const choices=old.checked===date&&old.selection!==selection ? pool.filter(x=>x.question_id!==old.id) : pool;const q=choices[(Math.floor(day/7)+Number(selection))%choices.length];const images=[...q.body.matchAll(/<img[^>]+src="(https:[^"]+)"/g)].map(x=>decode(x[1])).slice(0,3);return {rawTex:true,title:math(q.title),body:math(q.body),images,url:q.link,id:q.question_id,author:decode(q.owner?.display_name||'"'"'Community contributor'"'"'),topic,source:'"'"'Mathematics Stack Exchange'"'"',license:q.content_license||'"'"'CC BY-SA'"'"',published:new Date(q.creation_date*1000).toISOString().slice(0,10)};})]);
 try { await renderProblem(problem); }
 catch(e) { problem.error='"'"'Could not render equations: '"'"'+e.message; problem.parts=[{text:problem.title||'"'"'Loading problem…'"'"',title:true},{text:problem.body||'"'"'Connect to the internet to load the source.'"'"'}]; }
 console.log(JSON.stringify({word,problem}));
-})().catch(e=>{console.log(JSON.stringify({error:e.message}));process.exitCode=0});' """ + sh(date)) every 1h json timeout 210s
+})().catch(e=>{console.log(JSON.stringify({error:e.message}));process.exitCode=0});' """ + sh(date) + " " + sh(problemOffset) + " " + sh(reload)) every 15m json timeout 210s
   let word = data.word
   let problem = data.problem
-  on date { refresh() }
+  on date { problemOffset = 0 }
   Column {
     fill: true
     gap: 14
@@ -137,7 +149,19 @@ console.log(JSON.stringify({word,problem}));
           border: 1
           borderColor: alpha(blue, 0.35)
           radius: 20
-          Text { text: "02   DAILY MATH SELECTION"; fontSize: 11; letterSpacing: 2; color: blue }
+          Row {
+            fill: width
+            align: center
+            Text { text: "02   DAILY MATH SELECTION"; fontSize: 11; letterSpacing: 2; color: blue; weight: 1 }
+            Box {
+              width: 32
+              height: 32
+              align: center
+              radius: 16
+              onTap: problemOffset = problemOffset + 1
+              Text { text: "↻"; fontSize: 22; color: blue; align: center }
+            }
+          }
           Text { text: problem.topic ?? "Fetching…"; fontSize: 13; color: accent }
           if !problem.parts { Text { text: "Preparing typeset problem…"; fontSize: 16 } }
           for part in problem.parts ?? [] {
@@ -155,7 +179,7 @@ console.log(JSON.stringify({word,problem}));
           if problem.error { Text { text: problem.error; fontSize: 12; color: yellow } }
           Button { text: "Solution in browser ↗"; onTap: url(problem.url ?? "https://math.stackexchange.com/") }
         }
-        Button { text: "Refresh from websites"; onTap: refresh() }
+        Button { text: "Atualizar dos sites ↻"; onTap: reload = reload + 1 }
         Text { text: "Published content · saved locally for offline reading\nMath is selected daily from the archive."; fontSize: 11; color: muted; align: center }
       }
     Spacer { height: screenInset }
