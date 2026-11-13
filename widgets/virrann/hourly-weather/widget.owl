@@ -1,0 +1,87 @@
+widget "Tempo por hora" {
+  meta { owl: 11; description: "Previsão por hora em uma faixa adaptável"; version: "1.0"; license: "MIT"; category: "world" }
+  size: 6x1
+  minSize: 1x1
+  padding: 3
+  state place = null persist
+  state country = "" persist
+  state region = "" persist
+  state city = "" persist
+  state query = ""
+  source now = clock every 1m
+  source search = http(query == "" ? null : "https://geocoding-api.open-meteo.com/v1/search?name=${enc(query)}&count=100&language=pt&format=json") json status every 24h
+  let candidates = (search.out.results ?? []).filter(p => (country == "" || contains(lower(p.country ?? ""), lower(trim(country))) || upper(trim(country)) == p.country_code) && (region == "" || contains(lower(p.admin1 ?? ""), lower(trim(region)))))
+  source forecast = http(place == null ? null : "https://api.open-meteo.com/v1/forecast?latitude=${enc(place.latitude)}&longitude=${enc(place.longitude)}&hourly=temperature_2m,precipitation_probability,weather_code,is_day&timeformat=unixtime&timezone=auto&forecast_days=3") json status every 20m
+  let data = forecast.out
+  let times = data.hourly.time ?? []
+  let indices = range(len(times)).filter(i => times[i] <= now && times[i] + 3600 > now || times[i] > now)
+  let slots = max(1, floor(((tileWidth ?? 300) - 6) / 48))
+  let shown = indices.take(slots)
+  onTap: screen()
+  Box {
+    fill: true
+    clip: true
+    align: center
+    if place == null {
+      Text { text: "☁ Toque para configurar"; fontSize: 11; align: center; maxLines: 2 }
+    } else if len(shown) == 0 {
+      Text { text: forecast == null ? "Carregando…" : "Sem previsão · toque"; fontSize: 10; align: center; maxLines: 2 }
+    } else {
+      Row {
+        fill: true
+        gap: 0
+        align: center
+        for i, n in shown {
+          let code = data.hourly.weather_code[i]
+          let wttr = code == 0 ? 113 : code == 1 || code == 2 ? 116 : code == 3 ? 122 : code == 45 || code == 48 ? 143 : code >= 95 ? 200 : code >= 71 && code <= 77 || code == 85 || code == 86 ? 338 : code >= 80 ? 353 : code >= 61 ? 296 : 266
+          Column {
+            weight: 1
+            gap: 0
+            align: center
+            background: n == 0 ? alpha(accent, 0.12) : alpha(accent, 0)
+            radius: 5 * corners
+            Text { text: n == 0 ? fmtTime(now, "HH:mm", place.timezone) : fmtTime(times[i], "HH:mm", place.timezone); fontSize: 9; color: n == 0 ? accent : muted; align: center; maxLines: 1 }
+            Row { gap: 2; align: center
+            Text { text: weatherIcon(wttr, data.hourly.is_day[i] == 0); font: icon; fontSize: 16; color: n == 0 ? accent : foreground; align: center; maxLines: 1 }
+            Text { text: "${round(data.hourly.temperature_2m[i])}°"; fontSize: 10; bold: true; align: center; maxLines: 1 }
+            }
+            Text { text: "${data.hourly.precipitation_probability[i] ?? "–"}%"; fontSize: 9; color: cyan; align: center; maxLines: 1 }
+          }
+        }
+      }
+    }
+  }
+  screen {
+    title: "Configurações do tempo"
+    Column {
+      scroll: true
+      gap: 10
+      padding: 12
+      Text { text: "Local da previsão"; style: title }
+      Text { text: place == null ? "Escolha uma cidade abaixo." : "${place.name} · ${place.admin1 ?? ""} · ${place.country}"; maxLines: 3 }
+      Text { text: "País (nome ou código, por exemplo Brasil ou BR)"; style: small }
+      Input { text: country; placeholder: "Qualquer país"; onChange: country = value }
+      Text { text: "Estado / região (nome completo)"; style: small }
+      Input { text: region; placeholder: "Qualquer estado"; onChange: region = value }
+      Text { text: "Cidade"; style: small }
+      Input { text: city; placeholder: "Digite a cidade"; onChange: city = value; onSubmit: query = trim(city) }
+      Button { text: "Buscar cidade"; onTap: query = trim(city) }
+      if query != "" {
+        if search == null { Text { text: "Buscando…" } }
+        else if !search.ok { Text { text: "Não foi possível buscar. Confira a conexão e tente novamente."; color: red; maxLines: 3 } }
+        else if len(candidates) == 0 { Text { text: "Nenhum resultado. Confira os nomes ou deixe país/estado em branco e escolha na lista."; maxLines: 4 } }
+        for p in candidates.take(15) {
+          Button {
+            text: "${p.name} · ${p.admin1 ?? ""} · ${p.country}"
+            onTap: { place = p; close() }
+          }
+        }
+      }
+      Button { text: "Atualizar dados"; onTap: refresh() }
+      Text { text: "O primeiro horário é o atual, no fuso da cidade. Os seguintes avançam de hora em hora. Aumente a largura para ver mais horas."; style: small; maxLines: 5 }
+      Text { text: "Ícone: condição prevista · °: temperatura em Celsius · %: probabilidade de chuva, não certeza geral da previsão."; style: small; maxLines: 5 }
+      Text { text: forecast != null && !forecast.ok ? "Sem conexão: os últimos dados podem estar desatualizados." : "Atualização automática a cada 20 minutos."; style: small; maxLines: 3 }
+      Text { text: "Dados: Open-Meteo / GeoNames"; style: muted; onTap: url("https://open-meteo.com/") }
+    }
+  }
+}
