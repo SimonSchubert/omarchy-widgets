@@ -1,17 +1,17 @@
-# Omagara
+# Omagara v1.5.1
 
 Niagara-inspired OWL 21 home face for [Omalauncher](https://github.com/SimonSchubert/omalauncher). No extra packages or shell commands.
 
 ## Features
 
-- **Alphabet:** Elastic A–Z navigation with letter-only previews while dragging, a circular Settings cog below the last letter, distance/speed-sensitive wiggle, optional opposite-edge input, and configurable haptics.
-- **Apps:** Buffered full-height browser with elastic ends, adjustable scale, and padded A–Z headings. Empty Search places the most recently opened app first.
+- **Alphabet:** Elastic A–Z navigation with letter-only previews while dragging, a letter-sized Settings cog integrated into the alphabet worm’s shaded tail, distance/speed-sensitive wiggle, optional opposite-edge input, and configurable haptics.
+- **Apps:** Buffered full-height browser with elastic ends, adjustable scale, padded A–Z headings, and the bottom Omagara/Omalauncher settings menu. Empty Search places the most recently opened app first.
 - **Notifications:** Compact grouped cards, consistent magnetic swipe feedback, expandable actions/replies, bottom scroll clearance, and pull feedback.
 - **Appearance:** Connected, content-fitted shade for the clock, date, and event, with theme-aware alphabet, notification, and app-label shades. Optional shading and independent corner rounding.
 - **Controls:** Theme/Light/Dark text colors, contrast, icon overlays, fonts, and Reduce Motion.
 - **Utilities:** Calendar, next alarm, timer, stopwatch, and world clocks.
 
-Tap the cog below the alphabet worm or long-press Search to open Omagara Settings. Omalauncher settings are available from there.
+Tap the small cog inside the alphabet worm’s shaded tail, use the bottom app-list menu, or long-press Search to open Omagara settings.
 
 ## Limitation
 
