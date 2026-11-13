@@ -11,7 +11,7 @@ Niagara-inspired OWL 21 home face for [Omalauncher](https://github.com/SimonSchu
 - **Controls:** Theme/Light/Dark text colors, contrast, icon overlays, fonts, and Reduce Motion.
 - **Utilities:** Calendar, next alarm, timer, stopwatch, and world clocks.
 
-Tap the small cog inside the alphabet worm’s shaded tail, use the bottom app-list menu, or long-press Search to open Omagara settings.
+Slide onto the cog below the last alphabet letter (with haptic feedback) to navigate to the bottom settings menu. Select Omagara settings or Omalauncher settings there. Long-press Search still opens Omagara settings directly.
 
 ## Limitation
 
