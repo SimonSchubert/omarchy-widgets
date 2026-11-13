@@ -305,9 +305,9 @@ face "Omagara" {
   let appSections = fullAlphabet.filter(c => !cfg.hideEmpty || len(get(groups, c, [])) > 0)
   let appSectionEnds = scan(appSections, (height, c) => height + appLabelHeight + len(get(groups, c, [])) * appRowHeight, 0)
   let appSectionStarts = map(appSections, (c, i) => appEdgeSpace + (i == 0 ? 0 : appSectionEnds[i - 1]))
-  // Keep the original end-of-list settings section, but shorten the gap
-  // after the last letter's apps so the final apps remain thumb-reachable.
-  let appMenuTop = (last(appSectionEnds) ?? 0) + 26 * appScale
+  // Document section ends exclude the initial appEdgeSpace. Include it
+  // before the settings heading, or the heading overlaps the final app row.
+  let appMenuTop = (last(appSectionEnds) ?? 0) + appEdgeSpace + 12 * appScale
   let appMenuHeadingHeight = appLabelHeight + 8 * appScale
   let appMenuBottom = appMenuTop + appMenuHeadingHeight + 2 * appRowHeight
   // At the end of the list, align the last Settings action beside the
@@ -391,7 +391,14 @@ face "Omagara" {
   let appPreviewFirstRow = max(0, floor((-appPreviewTop - appLabelHeight) / appRowHeight) - 2)
   let appPreviewCount = max(0, ceil((appPanelHeight - appPreviewTop - appLabelHeight - appPreviewFirstRow * appRowHeight) / appRowHeight) + 2)
   let appPreviewRows = (appPreviewTop + appLabelHeight > 0 ? [{id: "heading:" + letter, section: letter, heading: true, top: appPreviewTop, height: appLabelHeight}] : []) + map(take(drop(appPreviewApps, appPreviewFirstRow), appPreviewCount), (a, j) => {id: a.key, section: letter, heading: false, app: a, top: appPreviewTop + appLabelHeight + (appPreviewFirstRow + j) * appRowHeight, height: appRowHeight})
-  let appWindow = appPreviewing && !railSettingsSelected ? appPreviewRows : fullAppWindow
+  // The cog is a final preview stop, just like any letter. During the hold
+  // show ONLY the settings heading/actions near the cog, with no other apps.
+  // Full document layout is restored when the thumb leaves the rail.
+  let appSettingsPreviewHeight = appMenuHeadingHeight + 2 * appRowHeight
+  let appSettingsPreviewCenter = railTop + railHeight + railStep / 2 + railVisualY - appSafeTop
+  let appSettingsPreviewTop = clamp(appSettingsPreviewCenter - appMenuHeadingHeight - 1.5 * appRowHeight, appEdgeSpace, max(appEdgeSpace, appPanelHeight - 12 - appSettingsPreviewHeight))
+  let appSettingsPreviewRows = map(appMenuRows, r => merge(r, {top: appSettingsPreviewTop + r.top - appMenuTop}))
+  let appWindow = appPreviewing ? (railSettingsSelected ? appSettingsPreviewRows : appPreviewRows) : fullAppWindow
   // Anchoring must use the unfiltered document even during a preview.
   let appVisibleRows = fullAppWindow.filter(r => r.top + r.height > appOffset && r.top < appOffset + appPanelHeight)
   let appFirst = first(appVisibleRows)
@@ -1402,7 +1409,7 @@ face "Omagara" {
         for row in appWindow key row.id {
           // Preview rows use their own bounded screen positions; ordinary
           // scrolling still uses continuous document coordinates.
-          let rowY = appPreviewing && !railSettingsSelected ? row.top : row.top - appOffset
+          let rowY = appPreviewing ? row.top : row.top - appOffset
           // Fade by row centre: a partly clipped row must not vanish whole.
           let rowCentre = rowY + row.height / 2
           let edge = clamp(min(rowCentre, appPanelHeight - rowCentre) / max(1, appFade), 0, 1)
@@ -1592,7 +1599,7 @@ face "Omagara" {
     }
     // The selected-letter cue mirrors with the rail. Its screen-space
     // position is independent of the fixed left and right touch targets.
-    if railHeld && activeSide != 0 {
+    if railHeld && activeSide != 0 && !railSettingsSelected {
       let peakX = railHomeX - alphabetSide * railPull
       let bubbleX = alphabetSide == 1 ? max(screenLeft + 22, peakX - 42) : min((tileWidth ?? 400) - screenRight - 22, peakX + 42)
       let edgeThumbGap = alphabetSide == 1 ? screenLeft + 56 - railThumbX : railThumbX - ((tileWidth ?? 400) - screenRight - 56)
