@@ -1,5 +1,5 @@
 face "Omagara" {
-  meta { owl: 21; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.4"; license: "MIT"; category: "home" }
+  meta { owl: 21; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.5"; license: "MIT"; category: "home" }
   // Omalauncher OWL time animations are capped at 60 FPS, regardless of display Hz.
   // Keep the highest supported rate; reduce work rather than reducing responsiveness.
   fps: 60
@@ -43,6 +43,9 @@ face "Omagara" {
   state railWiggleStarted = 0
   state railWiggleOrigin = 0
   state railWiggleDirection = 0
+  // Scale the released wave by real finger travel and average speed.
+  state railWiggleStrength = 0
+  state railWiggleDuration = 0
   // Brief mountain entrance, then full-speed thumb tracking.
   state railEnterStart = 0
   state railEntering = false
@@ -124,6 +127,8 @@ face "Omagara" {
   // Theme-aware scrim to keep header and index legible over detailed wallpapers.
   // Forced light/dark text receives its opposite backing color.
   let legibilityShade = cfg.textTone == "Light" ? alpha(#111111, 0.49) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.49) : alpha(mix(background, surface, 0.50), 0.49)
+  // Only the fitted, connected header backdrop uses this subtle scrim.
+  let headerShade = cfg.textTone == "Light" ? alpha(#111111, 0.29) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.29) : alpha(mix(background, surface, 0.50), 0.29)
   // Slightly stronger, compact scrim for app names and section headings.
   let appLabelShade = cfg.textTone == "Light" ? alpha(#111111, 0.60) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.60) : alpha(mix(background, surface, 0.50), 0.60)
   let alphabetSide = cfg.alphabetSide == "Left" ? -1 : 1
@@ -212,7 +217,7 @@ face "Omagara" {
   // Directional travel starts at the touched letter: up goes toward A,
   // down goes toward Z. A new alphabet gesture cancels the whole effect.
   let railWiggleAge = railWiggling ? max(0, time - railWiggleStarted) : 0
-  let railWiggleDone = railWiggling && railWiggleAge >= 1.70
+  let railWiggleDone = railWiggling && railWiggleAge >= railWiggleDuration
   on railWiggleDone { if value { railWiggling = false } }
   // Share deformation between the glyphs and the single Canvas ribbon.
   let railCurveStrength = !cfg.curve ? 0 : activeSide != 0 ? railEnterEase : railReturning && !cfg.reduceMotion ? railReturnScale * railReturnEase : 0
@@ -239,7 +244,25 @@ face "Omagara" {
   // Prefer timed current/upcoming events, then an all-day event covering today.
   let todayEvents = (agenda.events ?? []).filter(e => trim(e.title ?? "") != "" && e.start < dayEnd && e.end > now && e.end > dayStart).sortBy(e => e.allDay ? dayEnd : max(now, e.start))
   let todayEvent = first(todayEvents)
-  let headerBottom = screenTop + (cfg.clock ? (compact ? 64 : 100) : 0) + (cfg.date ? 36 : 0) + (cfg.event && todayEvent != null ? 32 : 0) + 36
+  // Shape the backdrop from the ACTUAL displayed labels, not the screen width.
+  // OWL 21 does not expose font text measurement. Glyph-weighted advances
+  // avoid the old full-width boxes without clipping ordinary date formats.
+  let headerClockText = fmtTime(now, "HH:mm")
+  let headerDateText = fmtTime(now, "EEEE, d MMMM")
+  let headerEventText = todayEvent != null ? todayEvent.title + " · " + (todayEvent.allDay ? "Today" : fmtTime(todayEvent.start, "HH:mm")) : ""
+  let headerClockFont = compact ? 36 : 48
+  let headerClockHeight = compact ? 47 : 63
+  let headerDateHeight = 27
+  let headerEventHeight = 24
+  let headerPadTop = compact ? 0 : 20
+  let headerShapeMax = max(100, availableWidth - 60)
+  let headerClockWidth = min(headerShapeMax, 16 + headerClockFont * sum(map(range(len(headerClockText)), i => contains(":., ", sub(headerClockText, i, i + 1)) ? 0.27 : 0.64)))
+  let headerDateWidth = min(headerShapeMax, 28 + 16 * sum(map(range(len(headerDateText)), i => contains("iltfjI!.,:; '1", sub(headerDateText, i, i + 1)) ? 0.30 : contains("MW@QO", sub(headerDateText, i, i + 1)) ? 0.77 : 0.55)))
+  let headerEventWidth = min(headerShapeMax, 26 + 13 * sum(map(range(len(headerEventText)), i => contains("iltfjI!.,:; '1", sub(headerEventText, i, i + 1)) ? 0.30 : contains("MW@QO", sub(headerEventText, i, i + 1)) ? 0.77 : 0.55)))
+  let headerRows = (cfg.clock ? [{w: headerClockWidth, h: headerClockHeight}] : []) + (cfg.date ? [{w: headerDateWidth, h: headerDateHeight}] : []) + (cfg.event && todayEvent != null ? [{w: headerEventWidth, h: headerEventHeight}] : [])
+  let headerShapeHeight = sum(map(headerRows, r => r.h))
+  // Preserve a minimum gap above the independently scrolling notifications.
+  let headerBottom = screenTop + 12 + headerPadTop + headerShapeHeight + 30
   let noticeTop = max(headerBottom, screenTop + availableHeight * 0.24)
   let controlRight = screenRight + 60
   // Center at 89% of inset-safe height, with at least 24dp below the button.
@@ -278,7 +301,18 @@ face "Omagara" {
   let appSections = fullAlphabet.filter(c => !cfg.hideEmpty || len(get(groups, c, [])) > 0)
   let appSectionEnds = scan(appSections, (height, c) => height + appLabelHeight + len(get(groups, c, [])) * appRowHeight, 0)
   let appSectionStarts = map(appSections, (c, i) => appEdgeSpace + (i == 0 ? 0 : appSectionEnds[i - 1]))
-  let appDocumentHeight = (last(appSectionEnds) ?? 0) + appEdgeSpace * 2
+  // Niagara-style settings section is a genuine end of the scrollable
+  // document, not a fixed overlay or a letter in the alphabet rail.
+  let appMenuTop = (last(appSectionEnds) ?? 0) + appEdgeSpace + 12 * appScale
+  let appMenuHeadingHeight = appLabelHeight + 8 * appScale
+  let appMenuBottom = appMenuTop + appMenuHeadingHeight + 2 * appRowHeight
+  // At maximum scroll the last menu row clears the floating Close control,
+  // not just Search: Close sits 64dp above Search and is 48dp tall.
+  let appMenuTail = max(appEdgeSpace, searchBottom - screenInset + 64 + 48 + 24)
+  // Keep menu text to the left of the floating controls on narrow screens.
+  // Text wraps inside this constraint rather than becoming a long banner.
+  let appMenuTextWidth = max(32, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 52 * appScale)
+  let appDocumentHeight = appMenuBottom + appMenuTail
   let appMaxScroll = max(0, appDocumentHeight - appPanelHeight)
   // Read time ONLY while gliding. An every-frame trigger would keep OWL's
   // frame clock awake even at rest. This analytic integral is exact at any fps.
@@ -319,9 +353,14 @@ face "Omagara" {
   let appRenderTop = max(0, floor(appOffset / appWindowStride) * appWindowStride - 3 * appRowHeight)
   let appRenderBottom = min(appDocumentHeight, appRenderTop + appPanelHeight + 11 * appRowHeight)
   let visibleSections = appDocument.filter(s => s.top + s.height > appRenderTop && s.top < appRenderBottom).map(s => merge(s, {firstRow: max(0, floor((appRenderTop - s.top - appLabelHeight) / appRowHeight))}))
+  let appMenuRows = [
+    {id: "omagara:menu", kind: "menuHeading", top: appMenuTop, height: appMenuHeadingHeight},
+    {id: "omagara:settings", kind: "menuAction", top: appMenuTop + appMenuHeadingHeight, height: appRowHeight},
+    {id: "omagara:launcher", kind: "menuAction", top: appMenuTop + appMenuHeadingHeight + appRowHeight, height: appRowHeight}
+  ]
   let appWindow = flatten(visibleSections.map(s => (
     s.top + appLabelHeight > appRenderTop ? [{id: "heading:" + s.section, section: s.section, heading: true, top: s.top, height: appLabelHeight}] : []
-  ) + map(take(drop(get(groups, s.section, []), s.firstRow), ceil((appRenderBottom - appRenderTop) / appRowHeight) + 1), (a, j) => {id: a.key, section: s.section, heading: false, app: a, top: s.top + appLabelHeight + (s.firstRow + j) * appRowHeight, height: appRowHeight}).filter(r => r.top + r.height > appRenderTop && r.top < appRenderBottom)))
+  ) + map(take(drop(get(groups, s.section, []), s.firstRow), ceil((appRenderBottom - appRenderTop) / appRowHeight) + 1), (a, j) => {id: a.key, section: s.section, heading: false, app: a, top: s.top + appLabelHeight + (s.firstRow + j) * appRowHeight, height: appRowHeight}).filter(r => r.top + r.height > appRenderTop && r.top < appRenderBottom))) + appMenuRows.filter(r => r.top + r.height > appRenderTop && r.top < appRenderBottom)
   let appVisibleRows = appWindow.filter(r => r.top + r.height > appOffset && r.top < appOffset + appPanelHeight)
   let appFirst = first(appVisibleRows)
   // A single focus line serves section alignment and manual-scroll tracking.
@@ -346,7 +385,8 @@ face "Omagara" {
   // Keep the same visible row through installation/removal/profile updates.
   let anchorSection = find(appDocument, s => s.section == appAnchorSection)
   let anchorIndex = indexOf(get(appKeyGroups, appAnchorSection, []), appAnchor)
-  let anchorTop = anchorSection == null ? null : appAnchor == "heading:" + appAnchorSection ? anchorSection.top : anchorIndex < 0 ? null : anchorSection.top + appLabelHeight + anchorIndex * appRowHeight
+  let anchorMenu = find(appMenuRows, r => r.id == appAnchor)
+  let anchorTop = anchorMenu != null ? anchorMenu.top : anchorSection == null ? null : appAnchor == "heading:" + appAnchorSection ? anchorSection.top : anchorIndex < 0 ? null : anchorSection.top + appLabelHeight + anchorIndex * appRowHeight
   // No per-scroll on-triggers: OWL limits those to 10 runs/sec. Anchors
   // are captured by direct input handlers and once when a glide stops.
   on apps {
@@ -502,8 +542,8 @@ face "Omagara" {
       gap: 4
       padding: [14, 8]
       radius: cfg.roundNotifications ? 14 : 0
-      border: stackArmed ? 1 : cfg.bubbleBorder ? 1 : 0
-      borderColor: stackArmed ? accent : border
+      border: cfg.bubbleBorder ? 1 : 0
+      borderColor: border
       background: alpha(background, 0.48)
       onTap: {
         if summary && len(get(noticeGroups, stack, [])) > 1 {
@@ -807,6 +847,7 @@ face "Omagara" {
         railReturning = false
         // A new touch cancels the optional ripple immediately.
         railWiggling = false
+        railWiggleStrength = 0
         railFlickStartY = y
         railFlickLastY = y
         railFlickStarted = time
@@ -882,9 +923,18 @@ face "Omagara" {
         // Lower-to-upper and upper-to-lower flicks create opposite ripples.
         let flickTravel = railFlickLastY - railFlickStartY
         let flickAge = max(0.04, time - railFlickStarted)
-        let upFlick = railFlickStartY >= railHeight * 0.60 && flickTravel <= -max(70, railStep * 4)
-        let downFlick = railFlickStartY <= railHeight * 0.40 && flickTravel >= max(70, railStep * 4)
-        railWiggling = !cfg.reduceMotion && draggingSide == 1 && (upFlick || downFlick) && flickAge <= 0.55 && abs(flickTravel) / flickAge >= 850
+        let flickDistance = abs(flickTravel)
+        let flickSpeed = flickDistance / flickAge
+        // Tap/hold releases cannot ripple. Short, fast drags barely move
+        // the ribbon; only a long, fast directional sweep reaches full power.
+        let upFlick = railFlickStartY >= railHeight * 0.55 && flickTravel < 0
+        let downFlick = railFlickStartY <= railHeight * 0.45 && flickTravel > 0
+        let distanceGain = pow(clamp((flickDistance - max(44, railStep * 2.5)) / max(1, railHeight * 0.65), 0, 1), 1.4)
+        let speedGain = clamp((flickSpeed - 350) / 500, 0, 1)
+        let wiggleGain = distanceGain * speedGain
+        railWiggleStrength = wiggleGain
+        railWiggleDuration = 0.36 + 1.30 * wiggleGain
+        railWiggling = !cfg.reduceMotion && draggingSide == 1 && (upFlick || downFlick) && flickAge <= 0.6 && flickSpeed >= 520 && wiggleGain > 0.012
         if railWiggling {
           railWiggleStarted = time
           railWiggleOrigin = clamp(railFlickStartY / railStep - 0.5, 0, max(0, len(alphabet) - 1))
@@ -912,7 +962,7 @@ face "Omagara" {
           let wiggleActive = railWiggling && !cfg.reduceMotion
           let contourSteps = wiggleActive ? 2 : 4
           let wigglePhases = wiggleActive ? map(range(len(alphabet) * contourSteps + 1), j => railWiggleAge - abs(j / contourSteps - 0.5 - railWiggleOrigin) * 0.015) : []
-          let wiggleOffsets = wiggleActive ? map(wigglePhases, phase => phase > 0 && phase < 1.34 ? railWiggleDirection * 11 * pow(1 - phase / 1.34, 2) * sin(phase * 36) : 0) : []
+          let wiggleOffsets = wiggleActive ? map(wigglePhases, phase => phase > 0 && phase < 1.34 ? railWiggleDirection * 11 * railWiggleStrength * pow(1 - phase / 1.34, 2) * sin(phase * 36) : 0) : []
           if cfg.shadeAlphabet && len(alphabet) > 0 {
             Canvas {
               width: railMaxReach + 44
@@ -1137,46 +1187,102 @@ face "Omagara" {
       gap: 0
       padding: [screenLeft + 24, screenTop + 12, screenRight + 24, 0]
       visible: !browsing
-      // Independent, content-sized shades. No shared oversized floating slab.
+      // One connected, content-fitted ribbon behind time, date and event.
+      // No gaps, no full-width shade, and no separate overlapping panels.
       Box {
         fill: width
-        align: center
+        height: headerPadTop + headerShapeHeight
+        align: topStart
+        if cfg.shadeHeader && len(headerRows) > 0 {
+          Canvas {
+            fill: width
+            height: headerShapeHeight
+            offset: [0, headerPadTop]
+            let row0 = first(headerRows)
+            let row1 = get(headerRows, 1, row0)
+            let row2 = get(headerRows, 2, row1)
+            let rowCount = len(headerRows)
+            let mid0 = row0.h / 2
+            let mid1 = row0.h + row1.h / 2
+            let mid2 = row0.h + row1.h + row2.h / 2
+            let seg01 = max(1, mid1 - mid0)
+            let seg12 = max(1, mid2 - mid1)
+            let topRounded = cfg.clock ? cfg.roundTime : cfg.date ? cfg.roundDate : cfg.roundEvent
+            let bottomRounded = cfg.event && todayEvent != null ? cfg.roundEvent : cfg.date ? cfg.roundDate : cfg.roundTime
+            let topR = topRounded ? 8 : 0
+            let bottomR = bottomRounded ? 8 : 0
+            // Blend widths continuously through the row centers so the
+            // connected shadow tapers naturally without little side divots.
+            let slices = map(range(ceil(headerShapeHeight / 2) + 1), i => min(headerShapeHeight, i * 2))
+            let shapeEdge = map(slices, y => {
+              y: y,
+              half: (
+                rowCount <= 1 ? row0.w : rowCount == 2 ? (
+                  y <= mid0 ? row0.w : y >= mid1 ? row1.w : row0.w + (row1.w - row0.w) * (0.5 - 0.5 * cos(rad(180 * clamp((y - mid0) / seg01, 0, 1))))
+                ) : (
+                  y <= mid0 ? row0.w : y < mid1 ? row0.w + (row1.w - row0.w) * (0.5 - 0.5 * cos(rad(180 * clamp((y - mid0) / seg01, 0, 1)))) : y >= mid2 ? row2.w : row1.w + (row2.w - row1.w) * (0.5 - 0.5 * cos(rad(180 * clamp((y - mid1) / seg12, 0, 1))))
+                )
+              ) / 2
+              - (topR > 0 && y < topR ? topR - sqrt(max(0, topR * topR - pow(y - topR, 2))) : 0)
+              - (bottomR > 0 && y > headerShapeHeight - bottomR ? bottomR - sqrt(max(0, bottomR * bottomR - pow(y - headerShapeHeight + bottomR, 2))) : 0)
+            })
+            path(map(shapeEdge, p => [width / 2 + p.half, p.y]) + reverse(map(shapeEdge, p => [width / 2 - p.half, p.y])), closed: true, fill: headerShade)
+          }
+        }
         Column {
           fill: width
-          align: center
-          gap: 6
-          padding: [0, compact ? 0 : 20, 0, 20]
+          gap: 0
+          offset: [0, headerPadTop]
           if cfg.clock {
             Box {
-              width: compact ? 144 : 184
-              padding: [6, compact ? 3 : 8]
-              background: cfg.shadeHeader ? legibilityShade : transparent
-              radius: cfg.roundTime ? 12 : 0
+              fill: width
+              height: headerClockHeight
               align: center
-              onTap: { if cfg.clockTap { queryText = ""; screenMode = "clock"; screen() } }
-              Text { text: fmtTime(now, "HH:mm"); font: chosenFont; fontSize: compact ? 36 : 48; fontWeight: 300; color: primaryText; align: center; maxLines: 1 }
+              Text {
+                text: headerClockText
+                width: headerClockWidth
+                font: chosenFont
+                fontSize: headerClockFont
+                fontWeight: 300
+                color: primaryText
+                align: center
+                maxLines: 1
+                onTap: { if cfg.clockTap { queryText = ""; screenMode = "clock"; screen() } }
+              }
             }
           }
           if cfg.date {
             Box {
-              width: max(198, min(availableWidth - 96, 246))
-              padding: [8, 6]
-              background: cfg.shadeHeader ? legibilityShade : transparent
-              radius: cfg.roundDate ? 10 : 0
+              fill: width
+              height: headerDateHeight
               align: center
-              onTap: { if cfg.dateTap { pickedEvent = null; queryText = ""; screenMode = "calendar"; screen() } }
-              Text { text: fmtTime(now, "EEEE, d MMMM"); font: chosenFont; fontSize: 16; color: secondaryText; align: center; maxLines: 1 }
+              Text {
+                text: headerDateText
+                width: headerDateWidth
+                font: chosenFont
+                fontSize: 16
+                color: secondaryText
+                align: center
+                maxLines: 1
+                onTap: { if cfg.dateTap { pickedEvent = null; queryText = ""; screenMode = "calendar"; screen() } }
+              }
             }
           }
           if cfg.event && todayEvent != null {
             Box {
-              width: max(198, min(availableWidth - 64, 278))
-              padding: [8, 6]
-              background: cfg.shadeHeader ? legibilityShade : transparent
-              radius: cfg.roundEvent ? 10 : 0
+              fill: width
+              height: headerEventHeight
               align: center
-              onTap: { if cfg.eventTap { pickedEvent = todayEvent; queryText = ""; screenMode = "calendar"; screen() } }
-              Text { text: todayEvent.title + " · " + (todayEvent.allDay ? "Today" : fmtTime(todayEvent.start, "HH:mm")); font: chosenFont; fontSize: 13; color: secondaryText; align: center; maxLines: 1 }
+              Text {
+                text: headerEventText
+                width: headerEventWidth
+                font: chosenFont
+                fontSize: 13
+                color: secondaryText
+                align: center
+                maxLines: 1
+                onTap: { if cfg.eventTap { pickedEvent = todayEvent; queryText = ""; screenMode = "calendar"; screen() } }
+              }
             }
           }
         }
@@ -1255,9 +1361,81 @@ face "Omagara" {
                     fontSize: 22 * appScale
                     color: secondaryText
                     maxLines: 1
-                    padding: cfg.shadeAppLabels ? [0, 5 * appScale] : [0, 0]
+                    padding: cfg.shadeAppLabels ? [8 * appScale, 3 * appScale] : [0, 0]
                     background: cfg.shadeAppLabels ? appLabelShade : transparent
                     radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 4 * appScale : 0
+                  }
+                }
+              } else if row.kind == "menuHeading" {
+                Row {
+                  fill: width
+                  Text {
+                    text: "Omagara"
+                    height: appMenuHeadingHeight
+                    font: chosenFont
+                    fontSize: 20 * appScale
+                    color: secondaryText
+                    maxLines: 1
+                    padding: cfg.shadeAppLabels ? [8 * appScale, 3 * appScale] : [0, 0]
+                    background: cfg.shadeAppLabels ? appLabelShade : transparent
+                    radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 4 * appScale : 0
+                  }
+                }
+              } else if row.kind == "menuAction" {
+                Row {
+                  fill: width
+                  height: appRowHeight
+                  align: center
+                  gap: 12 * appScale
+                  padding: [4 * appScale, 8 * appScale]
+                  onTap: {
+                    if rowAlpha > 0.08 && row.top >= appOffset && row.top + row.height <= appOffset + appPanelHeight {
+                      appVelocity = 0
+                      browsing = false
+                      activeSide = 0
+                      railHeld = false
+                      draggingSide = 0
+                      letter = first(liveAlphabet) ?? "A"
+                      appScroll = 0
+                      appAnchor = ""
+                      queryText = ""
+                      menu = ""
+                      if row.id == "omagara:settings" {
+                        resetConfirm = false
+                        screenMode = "settings"
+                        screen()
+                      } else {
+                        launcher("settings")
+                      }
+                    }
+                  }
+                  Box {
+                    size: 36 * appScale
+                    align: center
+                    // Theme-aware settings gear, drawn without font glyphs.
+                    Canvas {
+                      size: 24 * appScale
+                      for i in range(8) {
+                        rotate(i * 45, 12 * appScale, 12 * appScale) {
+                          line(12 * appScale, 2 * appScale, 12 * appScale, 5 * appScale, stroke: secondaryText, width: 2 * appScale, cap: round)
+                        }
+                      }
+                      circle(12 * appScale, 12 * appScale, 7 * appScale, stroke: secondaryText, width: 2 * appScale)
+                      circle(12 * appScale, 12 * appScale, 2 * appScale, fill: secondaryText)
+                    }
+                  }
+                  Row {
+                    width: appMenuTextWidth
+                    Text {
+                      text: row.id == "omagara:settings" ? "Omagara settings" : "Omalauncher settings"
+                      font: chosenFont
+                      fontSize: 18 * appScale
+                      color: primaryText
+                      maxLines: 2
+                      padding: cfg.shadeAppLabels ? [2 * appScale, 5 * appScale] : [0, 0]
+                      background: cfg.shadeAppLabels ? appLabelShade : transparent
+                      radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 6 * appScale : 0
+                    }
                   }
                 }
               } else {
