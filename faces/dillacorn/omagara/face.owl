@@ -305,11 +305,10 @@ face "Omagara" {
   let appSections = fullAlphabet.filter(c => !cfg.hideEmpty || len(get(groups, c, [])) > 0)
   let appSectionEnds = scan(appSections, (height, c) => height + appLabelHeight + len(get(groups, c, [])) * appRowHeight, 0)
   let appSectionStarts = map(appSections, (c, i) => appEdgeSpace + (i == 0 ? 0 : appSectionEnds[i - 1]))
-  // Document section ends exclude the initial appEdgeSpace. Include it
-  // before the settings heading, or the heading overlaps the final app row.
+  // Keep both settings actions after the final app, with the same initial
+  // edge-space alignment as app sections. No redundant Omagara heading.
   let appMenuTop = (last(appSectionEnds) ?? 0) + appEdgeSpace + 12 * appScale
-  let appMenuHeadingHeight = appLabelHeight + 8 * appScale
-  let appMenuBottom = appMenuTop + appMenuHeadingHeight + 2 * appRowHeight
+  let appMenuBottom = appMenuTop + 2 * appRowHeight
   // At the end of the list, align the last Settings action beside the
   // alphabet cog. Keep a small bottom inset rather than the old oversized
   // padding. Close and Search stay on the right, clear of the menu text.
@@ -357,9 +356,8 @@ face "Omagara" {
   let appRenderBottom = min(appDocumentHeight, appRenderTop + appPanelHeight + 11 * appRowHeight)
   let visibleSections = appDocument.filter(s => s.top + s.height > appRenderTop && s.top < appRenderBottom).map(s => merge(s, {firstRow: max(0, floor((appRenderTop - s.top - appLabelHeight) / appRowHeight))}))
   let appMenuRows = [
-    {id: "omagara:menu", kind: "menuHeading", top: appMenuTop, height: appMenuHeadingHeight},
-    {id: "omagara:settings", kind: "menuAction", top: appMenuTop + appMenuHeadingHeight, height: appRowHeight},
-    {id: "omagara:launcher", kind: "menuAction", top: appMenuTop + appMenuHeadingHeight + appRowHeight, height: appRowHeight}
+    {id: "omagara:settings", kind: "menuAction", top: appMenuTop, height: appRowHeight},
+    {id: "omagara:launcher", kind: "menuAction", top: appMenuTop + appRowHeight, height: appRowHeight}
   ]
   let fullAppWindow = flatten(visibleSections.map(s => (
     s.top + appLabelHeight > appRenderTop ? [{id: "heading:" + s.section, section: s.section, heading: true, top: s.top, height: appLabelHeight}] : []
@@ -391,12 +389,12 @@ face "Omagara" {
   let appPreviewFirstRow = max(0, floor((-appPreviewTop - appLabelHeight) / appRowHeight) - 2)
   let appPreviewCount = max(0, ceil((appPanelHeight - appPreviewTop - appLabelHeight - appPreviewFirstRow * appRowHeight) / appRowHeight) + 2)
   let appPreviewRows = (appPreviewTop + appLabelHeight > 0 ? [{id: "heading:" + letter, section: letter, heading: true, top: appPreviewTop, height: appLabelHeight}] : []) + map(take(drop(appPreviewApps, appPreviewFirstRow), appPreviewCount), (a, j) => {id: a.key, section: letter, heading: false, app: a, top: appPreviewTop + appLabelHeight + (appPreviewFirstRow + j) * appRowHeight, height: appRowHeight})
-  // The cog is a final preview stop, just like any letter. During the hold
-  // show ONLY the settings heading/actions near the cog, with no other apps.
-  // Full document layout is restored when the thumb leaves the rail.
-  let appSettingsPreviewHeight = appMenuHeadingHeight + 2 * appRowHeight
+  // The cog previews ONLY the two settings actions. Anchor the second
+  // action near the selected cog and clamp both rows within the viewport.
+  // Release restores the continuous app list at its settings section.
+  let appSettingsPreviewHeight = 2 * appRowHeight
   let appSettingsPreviewCenter = railTop + railHeight + railStep / 2 + railVisualY - appSafeTop
-  let appSettingsPreviewTop = clamp(appSettingsPreviewCenter - appMenuHeadingHeight - 1.5 * appRowHeight, appEdgeSpace, max(appEdgeSpace, appPanelHeight - 12 - appSettingsPreviewHeight))
+  let appSettingsPreviewTop = clamp(appSettingsPreviewCenter - 1.5 * appRowHeight, appEdgeSpace, max(appEdgeSpace, appPanelHeight - 12 - appSettingsPreviewHeight))
   let appSettingsPreviewRows = map(appMenuRows, r => merge(r, {top: appSettingsPreviewTop + r.top - appMenuTop}))
   let appWindow = appPreviewing ? (railSettingsSelected ? appSettingsPreviewRows : appPreviewRows) : fullAppWindow
   // Anchoring must use the unfiltered document even during a preview.
@@ -1430,21 +1428,6 @@ face "Omagara" {
                     height: appLabelHeight
                     font: chosenFont
                     fontSize: 22 * appScale
-                    color: secondaryText
-                    maxLines: 1
-                    padding: cfg.shadeAppLabels ? [8 * appScale, 3 * appScale] : [0, 0]
-                    background: cfg.shadeAppLabels ? appLabelShade : transparent
-                    radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 4 * appScale : 0
-                  }
-                }
-              } else if row.kind == "menuHeading" {
-                Row {
-                  fill: width
-                  Text {
-                    text: "Omagara"
-                    height: appMenuHeadingHeight
-                    font: chosenFont
-                    fontSize: 20 * appScale
                     color: secondaryText
                     maxLines: 1
                     padding: cfg.shadeAppLabels ? [8 * appScale, 3 * appScale] : [0, 0]
