@@ -1,0 +1,79 @@
+face "Daily learning" {
+  meta { owl: 18; description: "Published daily word and a daily selection of sourced college math problems"; version: "3.2"; license: "MIT"; category: "productivity" }
+  page: 0
+  padding: 0
+  background: linear(0, 0, 1, 1, [background, mix(background, blue, 0.12), background])
+  source now = clock every 1m
+  let date = fmtTime(now, "yyyy-MM-dd")
+  requires { pacman: ["nodejs"] }
+  source data = cmd("""node -e 'const fs=require('\''fs'\'');
+const dir=require('\''path'\'').join(require('\''os'\'').homedir(),'\''.cache'\'','\''daily-learning'\'');
+fs.mkdirSync(dir,{recursive:true});
+const date=/^\d{4}-\d{2}-\d{2}$/.test(process.argv[1]||'\'''\'') ? process.argv[1] : new Date().toISOString().slice(0,10);
+const decode=s=>s.replace(/&#x([0-9a-f]+);/gi,(_,n)=>String.fromCodePoint(parseInt(n,16))).replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(+n)).replace(/&(amp|lt|gt|quot|apos|nbsp);/g,(_,n)=>({amp:'\''&'\'',lt:'\''<'\'',gt:'\''>'\'',quot:'\''"'\'',apos:"'\''",nbsp:'\'' '\''})[n]);
+const plain=s=>decode(s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'\''$1'\'').replace(/<\/(p|div|blockquote|li|h\d)>/g,'\''\n\n'\'').replace(/<br\s*\/?>/g,'\''\n'\'').replace(/<[^>]+>/g,'\'''\'')).replace(/\n\s*\n\s*\n/g,'\''\n\n'\'').trim();
+const math=s=>plain(s).replace(/\\(?:left|right|displaystyle|textstyle)/g,'\'''\'').replace(/\\(?:cdot|times)/g,'\''×'\'').replace(/\\pi/g,'\''π'\'').replace(/\\theta/g,'\''θ'\'').replace(/\\alpha/g,'\''α'\'').replace(/\\beta/g,'\''β'\'').replace(/\\infty/g,'\''∞'\'').replace(/\\sqrt\{([^{}]+)\}/g,'\''√($1)'\'').replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g,'\''($1)/($2)'\'').replace(/\\(?:text|mathrm)\{([^{}]+)\}/g,'\''$1'\'').replace(/\$/g,'\'''\'');
+const get=async u=>{let r=await fetch(u,{signal:AbortSignal.timeout(18000),headers:{'\''User-Agent'\'':'\''DailyLearningPersonalWidget/1.0'\''}});if(!r.ok)throw Error('\''HTTP '\''+r.status);return r.text()};
+async function cached(name,fn){const p=dir+'\''/'\''+name+'\''.json'\'';let old={};try{old=JSON.parse(fs.readFileSync(p,'\''utf8'\''))}catch{};if(old.checked===date&&!old.error)return old;try{const fresh={...await fn(),checked:date,fetched:new Date().toISOString()};fs.writeFileSync(p,JSON.stringify(fresh));return fresh}catch(e){return {...old,error:'\''Could not refresh: '\''+e.message,stale:!!old.title}}}
+(async()=>{
+const [word,problem]=await Promise.all([
+cached('\''word'\'',async()=>{const xml=await get('\''https://www.merriam-webster.com/wotd/feed/rss2'\'');const item=xml.match(/<item>([\s\S]*?)<\/item>/)?.[1];if(!item)throw Error('\''No word in feed'\'');const tag=n=>item.match(new RegExp('\''<'\''+n+'\''[^>]*>([\\s\\S]*?)<\/'\''+n+'\''>'\''))?.[1]||'\'''\'';const desc=tag('\''description'\'').replace(/<!\[CDATA\[|\]\]>/g,'\'''\'');const short=tag('\''merriam:shortdef'\'');let body=plain(short||desc);if(!short)body=body.split(/Did You Know\?/i)[0].replace(/^Merriam-Webster'\''s Word of the Day[^\n]*\n+/,'\'''\'');return {title:plain(tag('\''title'\'')),body:body.split(/\s+/).slice(0,100).join('\'' '\''),url:plain(tag('\''link'\'')),published:plain(tag('\''pubDate'\'')),source:'\''Merriam-Webster'\''};}),
+cached('\''math'\'',async()=>{const topics=['\''geometry'\'','\''multivariable-calculus'\'','\''linear-algebra'\'','\''geometry'\'','\''ordinary-differential-equations'\'','\''integration'\'','\''optimization'\''];const day=Math.floor(Date.parse(date+'\''T00:00:00Z'\'')/86400000);const topic=topics[day%topics.length];const api='\''https://api.stackexchange.com/2.3/questions?site=math&pagesize=100&order=desc&sort=votes&min=5&tagged='\''+encodeURIComponent(topic)+'\''&filter=withbody'\'';const j=JSON.parse(await get(api));if(j.error_message)throw Error(j.error_message);let pool=(j.items||[]).filter(x=>x.accepted_answer_id&&x.body.length<7000&&/find|calculat|determin|prove|evaluat|area|volume|integral|solve/i.test(x.title));if(topic==='\''geometry'\''){const illustrated=pool.filter(x=>/<img /i.test(x.body));if(illustrated.length)pool=illustrated;}if(!pool.length)throw Error('\''No matching problems'\'');const q=pool[Math.floor(day/7)%pool.length];const images=[...q.body.matchAll(/<img[^>]+src="(https:[^"]+)"/g)].map(x=>decode(x[1])).slice(0,3);return {title:math(q.title),body:math(q.body),images,url:q.link,id:q.question_id,author:decode(q.owner?.display_name||'\''Community contributor'\''),topic,source:'\''Mathematics Stack Exchange'\'',license:q.content_license||'\''CC BY-SA'\'',published:new Date(q.creation_date*1000).toISOString().slice(0,10)};})]);
+console.log(JSON.stringify({word,problem}));
+})().catch(e=>{console.log(JSON.stringify({error:e.message}));process.exitCode=0});
+' """ + sh(date)) every 1h json timeout 45s
+  let word = data.word
+  let problem = data.problem
+  on date { refresh() }
+  Column {
+    fill: true
+    gap: 14
+    padding: [20, 16]
+      Column {
+        weight: 1
+        fill: width
+        scroll: true
+        gap: 18
+        Text { text: "DAILY / LEARNING"; fontSize: 12; letterSpacing: 3; color: accent }
+        Text { text: fmtTime(now, "EEEE, d MMMM"); fontSize: 23; font: serif }
+        Column {
+          fill: width
+          gap: 12
+          padding: 20
+          background: alpha(surface, 0.85)
+          border: 1
+          borderColor: alpha(accent, 0.3)
+          radius: 20
+          Text { text: "01   WORD OF THE DAY"; fontSize: 11; letterSpacing: 2; color: accent }
+          Text { text: word.title ?? "Fetching today's word…"; font: serif; fontSize: 32 }
+          Text { text: word.body ?? "Connect to the internet to load the publisher's word."; fontSize: 16 }
+          Text { text: "Merriam-Webster · ${word.published ?? "loading"}"; fontSize: 11; color: muted }
+          if word.error { Text { text: word.error; fontSize: 12; color: yellow } }
+          Button { text: "Word entry in browser ↗"; onTap: url(word.url ?? "https://www.merriam-webster.com/word-of-the-day") }
+        }
+        Column {
+          fill: width
+          gap: 14
+          padding: 20
+          background: alpha(surface, 0.85)
+          border: 1
+          borderColor: alpha(blue, 0.35)
+          radius: 20
+          Text { text: "02   DAILY MATH SELECTION"; fontSize: 11; letterSpacing: 2; color: blue }
+          Text { text: problem.topic ?? "Fetching…"; fontSize: 13; color: accent }
+          Text { text: problem.title ?? "Loading a published problem…"; fontSize: 21; font: serif }
+          Text { text: problem.body ?? "Connect to the internet to load the source."; fontSize: 16 }
+          for picture in problem.images ?? [] {
+            Image { src: picture; fill: width; height: 240; fit: contain; label: "Original problem diagram"; background: #ffffff; radius: 8 }
+          }
+          Text { text: "By ${problem.author ?? "…"} · Mathematics Stack Exchange\n${problem.license ?? ""} · selected ${problem.checked ?? "…"}"; fontSize: 11; color: muted }
+          Text { text: "Open the source for fully typeset equations and community answers."; fontSize: 12; color: muted }
+          if problem.error { Text { text: problem.error; fontSize: 12; color: yellow } }
+          Button { text: "Solution in browser ↗"; onTap: url(problem.url ?? "https://math.stackexchange.com/") }
+        }
+        Button { text: "Refresh from websites"; onTap: refresh() }
+        Text { text: "Published content · saved locally for offline reading\nMath is selected daily from the archive."; fontSize: 11; color: muted; align: center }
+      }
+    Spacer { height: screenInset }
+  }
+}
