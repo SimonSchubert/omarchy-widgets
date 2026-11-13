@@ -1,0 +1,1367 @@
+widget "IMASA" {
+  page: 1
+  order: 3
+  size: 6x3
+  minSize: 6x3
+  requires { pacman: [] }
+  meta { description: "IMASA: jam sistem, kalender KHGT, jadwal shalat Muhammadiyah dengan cache dan notifikasi"; version: "0.21.0"; license: "MIT"; category: "time"; owl: 11 }
+
+  state city = "" persist
+  state lat = 0 persist
+  state lng = 0 persist
+  state prayer = null
+  state cache = null persist
+  state cacheKey = "" persist
+  // Persistent multi-location, date-specific cache (most recent 40 entries).
+  state cacheEntries = [] persist
+  state requestedKey = ""
+  // ---- Kalender hijriah di tab Jadwal ----
+  // Bulan Masehi yang sedang tampil ("yyyy-MM"); kosong berarti bulan berjalan.
+  state calMonth = ""
+  // Tanggal yang dipilih di kalender ("yyyy-MM-dd"); kosong berarti hari ini.
+  state calSel = ""
+  // Jawaban jadwal untuk tanggal pilihan. Sengaja TIDAK disimpan ke cache:
+  // hasilnya hanya dipakai selama tanggal itu yang dipilih.
+  //   calSlot    = jawaban terakhir
+  //   calSlotKey = identitas permintaan yang sedang berjalan ("tanggal|lat|lng")
+  //   calSlotFor = identitas jawaban yang tersimpan, "" bila belum/gagal
+  state calSlot = null
+  state calSlotKey = ""
+  state calSlotFor = ""
+  state calSlotAt = 0
+  state calRetryAt = 0
+  state calendarLoading = false
+  state calendarStartedAt = 0
+  state calendarMessage = ""
+  state calendarRevision = 0
+  state calendarRequestedAt = 0
+  state syncState = "idle"
+  state startedAt = 0
+  state lastSync = 0 persist
+  state retryAt = 0
+  state lastError = ""
+  state tab = "jadwal"
+  state reminderEnabled = false persist
+  state reminderLead = 10 persist
+  // ---- Notification engine state ----
+  // ACTIVE EVENT STATE: the one event the scheduler is currently waiting on.
+  // Persisted as an absolute Unix timestamp so a launcher restart re-arms it.
+  state reminderAt = 0 persist
+  state arrivalAt = 0 persist
+  // A monotonically increasing id for the active context (location+timezone+date).
+  // Bumped whenever the context changes; every armed event carries the generation
+  // it was armed under, so an event from a previous location aborts instead of firing.
+  state eventGeneration = 0 persist
+  // The full context (date|city|timezone|lat|lng|lead) the armed slots belong to.
+  // When this differs from the live context, both slots are cleared and the
+  // generation advances — see the invalidation trigger below.
+  state eventContextKey = "" persist
+  // The event identity each armed slot is currently committed to, e.g.
+  // "date|city|timezone|prayer|arrival". Empty when idle.
+  state reminderEventKey = "" persist
+  state arrivalEventKey = "" persist
+  // Full description of the armed events, for diagnostics and countdown.
+  state reminderEvent = null persist
+  state arrivalEvent = null persist
+  // HISTORY STATE: already-sent events. Never reused as a target.
+  state arrivalLastSent = "" persist
+  state reminderLastSent = "" persist
+  state arrivalLastResult = "belum ada" persist
+  state reminderLastResult = "belum ada" persist
+  // Separate, opt-out notification at the exact prayer time.
+  state arrivalEnabled = true persist
+  state notificationTestAt = 0
+  state notificationTestResult = "belum diuji"
+  // Custom notification sound: "off", an https:// URL, or a path in this
+  // system. The user picks a preset or pastes their own (an uploaded file's
+  // URL, or a file copied into the system such as ~/sounds/adhan.mp3).
+  state notifySound = "off" persist
+  state advancedDiagnostics = false
+  state onlineQuery = ""
+  state onlineSubmitted = ""
+  state locationTimezone = "" persist
+  state locationSource = "local" persist
+  state customName = ""
+  state customLat = ""
+  state customLng = ""
+  state locationMessage = ""
+  state favorites = [] persist
+  // ---- Tab Pengaturan ----
+  // Teks bantuan panjang hanya terbuka saat diminta, supaya tab tidak panjang.
+  state settingsHelp = false
+  // Stempel waktu konfirmasi "setelan awal"; lewat jendelanya batal sendiri.
+  state resetArmedAt = 0
+  // Sakelar pengingat/waktu tiba hanya berlaku di layar ini, tidak disimpan:
+  // keadaan sesungguhnya selalu dibaca dari penjadwal (reminderActive).
+  // Uji notifikasi memakai satu deadline absolut; tidak ada loop hitung mundur.
+
+
+  // Minute precision keeps the tile and sky idle between useful updates.
+  source now = clock every 1m
+  let hasLocation = trim(city) != ""
+  source deviceInfo = android.system every 1h
+  let today = fmtTime(now, "yyyy-MM-dd")
+  // Open-Meteo reports the calendar date in the selected coordinates' local timezone.
+  // A failed timezone lookup falls back to device date, explicitly flagged below.
+  source localTime = http(!hasLocation ? null : "https://api.open-meteo.com/v1/forecast?latitude=${fixed(lat, 4)}&longitude=${fixed(lng, 4)}&current=temperature_2m&daily=sunrise,sunset&forecast_days=1&timezone=auto") every 6h timeout 15s json status
+  // Offline Cache Plus: resolve timezone and local date from saved metadata
+  // for this exact coordinate, never from another city.
+  let onlineTimezoneReady = localTime.ok == true && localTime.out.daily.time[0] != null && localTime.out.timezone != null && localTime.out.utc_offset_seconds != null
+  let locationCache = first(cacheEntries.filter(e => e.lat == lat && e.lng == lng && e.timezone != null && e.utcOffset != null))
+  let offlineTimezoneReady = !onlineTimezoneReady && locationCache.timezone != null && locationCache.utcOffset != null
+  let timezoneReady = onlineTimezoneReady || offlineTimezoneReady
+  // Advance the local date offline too; never present yesterday’s schedule as today.
+  let offlineDate = fmtTime(now, "yyyy-MM-dd", locationCache.timezone ?? null)
+  let targetDate = onlineTimezoneReady ? fmtTime(now, "yyyy-MM-dd", localTime.out.timezone) : offlineTimezoneReady ? offlineDate : today
+  let targetTimezone = onlineTimezoneReady ? localTime.out.timezone : offlineTimezoneReady ? locationCache.timezone : locationTimezone
+  // Fixed offsets prevent an old city's cached/API offset shifting notifications.
+  let rawOffset = onlineTimezoneReady ? num(localTime.out.utc_offset_seconds) : num(locationCache.utcOffset, 0)
+  let effectiveOffset = targetTimezone == "Asia/Jakarta" ? 25200 : targetTimezone == "Asia/Makassar" ? 28800 : targetTimezone == "Asia/Jayapura" ? 32400 : rawOffset
+  let localClock = onlineTimezoneReady ? (localTime.out.current.time ?? "") : ""
+  let timezoneWarning = !timezoneReady
+  let timezoneSource = onlineTimezoneReady ? "Open-Meteo" : offlineTimezoneReady ? "cache offline" : "belum tersedia"
+  let requestKey = "${targetDate}|${lat}|${lng}"
+  // Full identity of the notification context. Defined up here because the
+  // invalidation trigger below is the first statement that reads it.
+  let contextKey = "${targetDate}|${city}|${targetTimezone}|${lat}|${lng}|${reminderLead}"
+  // Open-Meteo Geocoding: global city search, triggered by Cari button.
+  // Initial query is deliberately hidden until the user submits a search.
+  source geocoding = http(tab != "lokasi" || onlineSubmitted == "" ? null : "https://geocoding-api.open-meteo.com/v1/search?name=${enc(onlineSubmitted)}&count=10&language=id&format=json") every 24h timeout 15s json status
+  let onlineResults = onlineSubmitted != "" && geocoding.ok == true ? (geocoding.out.results ?? []) : []
+
+  source calendar = http(!hasLocation ? null : "https://api-khgt.muhammadiyah.or.id/api/calendar/today?date=${enc(targetDate)}&reload=${int(calendarRevision)}") every 24h timeout 15s json status
+
+  // The response is authoritative. A derived state cannot remain stuck
+  // in loading after a successful HTTP 200 response.
+  let responseValid = prayer.ok == true && prayer.out.success == true && prayer.out.data.schedules[0].date == targetDate
+  let responseMatches = requestedKey == requestKey
+  let responseReady = responseValid && responseMatches
+
+  when hasLocation && requestKey != requestedKey {
+    requestedKey = requestKey
+    retryAt = 0
+    syncState = "loading"
+    startedAt = now
+    prayer = null
+    prayer = post("https://api-khgt.muhammadiyah.or.id/api/sholat/schedule", {lat: lat, lng: lng, date: targetDate, mode: "daily"}, {"Content-Type": "application/json"})
+  }
+
+  // ---- Kalender hijriah (tab Jadwal) ----
+  // Bulan dan tanggal dihitung dari tengah malam UTC, jadi aritmetika hari
+  // tidak pernah meleset walau zona perangkat atau lokasi ber-DST.
+  let calMonthKey = calMonth == "" ? sub(targetDate, 0, 7) : calMonth
+  let calYear = num(sub(calMonthKey, 0, 4))
+  let calMon = num(sub(calMonthKey, 5, 7))
+  let calMonthFirst = "${calMonthKey}-01"
+  let calNextMonthFirst = calMon == 12 ? "${calYear + 1}-01-01" : "${calYear}-${pad(calMon + 1, 2, '0')}-01"
+  let calPrevKey = calMon == 1 ? "${calYear - 1}-12" : "${calYear}-${pad(calMon - 1, 2, '0')}"
+  let calNextKey = calMon == 12 ? "${calYear + 1}-01" : "${calYear}-${pad(calMon + 1, 2, '0')}"
+  let calFirstSec = parseTime(calMonthFirst, null, "UTC")
+  // Minggu = 0. 1970-01-01 jatuh pada Kamis (4), jadi patokannya 4.
+  let calFirstWd = (floor(calFirstSec / 86400) + 4) % 7
+  let calDaysInMonth = floor((parseTime(calNextMonthFirst, null, "UTC") - calFirstSec) / 86400)
+  // Lima baris kalau cukup, enam kalau perlu.
+  let calCellCount = calFirstWd + calDaysInMonth <= 35 ? 35 : 42
+
+  // Kalender resmi KHGT: satu GET per tahun Masehi memberi hari Hijriah untuk
+  // setiap tanggal, lengkap dengan nama bulan Hijriah dan pasaran Jawa. Sumber
+  // ini diperbarui mingguan dan saat tahun yang tampil berganti.
+  source calCal = http(!hasLocation ? null : "https://api-khgt.muhammadiyah.or.id/api/calendar/${fixed(calYear, 0)}") every 168h timeout 20s json status
+  let calLoaded = calCal.ok == true && calCal.out.success == true && calCal.out.data != null
+  // `gregorian_month` dari API ini 0-based (0 = Januari); `merge` menempelkan
+  // nama dan tahun Hijriah bulan induk ke setiap harinya.
+  let calRaw = calLoaded ? flatten(calCal.out.data.map(m => filter(m.days ?? [], x => x != null).map(x => merge(x, {hm: m.hijri_month_name, hy: m.hijri_year})))) : []
+  // Home fasting dates stay independent of the month/year browsed on screen.
+  let homeDate = targetDate
+  let homeTomorrow = fmtTime(parseTime(homeDate, null, "UTC") + 86400, "yyyy-MM-dd", "UTC")
+  let homeYear = num(sub(homeDate, 0, 4))
+  let homeNextYear = num(sub(homeTomorrow, 0, 4))
+  source homeCal = http(hasLocation && homeYear != calYear ? "https://api-khgt.muhammadiyah.or.id/api/calendar/${fixed(homeYear, 0)}" : null) every 168h timeout 20s json status
+  source homeCalNext = http(hasLocation && homeNextYear != homeYear && homeNextYear != calYear ? "https://api-khgt.muhammadiyah.or.id/api/calendar/${fixed(homeNextYear, 0)}" : null) every 168h timeout 20s json status
+  let homeExtra = (homeYear != calYear && homeCal.ok == true && homeCal.out.success == true ? homeCal.out.data : []) + (homeNextYear != homeYear && homeNextYear != calYear && homeCalNext.ok == true && homeCalNext.out.success == true ? homeCalNext.out.data : [])
+  let fastingRaw = calRaw + flatten(homeExtra.map(m => filter(m.days ?? [], x => x != null).map(x => merge(x, {hm: m.hijri_month_name, hy: m.hijri_year}))))
+  // Rules use the official KHGT date. Prohibitions override every sunnah.
+  // References: tarj ih Muhammadiyah, Macam Puasa Wajib dan Sunah;
+  // Muhammadiyah, Puasa Sunnah Ayyam al-Bidh di Hari Tasyrik (27 Mei 2026).
+  let calRules = fastingRaw.map(d => merge(d, {
+    hd: num(d.hijri_date),
+    wd: (floor(parseTime("${d.gregorian_year}-${pad(d.gregorian_month + 1, 2, '0')}-${pad(d.gregorian_date, 2, '0')}", null, "UTC") / 86400) + 4) % 7,
+    forbidden: d.hm == "Syawal" && num(d.hijri_date) == 1 ? "Idulfitri" : d.hm == "Zulhijah" && num(d.hijri_date) == 10 ? "Iduladha" : d.hm == "Zulhijah" && num(d.hijri_date) >= 11 && num(d.hijri_date) <= 13 ? "Hari Tasyrik" : ""
+  }))
+  let calAll = calRules.map(d => merge(d, {
+    fastLabels: d.forbidden != "" ? [] : d.hm == "Ramadhan" ? ["Wajib Ramadan"] : filter([
+      d.wd == 1 ? "Senin" : d.wd == 4 ? "Kamis" : "",
+      d.hd >= 13 && d.hd <= 15 ? "Ayyamul Bidh" : "",
+      d.hm == "Zulhijah" && d.hd == 9 ? "Arafah" : "",
+      d.hm == "Muharam" && d.hd == 9 ? "Tasu’a" : "",
+      d.hm == "Muharam" && d.hd == 10 ? "Asyura" : "",
+      d.hm == "Syawal" && d.hd >= 2 ? "Pilihan 6 hari Syawal" : "",
+      d.hm == "Syaban" && d.hd <= 28 ? "Sya’ban" : ""
+    ], x => x != "")
+  }))
+  let homeFastingDays = [homeDate, homeTomorrow].map(date => {date: date, day: first(calAll.filter(d => "${d.gregorian_year}-${pad(d.gregorian_month + 1, 2, '0')}-${pad(d.gregorian_date, 2, '0')}" == date))})
+  let homeFastingRows = homeFastingDays.filter(e => e.date == homeDate || e.day != null && e.day.forbidden == "" && len(e.day.fastLabels) > 0).map(e => merge(e, {
+    label: e.date == homeDate ? "Hari ini" : "Besok",
+    info: e.day == null ? "Info puasa belum tersedia" : e.day.forbidden != "" ? "${e.day.forbidden} · dilarang puasa" : len(e.day.fastLabels) > 0 ? join(e.day.fastLabels, " · ") : "Tidak ada puasa khusus"
+  }))
+  let calCells = range(calCellCount).map(i => calFirstSec + (i - calFirstWd) * 86400).map(sec => {sec: sec, y: num(fmtTime(sec, "yyyy", "UTC")), m0: num(fmtTime(sec, "MM", "UTC")) - 1, d: num(fmtTime(sec, "dd", "UTC"))}).map(c => merge(c, {iso: fmtTime(c.sec, "yyyy-MM-dd", "UTC"), inMonth: c.y == calYear && c.m0 == calMon - 1, day: first(calAll.filter(d => d.gregorian_year == c.y && d.gregorian_month == c.m0 && d.gregorian_date == c.d))}))
+  let calRows = range(calCellCount / 7).map(r => calCells.drop(r * 7).take(7))
+  let calMiddle = first(calCells.filter(c => c.inMonth && c.d == 15))
+  let calHijriLabel = calMiddle.day != null ? "${calMiddle.day.hm} ${calMiddle.day.hy} H" : "Kalender hijriah belum termuat"
+  // Daftar awal bulan Hijriah untuk tab Kalender (hanya yang mulai di tahun ini).
+  let calMonths = calLoaded ? calCal.out.data.filter(m => m.tanggal_masehi != null && startsWith(m.tanggal_masehi, "${calYear}-")) : []
+
+  // Tanggal terpilih: hari ini kalau belum ada pilihan.
+  let calSelected = calSel == "" ? targetDate : calSel
+  let calSelSec = parseTime(calSelected, null, "UTC")
+  let calSelY = num(sub(calSelected, 0, 4))
+  let calSelM0 = num(sub(calSelected, 5, 7)) - 1
+  let calSelD = num(sub(calSelected, 8, 10))
+  let calSelDay = first(calAll.filter(d => d.gregorian_year == calSelY && d.gregorian_month == calSelM0 && d.gregorian_date == calSelD))
+  let calSelDateLabel = fmtTime(calSelSec, "EEEE, d MMMM yyyy", "UTC")
+  let calSelHijriLabel = calSelDay != null ? "${calSelDay.hijri_date} ${calSelDay.hm} ${calSelDay.hy} H" : ""
+  let fastBlue = #91d8ff
+  let fastRequired = #245ca6
+  let fastRed = #f36b74
+  let calFastTint = calSelDay.forbidden != null && calSelDay.forbidden != "" ? fastRed : calSelDay.hm == "Ramadhan" ? fastRequired : len(calSelDay.fastLabels) > 0 ? fastBlue : muted
+  let calFastTitle = calSelDay == null ? "Info puasa belum tersedia" : calSelDay.forbidden != "" ? "Dilarang puasa · ${calSelDay.forbidden}" : len(calSelDay.fastLabels) > 0 ? join(calSelDay.fastLabels, " · ") : "Tidak ada puasa khusus pada tanggal ini"
+  let calFastInfo = calSelDay == null ? "Menunggu tanggal Hijriah resmi KHGT." : calSelDay.forbidden != "" ? (calSelDay.forbidden == "Hari Tasyrik" ? "11–13 Zulhijah: tidak ada anjuran puasa sunnah, termasuk Senin/Kamis dan Ayyamul Bidh. Pengecualian khusus jamaah haji yang tidak mendapat hadyu. Puasa tiga hari bulanan dapat dilengkapi pada hari lain, misalnya 16 Zulhijah." : "Hari raya: dilarang berpuasa, meskipun bertepatan dengan Senin atau Kamis.") : calSelDay.hm == "Ramadhan" ? "Puasa Ramadan wajib bagi yang memenuhi syarat; label sunnah tidak ditampilkan selama Ramadan." : len(calSelDay.fastLabels) == 0 ? "Tidak ada anjuran puasa khusus yang ditandai untuk tanggal ini. Qadha, nazar dan kafarat mengikuti kewajiban pribadi." : join(filter([
+    calSelDay.wd == 1 || calSelDay.wd == 4 ? "Puasa sunnah mingguan pada Senin dan Kamis." : "",
+    calSelDay.hd >= 13 && calSelDay.hd <= 15 ? "Ayyamul Bidh: puasa sunnah tanggal 13–15 Hijriah." : "",
+    calSelDay.hm == "Zulhijah" && calSelDay.hd == 9 ? "Arafah: sunnah bagi yang tidak sedang berhaji." : "",
+    calSelDay.hm == "Muharam" && calSelDay.hd == 9 ? "Tasu’a: 9 Muharam, mendampingi puasa Asyura." : "",
+    calSelDay.hm == "Muharam" && calSelDay.hd == 10 ? "Asyura: puasa sunnah 10 Muharam." : "",
+    calSelDay.hm == "Syawal" ? "Syawal: pilih total enam hari setelah Idulfitri; tidak harus berturut-turut. Penanda ini menunjukkan hari yang dapat dipilih." : "",
+    calSelDay.hm == "Syaban" ? "Sya’ban: dianjurkan memperbanyak puasa. Jangan sengaja mendahului Ramadan satu atau dua hari kecuali kebiasaan puasa." : ""
+  ], x => x != ""), " ")
+  let calSelPasaran = calSelDay.pasaran ?? ""
+  // Identitas jawaban = tanggal + lokasi, jadi jawaban lokasi lama atau
+  // tanggal lain tidak pernah tampil sebagai jadwal tanggal terpilih.
+  let calSelKey = "${calSel}|${lat}|${lng}"
+  let calSelLoading = calSel != "" && calSlotKey == calSelKey
+  let calSelSchedule = calSlotFor == calSelKey && calSlot.ok == true && calSlot.out.success == true && calSlot.out.data.schedules[0].date == calSel ? calSlot.out.data.schedules[0] : null
+  let calSelFailed = calSel != "" && !calSelLoading && calSelSchedule == null && calRetryAt > now
+
+  // Satu permintaan untuk tanggal yang dipilih, tanpa cache: hanya tanggal itu
+  // yang diunduh, dan hasilnya dipakai selama tanggal itu masih dipilih.
+  when hasLocation && calSel != "" && calSlotKey == "" && calSlotFor != calSelKey && now >= calRetryAt {
+    calSlotKey = calSelKey
+    calSlotAt = now
+    calSlot = null
+    calSlot = post("https://api-khgt.muhammadiyah.or.id/api/sholat/schedule", {lat: lat, lng: lng, date: calSel, mode: "daily"}, {"Content-Type": "application/json"})
+  }
+
+  // Jawaban datang: tandai sebagai milik tanggal+lokasi yang meminta. Jawaban
+  // yang gagal atau untuk tanggal lain diberi jeda supaya API tidak dihajar.
+  when calSlot != null {
+    let sch = calSlot.ok == true && calSlot.out.success == true ? calSlot.out.data.schedules[0] : null
+    if sch != null && sch.date == sub(calSlotKey, 0, 10) {
+      calSlotFor = calSlotKey
+      calRetryAt = 0
+    } else {
+      calSlotFor = ""
+      calRetryAt = now + 90
+    }
+    calSlotKey = ""
+  }
+
+  // Jaring pengaman: permintaan yang tidak pernah menjawab tidak boleh
+  // memblokir pilihan berikutnya selamanya.
+  when calSelLoading && now - calSlotAt > 30 {
+    calSlotKey = ""
+    calRetryAt = now + 30
+  }
+
+  // Single invalidation point for notification context (BUG 1, 2, 3, 7).
+  // contextKey covers date, city, timezone, coordinates and reminder lead, so it
+  // changes whenever the armed events' meaning changes — requestKey is a subset
+  // of it, so a location/date switch lands here too, while a mere reminder-lead
+  // change re-arms without wasting an HTTP request. The generation advances and
+  // both armed slots are cleared; any event still pending under the old
+  // generation can never fire, so nothing from the previous context leaks in.
+  // History (arrivalLastSent/reminderLastSent) is deliberately untouched.
+  when contextKey != eventContextKey {
+    eventContextKey = contextKey
+    eventGeneration = eventGeneration + 1
+    reminderAt = 0
+    reminderEvent = null
+    reminderEventKey = ""
+    arrivalAt = 0
+    arrivalEvent = null
+    arrivalEventKey = ""
+  }
+
+  when responseReady && (cacheKey != requestKey || lastSync < startedAt) {
+    cache = prayer.out.data.schedules[0]
+    cacheKey = requestKey
+    cacheEntries = [{key: requestKey, lat: lat, lng: lng, city: city, timezone: targetTimezone, utcOffset: effectiveOffset, sunrise: onlineTimezoneReady ? localTime.out.daily.sunrise[0] : locationCache.sunrise, sunset: onlineTimezoneReady ? localTime.out.daily.sunset[0] : locationCache.sunset, data: prayer.out.data.schedules[0], savedAt: now}] + cacheEntries.filter(e => e.key != requestKey).take(39)
+    lastSync = now
+    syncState = "success"
+    retryAt = 0
+    lastError = ""
+  }
+
+  when prayer != null && !responseValid && syncState == "loading" && responseMatches {
+    syncState = "error"
+    lastError = "HTTP ${prayer.code ?? "?"}; periksa respons API"
+    retryAt = now + 900
+  }
+
+  at retryAt {
+    retryAt = 0
+    startedAt = now
+    syncState = "loading"
+    prayer = null
+    prayer = post("https://api-khgt.muhammadiyah.or.id/api/sholat/schedule", {lat: lat, lng: lng, date: targetDate, mode: "daily"}, {"Content-Type": "application/json"})
+  }
+
+  // OWL every-block accepts assignments/actions, not nested if statements.
+  // The request-key and response handlers above handle location changes.
+  when syncState == "loading" && now - startedAt > 25 {
+    syncState = "error"
+    lastError = "Respons jadwal belum cocok setelah 25 detik. Coba sinkronkan ulang."
+    retryAt = now + 900
+  }
+
+  // Calendar GET reload uses a changing query parameter, forcing a fresh URL.
+  // Do not rely on refresh() alone to distinguish a new request.
+  when calendarLoading && calendar.ok == true && calendar.out.success == true && calendarRequestedAt > 0 {
+    calendarLoading = false
+    calendarMessage = "Kalender KHGT tersedia"
+  }
+  at calendarStartedAt {
+    calendarStartedAt = 0
+    calendarLoading = false
+    calendarMessage = "Pembaruan selesai; lihat status kalender di bawah."
+  }
+  on calendar {
+    calendarLoading = false
+    calendarMessage = value.ok == true && value.out.success == true ? "Kalender KHGT berhasil diperbarui" : "Kalender gagal dimuat; periksa jaringan"
+  }
+
+  // ---- Lokasi tersedia (tab Lokasi) ----
+  // Daftar "lokasi tersedia" hanya memakai lokasi yang sudah ada di cache
+  // jadwal, dikelompokkan per koordinat (entri baru selalu di depan, jadi
+  // `first` tiap grup adalah simpanan terbaru lokasi itu). Kolom pencarian
+  // menyaring daftar ini secara langsung, sekaligus menjadi kueri pencarian
+  // online bila tombol Cari ditekan.
+  let cachePlaces = values(groupBy(cacheEntries, e => "${e.lat}|${e.lng}")).map(g => first(g))
+  let cacheFilter = lower(trim(onlineQuery))
+  let filteredCache = cacheFilter == "" ? cachePlaces : cachePlaces.filter(e => contains(lower(e.city ?? ""), cacheFilter) || contains(str(e.lat), cacheFilter) || contains(str(e.lng), cacheFilter))
+  let favoriteExists = favorites.any(c => c.name == city && c.lat == lat && c.lng == lng)
+  let manualValid = trim(customName) != "" && trim(customLat) != "" && trim(customLng) != "" && num(customLat, 999) >= -90 && num(customLat, 999) <= 90 && num(customLng, 999) >= -180 && num(customLng, 999) <= 180
+  // Prefer a matching location/date entry; retain legacy single-cache fallback.
+  // Never display data from another coordinate or another date.
+  let cachedEntry = cacheEntries.filter(e => e.key == requestKey)[0]
+  let schedule = cachedEntry.data ?? (cacheKey == requestKey ? cache : null)
+  let valid = schedule.date == targetDate && (cachedEntry.key == requestKey || cacheKey == requestKey)
+  // Satu kartu jadwal untuk tanggal yang dipilih di kalender. Hari ini memakai
+  // jadwal harian yang sudah tersimpan (lengkap dengan hitungan mundur);
+  // tanggal lain memakai jawaban sekali-pakai dari trigger kalender.
+  let calIsToday = calSel == "" || calSel == targetDate
+  let calCardSchedule = calIsToday ? (valid ? schedule : null) : calSelSchedule
+  let loading = syncState == "loading" && !responseReady
+  // Startup self-recovery: a restored request key may match even though its
+  // schedule cache is absent or belongs to a previous date/location.
+  // Never interfere with an in-flight request or a scheduled error retry.
+  when timezoneReady && requestKey == requestedKey && !valid && !responseReady && retryAt == 0 && (syncState == "idle" || syncState == "success") && now - startedAt > 30 {
+    requestedKey = ""
+    syncState = "idle"
+  }
+  let displayState = responseReady || valid && syncState == "success" ? "success" : loading ? "loading" : syncState
+  let hijri = calendar.ok == true && calendar.out.success == true ? calendar.out.data.hijri_formatted : "Kalender KHGT belum tersedia"
+  let hijriPlain = replace(hijri, " H KHGT", "")
+  let hijriYear = calendar.ok == true && calendar.out.success == true ? last(split(hijriPlain, " ")) : ""
+  let hijriMonthDay = hijriYear == "" ? hijriPlain : replace(hijriPlain, " ${hijriYear}", "")
+  let calCardHijri = calSelHijriLabel != "" ? (calSelPasaran == "" ? calSelHijriLabel : "${calSelHijriLabel} · ${calSelPasaran}") : (calIsToday && hijriYear != "" ? "${hijriMonthDay} ${hijriYear} H" : "")
+  // Unix clock + location UTC offset gives local seconds since midnight.
+  // Unlike the fetched weather timestamp, this advances locally each minute.
+  let utcOffset = timezoneReady ? effectiveOffset : 0
+  let localSeconds = timezoneReady ? num(fmtTime(now, "HH", targetTimezone)) * 3600 + num(fmtTime(now, "mm", targetTimezone)) * 60 : 0
+  let localHour = floor(localSeconds / 3600)
+  let localMinute = floor((localSeconds % 3600) / 60)
+  let localClockLive = "${pad(localHour, 2, '0')}:${pad(localMinute, 2, '0')}"
+  let deviceClock = fmtTime(now, "HH:mm")
+  let lastFireClock = fmtTime(now, "dd MMM HH:mm:ss")
+  // Active notification sound; "" when off, so sound("") is never called.
+  let notifySoundSrc = notifySound == "off" ? "" : trim(notifySound)
+  let notifySoundLabel = notifySoundSrc == "" ? "Tanpa suara" : notifySoundSrc
+  let deviceTimezone = deviceInfo.timezone ?? ""
+  let dualClock = timezoneReady && deviceTimezone != "" && deviceTimezone != targetTimezone
+  // ---- Ringkasan sekilas untuk tab Pengaturan ----
+  let syncLabel = displayState == "success" ? "Tersinkron" : displayState == "loading" ? "Memuat" : displayState == "error" ? "Gagal" : "Menunggu"
+  let syncTint = displayState == "success" ? green : displayState == "loading" ? accent : displayState == "error" ? orange : muted
+  let kalenderLabel = calLoaded ? "Termuat" : "Belum termuat"
+  let reminderLabel = !reminderEnabled ? "Nonaktif" : !timezoneReady ? "Tunggu zona" : "${reminderLead} menit"
+  // Nama pendek suara aktif: preset dikenali dari URL-nya, selain itu filenya.
+  let soundName = notifySoundSrc == "" ? "Tanpa suara" : contains(notifySoundSrc, "beep_short") ? "Beep" : contains(notifySoundSrc, "alarm_clock") ? "Alarm" : contains(notifySoundSrc, "digital_watch") ? "Digital" : last(split(notifySoundSrc, "/"))
+
+  // Moving twelve-hour sky: six hours before and after local now.
+  let riseParts = split(last(split((onlineTimezoneReady ? localTime.out.daily.sunrise[0] : locationCache.sunrise) ?? "06:00", "T")), ":")
+  let setParts = split(last(split((onlineTimezoneReady ? localTime.out.daily.sunset[0] : locationCache.sunset) ?? "18:00", "T")), ":")
+  let riseSeconds = num(riseParts[0], 6) * 3600 + num(riseParts[1], 0) * 60
+  let setSeconds = num(setParts[0], 18) * 3600 + num(setParts[1], 0) * 60
+  let skySteps = 48
+  let hNow = localSeconds / 3600
+  let riseH = riseSeconds / 3600
+  let setH = setSeconds / 3600
+  let dayLenH = max(1, setH - riseH)
+  let skyHalfHours = 6
+  let skyHours = range(skySteps + 1).map(i => (hNow - skyHalfHours + i * 2 * skyHalfHours / skySteps + 24) % 24)
+  let skyElev = skyHours.map(h => h >= riseH && h <= setH ? sin(rad(180 * (h - riseH) / dayLenH)) : -sin(rad(180 * ((h - setH + 24) % 24) / max(1, 24 - dayLenH))))
+  // Elevation → sky color: one continuous piecewise gradient, dusk rose at the
+  // horizons → warm horizon → day blue → zenith blue in the middle. These are
+  // ABSOLUTE hex colors, never theme or terminal-style names, which is what
+  // lets the strip keep its own look no matter what style the launcher uses.
+  let skyColors = skyElev.map(e =>
+    e < -0.35 ? mix(#03050e, #0a1030, (e + 1) / 0.65)
+    : e < -0.12 ? mix(#0a1030, #3a2a5e, (e + 0.35) / 0.23)
+    : e < 0.0 ? mix(#3a2a5e, #e0705a, (e + 0.12) / 0.12)
+    : e < 0.12 ? mix(#e0705a, #f4b26a, e / 0.12)
+    : e < 0.35 ? mix(#f4b26a, #7fb6e8, (e - 0.12) / 0.23)
+    : mix(#7fb6e8, #a9dcff, (e - 0.35) / 0.65))
+  // Day or night decides which sky the strip paints: the sunrise→sunset
+  // gradient while the sun is up, and a proper night sky outside that window
+  // (the bug was that the daylight gradient was painted around the clock).
+  let isDay = hNow >= riseH && hNow <= setH
+  let prayersToday = valid && timezoneReady ? [
+    {name: "Subuh", time: schedule.subuh},
+    {name: "Zuhur", time: schedule.dzuhur},
+    {name: "Asar", time: schedule.ashar},
+    {name: "Magrib", time: schedule.maghrib},
+    {name: "Isya", time: schedule.isya}
+  ].map(p => {name: p.name, time: p.time, at: parseTime("${targetDate} ${p.time}", null, targetTimezone)}) : []
+  let upcoming = prayersToday.filter(p => p.at > now).sortBy(p => p.at)
+  let nextEvent = first(upcoming)
+  let nextPrayer = !valid || !timezoneReady ? "Belum tersedia" : nextEvent.name ?? "Selesai hari ini"
+  let nextPrayerTime = nextEvent.time ?? ""
+  let nextPrayerInfo = nextEvent.name == null ? "Seluruh waktu shalat hari ini telah lewat" : "${nextEvent.name} · ${nextEvent.time}"
+  let countdownSeconds = nextEvent.at == null ? 0 : max(0, nextEvent.at - now)
+  let countdownLabel = nextEvent.at == null ? "" : countdownSeconds < 60 ? "<1 mnt" : "${floor(countdownSeconds / 3600)}j ${floor((countdownSeconds % 3600) / 60)}m"
+  // Kalender: tujuh kolom berbagi lebar layar setelah padding layar (2×12),
+  // padding kartu (2×10), dan enam celah antar kolom.
+  let calCellW = floor(((screenWidth ?? 360) - 32 - 24 - 6 * 3) / 7)
+  // Every notification event is a self-describing record built from local prayer
+  // time + the location's timezone offset → one absolute Unix timestamp. Nothing
+  // downstream re-derives a target from HH:mm or from the clock, so a countdown
+  // and its notification always refer to the same instant (BUG 4).
+  let arrivalEvents = prayersToday.map(p => {name: p.name, time: p.time, at: p.at, kind: "arrival", key: "${targetDate}|${city}|${targetTimezone}|${p.name}|arrival", date: targetDate, city: city, timezone: targetTimezone})
+  let reminderEvents = prayersToday.map(p => ({name: p.name, time: p.time, at: p.at - reminderLead * 60, kind: "reminder${reminderLead}", prayerAt: p.at, key: "${targetDate}|${city}|${targetTimezone}|${p.name}|reminder${reminderLead}", date: targetDate, city: city, timezone: targetTimezone}))
+  // BUG 5: a location whose reminder time already elapsed is never armed and never
+  // fired retroactively. Only strictly-future events qualify; falling through to a
+  // later prayer happens naturally because every earlier event fails this filter.
+  let nextArrival = first(arrivalEvents.filter(p => p.at > now + 1 && p.key != arrivalLastSent).sortBy(p => p.at))
+  let nextReminder = first(reminderEvents.filter(p => p.at > now + 1 && p.key != reminderLastSent).sortBy(p => p.at))
+  // The prayer that is actually next; its reminder time, to report SKIPPED when it elapsed.
+  let upcomingPrayerReminderAt = nextEvent.at != null ? nextEvent.at - reminderLead * 60 : 0
+  let reminderSkipped = reminderEnabled && valid && timezoneReady && upcomingPrayerReminderAt > 0 && upcomingPrayerReminderAt <= now && nextEvent.at > now
+  // Armed slots read back only when their stored event still matches the armed key,
+  // so a cleared or generation-stale slot never reads as active.
+  let armedReminder = reminderEvent != null && reminderEvent.key == reminderEventKey ? reminderEvent : null
+  let armedArrival = arrivalEvent != null && arrivalEvent.key == arrivalEventKey ? arrivalEvent : null
+  let reminderActive = reminderAt > now && armedReminder != null
+  let arrivalActive = arrivalAt > now && armedArrival != null
+  let arrivalScheduleStatus = !arrivalEnabled ? "Nonaktif" : !valid ? "Menunggu jadwal lokasi" : !timezoneReady ? "Menunggu zona waktu" : arrivalActive ? "Terjadwal" : "Tidak ada jadwal berikutnya hari ini"
+  let reminderLocalSeconds = reminderActive && timezoneReady ? (reminderAt + utcOffset) % 86400 : 0
+  let reminderLocalHour = floor(reminderLocalSeconds / 3600)
+  let reminderLocalMinute = floor((reminderLocalSeconds % 3600) / 60)
+  let reminderLocalClock = "${pad(reminderLocalHour, 2, '0')}:${pad(reminderLocalMinute, 2, '0')}"
+  let reminderRemaining = max(0, reminderAt - now)
+  let reminderCountdownLabel = !reminderActive ? "—" : reminderRemaining < 60 ? "<1 menit" : "${ceil(reminderRemaining / 60)} menit"
+  let reminderScheduleStatus = !reminderEnabled ? "Nonaktif" : !valid ? "Menunggu jadwal shalat sesuai lokasi" : !timezoneReady ? "Menunggu verifikasi zona waktu" : reminderSkipped ? "Waktu pengingat sudah lewat" : reminderActive ? "Terjadwal" : "Belum ada pengingat mendatang hari ini"
+  let reminderSummary = reminderEnabled ? "Pengingat aktif · ${reminderLead} menit sebelum shalat" : "Pengingat nonaktif"
+  // Sakelar menampilkan pilihan pengguna. Penjadwal baru mengaktifkan slotnya
+  // setelah jadwal dan zona waktu lokasi tersedia.
+  let armedReminderEnabled = reminderEnabled && timezoneReady
+  let armedArrivalEnabled = arrivalEnabled && timezoneReady
+  let reminderNote = !reminderEnabled ? "Pengingat sebelum shalat" : !timezoneReady ? "Menunggu zona waktu lokasi" : reminderActive ? "Aktif · ${armedReminder.name} ${reminderLocalClock}" : reminderSkipped ? "Lewat untuk ${nextEvent.name} hari ini" : valid ? "Menunggu jadwal berikutnya" : "Menunggu jadwal lokasi"
+  let arrivalNote = !arrivalEnabled ? "Notifikasi waktu tiba" : !timezoneReady ? "Menunggu zona waktu lokasi" : arrivalActive ? "Aktif · ${armedArrival.name} ${armedArrival.time}" : valid ? "Menunggu jadwal berikutnya" : "Menunggu jadwal lokasi"
+  let reminderCardTint = armedReminderEnabled ? green : orange
+  let arrivalCardTint = armedArrivalEnabled ? green : orange
+  let suaraCountdown = notifySoundSrc == "" ? "tanpa suara" : "dengan suara"
+  // ---- Scheduler: two self-re-arming `at` triggers ----
+  // `at` fires even while the page is off screen and the clock source is paused
+  // (README). This is what lets the Subuh→Isya chain advance on its own without the
+  // widget being opened (BUG 6). Each handler consumes its slot and re-arms to the
+  // next strictly-future event, so the day walks forward unattended. The armed event
+  // carries a generation; a location/timezone/date change bumps the generation and
+  // clears the slots, so a stale event aborts instead of firing (BUG 3, 7).
+
+  when valid && timezoneReady && arrivalEnabled && !arrivalActive && nextArrival.at != null && arrivalEventKey != nextArrival.key {
+    arrivalEvent = merge(nextArrival, {generation: eventGeneration})
+    arrivalEventKey = nextArrival.key
+    arrivalAt = nextArrival.at
+  }
+
+  at arrivalAt {
+    let consumedArrivalAt = arrivalAt
+    if arrivalAt > 0 && arrivalEnabled && valid && timezoneReady && armedArrival != null && armedArrival.key == arrivalEventKey && armedArrival.generation == eventGeneration && armedArrival.key != arrivalLastSent {
+      notify("IMASA · Waktu ${armedArrival.name}", "Telah masuk waktu ${armedArrival.name} di ${armedArrival.city} (${armedArrival.time}). Jadwal shalat Muhammadiyah.")
+      if notifySoundSrc != "" { sound(notifySoundSrc) }
+      arrivalLastSent = armedArrival.key
+      arrivalLastResult = "${armedArrival.name} · ${lastFireClock}"
+    }
+    arrivalEvent = null
+    arrivalEventKey = ""
+    arrivalAt = 0
+    let followingArrival = first(arrivalEvents.filter(p => p.at > consumedArrivalAt && p.key != arrivalLastSent).sortBy(p => p.at))
+    if arrivalEnabled && valid && timezoneReady && followingArrival.at != null {
+      arrivalEvent = merge(followingArrival, {generation: eventGeneration})
+      arrivalEventKey = followingArrival.key
+      arrivalAt = followingArrival.at
+    }
+  }
+
+  when reminderEnabled && valid && timezoneReady && !reminderActive && nextReminder.at != null && reminderEventKey != nextReminder.key {
+    reminderEvent = merge(nextReminder, {generation: eventGeneration})
+    reminderEventKey = nextReminder.key
+    reminderAt = nextReminder.at
+  }
+
+  at reminderAt {
+    let consumedReminderAt = reminderAt
+    if reminderAt > 0 && reminderEnabled && valid && timezoneReady && armedReminder != null && armedReminder.key == reminderEventKey && armedReminder.generation == eventGeneration && armedReminder.key != reminderLastSent {
+      notify("IMASA · ${armedReminder.name}", "Waktu ${armedReminder.name} di ${armedReminder.city} sekitar ${reminderLead} menit lagi. Jadwal Muhammadiyah.")
+      if notifySoundSrc != "" { sound(notifySoundSrc) }
+      reminderLastSent = armedReminder.key
+      reminderLastResult = "${armedReminder.name} · ${lastFireClock}"
+    }
+    reminderEvent = null
+    reminderEventKey = ""
+    reminderAt = 0
+    let followingReminder = first(reminderEvents.filter(p => p.at > consumedReminderAt && p.key != reminderLastSent).sortBy(p => p.at))
+    if reminderEnabled && valid && timezoneReady && followingReminder.at != null {
+      reminderEvent = merge(followingReminder, {generation: eventGeneration})
+      reminderEventKey = followingReminder.key
+      reminderAt = followingReminder.at
+    }
+  }
+
+  at notificationTestAt {
+    notify("IMASA · Uji terjadwal", "Uji notifikasi terjadwal berhasil dipicu.")
+    if notifySoundSrc != "" { sound(notifySoundSrc) }
+    notificationTestAt = 0
+    notificationTestResult = "pemicu dijalankan; periksa notifikasi Android"
+  }
+
+  // Independent deadlines, with no countdown loop or periodic state writes.
+  at resetArmedAt { resetArmedAt = 0 }
+  when !arrivalEnabled { arrivalAt = 0; arrivalEvent = null; arrivalEventKey = "" }
+  when !reminderEnabled { reminderAt = 0; reminderEvent = null; reminderEventKey = "" }
+
+  // ---- Kartu status mini: empat sel ringkas di puncak tab Pengaturan ----
+  component SettingStat(caption, value, tint = accent) {
+    Column {
+      gap: 1
+      padding: [10, 8]
+      background: surface
+      border: 1
+      borderColor: border
+      radius: 10 * corners
+      Text { text: caption; font: sans; style: label; color: muted; maxLines: 1 }
+      Text { text: value; style: body; bold: true; color: tint; maxLines: 1 }
+    }
+  }
+
+  // Sakelar bulat di ujung kanan baris pengaturan yang bisa diketuk penuh.
+  // Posisinya digeser lewat offset (yang bisa diubah nilainya), bukan justify.
+  component ToggleKnob(active) {
+    Row {
+      width: 44
+      height: 24
+      padding: 3
+      align: center
+      radius: 12
+      background: active ? green : alpha(muted, 0.3)
+            Box { size: 18; radius: 9; background: foreground; offset: active ? [20, 0] : [0, 0] }
+    }
+  }
+
+  // Kotak bantuan yang bisa dibuka di tab Pengaturan: penjelasan panjang tidak
+  // ikut memanjangkan layar selama tidak diminta.
+  component HelpBox(text) {
+    Column {
+      gap: 4
+      padding: [10, 8]
+      radius: 10 * corners
+      background: alpha(background, 0.55)
+      Text { text: text; style: small; color: muted; maxLines: 6 }
+    }
+  }
+
+  // Judul bagian di dalam kartu: garis aksen kecil, lalu namanya. Lebih ringkas
+  // daripada judul + catatan, dan tetap terbaca sebagai kepala bagian.
+  component SectionHead(heading, note, tint = muted) {
+    Row {
+      gap: 8
+      align: center
+      Box { width: 3; height: 24; radius: 2; background: tint }
+      Column {
+        weight: 1
+        gap: 2
+        Text { text: heading; font: sans; fontSize: 18; bold: true; maxLines: 2 }
+        Text { text: note; font: sans; style: small; color: tint; maxLines: 1 }
+      }
+    }
+  }
+
+  component Prayer(label, time, active) {
+    Column {
+      gap: 3
+      weight: 1
+      Text { text: label; style: small; color: active ? green : muted; align: center; maxLines: 1 }
+      Text { text: time; fontSize: 14; bold: true; color: active ? green : muted; align: center; maxLines: 1 }
+    }
+  }
+
+  component ScheduleLine(label, time, active) {
+    Row {
+      fill: width
+      gap: 12
+      align: center
+      Text { text: label; weight: 1; font: sans; style: body; maxLines: 1 }
+      Text { text: time; width: 90; align: end; style: title; color: active ? green : accent; maxLines: 1 }
+    }
+  }
+
+  // Peristiwa matahari (terbit/tenggelam): label dan jamnya lebih redup dari
+  // lima waktu shalat, jadi bedanya terbaca tanpa ikon atau panah.
+  component SunLine(label, time) {
+    Row {
+      fill: width
+      gap: 12
+      align: center
+      Text { text: label; weight: 1; style: body; color: muted; maxLines: 1 }
+      Text { text: time; width: 90; align: end; style: title; color: muted; maxLines: 1 }
+    }
+  }
+
+  // Satu sel kalender: angka Hijriah besar, tanggal Masehi kecil di bawahnya.
+  // Hari di luar bulan yang tampil tetap bisa diketuk — kalender lalu pindah
+  // ke bulan tanggal itu.
+  component CalCell(cell, selected, isToday, w) {
+    let marked = cell.day != null && (cell.day.forbidden != "" || len(cell.day.fastLabels) > 0)
+    let tint = cell.day.forbidden != null && cell.day.forbidden != "" ? fastRed : cell.day.hm == "Ramadhan" ? fastRequired : fastBlue
+    Column {
+      width: w
+      gap: 1
+      padding: [2, 6]
+      align: center
+      radius: 8 * corners
+      background: marked ? alpha(tint, selected ? 0.55 : 0.24) : selected ? alpha(accent, 0.22) : alpha(surface, 0)
+      border: selected || isToday ? 1 : 0
+      borderColor: selected ? foreground : green
+      onTap: {
+        calSel = cell.iso
+        if !cell.inMonth { calMonth = fmtTime(cell.sec, "yyyy-MM", "UTC") }
+      }
+      Text { text: cell.day != null ? "${cell.day.hijri_date}" : "${cell.d}"; fontSize: 16; font: sans; bold: selected || isToday; color: marked ? (cell.day.hm == "Ramadhan" ? #c8e1ff : tint) : isToday ? green : !cell.inMonth ? alpha(muted, 0.55) : selected ? accent : foreground; align: center; maxLines: 1 }
+      Text { text: cell.day != null ? "${cell.d}" : " "; fontSize: 9; color: muted; align: center; maxLines: 1 }
+    }
+  }
+
+  onTap: { if !hasLocation { tab = "lokasi" }; screen() }
+
+  Column {
+    gap: 4
+    Row {
+      gap: 6
+      align: top
+      Column {
+        weight: 1
+        gap: 2
+        Text { text: deviceClock; fontSize: dualClock ? 27 : 36; bold: true; color: accent; maxLines: 1 }
+        if dualClock { Text { text: deviceTimezone; fontSize: 9; color: muted; maxLines: 1 } }
+        Text { text: nextEvent.at != null ? "${nextPrayer} · ${countdownLabel}" : !hasLocation ? "Ketuk untuk pilih lokasi" : !timezoneReady ? "Menunggu zona waktu" : valid ? "Selesai untuk hari ini" : loading ? "Memuat jadwal…" : "Jadwal belum tersedia"; fontSize: dualClock ? 10 : 12; color: green; maxLines: 1 }
+      }
+      if dualClock {
+        Column {
+          weight: 1
+          gap: 2
+          Text { text: timezoneReady ? localClockLive : "--:--"; fontSize: 27; bold: true; color: cyan; maxLines: 1 }
+          Text { text: targetTimezone; fontSize: 9; color: muted; maxLines: 1 }
+        }
+      }
+      Column {
+        weight: dualClock ? 1.25 : 1
+        gap: 3
+        align: end
+        Text { text: fmtTime(now, "EEEE, d MMM yyyy", timezoneReady ? targetTimezone : null) == "" ? "" : replace(fmtTime(now, "EEEE, d MMM yyyy", timezoneReady ? targetTimezone : null), "Minggu", "Ahad"); fontSize: dualClock ? 10 : 12; align: end; maxLines: 2 }
+        Text { text: hijriMonthDay; fontSize: dualClock ? 11 : 13; color: accent; align: end; maxLines: 2 }
+        if hijriYear != "" { Text { text: "${hijriYear} H"; fontSize: dualClock ? 10 : 12; color: accent; align: end; maxLines: 1 } }
+      }
+    }
+    Text { text: timezoneReady ? "${city} · ${targetTimezone}" : hasLocation ? "${city} · zona waktu belum tersedia" : "IMASA · Pilih lokasi untuk memulai"; fontSize: 10; color: muted; maxLines: 1 }
+    // Keep prayer times visible during loading; do not add warning rows.
+    // Each horizontal position is a local time; midnight wraps naturally.
+    Canvas {
+      fill: width
+      height: 30
+      if timezoneReady {
+        rect(0, 0, width, height, fill: linear(0, 0, width, 0, skyColors))
+        // Stars appear only in the dark part of the moving time window.
+        for i in range(40) {
+          let f = hash(i)
+          let e = skyElev[int(f * skySteps)]
+          if e < -0.12 {
+            circle(3 + f * (width - 6), 11 + hash(i + 40) * 19, 0.5 + hash(i + 80) * 0.5, fill: alpha(#e8eeff, clamp((-e - 0.12) * 1.3, 0, 0.85)))
+          }
+        }
+        // The current sun or moon stays at the center of the timeline.
+        let currentElev = skyElev[skySteps / 2]
+        let bodyY = 23 - 9 * abs(currentElev)
+        circle(width / 2, bodyY, 14, fill: radial(width / 2, bodyY, 14, [alpha(#fff6d8, 0.35), alpha(#fff6d8, 0)]))
+        circle(width / 2, bodyY, 4, fill: isDay ? #fff3c4 : #eef2fb)
+        line(width / 2, 25, width / 2, height, stroke: alpha(#ffffff, 0.7), width: 1)
+        // Sunrise and sunset share the same moving time coordinates as the colors.
+        for event in [{hour: riseH, label: "↑", seconds: riseSeconds}, {hour: setH, label: "↓", seconds: setSeconds}] {
+          let delta = (event.hour - hNow + 36) % 24 - 12
+          if abs(delta) <= skyHalfHours {
+            let x = width * (delta + skyHalfHours) / (2 * skyHalfHours)
+            line(x, 10, x, height, stroke: alpha(#ffffff, 0.45), width: 1)
+            text("${event.label}${pad(floor(event.seconds / 3600), 2, '0')}:${pad(floor(event.seconds % 3600 / 60), 2, '0')}", clamp(x, 20, width - 20), 5, size: 8, align: center, color: #ffffff)
+          }
+        }
+      } else {
+        line(16, 22, width - 16, 22, stroke: border, width: 2)
+      }
+    }
+    Row {
+      gap: 3
+      Prayer { label: "Subuh"; time: valid ? schedule.subuh : "--:--"; active: nextPrayer == "Subuh" }
+      Prayer { label: "Zuhur"; time: valid ? schedule.dzuhur : "--:--"; active: nextPrayer == "Zuhur" }
+      Prayer { label: "Asar"; time: valid ? schedule.ashar : "--:--"; active: nextPrayer == "Asar" }
+      Prayer { label: "Magrib"; time: valid ? schedule.maghrib : "--:--"; active: nextPrayer == "Magrib" }
+      Prayer { label: "Isya"; time: valid ? schedule.isya : "--:--"; active: nextPrayer == "Isya" }
+    }
+    Column {
+      gap: 2
+      for entry in homeFastingRows {
+        Text {
+          text: "${entry.label}: ${entry.info}"
+          maxLines: 1
+          font: sans
+          fontSize: 9
+          color: entry.day.forbidden != null && entry.day.forbidden != "" ? fastRed : entry.day.hm == "Ramadhan" ? #8fbfff : len(entry.day.fastLabels) > 0 ? fastBlue : muted
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "IMASA · Waktu & ibadah"
+    Column {
+      gap: 12
+      padding: 16
+      // Kepala layar penuh dibuat sama persis seperti widget kecil: jam
+      // perangkat di kiri, dan — ketika zona lokasi berbeda dari zona
+      // perangkat — jam kedua bertanda zona di tengah, tanggal Masehi dan
+      // Hijriah KHGT di kanan.
+      Row {
+        gap: 10
+        align: top
+        Column {
+          weight: 1
+          gap: 2
+          Text { text: deviceClock; fontSize: dualClock ? 27 : 39; bold: true; color: accent; maxLines: 1 }
+          if dualClock { Text { text: deviceTimezone; fontSize: 9; color: muted; maxLines: 1 } }
+          Text { text: nextEvent.at != null ? "${nextPrayer} · ${countdownLabel}" : !hasLocation ? "Ketuk untuk pilih lokasi" : !timezoneReady ? "Menunggu zona waktu" : valid ? "Selesai untuk hari ini" : loading ? "Memuat jadwal…" : "Jadwal belum tersedia"; fontSize: dualClock ? 10 : 12; color: green; maxLines: 1 }
+        }
+        if dualClock {
+          Column {
+            weight: 1
+            gap: 2
+            Text { text: timezoneReady ? localClockLive : "--:--"; fontSize: 27; bold: true; color: cyan; maxLines: 1 }
+            Text { text: targetTimezone; fontSize: 9; color: muted; maxLines: 1 }
+          }
+        }
+        Column {
+          weight: dualClock ? 1.25 : 1
+          gap: 3
+          align: end
+          Text { text: fmtTime(now, "EEEE, d MMM yyyy", timezoneReady ? targetTimezone : null) == "" ? "" : replace(fmtTime(now, "EEEE, d MMM yyyy", timezoneReady ? targetTimezone : null), "Minggu", "Ahad"); fontSize: dualClock ? 10 : 12; align: end; maxLines: 2 }
+          Text { text: hijriMonthDay; fontSize: dualClock ? 11 : 13; color: accent; align: end; maxLines: 2 }
+          if hijriYear != "" { Text { text: "${hijriYear} H"; fontSize: dualClock ? 10 : 12; color: accent; align: end; maxLines: 1 } }
+        }
+      }
+      Text { text: timezoneReady ? "${city} · ${targetTimezone} · jadwal ${targetDate}" : hasLocation ? "${city} · zona waktu belum tersedia" : "IMASA · Pilih lokasi untuk memulai"; fontSize: 10; color: muted; maxLines: 1 }
+      if !timezoneReady { Text { text: "Zona waktu belum tersedia; tanggal sementara mengikuti perangkat."; style: small; color: orange; maxLines: 2 } }
+      Row {
+        gap: 4
+        for item in [{id: "jadwal", label: "Jadwal"}, {id: "kalender", label: "Kalender"}, {id: "lokasi", label: "Lokasi"}, {id: "pengaturan", label: "Setelan"}] {
+          Column {
+            weight: 1
+            padding: [2, 10]
+            gap: 6
+            align: center
+            background: tab == item.id ? alpha(accent, 0.10) : surface
+            radius: 10 * corners
+            onTap: tab = item.id
+            Text { text: item.label; font: sans; fontSize: 12; bold: tab == item.id; color: tab == item.id ? accent : muted; align: center; maxLines: 1 }
+            Box { fill: width; height: 2; background: tab == item.id ? accent : alpha(accent, 0) }
+          }
+        }
+      }
+      Column {
+        scroll: true
+        weight: 1
+        gap: 12
+        if !hasLocation && tab != "lokasi" {
+          Column {
+            gap: 8
+            padding: 14
+            background: surface
+            radius: 12 * corners
+            Text { text: "Selamat datang di IMASA"; font: sans; style: title }
+            Text { text: "Pilih kota untuk menampilkan jadwal shalat, kalender KHGT, dan informasi puasa. Tidak perlu akses GPS."; font: sans; style: body; maxLines: 4 }
+            Button { text: "Pilih lokasi"; color: accent; onTap: tab = "lokasi" }
+          }
+        }
+      if tab == "jadwal" {
+        Column {
+          gap: 12
+          // Satu kartu jadwal: isinya mengikuti tanggal yang dipilih di
+          // kalender, dan sejak awal sudah memilih hari ini.
+          Row {
+            gap: 8
+            align: center
+            Column {
+              weight: 1
+              gap: 1
+              Text { text: calIsToday ? "Jadwal hari ini" : "Jadwal ${calSelDateLabel}"; font: sans; style: title; maxLines: 2 }
+              if calCardHijri != "" { Text { text: calCardHijri; style: small; color: accent; maxLines: 2 } }
+            }
+            if !calIsToday { Button { text: "Hari ini"; onTap: { calSel = ""; calMonth = "" } } }
+          }
+          Column {
+            fill: width
+            gap: 8
+            padding: 12
+            background: surface
+            border: 1
+            borderColor: border
+            radius: 12 * corners
+            ScheduleLine { label: "Subuh"; time: calCardSchedule != null ? calCardSchedule.subuh : "--:--"; active: calIsToday && nextPrayer == "Subuh" }
+            SunLine { label: "Terbit"; time: calCardSchedule != null ? calCardSchedule.terbit : "--:--" }
+            ScheduleLine { label: "Zuhur"; time: calCardSchedule != null ? calCardSchedule.dzuhur : "--:--"; active: calIsToday && nextPrayer == "Zuhur" }
+            ScheduleLine { label: "Asar"; time: calCardSchedule != null ? calCardSchedule.ashar : "--:--"; active: calIsToday && nextPrayer == "Asar" }
+            SunLine { label: "Tenggelam"; time: calCardSchedule != null ? calCardSchedule.maghrib : "--:--" }
+            ScheduleLine { label: "Magrib"; time: calCardSchedule != null ? calCardSchedule.maghrib : "--:--"; active: calIsToday && nextPrayer == "Magrib" }
+            ScheduleLine { label: "Isya"; time: calCardSchedule != null ? calCardSchedule.isya : "--:--"; active: calIsToday && nextPrayer == "Isya" }
+            if calIsToday {
+              if loading { Text { text: "Menghubungi API Muhammadiyah..."; style: small; color: accent } }
+              if displayState == "error" { Text { text: valid ? "Pembaruan gagal; jadwal tersimpan tetap dipakai." : "Gagal memuat jadwal. Dicoba lagi dalam 15 menit; buka Setelan untuk mencoba sekarang."; style: small; color: orange; maxLines: 2 } }
+            } else {
+              if calSelLoading { Text { text: "Mengambil jadwal ${calSel}..."; style: small; color: accent } }
+              if calSelFailed { Text { text: "Jadwal tanggal ini belum bisa diambil. Ketuk tanggalnya lagi atau periksa jaringan."; style: small; color: orange; maxLines: 2 } }
+            }
+          }
+          Column {
+            gap: 6
+            padding: 12
+            background: alpha(calFastTint, 0.10)
+            border: 1
+            borderColor: alpha(calFastTint, 0.55)
+            radius: 12 * corners
+            Text { font: sans; text: "INFO PUASA · ${calSelHijriLabel == "" ? calSelected : calSelHijriLabel}"; style: label; color: muted; maxLines: 2 }
+            Text { text: calFastTitle; font: sans; style: body; bold: true; color: calFastTint == fastRequired ? #8fbfff : calFastTint; maxLines: 3 }
+            Text { text: calFastInfo; font: sans; style: small; color: foreground }
+          }
+          Text { text: "Kalender Hijriah"; font: sans; style: title }
+          Column {
+            gap: 6
+            padding: 12
+            background: surface
+            border: 1
+            borderColor: border
+            radius: 12 * corners
+            Row {
+              gap: 6
+              align: center
+              Button { text: "‹"; onTap: calMonth = calPrevKey }
+              Column {
+                weight: 1
+                gap: 1
+                align: center
+                Text { text: fmtTime(calFirstSec, "MMMM yyyy", "UTC"); style: body; bold: true; align: center; maxLines: 1 }
+                Text { text: calHijriLabel; style: small; color: accent; align: center; maxLines: 1 }
+              }
+              Button { text: "›"; onTap: calMonth = calNextKey }
+              Button { text: "Hari ini"; onTap: { calMonth = ""; calSel = "" } }
+            }
+            Row {
+              gap: 3
+              for wd in ["Ahd", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"] {
+                Text { text: wd; width: calCellW; style: label; color: muted; align: center; maxLines: 1 }
+              }
+            }
+            for row in calRows {
+              Row {
+                gap: 3
+                for c in row key c.iso {
+                  CalCell { cell: c; selected: calSelected == c.iso; isToday: c.iso == targetDate; w: calCellW }
+                }
+              }
+            }
+            Flow {
+              gap: 8
+              for item in [{label: "Sunnah", tint: fastBlue}, {label: "Wajib", tint: fastRequired}, {label: "Tasyrik / hari raya", tint: fastRed}] {
+                Row {
+                  gap: 4
+                  align: center
+                  Box { width: 9; height: 9; radius: 3; background: item.tint }
+                  Text { text: item.label; style: small; color: foreground }
+                }
+              }
+            }
+            Text { text: "Ketuk tanggal untuk jenis dan info puasa. Bingkai menandai tanggal pilihan / hari ini."; style: small; color: muted; maxLines: 2 }
+            if !calLoaded { Text { text: "Kalender Hijriah KHGT belum termuat; angka besar masih tanggal Masehi. Periksa jaringan, kalender dicoba lagi otomatis."; style: small; color: orange; maxLines: 3 } }
+            if calSel == "" { Text { text: "Ketuk tanggal untuk melihat jadwal shalat hari itu."; style: small; color: muted; maxLines: 2 } }
+          }
+        }
+      } else if tab == "kalender" {
+        Column {
+          gap: 12
+          Text { text: "Awal bulan Hijriah ${calYear}"; font: sans; style: title }
+          Row {
+            gap: 8
+            Button { text: "‹ ${calYear - 1}"; onTap: calMonth = "${calYear - 1}-01" }
+            Button { text: "${calYear + 1} ›"; onTap: calMonth = "${calYear + 1}-01" }
+          }
+          Column {
+            gap: 4
+            padding: 12
+            background: surface
+            border: 1
+            borderColor: border
+            radius: 12 * corners
+            for m in calMonths key m.tanggal_masehi {
+              Row {
+                gap: 8
+                align: center
+                padding: [5, 6]
+                radius: 8 * corners
+                Text { text: "${m.hijri_month_name} ${m.hijri_year}"; weight: 1; font: sans; fontSize: 13; maxLines: 2 }
+                Text { text: fmtTime(parseTime(m.tanggal_masehi, null, "UTC"), "d MMM yyyy", "UTC"); width: 88; align: end; font: sans; fontSize: 11; maxLines: 1 }
+                Text { text: m.pkg1 == true ? "PKG1" : m.pkg2 == true ? "PKG2" : "istikmal"; width: 44; align: end; font: sans; fontSize: 10; color: accent; maxLines: 1 }
+              }
+            }
+          }
+          if !calLoaded { Text { text: "Kalender KHGT belum termuat; periksa jaringan lalu buka lagi tab ini."; style: small; color: orange; maxLines: 2 } }
+          if calLoaded && len(calMonths) == 0 { Text { text: "Tidak ada awal bulan Hijriah pada ${calYear}."; style: small; color: muted } }
+        }
+      } else if tab == "pengaturan" {
+        Column {
+          gap: 12
+          // ---- Ringkasan: empat sel status yang terbaca sekilas ----
+          Row {
+            gap: 8
+            SettingStat { caption: "Jadwal"; value: syncLabel; tint: syncTint; weight: 1 }
+            SettingStat { caption: "Kalender KHGT"; value: kalenderLabel; tint: calLoaded ? green : orange; weight: 1 }
+          }
+          Row {
+            gap: 8
+            SettingStat { caption: "Pengingat"; value: reminderLabel; tint: reminderEnabled ? (armedReminderEnabled ? green : orange) : muted; weight: 1 }
+            SettingStat { caption: "Suara"; value: soundName; tint: notifySoundSrc == "" ? muted : accent; weight: 1 }
+          }
+          Text { text: lastSync > 0 ? "Sinkron terakhir ${fmtAgo(lastSync, now)} (${fmtTime(lastSync, "dd MMM HH:mm")})" : "Belum pernah sinkron di perangkat ini"; style: small; color: muted; maxLines: 1 }
+          if !timezoneReady { Text { text: "Zona waktu lokasi belum terverifikasi: pengingat dan notifikasi waktu tiba belum bisa dijadwalkan."; style: small; color: orange; maxLines: 2 } }
+          // ---- Pembaruan data ----
+          Column {
+            gap: 8
+            padding: 12
+            background: surface
+            border: 1
+            borderColor: border
+            radius: 12 * corners
+            SectionHead { heading: "Pembaruan data"; note: loading || calendarLoading ? "memuat" : "siap"; tint: loading || calendarLoading ? accent : muted }
+            Row {
+              gap: 8
+              Button { text: loading ? "Memuat…" : "Sinkron jadwal"; weight: 1; color: loading ? muted : accent; onTap: { if hasLocation && !loading { syncState = "loading"; lastError = ""; startedAt = now; requestedKey = requestKey; retryAt = 0; calRetryAt = 0; calSlotFor = ""; prayer = null; prayer = post("https://api-khgt.muhammadiyah.or.id/api/sholat/schedule", {lat: lat, lng: lng, date: targetDate, mode: "daily"}, {"Content-Type": "application/json"}) } } }
+              Button { text: calendarLoading ? "Mengunduh…" : "Muat kalender"; weight: 1; color: calendarLoading ? muted : foreground; onTap: { if hasLocation && !calendarLoading { calendarLoading = true; calendarStartedAt = now + 60; calendarRequestedAt = now; calendarRevision = calendarRevision + 1; calendarMessage = ""; refresh() } } }
+            }
+            if loading || calendarLoading { Text { text: calendarLoading ? "Mengunduh kalender KHGT..." : "Menghubungi API Muhammadiyah..."; style: small; color: accent; maxLines: 1 } }
+            if !calendarLoading && calendarMessage != "" { Text { text: calendarMessage; style: small; color: calLoaded ? green : orange; maxLines: 2 } }
+            if lastError != "" { Text { text: "Kesalahan terakhir: ${lastError}"; style: small; color: orange; maxLines: 2 } }
+            Text { text: calLoaded ? "Kalender ${calYear} termuat · ${len(calMonths)} awal bulan Hijriah." : "Kalender ${calYear} belum termuat; dicoba lagi otomatis."; style: small; color: calLoaded ? green : muted; maxLines: 2 }
+            Text { text: "Cache jadwal ${len(cacheEntries)}/40"; style: label; color: muted; maxLines: 1 }
+            Progress { value: min(100, len(cacheEntries) * 100 / 40); color: accent; track: alpha(muted, 0.25) }
+          }
+          // ---- Pengingat & notifikasi ----
+          Column {
+            gap: 8
+            padding: 12
+            background: surface
+            border: 1
+            borderColor: border
+            radius: 12 * corners
+            SectionHead { heading: "Pengingat & notifikasi"; note: armedReminderEnabled && armedArrivalEnabled ? "keduanya aktif" : armedReminderEnabled || armedArrivalEnabled ? "sebagian aktif" : "nonaktif"; tint: armedReminderEnabled || armedArrivalEnabled ? green : muted }
+            // Barisnya sendiri yang diketuk, jadi target sentuhnya lebar. Keadaan
+            // sakelar dibaca dari penjadwal (reminderActive), bukan dari state
+            // lokal, supaya tidak pernah bertentangan dengan status di bawahnya.
+            Row {
+              gap: 10
+              align: center
+              padding: [10, 8]
+              radius: 10 * corners
+              background: reminderEnabled ? alpha(green, 0.10) : alpha(muted, 0.10)
+              border: 1
+              borderColor: reminderCardTint
+              onTap: { reminderEnabled = !reminderEnabled; haptic() }
+              Column {
+                weight: 1
+                gap: 1
+                Text { text: "Pengingat sebelum shalat"; style: body; bold: true; maxLines: 1 }
+                Text { text: reminderNote; style: small; color: reminderEnabled ? green : muted; maxLines: 2 }
+              }
+              ToggleKnob { active: reminderEnabled }
+            }
+            Text { text: "Jeda pengingat"; style: label; color: muted; maxLines: 1 }
+            Row {
+              gap: 8
+              Button { text: "5 menit"; weight: 1; color: reminderLead == 5 ? accent : muted; onTap: { reminderLead = 5; haptic() } }
+              Button { text: "10 menit"; weight: 1; color: reminderLead == 10 ? accent : muted; onTap: { reminderLead = 10; haptic() } }
+              Button { text: "15 menit"; weight: 1; color: reminderLead == 15 ? accent : muted; onTap: { reminderLead = 15; haptic() } }
+            }
+            Text { text: "Status penjadwalan: ${reminderScheduleStatus}"; style: small; color: reminderActive ? green : reminderSkipped ? orange : muted; maxLines: 2 }
+            if reminderActive && timezoneReady {
+              Text { text: "${armedReminder.name} · ${reminderLocalClock} waktu ${city}"; style: body; color: accent; maxLines: 2 }
+              Text { text: "${targetTimezone} · pengingat dalam ${reminderCountdownLabel}"; style: small; color: muted; maxLines: 2 }
+              Text { text: "Waktu perangkat: ${fmtTime(reminderAt, "dd MMM HH:mm")}"; style: small; color: muted; maxLines: 1 }
+            }
+            if reminderSkipped { Text { text: "Pengingat ${nextEvent.name} sudah lewat saat lokasi dipilih; hanya waktu tiba yang dijadwalkan."; style: small; color: orange; maxLines: 2 } }
+            if reminderEnabled && !reminderActive && !reminderSkipped { Text { text: "Tidak ada pengingat aktif untuk waktu mendatang; periksa tanggal dan lokasi."; style: small; color: muted; maxLines: 2 } }
+            Box { height: 1; fill: width; background: border }
+            Row {
+              gap: 10
+              align: center
+              padding: [10, 8]
+              radius: 10 * corners
+              background: arrivalEnabled ? alpha(green, 0.10) : alpha(muted, 0.10)
+              border: 1
+              borderColor: arrivalCardTint
+              onTap: { arrivalEnabled = !arrivalEnabled; haptic() }
+              Column {
+                weight: 1
+                gap: 1
+                Text { text: "Notifikasi waktu tiba"; style: body; bold: true; maxLines: 1 }
+                Text { text: arrivalNote; style: small; color: arrivalEnabled ? green : muted; maxLines: 2 }
+              }
+              ToggleKnob { active: arrivalEnabled }
+            }
+            Text { text: "Status waktu tiba: ${arrivalScheduleStatus}"; style: small; color: arrivalActive ? green : muted; maxLines: 2 }
+            if arrivalActive {
+              Text { text: "${armedArrival.name} · ${armedArrival.time} (${targetTimezone})"; style: body; color: accent; maxLines: 2 }
+              Text { text: "Waktu perangkat: ${fmtTime(arrivalAt, "dd MMM HH:mm")}"; style: small; color: muted }
+            }
+            Text { text: "Riwayat waktu tiba: ${arrivalLastResult}"; style: small; color: muted; maxLines: 2 }
+            Text { text: "Riwayat pengingat: ${reminderLastResult}"; style: small; color: muted; maxLines: 2 }
+            Text { text: "Dua notifikasi independen: sebelum shalat dan tepat waktu tiba. Notifikasi dapat terlambat ketika ponsel tidur; bukan pengganti alarm sistem."; style: small; color: muted; maxLines: 3 }
+            Row {
+              gap: 8
+              Button { text: "Uji langsung"; weight: 1; color: accent; onTap: { haptic(); notify("IMASA · Uji pengingat", "Notifikasi Android dari IMASA berhasil dikirim.") } }
+              Button { text: notificationTestAt > now ? "Batalkan uji" : "Uji terjadwal"; weight: 1; color: notificationTestAt > now ? orange : muted; onTap: {
+                if notificationTestAt > now {
+                  notificationTestAt = 0
+                  notificationTestResult = "dibatalkan"
+                } else {
+                  notificationTestAt = now + 120
+                  notificationTestResult = "dijadwalkan"
+                }
+                haptic()
+              } }
+            }
+            if notificationTestAt > now {
+              Text { text: "Uji dijadwalkan ${fmtTime(notificationTestAt, 'HH:mm')} · sekitar ${ceil((notificationTestAt - now) / 60)} menit. Anda boleh menutup layar ini."; font: sans; style: small; color: accent; maxLines: 3 }
+            } else {
+              Text { text: "Status uji: ${notificationTestResult}"; font: sans; style: small; color: muted; maxLines: 2 }
+            }
+          }
+          // ---- Suara notifikasi ----
+          Column {
+            gap: 8
+            padding: 12
+            background: surface
+            border: 1
+            borderColor: border
+            radius: 12 * corners
+            SectionHead { heading: "Suara notifikasi"; note: soundName; tint: notifySoundSrc == "" ? muted : accent }
+            Column {
+              gap: 1
+              Text { text: "Suara diputar bersama notifikasi waktu shalat."; style: small; color: muted; maxLines: 2 }
+              Text { text: "Uji terjadwal: notifikasi ${suaraCountdown}"; style: label; color: muted; maxLines: 1 }
+            }
+            Row {
+              gap: 8
+              Button { text: "Tanpa suara"; weight: 1; color: notifySoundSrc == "" ? accent : muted; onTap: { notifySound = "off"; haptic() } }
+              Button { text: "Beep"; weight: 1; color: notifySound == "https://actions.google.com/sounds/v1/alarms/beep_short.ogg" ? accent : muted; onTap: { notifySound = "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"; haptic() } }
+            }
+            Row {
+              gap: 8
+              Button { text: "Alarm"; weight: 1; color: notifySound == "https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" ? accent : muted; onTap: { notifySound = "https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg"; haptic() } }
+              Button { text: "Digital"; weight: 1; color: notifySound == "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg" ? accent : muted; onTap: { notifySound = "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg"; haptic() } }
+            }
+            Input { text: notifySound; placeholder: "URL sendiri (https://…) atau path file ~/sounds/adhan.mp3"; clear: true; onSubmit: { notifySound = trim(value); haptic() } }
+            Row {
+              gap: 8
+              align: center
+              Text { text: "Aktif: ${notifySoundLabel}"; style: small; color: notifySoundSrc == "" ? muted : accent; weight: 1; maxLines: 2 }
+              Button { text: "Putar contoh"; color: muted; onTap: { haptic(); if notifySoundSrc != "" { sound(notifySoundSrc) } else { notify("IMASA · Suara nonaktif", "Pilih suara atau isi kolom di atas terlebih dulu.") } } }
+            }
+          }
+          // ---- Bantuan dan pintasan ----
+          Column {
+            gap: 8
+            padding: 12
+            background: surface
+            border: 1
+            borderColor: border
+            radius: 12 * corners
+            SectionHead { heading: "Bantuan"; note: settingsHelp ? "terbuka" : "ringkas" }
+            Row {
+              gap: 8
+              Button { text: settingsHelp ? "Tutup bantuan" : "Bantuan"; weight: 1; color: settingsHelp ? accent : muted; onTap: { settingsHelp = !settingsHelp; haptic() } }
+              Button { text: "Diagnostik"; weight: 1; color: muted; onTap: { tab = "debug"; advancedDiagnostics = false; haptic() } }
+            }
+            if settingsHelp {
+              HelpBox { text: "Kalender Hijriah memakai kalender resmi KHGT: diperbarui otomatis tiap minggu, atau saat dimuat manual. Jadwal tanggal yang dipilih di kalender diambil sekali saat diketuk, tidak disimpan ke cache." }
+              HelpBox { text: "Suara sendiri: salin file MP3/OGG/WAV/M4A ke sistem (misalnya ~/sounds/), lalu tulis path-nya di kolom suara; atau tempel URL file yang sudah Anda unggah. Saat notifikasi datang, suara berbunyi hanya bila layar atau aplikasi terbuka — uji lewat tombol bisa langsung dari layar utama." }
+              HelpBox { text: "Pindah lokasi otomatis mengambil jadwal baru dari API Muhammadiyah. Pencarian online memakai Open-Meteo dan butuh internet. GPS otomatis belum tersedia." }
+              HelpBox { text: "Notifikasi dapat terlambat ketika ponsel tidur; bukan pengganti alarm sistem." }
+            }
+          }
+          Column {
+            gap: 6
+            padding: 12
+            background: surface
+            radius: 12 * corners
+            Text { text: "Tentang IMASA"; font: sans; style: title }
+            Text { text: "Jadwal & kalender: API Muhammadiyah KHGT. Zona waktu & pencarian kota: Open-Meteo. IMASA merupakan widget independen."; font: sans; style: small; color: muted }
+            Text { text: "Hemat daya: tampilan per menit; interval otomatis zona waktu 6 jam, kalender harian 24 jam, kalender tahunan 1 minggu. Pembaruan manual mengambil data baru. Sumber aktif hanya saat halaman terlihat atau di sebelahnya; pemicu notifikasi tetap terjadwal."; font: sans; style: small; color: muted }
+            Text { text: "Koordinat dikirim ke layanan zona waktu dan jadwal setelah lokasi dipilih; nama kota dikirim saat pencarian. Tidak memakai GPS atau pelacakan lokasi latar belakang."; font: sans; style: small; color: muted }
+            Text { text: "Versi 0.21.0 · Bahasa Indonesia · MIT"; style: label; color: muted }
+          }
+          // ---- Setelan awal: dua ketukan dengan pembatalan otomatis ----
+          Column {
+            gap: 8
+            padding: 12
+            background: surface
+            border: 1
+            borderColor: border
+            radius: 12 * corners
+            SectionHead { heading: "Setelan awal"; note: resetArmedAt > now ? "menunggu" : "aman"; tint: resetArmedAt > now ? orange : muted }
+            Text { text: "Mengembalikan pengingat, jeda, notifikasi waktu tiba dan suara ke kondisi bawaan. Cache jadwal dan lokasi tidak disentuh."; style: small; color: muted; maxLines: 3 }
+            Button { text: resetArmedAt > now ? "Ketuk lagi untuk mengonfirmasi" : "Kembalikan setelan notifikasi"; color: resetArmedAt > now ? red : muted; onTap: {
+              if resetArmedAt > now {
+                reminderEnabled = false
+                reminderLead = 10
+                arrivalEnabled = true
+                notifySound = "off"
+                resetArmedAt = 0
+                haptic()
+              } else {
+                resetArmedAt = now + 120
+              }
+            } }
+            if resetArmedAt > now { Text { text: "Konfirmasi dibatalkan otomatis dalam sekitar 1–2 menit."; style: small; color: orange; maxLines: 1 } }
+          }
+        }
+      } else if tab == "lokasi" {
+        Column {
+          gap: 8
+          // ---- Lokasi aktif: satu kartu ringkas ----
+          Column {
+            gap: 3
+            padding: [10, 8]
+            background: surface
+            border: 1
+            borderColor: border
+            radius: 12 * corners
+            Row {
+              gap: 8
+              align: center
+              Column {
+                weight: 1
+                gap: 1
+                Text { text: "Lokasi aktif"; style: label; color: muted; maxLines: 1 }
+                Text { text: hasLocation ? city : "Belum dipilih"; fontSize: 16; bold: true; color: accent; maxLines: 1 }
+              }
+              Button { visible: hasLocation; text: favoriteExists ? "Hapus favorit" : "Simpan favorit"; color: favoriteExists ? green : muted; onTap: { favorites = favoriteExists ? favorites.filter(c => !(c.name == city && c.lat == lat && c.lng == lng)) : favorites + [{name: city, lat: lat, lng: lng, timezone: targetTimezone}]; haptic() } }
+            }
+            Text { visible: hasLocation; text: "${fixed(lat, 4)}, ${fixed(lng, 4)} · ${targetTimezone == "" ? "zona belum diketahui" : targetTimezone}"; style: small; color: muted; maxLines: 1 }
+            Text { visible: hasLocation; text: "Tanggal lokal ${targetDate} · ${timezoneSource}"; style: small; color: muted; maxLines: 1 }
+          }
+          if locationMessage != "" { Text { text: locationMessage; style: small; color: accent; maxLines: 2 } }
+          // ---- Pencarian: menyaring daftar tersimpan, atau cari online ----
+          Row {
+            gap: 6
+            align: center
+            Input { text: onlineQuery; placeholder: "Cari nama kota…"; clear: true; onChange: onlineQuery = value; onSubmit: { onlineSubmitted = len(trim(onlineQuery)) >= 3 ? trim(onlineQuery) : ""; locationMessage = len(trim(onlineQuery)) >= 3 ? "Mencari lokasi melalui Open-Meteo..." : "Masukkan minimal 3 karakter"; refresh() }; weight: 1 }
+            Button { text: "Cari"; onTap: { onlineSubmitted = len(trim(onlineQuery)) >= 3 ? trim(onlineQuery) : ""; locationMessage = len(trim(onlineQuery)) >= 3 ? "Mencari lokasi melalui Open-Meteo..." : "Masukkan minimal 3 karakter"; refresh() } }
+          }
+          if onlineSubmitted != "" {
+            Column {
+              gap: 4
+              Text { text: "Hasil online: ${onlineSubmitted}"; style: small; color: muted; maxLines: 1 }
+              if geocoding.ok == true && len(onlineResults) == 0 { Text { text: "Tidak ada hasil. Coba nama kota lain atau koordinat manual di bawah."; style: small; color: muted; maxLines: 2 } }
+              if geocoding.ok != true { Text { text: "Pencarian belum berhasil — periksa jaringan lalu ketuk Cari lagi."; style: small; color: orange; maxLines: 2 } }
+              for place in onlineResults key "${place.latitude},${place.longitude}" {
+                Row {
+                  gap: 8
+                  align: center
+                  Column {
+                    weight: 1
+                    gap: 0
+                    Text { text: "${place.name}, ${place.country ?? ""}"; style: body; maxLines: 1 }
+                    Text { text: "${place.admin1 ?? ""} · ${fixed(num(place.latitude), 3)}, ${fixed(num(place.longitude), 3)}"; style: small; color: muted; maxLines: 1 }
+                  }
+                  Button { text: "Pilih"; onTap: { city = "${place.name}, ${place.country ?? ""}"; lat = place.latitude; lng = place.longitude; locationTimezone = place.timezone ?? ""; locationSource = "online"; locationMessage = ""; onlineQuery = ""; onlineSubmitted = ""; requestedKey = ""; syncState = "idle"; retryAt = 0; tab = "jadwal" } }
+                }
+              }
+            }
+          }
+          // ---- Lokasi favorit ----
+          Row {
+            gap: 6
+            align: center
+            Text { text: "Lokasi favorit"; font: sans; style: title; weight: 1 }
+            Text { text: "${len(favorites)}"; style: small; color: muted }
+          }
+          if len(favorites) == 0 { Text { text: "Belum ada favorit — simpan lokasi aktif lewat tombol di kartu atas."; style: small; color: muted; maxLines: 2 } }
+          for c in favorites key "${c.lat}|${c.lng}" {
+            Row {
+              gap: 8
+              align: center
+              Column {
+                weight: 1
+                gap: 0
+                Text { text: c.name; style: body; bold: c.lat == lat && c.lng == lng; maxLines: 1 }
+                if c.timezone != null && c.timezone != "" { Text { text: c.timezone; style: small; color: muted; maxLines: 1 } }
+              }
+              Button { text: "Pilih"; color: c.lat == lat && c.lng == lng ? green : foreground; onTap: { city = c.name; lat = c.lat; lng = c.lng; locationTimezone = c.timezone ?? ""; locationSource = "favorit"; locationMessage = ""; requestedKey = ""; syncState = "idle"; retryAt = 0; tab = "jadwal" } }
+              Button { text: "Hapus"; color: red; onTap: favorites = favorites.filter(f => !(f.name == c.name && f.lat == c.lat && f.lng == c.lng)) }
+            }
+          }
+          // ---- Lokasi tersedia: hanya yang sudah ada di cache ----
+          Row {
+            gap: 6
+            align: center
+            Text { text: "Lokasi tersimpan"; font: sans; style: title; weight: 1 }
+            Text { text: "${len(cachePlaces)} tersimpan"; style: small; color: muted; maxLines: 1 }
+          }
+          Text { text: "Otomatis terisi saat jadwal sebuah lokasi berhasil diunduh. Tulis di kolom pencarian untuk menyaring daftar ini."; style: small; color: muted; maxLines: 2 }
+          for p in filteredCache key "${p.lat}|${p.lng}" {
+            Row {
+              gap: 8
+              align: center
+              Column {
+                weight: 1
+                gap: 0
+                Text { text: p.city ?? "Tanpa nama"; style: body; bold: p.lat == lat && p.lng == lng; maxLines: 1 }
+                Text { text: "jadwal ${p.data.date ?? "-"} · disimpan ${fmtAgo(p.savedAt, now)}${p.lat == lat && p.lng == lng ? " · aktif" : ""}"; style: small; color: p.lat == lat && p.lng == lng ? green : muted; maxLines: 1 }
+              }
+              Button { text: "Pilih"; color: p.lat == lat && p.lng == lng ? green : foreground; onTap: { city = p.city ?? city; lat = p.lat; lng = p.lng; locationTimezone = p.timezone ?? ""; locationSource = "cache"; locationMessage = ""; requestedKey = ""; syncState = "idle"; retryAt = 0; tab = "jadwal" } }
+              Button { text: "Hapus"; color: red; onTap: {
+                let wasActive = lat == p.lat && lng == p.lng
+                cacheEntries = cacheEntries.filter(e => !(e.lat == p.lat && e.lng == p.lng))
+                // Lokasi aktif yang cache-nya dihapus langsung diunduh ulang,
+                // supaya tab Jadwal tidak menyisakan data yang sudah dihapus.
+                if wasActive { requestedKey = ""; syncState = "idle"; retryAt = 0 }
+                locationMessage = "Lokasi ${p.city ?? "tanpa nama"} dihapus dari cache"
+                haptic()
+              } }
+            }
+          }
+          if len(cachePlaces) == 0 { Text { text: "Belum ada lokasi tersimpan. Setiap lokasi otomatis muncul di sini setelah jadwalnya berhasil diunduh."; style: small; color: muted; maxLines: 3 } }
+          if len(cachePlaces) > 0 && len(filteredCache) == 0 { Text { text: "Tidak ada lokasi tersimpan yang cocok dengan “${onlineQuery}”. Tekan Cari untuk mencari online."; style: small; color: muted; maxLines: 2 } }
+          // ---- Koordinat manual ----
+          Text { text: "Koordinat manual"; font: sans; style: title }
+          Row {
+            gap: 6
+            Input { text: customName; placeholder: "Nama"; onChange: customName = value; weight: 1.4 }
+            Input { text: customLat; placeholder: "Lat"; onChange: customLat = value; weight: 1 }
+            Input { text: customLng; placeholder: "Lng"; onChange: customLng = value; weight: 1 }
+          }
+          Row {
+            gap: 8
+            align: center
+            Button { text: "Terapkan"; color: manualValid ? accent : muted; onTap: { city = manualValid ? trim(customName) : city; lat = manualValid ? num(customLat) : lat; lng = manualValid ? num(customLng) : lng; locationTimezone = manualValid ? "" : locationTimezone; locationSource = manualValid ? "manual" : locationSource; locationMessage = manualValid ? "Lokasi manual diterapkan" : "Periksa nama dan koordinat"; requestedKey = manualValid ? "" : requestedKey; syncState = manualValid ? "idle" : syncState; retryAt = manualValid ? 0 : retryAt; tab = manualValid ? "jadwal" : "lokasi" } }
+            Text { text: manualValid ? "siap dipakai" : "isi nama, lat (-90..90) dan lng (-180..180)"; style: small; color: manualValid ? green : muted; weight: 1; maxLines: 2 }
+          }
+          Text { text: "Pindah lokasi otomatis mengambil jadwal baru dari API Muhammadiyah. Pencarian online memakai Open-Meteo dan butuh internet. GPS otomatis belum tersedia."; style: small; color: muted; maxLines: 3 }
+        }
+      } else {
+        Column {
+          gap: 8
+          Text { text: "Kesehatan layanan"; style: title }
+          Text { text: "Ringkasan status. Buka detail hanya saat troubleshooting."; style: small; color: muted; maxLines: 2 }
+          Text { text: "Status jadwal: ${displayState}"; color: displayState == "success" ? green : muted }
+          if !valid { Text { text: timezoneReady ? "Pemulihan otomatis aktif jika cache tidak cocok." : "Menunggu data zona waktu sebelum mengambil jadwal."; style: small; color: muted } }
+          Text { text: "API shalat Muhammadiyah: HTTP ${prayer.code ?? "-"} · ${prayer.ok == true ? "OK" : "belum berhasil"}" }
+          Text { text: "API kalender KHGT: HTTP ${calendar.code ?? "-"} · ${calendar.ok == true ? "OK" : "belum berhasil"}" }
+          Text { text: "Lokasi: ${city} · ${targetDate}"; style: small }
+          Text { text: "Zona waktu: ${targetTimezone == "" ? "belum diketahui" : targetTimezone}"; style: small }
+          Text { text: "Zona waktu: ${timezoneReady ? "terverifikasi" : "belum terverifikasi"}"; style: small; color: timezoneReady ? green : orange }
+          Text { text: "Cache: ${valid ? "sesuai lokasi" : "belum sesuai lokasi"}"; style: small; color: valid ? green : orange }
+          Text { text: "Permintaan: ${responseMatches ? "cocok" : "belum cocok"}"; style: small; color: responseMatches ? green : orange }
+          if lastError != "" { Text { text: "Kesalahan: ${lastError}"; color: orange; style: small } }
+          Button { text: advancedDiagnostics ? "Sembunyikan detail teknis" : "Tampilkan detail teknis"; onTap: advancedDiagnostics = !advancedDiagnostics }
+          if advancedDiagnostics {
+            Column {
+              gap: 7
+              Text { text: "Detail permintaan dan cache"; style: title }
+              Text { text: "Respons valid: ${responseValid}" }
+              Text { text: "Respons cocok lokasi: ${responseMatches}" }
+              Text { text: "Kalender memuat: ${calendarLoading}" }
+              Text { text: "Tanggal perangkat: ${today}" }
+              Text { text: "Zona waktu API HTTP: ${localTime.code ?? "belum ada"}" }
+              Text { text: "Waktu lokasi saat pembaruan API: ${localClock}" }
+              Text { text: "Sumber lokasi: ${locationSource}" }
+              Text { text: "Geocoding HTTP: ${geocoding.code ?? "belum ada"}" }
+              Text { text: "Tanggal cache: ${schedule.date ?? "belum ada"}" }
+              Text { text: "Key aktif: ${requestKey}"; style: small; maxLines: 2 }
+              Text { text: "Key cache terakhir: ${cacheKey}"; style: small; maxLines: 2 }
+              Text { text: "Jumlah cache lokasi/tanggal: ${len(cacheEntries)}"; style: small }
+              Text { text: "Kalender KHGT: ${calLoaded ? "termuat ${len(calAll)} hari" : "belum termuat"} · bulan ${calMonthKey} · HTTP ${calCal.code ?? "-"}"; style: small; maxLines: 2 }
+              Text { text: "Tanggal pilihan: ${calSel == "" ? "hari ini" : calSel} · ${calSelLoading ? "meminta" : calSelSchedule != null ? "siap" : "belum ada"} · mencoba lagi ${calRetryAt == 0 ? "-" : fmtTime(calRetryAt, "HH:mm:ss")}"; style: small; maxLines: 2 }
+              Text { text: "Sumber zona waktu: ${timezoneSource}"; style: small }
+              Text { text: "Metadata lokasi offline: ${offlineTimezoneReady ? "tersedia" : "tidak digunakan"}"; style: small }
+              Text { text: "Cache aktif: ${cachedEntry.key == requestKey ? "multi-lokasi" : cacheKey == requestKey ? "legacy" : "tidak ada"}"; style: small }
+              Text { text: "Key permintaan: ${requestedKey}"; style: small; maxLines: 2 }
+              Text { text: "Retry: ${retryAt == 0 ? "tidak dijadwalkan" : fmtTime(retryAt, "HH:mm:ss")}" }
+              Text { text: "Pengingat: ${reminderScheduleStatus}"; style: small }
+              Text { text: "Notifikasi waktu tiba: ${arrivalScheduleStatus}"; style: small }
+              Text { text: "Zona waktu perangkat: ${deviceTimezone}"; style: small }
+              // Next prayer: read straight from the armed arrival event (BUG 8).
+              Text { text: "— Shalat berikutnya —"; style: label }
+              Text { text: "Nama: ${armedArrival != null ? armedArrival.name : nextEvent.name ?? "tidak ada"}"; style: small }
+              Text { text: "Lokasi: ${armedArrival != null ? armedArrival.city : city}"; style: small }
+              Text { text: "Zona: ${armedArrival != null ? armedArrival.timezone : targetTimezone}"; style: small }
+              Text { text: "Waktu lokal: ${armedArrival != null ? armedArrival.time : nextEvent.time ?? "--:--"}"; style: small }
+              Text { text: "Unix: ${(armedArrival != null ? armedArrival.at : nextEvent.at) ?? 0}"; style: small }
+              Text { text: "Countdown: ${(armedArrival != null ? armedArrival.at : nextEvent.at) != null ? "${pad(floor(max(0, (armedArrival != null ? armedArrival.at : nextEvent.at) - now) / 3600), 2, '0')}:${pad(floor((max(0, (armedArrival != null ? armedArrival.at : nextEvent.at) - now) % 3600) / 60), 2, '0')}:${pad(floor(max(0, (armedArrival != null ? armedArrival.at : nextEvent.at) - now) % 60), 2, '0')}" : "tidak terjadwal"}"; style: small }
+              // Next reminder: read straight from the armed reminder event.
+              Text { text: "— Pengingat berikutnya —"; style: label }
+              Text { text: "Nama: ${armedReminder != null ? armedReminder.name : "tidak ada"}"; style: small }
+              Text { text: "Lokasi: ${armedReminder != null ? armedReminder.city : city}"; style: small }
+              Text { text: "Zona: ${armedReminder != null ? armedReminder.timezone : targetTimezone}"; style: small }
+              Text { text: "Waktu lokal: ${reminderActive ? reminderLocalClock : "--:--"}"; style: small }
+              Text { text: "Unix: ${reminderActive ? reminderAt : 0}"; style: small }
+              Text { text: "Countdown: ${reminderCountdownLabel}"; style: small }
+              Text { text: "Status: ${reminderScheduleStatus}"; style: small }
+              // Last notification: pure history, never a scheduling target.
+              Text { text: "— Notifikasi terakhir —"; style: label }
+              Text { text: "Tiba — key: ${arrivalLastSent == "" ? "belum ada" : arrivalLastSent}"; style: small; maxLines: 2 }
+              Text { text: "Tiba — hasil: ${arrivalLastResult}"; style: small }
+              Text { text: "Pengingat — key: ${reminderLastSent == "" ? "belum ada" : reminderLastSent}"; style: small; maxLines: 2 }
+              Text { text: "Pengingat — hasil: ${reminderLastResult}"; style: small }
+              Text { text: "Generasi kejadian: ${eventGeneration} · konteks: ${contextKey}"; style: small; maxLines: 2 }
+            }
+          }
+          if !calendarLoading && calendarMessage != "" { Text { text: calendarMessage; color: muted } }
+        }
+      }
+      }
+    }
+  }
+}
