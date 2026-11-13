@@ -98,6 +98,8 @@ face "Omagara" {
   state worldZones = [] persist
   state heldAlphabet = []
   state railHeld = false
+  // The cog is one more worm stop, not another alphabet letter.
+  state railSettingsSelected = false
   state menu = ""
   state menuShortcuts = null
   state pickedEvent = null
@@ -376,7 +378,7 @@ face "Omagara" {
   // Materialize only the rows fitting on screen, even if one letter owns
   // hundreds of apps. Keyed rows keep their identity in and out of preview.
   let appPreviewRows = [{id: "heading:" + letter, section: letter, heading: true, top: appPreviewTop, height: appLabelHeight}] + map(take(appPreviewApps, max(0, ceil((appPanelHeight - appPreviewTop - appLabelHeight) / appRowHeight) + 1)), (a, j) => {id: a.key, section: letter, heading: false, app: a, top: appPreviewTop + appLabelHeight + j * appRowHeight, height: appRowHeight})
-  let appWindow = appPreviewing ? appPreviewRows : fullAppWindow
+  let appWindow = appPreviewing && !railSettingsSelected ? appPreviewRows : fullAppWindow
   // Anchoring must use the unfiltered document even during a preview.
   let appVisibleRows = fullAppWindow.filter(r => r.top + r.height > appOffset && r.top < appOffset + appPanelHeight)
   let appFirst = first(appVisibleRows)
@@ -849,7 +851,7 @@ face "Omagara" {
     let visual = side == alphabetSide
     Column {
       width: visual ? 44 : 20
-      height: railHeight
+      height: visual ? railPaintHeight : railHeight
       gap: 0
       // Track both axes: outward thumb motion must work even without moving vertically.
       // Hit region stays fixed; the glyph transforms are visual only.
@@ -860,6 +862,7 @@ face "Omagara" {
         appVelocity = 0
         heldAlphabet = liveAlphabet
         railHeld = true
+        railSettingsSelected = y >= railHeight && visual
         draggingSide = 0
         railReturning = false
         // A new touch cancels the optional ripple immediately.
@@ -869,7 +872,7 @@ face "Omagara" {
         railFlickLastY = y
         railFlickStarted = time
         // Beyond an endpoint, the worm follows the thumb 1:1 up to the screen edge.
-        let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railHeight - railStep / 2 ? y - (railHeight - railStep / 2) : 0
+        let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railPaintHeight - railStep / 2 ? y - (railPaintHeight - railStep / 2) : 0
         railOverpull = len(alphabet) < 2 ? 0 : clamp(edgeY, -railUpperReach, railLowerReach)
         railEnterStart = time
         railEntering = cfg.curve && !cfg.reduceMotion
@@ -879,7 +882,7 @@ face "Omagara" {
         railPull = visual ? (side == 1 ? clamp(106 - x, 0, railMaxReach) : clamp(62 + x, 0, railMaxReach)) : min(84, railMaxReach)
         railThumbX = side == 1 ? (tileWidth ?? 400) - screenRight - 4 - (visual ? 44 : 20) + x : screenLeft + (visual ? 4 : 0) + x
         touchY = clamp(railTop + y, screenTop, (tileHeight ?? 800) - screenInset)
-        fingerPosition = clamp(y / railStep - 0.5, 0, max(0, len(alphabet) - 1))
+        fingerPosition = clamp(y / railStep - 0.5, 0, max(0, len(alphabet) - (railSettingsSelected ? 0 : 1)))
         let pressedLetter = get(alphabet, clamp(floor(y / railStep), 0, max(0, len(alphabet) - 1)), letter)
         letter = pressedLetter
         if cfg.hapticFeedback != "Off" { haptic() }
@@ -887,7 +890,8 @@ face "Omagara" {
         let pressedHeight = appLabelHeight + len(get(groups, pressedLetter, [])) * appRowHeight
         let pressedCenter = railTop + railOverpull + (max(0, indexOf(alphabet, pressedLetter)) + 0.5) * railStep - appSafeTop
         let pressedTop = clamp(pressedCenter - pressedHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - pressedHeight))
-        appScroll = clamp(get(appSectionStarts, max(0, indexOf(appSections, pressedLetter)), 0) - pressedTop, 0, appMaxScroll)
+        // Sliding onto the cog navigates to the actual bottom settings menu.
+        appScroll = railSettingsSelected ? appMaxScroll : clamp(get(appSectionStarts, max(0, indexOf(appSections, pressedLetter)), 0) - pressedTop, 0, appMaxScroll)
         menu = ""
         activeSide = 1
         browsing = true
@@ -902,24 +906,27 @@ face "Omagara" {
         railFlickLastY = y
         railHeld = true
         draggingSide = 1
-        let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railHeight - railStep / 2 ? y - (railHeight - railStep / 2) : 0
+        let nextSettings = y >= railHeight && visual
+        let edgeY = y < railStep / 2 ? y - railStep / 2 : y > railPaintHeight - railStep / 2 ? y - (railPaintHeight - railStep / 2) : 0
         railOverpull = len(alphabet) < 2 ? 0 : clamp(edgeY, -railUpperReach, railLowerReach)
         // Track absolute thumb position while the rail's hit cells stay fixed.
         // Mirror the inward-facing curve when the rail is on the left.
         railPull = visual ? (side == 1 ? clamp(106 - x, 0, railMaxReach) : clamp(62 + x, 0, railMaxReach)) : min(84, railMaxReach)
         railThumbX = side == 1 ? (tileWidth ?? 400) - screenRight - 4 - (visual ? 44 : 20) + x : screenLeft + (visual ? 4 : 0) + x
         touchY = clamp(railTop + y, screenTop, (tileHeight ?? 800) - screenInset)
-        fingerPosition = clamp(y / railStep - 0.5, 0, max(0, len(alphabet) - 1))
+        fingerPosition = clamp(y / railStep - 0.5, 0, max(0, len(alphabet) - (nextSettings ? 0 : 1)))
         let nextLetter = get(alphabet, clamp(floor(y / railStep), 0, max(0, len(alphabet) - 1)), letter)
-        if nextLetter != letter {
+        if nextSettings != railSettingsSelected || (!nextSettings && nextLetter != letter) {
           hapticSteps = hapticSteps + 1
-          if cfg.hapticFeedback == "Every letter" || (cfg.hapticFeedback == "Reduced" && hapticSteps % 2 == 0) { haptic() }
-          letter = nextLetter
+          // Entering Settings must give one definite bump, even with Reduced haptics.
+          if cfg.hapticFeedback != "Off" && (nextSettings || cfg.hapticFeedback == "Every letter" || hapticSteps % 2 == 0) { haptic() }
         }
+        railSettingsSelected = nextSettings
+        if !nextSettings { letter = nextLetter }
         let nextHeight = appLabelHeight + len(get(groups, nextLetter, [])) * appRowHeight
         let nextCenter = railTop + railOverpull + (max(0, indexOf(alphabet, nextLetter)) + 0.5) * railStep - appSafeTop
         let nextTop = clamp(nextCenter - nextHeight / 2, appEdgeSpace, max(appEdgeSpace, appPanelHeight - appEdgeSpace - nextHeight))
-        appScroll = clamp(get(appSectionStarts, max(0, indexOf(appSections, nextLetter)), 0) - nextTop, 0, appMaxScroll)
+        appScroll = nextSettings ? appMaxScroll : clamp(get(appSectionStarts, max(0, indexOf(appSections, nextLetter)), 0) - nextTop, 0, appMaxScroll)
         menu = ""
         activeSide = 1
         browsing = true
@@ -927,7 +934,7 @@ face "Omagara" {
         replyKey = ""
         replyDraft = ""
       }
-      onTap: { browsing = true; activeSide = 0; railHeld = false; railPull = 0 }
+      onTap: { browsing = true; activeSide = 0; railHeld = false; railSettingsSelected = false; railPull = 0 }
       // A press is cancelled when the drag detector consumes its first move.
       // Keep the curve active in either detector order at that transition;
       // a real drag release/cancellation always clears both states below.
@@ -941,7 +948,7 @@ face "Omagara" {
           railReturning = !cfg.reduceMotion && (abs(railOverpull) > 0.5 || cfg.curve && railPull * railEnterEase > 0.5)
           railOverpull = 0
           railEntering = false
-          activeSide = 0; railHeld = false; railPull = 0
+          activeSide = 0; railHeld = false; railSettingsSelected = false; railPull = 0
         }
       }
       onDragEnd: {
@@ -972,7 +979,7 @@ face "Omagara" {
         railReturning = !cfg.reduceMotion && (abs(railOverpull) > 0.5 || cfg.curve && railPull * railEnterEase > 0.5)
         railOverpull = 0
         railEntering = false
-        draggingSide = 0; activeSide = 0; railHeld = false; railPull = 0
+        draggingSide = 0; activeSide = 0; railHeld = false; railSettingsSelected = false; railPull = 0
       }
       // The selected edge draws the glyphs; the other edge is optional input.
       // Keep showing the worm during its release return even if idle alphabet is hidden.
@@ -1532,27 +1539,25 @@ face "Omagara" {
       let gearPhase = railWiggleAge - abs(len(alphabet) - railWiggleOrigin) * 0.015
       let gearWiggle = railWiggling && !cfg.reduceMotion && gearPhase > 0 && gearPhase < 1.34 ? railWiggleDirection * 11 * railWiggleStrength * pow(1 - gearPhase / 1.34, 2) * sin(gearPhase * 36) : 0
       let gearX = railHomeX - alphabetSide * (railCurvePull * gearCurve + gearWiggle)
+      // Display-only glyph: the extended stationary AlphabetRail handles
+      // taps, held navigation and haptics through this cell without a second
+      // overlapping gesture target.
       Box {
         width: 44
         height: railStep
         align: center
         offset: [gearX - 22, railTop + railHeight + railVisualY]
-        onTap: {
-          appVelocity = 0; browsing = false; activeSide = 0; railHeld = false
-          draggingSide = 0; letter = first(liveAlphabet) ?? "A"
-          appScroll = 0; appAnchor = ""; queryText = ""; menu = ""
-          resetConfirm = false; screenMode = "settings"; screen()
-        }
         // The gear's 11dp artwork matches the alphabet's 11dp font.
         Canvas {
           size: 11
+          scale: railSettingsSelected ? 1.16 : 1
           for i in range(8) {
             rotate(i * 45, 5.5, 5.5) {
-              line(5.5, 0.9, 5.5, 2.3, stroke: primaryText, width: 0.9, cap: round)
+              line(5.5, 0.9, 5.5, 2.3, stroke: railSettingsSelected ? accent : primaryText, width: 0.9, cap: round)
             }
           }
-          circle(5.5, 5.5, 3.3, stroke: primaryText, width: 0.9)
-          circle(5.5, 5.5, 0.9, fill: primaryText)
+          circle(5.5, 5.5, 3.3, stroke: railSettingsSelected ? accent : primaryText, width: 0.9)
+          circle(5.5, 5.5, 0.9, fill: railSettingsSelected ? accent : primaryText)
         }
       }
     }
@@ -1572,7 +1577,7 @@ face "Omagara" {
         background: alpha(surface, 0.94)
         align: center
         offset: [bubbleX - 21, clamp(touchY - 21 - bubbleLift, screenTop + 4, max(screenTop + 4, appSafeBottom - 42))]
-        Text { text: letter; font: chosenFont; fontSize: 20; color: accent; bold: true; align: center }
+        Text { text: railSettingsSelected ? "⚙" : letter; font: chosenFont; fontSize: 20; color: accent; bold: true; align: center }
       }
     }
     Box {
