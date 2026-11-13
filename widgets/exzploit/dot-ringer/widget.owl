@@ -1,0 +1,187 @@
+// Ring or vibrate in dots: a pill toggle whose thumb clicks across between the two halves, and the ring
+// volume as a row of dots under it. Each mode buzzes its own way when the phone has switched to it:
+// ring two taps, vibrate a short brrr. Red is vibrate: the phone won't ring.
+//
+// Android lets a launcher set the ring volume, not the mode itself: ring sets the volume back to where it was,
+// vibrate sets it to 0, which Android turns into vibrate. What the slider shows is what the phone says it is.
+// Do Not Disturb can refuse the change.
+widget "dot ringer" {
+  size: 4x4
+  minSize: 3x3
+  padding: 12
+  meta { owl: 13; description: "Nothing-style ring/vibrate toggle with haptics, and the ring volume in dots"; version: "1.0"; license: "MIT"; category: "system" }
+  requires { pacman: [] }
+
+  source m = android.modes
+  source v = android.volume
+  source now = clock every 1s
+
+  state lastRing = 60 persist   // the ring volume to go back to
+  state want = -1               // the notch asked for, until the phone says it's there
+  state dragPos = -1            // the thumb, 0..1, while a finger has it
+  state msg = ""
+  state off = 0
+  state giveUp = 0
+  state h1 = 0
+  state h2 = 0
+  state h3 = 0
+  on now first { off = now - time }
+
+  let ringer = m.ringer ?? "normal"
+  let actual = ringer == "normal" ? 0 : 1
+  let shown = dragPos >= 0 ? dragPos : (want >= 0 ? want : actual)
+  let at1 = round(shown) == 1
+  let names = ["RING", "VIBRATE"]
+  let ring = v.ring ?? {level: 0, steps: 7}
+  let steps = clamp(ring.steps ?? 7, 3, 15)
+  let lit = round((ring.level ?? 0) / 100 * steps)
+  let W = max(140, (tileWidth ?? 220) - 24)
+  let half = W / 2
+  let roomy = half >= 90
+  let tall = (tileHeight ?? 0) > 150
+
+  on v { if (value.ring.level ?? 0) > 0 { lastRing = value.ring.level } }
+
+  // The phone has switched: its own buzz for each mode.
+  on ringer {
+    want = -1
+    msg = ""
+    haptic()
+    if value == "normal" {
+      h1 = off + time + 0.14
+    } else {
+      h1 = off + time + 0.03
+      h2 = off + time + 0.06
+      h3 = off + time + 0.09
+    }
+  }
+  at h1 { haptic() }
+  at h2 { haptic() }
+  at h3 { haptic() }
+  // Asked for a mode the phone didn't take.
+  at giveUp {
+    if want >= 0 && want != actual {
+      msg = m.dnd ? "DND REFUSED" : "NOT CHANGED"
+      want = -1
+    }
+  }
+
+  component Glyph(kind, ink) {
+    // 7x7 dot icons: a bell, a phone shaking.
+    Canvas {
+      size: 15
+      let rows = kind == 1 ? [".......", "1.111.1", "1.1.1.1", "..1.1..", "1.1.1.1", "1.111.1", "......."] : ["...1...", "..111..", ".11111.", ".11111.", ".11111.", "1111111", "...1..."]
+      let p = width / 7
+      for y in range(7) {
+        for x in range(7) {
+          if sub(rows[y], x, x + 1) == "1" { circle(p / 2 + x * p, p / 2 + y * p, p * 0.38, fill: ink) }
+        }
+      }
+    }
+  }
+
+  Column {
+    fill: true
+    gap: 8
+    Row {
+      align: center
+      gap: 6
+      Text { text: "SOUND"; font: mono; bold: true; fontSize: 10; letterSpacing: 2; color: foreground; weight: 1; maxLines: 1 }
+      Text { text: msg != "" ? msg : names[round(shown)]; font: mono; fontSize: 10; letterSpacing: 1; color: at1 || msg != "" ? red : muted; maxLines: 1; onTap: msg = "" }
+    }
+    Spacer { weight: 1 }
+    // The toggle: a pill split in two, the thumb sliding under the half that's on. Tap a half, or drag.
+    Box {
+      width: W
+      height: 48
+      radius: 24
+      border: 1.5
+      borderColor: alpha(foreground, 0.3)
+      align: topStart
+      drag: horizontal
+      onPress: haptic()
+      onTap: {
+        let i = x > half ? 1 : 0
+        haptic()
+        if i != actual {
+          want = i
+          msg = ""
+          giveUp = off + time + 1.5
+          volume(i == 0 ? max(lastRing, 100 / steps) : 0, "ring")
+        }
+      }
+      onDrag: {
+        if dragPos < 0 { dragPos = shown }
+        let was = round(dragPos)
+        dragPos = clamp(dragPos + dx / half, 0, 1)
+        if round(dragPos) != was { haptic() }
+      }
+      onDragEnd: {
+        let i = round(dragPos >= 0 ? dragPos : shown)
+        dragPos = -1
+        haptic()
+        if i != actual {
+          want = i
+          msg = ""
+          giveUp = off + time + 1.5
+          volume(i == 0 ? max(lastRing, 100 / steps) : 0, "ring")
+        }
+      }
+      Box {
+        width: half - 6
+        height: 40
+        radius: 20
+        background: at1 ? red : foreground
+        animate background: tween(160ms, "out")
+        offset: [4 + shown * (half - 2), 4]
+        animate offset: spring(0.62, 650)
+      }
+      Row {
+        width: W
+        height: 48
+        for i in range(2) {
+          Row {
+            weight: 1
+            fill: height
+            align: center
+            justify: center
+            gap: 7
+            let on = round(shown) == i
+            let ink = on ? (i == 1 ? foreground : background) : alpha(foreground, 0.4)
+            if roomy { Glyph { kind: i; ink: ink } }
+            Text { text: names[i]; font: mono; bold: on; fontSize: 10; letterSpacing: 1; color: ink; maxLines: 1 }
+          }
+        }
+      }
+    }
+    Spacer { weight: 1 }
+    // Ring volume: a dot per step, lit up to the level; drag along it, a click per step.
+    Canvas {
+      width: W
+      height: 18
+      drag: horizontal
+      let p = W / steps
+      for k in range(steps) {
+        circle(p / 2 + k * p, 9, min(p * 0.3, 4.5), fill: k < lit ? (actual == 0 ? foreground : alpha(foreground, 0.35)) : alpha(foreground, 0.1))
+      }
+      onPress: haptic()
+      onDrag: {
+        let n = clamp(round(x / (W / steps)), 0, steps)
+        if n != lit {
+          haptic()
+          volume(n / steps * 100, "ring")
+        }
+      }
+      onTap: {
+        haptic()
+        volume(clamp(round(x / (W / steps)), 0, steps) / steps * 100, "ring")
+      }
+    }
+    Row {
+      visible: tall
+      align: center
+      Text { text: "VOLUME"; font: mono; fontSize: 9; letterSpacing: 2; color: muted; weight: 1; maxLines: 1 }
+      Text { text: "${round(ring.level ?? 0)}%"; font: mono; fontSize: 9; letterSpacing: 1; color: muted; maxLines: 1 }
+    }
+  }
+}
