@@ -110,6 +110,9 @@ face "Omagara" {
   state importText = ""
   state importStatus = ""
   state settingsSection = "Home"
+  state homeApplyPage = ""
+  state homeApplySerial = 0
+  state homeApplyStatus = ""
   state clockTab = "alarms"
   state timerMinutes = "5"
   state timerDeadline = 0 persist
@@ -144,7 +147,16 @@ face "Omagara" {
   let chosenFont = cfg.faceFont == "Serif" ? "serif" : cfg.faceFont == "Launcher" ? "mono" : "sans"
   let zoneChoices = ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland"]
   // Optional terminal actions don't make the face require Linux.
-  let homeDefaultCommand = "apply_home() { local page=\"$1\" file=\"$HOME/.config/omalauncher/style/style.toml\" stage backup; [[ \"$page\" == 0 || \"$page\" == 1 ]] || return 1; [[ -f \"$file\" && ! -L \"$file\" && -w \"$file\" ]] || return 1; stage=\"$(mktemp \"$file.omagara.XXXXXX\")\" || return 1; cp -p -- \"$file\" \"$stage\" || { rm -f -- \"$stage\"; return 1; }; if grep -Eq '^[[:space:]]*\\[home\\][[:space:]]*$' \"$stage\"; then sed -i -E '/^[[:space:]]*\\[home\\][[:space:]]*$/,/^[[:space:]]*\\[/ { /^[[:space:]]*home-page[[:space:]]*=/d; }' \"$stage\" && sed -i -E \"/^[[:space:]]*\\[home\\][[:space:]]*$/a home-page = $page\" \"$stage\" || { rm -f -- \"$stage\"; return 1; }; else printf '\\n[home]\\nhome-page = %s\\n' \"$page\" >> \"$stage\" || { rm -f -- \"$stage\"; return 1; }; fi; grep -Fxq \"home-page = $page\" \"$stage\" || { rm -f -- \"$stage\"; return 1; }; backup=\"$(mktemp \"$file.backup.XXXXXX\")\" || { rm -f -- \"$stage\"; return 1; }; cp -p -- \"$file\" \"$backup\" && chmod --reference=\"$file\" \"$stage\" && mv -f -- \"$stage\" \"$file\" || { rm -f -- \"$stage\"; return 1; }; printf 'Saved home page %s. Backup: %s\\n' \"$page\" \"$backup\"; }; if apply_home \"$1\"; then printf 'Home page updated.\\n'; else printf 'Home page update FAILED; original file was kept.\\n' >&2; fi; printf 'Press Enter to close this window...'; read -r _"
+  let homeDefaultCommand = "apply_home() { local page=\"$1\" file=\"$HOME/.config/omalauncher/style/style.toml\" stage backup; [[ \"$page\" == 0 || \"$page\" == 1 ]] || return 1; [[ -f \"$file\" && ! -L \"$file\" && -w \"$file\" ]] || return 1; stage=\"$(mktemp \"$file.omagara.XXXXXX\")\" || return 1; cp -p -- \"$file\" \"$stage\" || { rm -f -- \"$stage\"; return 1; }; if grep -Eq '^[[:space:]]*\\[home\\][[:space:]]*$' \"$stage\"; then sed -i -E '/^[[:space:]]*\\[home\\][[:space:]]*$/,/^[[:space:]]*\\[/ { /^[[:space:]]*home-page[[:space:]]*=/d; }' \"$stage\" && sed -i -E \"/^[[:space:]]*\\[home\\][[:space:]]*$/a home-page = $page\" \"$stage\" || { rm -f -- \"$stage\"; return 1; }; else printf '\\n[home]\\nhome-page = %s\\n' \"$page\" >> \"$stage\" || { rm -f -- \"$stage\"; return 1; }; fi; grep -Fxq \"home-page = $page\" \"$stage\" || { rm -f -- \"$stage\"; return 1; }; backup=\"$(mktemp \"$file.backup.XXXXXX\")\" || { rm -f -- \"$stage\"; return 1; }; cp -p -- \"$file\" \"$backup\" && chmod --reference=\"$file\" \"$stage\" && mv -f -- \"$stage\" \"$file\" || { rm -f -- \"$stage\"; return 1; }; printf 'Saved home page %s. Backup: %s\\n' \"$page\" \"$backup\"; }; if apply_home \"$1\"; then printf 'Request %s applied.\\n' \"$2\"; else printf 'Request %s failed.\\n' \"$2\" >&2; false; fi"
+  // This optional source runs only when a button changes homeApplyPage;
+  // its null command at rest avoids polling, shell startup and Linux dependency.
+  source homeApplyResult = cmd(homeApplyPage == "" ? null : "bash -c " + sh(homeDefaultCommand) + " _ " + sh(homeApplyPage) + " " + sh(str(homeApplySerial))) every 24h timeout 20s status optional
+  on homeApplyResult first {
+    if homeApplyPage != "" {
+      homeApplyStatus = value.ok ? (homeApplyPage == "0" ? "Omagara is now the default home." : "Original home restored.") : "Could not change default. " + (value.err == "" ? "Check Omalauncher Linux." : value.err)
+      homeApplyPage = ""
+    }
+  }
   let preferenceRows = [
     {section: "Appearance", key: "icons", name: "App icons"},
     {key: "clock", name: "Show clock"}, {key: "date", name: "Show date"},
@@ -1768,14 +1780,33 @@ face "Omagara" {
                 gap: 8
                 Button {
                   text: "Set Omagara as default"
-                  onTap: terminal("bash -c " + sh(homeDefaultCommand) + " _ 0", "Set Omagara home")
+                  onTap: {
+                    if !linux {
+                      homeApplyStatus = "Omalauncher Linux is required to set the default."
+                    } else if homeApplyPage == "" {
+                      homeApplyStatus = "Applying Omagara default..."
+                      homeApplySerial = homeApplySerial + 1
+                      homeApplyPage = "0"
+                    }
+                  }
                 }
                 Button {
                   text: "Restore original home"
-                  onTap: terminal("bash -c " + sh(homeDefaultCommand) + " _ 1", "Restore original home")
+                  onTap: {
+                    if !linux {
+                      homeApplyStatus = "Omalauncher Linux is required to set the default."
+                    } else if homeApplyPage == "" {
+                      homeApplyStatus = "Restoring original home..."
+                      homeApplySerial = homeApplySerial + 1
+                      homeApplyPage = "1"
+                    }
+                  }
                 }
               }
-              Text { text: "Opens a terminal to apply the setting and save a backup. Press Home after it reports success. Requires Omalauncher Linux."; font: chosenFont; fontSize: 12; color: secondaryText }
+              if homeApplyStatus != "" {
+                Text { text: homeApplyStatus; font: chosenFont; fontSize: 14; color: homeApplyPage != "" ? accent : secondaryText }
+              }
+              Text { text: "Changes apply in the background, without opening a terminal. A configuration backup is saved automatically."; font: chosenFont; fontSize: 12; color: secondaryText }
               Text { text: "Switch page temporarily"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
               Button { text: "View Omagara"; onTap: launcher("page:0") }
               Button { text: "View original tile home"; onTap: launcher("page:1") }
