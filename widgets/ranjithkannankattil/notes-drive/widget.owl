@@ -652,19 +652,19 @@ if __name__ == "__main__":
       gap: 8
       align: center
       padding: [2, 4, 0, 4]
-      Box { size: 34; align: center; onTap: { haptic(); run("${fn} toggle ${sh(list)} ${it.n}") }
+      Box { size: 34; align: center; onTap: { haptic(); run("${fn} toggle ${sh(list)} ${sh(it.n)}") }
         Box { size: 20; radius: 4 * corners; align: center; border: 2; borderColor: it.done ? accent : muted; background: it.done ? accent : null
           if it.done { Text { text: "󰄬"; font: icon; fontSize: 15; color: background; align: center } }
         }
       }
-      Box { weight: 1; onTap: run("${fn} toggle ${sh(list)} ${it.n}")
+      Box { weight: 1; onTap: run("${fn} toggle ${sh(list)} ${sh(it.n)}")
         T { text: it.text; size: 16; tint: it.done ? muted : foreground; lines: 2 }
       }
       if arrange {
-        Text { text: "↑"; bold: true; fontSize: 20; color: accent; padding: [12, 6]; onTap: { haptic(); run("${fn} move ${sh(list)} ${it.n} up") } }
-        Text { text: "↓"; bold: true; fontSize: 20; color: accent; padding: [12, 6]; onTap: { haptic(); run("${fn} move ${sh(list)} ${it.n} down") } }
+        Text { text: "↑"; bold: true; fontSize: 20; color: accent; padding: [12, 6]; onTap: { haptic(); run("${fn} move ${sh(list)} ${sh(it.n)} up") } }
+        Text { text: "↓"; bold: true; fontSize: 20; color: accent; padding: [12, 6]; onTap: { haptic(); run("${fn} move ${sh(list)} ${sh(it.n)} down") } }
       } else {
-        Box { size: 36; align: center; onTap: run("${fn} del ${sh(list)} ${it.n}")
+        Box { size: 36; align: center; onTap: run("${fn} del ${sh(list)} ${sh(it.n)}")
           Text { text: "󰅖"; font: icon; fontSize: 16; color: muted; align: center }
         }
       }
