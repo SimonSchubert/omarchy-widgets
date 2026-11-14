@@ -109,6 +109,10 @@ face "Omagara" {
   state resetConfirm = false
   state importText = ""
   state importStatus = ""
+  state settingsSection = "Clock"
+  state settingsCornersOpen = false
+  state settingsWorldClocksOpen = false
+  state settingsBackupOpen = false
   state clockTab = "alarms"
   state timerMinutes = "5"
   state timerDeadline = 0 persist
@@ -143,41 +147,41 @@ face "Omagara" {
   let chosenFont = cfg.faceFont == "Serif" ? "serif" : cfg.faceFont == "Launcher" ? "mono" : "sans"
   let zoneChoices = ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland"]
   let preferenceRows = [
-    {section: "Appearance", key: "icons", name: "Show application icons"},
+    {section: "Appearance", key: "icons", name: "App icons"},
     {key: "clock", name: "Show clock"}, {key: "date", name: "Show date"},
-    {key: "event", name: "Show today's calendar event"},
+    {key: "event", name: "Today's calendar event"},
     {key: "reduceMotion", name: "Reduce motion"},
-    {key: "shadeHeader", name: "Shade clock, date and event"},
-    {key: "shadeAlphabet", name: "Shade alphabet worm"},
-    {key: "shadeNoticeLabels", name: "Shade notification headings"},
-    {key: "shadeAppLabels", name: "Shade application labels"},
-    {section: "Corner rounding", key: "roundTime", name: "Round clock shade"},
-    {key: "roundDate", name: "Round date shade"},
-    {key: "roundEvent", name: "Round event shade"},
+    {key: "shadeHeader", name: "Clock and date shade"},
+    {key: "shadeAlphabet", name: "Alphabet shade"},
+    {key: "shadeNoticeLabels", name: "Notification heading shade"},
+    {key: "shadeAppLabels", name: "App label shade"},
+    {section: "Corner rounding", key: "roundTime", name: "Clock"},
+    {key: "roundDate", name: "Date"},
+    {key: "roundEvent", name: "Event"},
     {key: "roundAlphabet", name: "Round alphabet worm ends"},
-    {key: "roundNotifications", name: "Round notification cards"},
-    {key: "roundNoticeHeading", name: "Round Notifications heading"},
-    {key: "roundClearAll", name: "Round Clear all heading"},
-    {key: "roundSearch", name: "Round Search button"},
-    {key: "roundClose", name: "Round browser Close button"},
-    {key: "roundLetterCue", name: "Round selected-letter cue"},
-    {key: "roundCalendar", name: "Round calendar event cards"},
-    {key: "roundAppLabels", name: "Round application label shades"},
-    {section: "Navigation", key: "idleAlphabet", name: "Show alphabet while idle"},
-    {key: "hideEmpty", name: "Hide empty alphabet letters"},
-    {key: "leftInput", name: "Enable opposite-edge input"},
-    {key: "centerNotificationsWithoutAlphabet", name: "Center notifications when alphabet is hidden"},
-    {key: "curve", name: "Curved alphabet animation"},
+    {key: "roundNotifications", name: "Notification cards"},
+    {key: "roundNoticeHeading", name: "Notification heading"},
+    {key: "roundClearAll", name: "Clear all"},
+    {key: "roundSearch", name: "Search button"},
+    {key: "roundClose", name: "Close button"},
+    {key: "roundLetterCue", name: "Selected letter"},
+    {key: "roundCalendar", name: "Calendar events"},
+    {key: "roundAppLabels", name: "App labels"},
+    {section: "Navigation", key: "idleAlphabet", name: "Show alphabet on home"},
+    {key: "hideEmpty", name: "Hide empty letters"},
+    {key: "leftInput", name: "Opposite-edge gestures"},
+    {key: "centerNotificationsWithoutAlphabet", name: "Center notifications without alphabet"},
+    {key: "curve", name: "Curved alphabet"},
     {section: "Notifications", key: "notifications", name: "Show notifications"},
     {key: "notificationTimes", name: "Show notification timestamps"},
-    {key: "previews", name: "Show notification content previews"},
-    {key: "grouping", name: "Group notifications by application"},
-    {key: "actions", name: "Show notification action buttons"},
-    {section: "Search", key: "calculator", name: "Integrated calculator"},
+    {key: "previews", name: "Show message previews"},
+    {key: "grouping", name: "Group by application"},
+    {key: "actions", name: "Show action buttons"},
+    {section: "Search", key: "calculator", name: "Calculator in Search"},
     {key: "searchContacts", name: "Search contacts (unavailable)"},
-    {section: "Header interactions", key: "clockTap", name: "Clock tap action"},
-    {key: "dateTap", name: "Date / calendar tap action"},
-    {key: "eventTap", name: "Calendar event tap action"}
+    {section: "Header interactions", key: "clockTap", name: "Tap clock to open Clock"},
+    {key: "dateTap", name: "Tap date to open Calendar"},
+    {key: "eventTap", name: "Tap event to open Calendar"}
   ]
   let remaining = timerDeadline > 0 ? max(0, ceil(timerDeadline - seconds)) : timerLeft
   let elapsed = watchElapsed + (watchStarted > 0 ? max(0, seconds - watchStarted) : 0)
@@ -1678,6 +1682,20 @@ face "Omagara" {
   // OWL 21 rejects Input.focus on a face and disables automatic focus there.
   // A native screen is the supported single-tap keyboard path; it is framed
   // by the launcher, rather than an inline transparent search overlay.
+  // Full-width, readable toggle used by all settings categories.
+  component SettingToggle(pref) {
+    Row {
+      fill: width
+      gap: 8
+      align: center
+      padding: [12, 14]
+      background: alpha(surface, 0.30)
+      onTap: prefs = set(prefs, pref.key, !get(cfg, pref.key))
+      Text { text: pref.name; font: chosenFont; fontSize: 15; weight: 1; maxLines: 2 }
+      Text { text: get(cfg, pref.key) ? "ON" : "OFF"; font: chosenFont; fontSize: 14; color: get(cfg, pref.key) ? accent : muted }
+    }
+  }
+
   screen {
     title: screenMode == "calendarAdd" ? "Add event · calendar app" : screenMode == "settings" ? "Omagara Settings" : screenMode == "clock" ? "Clock" : screenMode == "calendar" ? "Calendar" : "Search apps"
     if screenMode == "search" {
@@ -1723,126 +1741,172 @@ face "Omagara" {
     } else if screenMode == "settings" {
       Column {
         fill: true
-        scroll: true
         gap: 8
-        Text { text: "Omagara only"; font: chosenFont; fontSize: 20; color: accent }
-        Text { text: "Long-press Search to return here. Colored icons retain their original colors; Theme overlay blends the selected theme color over them."; font: chosenFont; color: muted; fontSize: 13 }
-        for pref in preferenceRows {
+        // A fixed category selector replaces the difficult single long page.
+        Flow {
+          fill: width
+          gap: 6
+          for section in ["Clock", "Apps", "Alphabet", "Notifications", "Style", "More"] {
+            Button {
+              text: (settingsSection == section ? "✓ " : "") + section
+              color: settingsSection == section ? accent : secondaryText
+              onTap: settingsSection = section
+            }
+          }
+        }
+        // A keyed scroll view begins each category at the top.
+        for shownSection in [settingsSection] key shownSection {
           Column {
             fill: width
-            gap: 0
-            if pref.section != null { Text { text: pref.section; color: accent; padding: [0, 18, 0, 6]; font: chosenFont } }
-            Row {
-              fill: width
-              align: center
-              padding: [8, 14]
-              onTap: { if pref.key != "searchContacts" { prefs = set(prefs, pref.key, !get(cfg, pref.key)) }; menu = "" }
-              Text { text: pref.name; font: chosenFont; fontSize: 15; weight: 1 }
-              Text { text: get(cfg, pref.key) ? "ON" : "OFF"; color: get(cfg, pref.key) ? accent : muted; fontSize: 14 }
-            }
-            if pref.key == "idleAlphabet" {
-              Text { text: "Alphabet side"; font: chosenFont; fontSize: 14; color: secondaryText; padding: [4, 14, 0, 0] }
+            weight: 1
+            scroll: true
+            gap: 8
+            if shownSection == "Clock" {
+              Text { text: "Clock & date"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
+              Text { text: "Time format"; font: chosenFont; fontSize: 15 }
               Flow {
+                fill: width
+                gap: 8
+                for format in timeFormatChoices {
+                  Button {
+                    text: (cfg.timeFormat == format ? "✓ " : "") + format + " · " + fmtTime(now, format == "12-hour" ? "h:mm a" : "HH:mm")
+                    onTap: prefs = set(prefs, "timeFormat", format)
+                  }
+                }
+              }
+              Text { text: "Omagara time is set here; it does not follow Android's time format."; font: chosenFont; fontSize: 12; color: secondaryText }
+              Text { text: "Home header"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
+              for pref in preferenceRows.filter(p => contains(["clock", "date", "event", "clockTap", "dateTap", "eventTap"], p.key)) {
+                SettingToggle { pref: pref }
+              }
+            } else if shownSection == "Apps" {
+              Text { text: "Apps & search"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
+              for pref in preferenceRows.filter(p => contains(["icons", "calculator"], p.key)) {
+                SettingToggle { pref: pref }
+              }
+              Text { text: "App icon style"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
+              Flow {
+                fill: width
+                gap: 8
+                for iconOption in iconStyleChoices {
+                  Button { text: (cfg.iconStyle == iconOption ? "✓ " : "") + iconOption; onTap: prefs = set(prefs, "iconStyle", iconOption) }
+                }
+              }
+              if cfg.iconStyle == "Theme overlay" {
+                Text { text: "Overlay strength: " + str(cfg.iconOverlayOpacity) + "%"; font: chosenFont; fontSize: 14 }
+                Slider { value: cfg.iconOverlayOpacity; min: 0; max: 60; step: 10; live: true; onChange: prefs = set(prefs, "iconOverlayOpacity", clamp(round(value / 10) * 10, 0, 60)) }
+              }
+              if drawer.monochrome == true {
+                Text { text: "Original app colors require Colored icons in Omalauncher Style."; font: chosenFont; fontSize: 12; color: secondaryText }
+              }
+              Text { text: "App list size: " + str(cfg.appScale) + "%"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
+              Slider {
+                value: cfg.appScale
+                min: 75
+                max: 115
+                step: 5
+                live: true
+                onChange: { letter = highlightedLetter; appTracking = false; prefs = set(prefs, "appScale", clamp(round(value / 5) * 5, 75, 115)) }
+              }
+              Button { text: "Reset app size to 80%"; onTap: { letter = highlightedLetter; appTracking = false; prefs = set(prefs, "appScale", 80) } }
+              Text { text: "Contact search is unavailable in Omalauncher OWL."; font: chosenFont; fontSize: 12; color: secondaryText }
+            } else if shownSection == "Alphabet" {
+              Text { text: "Alphabet navigation"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
+              Text { text: "Alphabet position"; font: chosenFont; fontSize: 15 }
+              Flow {
+                fill: width
                 gap: 8
                 for edge in ["Right", "Left"] {
                   Button { text: (cfg.alphabetSide == edge ? "✓ " : "") + edge; onTap: prefs = set(prefs, "alphabetSide", edge) }
                 }
               }
-            }
-          }
-        }
-        Text { text: "Time format"; color: accent; padding: [0, 18, 0, 6] }
-        Flow {
-          fill: width
-          gap: 8
-          for format in timeFormatChoices {
-            Button { text: (cfg.timeFormat == format ? "✓ " : "") + format; onTap: prefs = set(prefs, "timeFormat", format) }
-          }
-        }
-        Text { text: "Choose 12-hour or 24-hour for Omagara. This does not automatically follow Android's clock setting."; font: chosenFont; fontSize: 13; color: muted }
-        Text { text: "Application icon style"; color: accent; padding: [0, 18, 0, 6] }
-        Flow {
-          fill: width
-          gap: 8
-          for iconOption in iconStyleChoices {
-            Button { text: (cfg.iconStyle == iconOption ? "✓ " : "") + iconOption; onTap: prefs = set(prefs, "iconStyle", iconOption) }
-          }
-        }
-        if cfg.iconStyle == "Theme overlay" {
-          Text { text: "Theme overlay strength · " + str(cfg.iconOverlayOpacity) + "%"; font: chosenFont; fontSize: 15 }
-          Slider { value: cfg.iconOverlayOpacity; min: 0; max: 60; step: 10; live: true; onChange: prefs = set(prefs, "iconOverlayOpacity", clamp(round(value / 10) * 10, 0, 60)) }
-        }
-        if drawer.monochrome == true {
-          Text { text: "Omalauncher Style currently supplies monochrome icon masks. Select Colored icons in the launcher's Style settings to retain original app colors in Theme overlay mode."; font: chosenFont; fontSize: 13; color: secondaryText }
-        }
-        Text { text: "Face font"; color: accent; padding: [0, 18, 0, 6] }
-        Flow {
-          fill: width
-          gap: 8
-          for faceFontName in faceFontChoices {
-            Button { text: (cfg.faceFont == faceFontName ? "✓ " : "") + faceFontName; onTap: prefs = set(prefs, "faceFont", faceFontName) }
-          }
-        }
-        Text { text: "Launcher uses the font selected in Omalauncher's Style settings."; font: chosenFont; fontSize: 13; color: secondaryText }
-        Row {
-          fill: width
-          align: center
-          padding: [8, 14]
-          onTap: prefs = set(prefs, "bubbleBorder", !cfg.bubbleBorder)
-          Text { text: "Show bubble borders"; font: chosenFont; fontSize: 15; weight: 1 }
-          Text { text: cfg.bubbleBorder ? "ON" : "OFF"; color: cfg.bubbleBorder ? accent : muted; fontSize: 14 }
-        }
-        Text { text: "All corners are square by default. Set rounding separately per element above."; font: chosenFont; fontSize: 13; color: muted }
-        Text { text: "Home text color"; color: accent; padding: [0, 18, 0, 6] }
-        Flow {
-          fill: width
-          gap: 8
-          for tone in textToneChoices {
-            Button { text: (cfg.textTone == tone ? "✓ " : "") + tone; onTap: prefs = set(prefs, "textTone", tone) }
-          }
-        }
-        Text { text: "Secondary text contrast"; color: accent; padding: [0, 18, 0, 6] }
-        Flow {
-          fill: width
-          gap: 8
-          for level in textContrastChoices {
-            Button { text: (cfg.textContrast == level ? "✓ " : "") + level; onTap: prefs = set(prefs, "textContrast", level) }
-          }
-        }
-        Text { text: "High is the default for readable dates, alphabet letters, and notifications. Use Light or Dark for wallpaper contrast; OWL cannot detect wallpaper brightness."; font: chosenFont; fontSize: 13; color: muted }
-        Text { text: "Alphabet touch feedback"; color: accent; padding: [0, 18, 0, 6] }
-        Flow {
-          fill: width
-          gap: 8
-          for mode in hapticChoices {
-            Button { text: (cfg.hapticFeedback == mode ? "✓ " : "") + mode; onTap: prefs = set(prefs, "hapticFeedback", mode) }
-          }
-        }
-        Text { text: "Reduced vibrates on every second letter change. Every letter vibrates on each change. Android controls vibration strength and may disable touch feedback."; font: chosenFont; fontSize: 13; color: muted }
-        Text { text: "Application Browser"; color: accent; padding: [0, 18, 0, 6] }
-        Text { text: "Application Scale · " + str(cfg.appScale) + "%"; font: chosenFont; fontSize: 15 }
-        Slider {
-          value: cfg.appScale
-          min: 75
-          max: 115
-          step: 5
-          live: true
-          onChange: { letter = highlightedLetter; appTracking = false; prefs = set(prefs, "appScale", clamp(round(value / 5) * 5, 75, 115)) }
-        }
-        Text { text: "80% is the default. 100% restores the previous browser sizing. Search and home content keep their size."; font: chosenFont; fontSize: 13; color: muted }
-        Button { text: "Reset Application Scale to 80%"; onTap: { letter = highlightedLetter; appTracking = false; prefs = set(prefs, "appScale", 80) } }
-        Text { text: "Contact search is unavailable in this launcher: OWL 21 has no contacts source or permission action. It stays OFF and reads no contacts."; font: chosenFont; fontSize: 13; color: muted }
-        Text { text: "World clocks"; color: accent; padding: [0, 18, 0, 6] }
-        Text { text: "Select zones; daylight-saving changes follow Android's time-zone database."; font: chosenFont; fontSize: 13; color: muted }
-        for zone in zoneChoices {
-          Text { text: (contains(worldZones, zone) ? "✓ " : "+ ") + zone; font: chosenFont; padding: [8, 14]; color: contains(worldZones, zone) ? accent : foreground; onTap: worldZones = contains(worldZones, zone) ? worldZones.filter(z => z != zone) : worldZones + [zone] }
-        }
-        Text { text: "Home"; color: accent; padding: [0, 18, 0, 6] }
-        Button { text: "Go to face page 0"; onTap: launcher("page:0") }
-        Button { text: "Go to widget page 1"; onTap: launcher("page:1") }
-        Text { text: "These buttons open existing pages without changing your default home page or page layout. Choose your default home page in launcher settings."; font: chosenFont; fontSize: 13; color: muted }
-        Button { text: "Android default launcher / launcher settings"; onTap: launcher("settings") }
-        Text { text: "Preferences"; color: accent; padding: [0, 18, 0, 6] }
+              for pref in preferenceRows.filter(p => contains(["idleAlphabet", "hideEmpty", "leftInput", "centerNotificationsWithoutAlphabet", "curve"], p.key)) {
+                SettingToggle { pref: pref }
+              }
+              Text { text: "Haptic feedback"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
+              Flow {
+                fill: width
+                gap: 8
+                for mode in hapticChoices {
+                  Button { text: (cfg.hapticFeedback == mode ? "✓ " : "") + mode; onTap: prefs = set(prefs, "hapticFeedback", mode) }
+                }
+              }
+              Text { text: "Reduced: every second letter. Every letter: each change."; font: chosenFont; fontSize: 12; color: secondaryText }
+            } else if shownSection == "Notifications" {
+              Text { text: "Notifications"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
+              for pref in preferenceRows.filter(p => contains(["notifications", "notificationTimes", "previews", "grouping", "actions"], p.key)) {
+                SettingToggle { pref: pref }
+              }
+            } else if shownSection == "Style" {
+              Text { text: "Appearance"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
+              Text { text: "Text color"; font: chosenFont; fontSize: 15 }
+              Flow {
+                fill: width
+                gap: 8
+                for tone in textToneChoices {
+                  Button { text: (cfg.textTone == tone ? "✓ " : "") + tone; onTap: prefs = set(prefs, "textTone", tone) }
+                }
+              }
+              Text { text: "Text contrast"; font: chosenFont; fontSize: 15 }
+              Flow {
+                fill: width
+                gap: 8
+                for level in textContrastChoices {
+                  Button { text: (cfg.textContrast == level ? "✓ " : "") + level; onTap: prefs = set(prefs, "textContrast", level) }
+                }
+              }
+              Text { text: "Font"; font: chosenFont; fontSize: 15 }
+              Flow {
+                fill: width
+                gap: 8
+                for faceFontName in faceFontChoices {
+                  Button { text: (cfg.faceFont == faceFontName ? "✓ " : "") + faceFontName; onTap: prefs = set(prefs, "faceFont", faceFontName) }
+                }
+              }
+              Text { text: "Shading & motion"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
+              for pref in preferenceRows.filter(p => contains(["reduceMotion", "shadeHeader", "shadeAlphabet", "shadeNoticeLabels", "shadeAppLabels"], p.key)) {
+                SettingToggle { pref: pref }
+              }
+              Row {
+                fill: width
+                align: center
+                padding: [12, 14]
+                background: alpha(surface, 0.30)
+                onTap: prefs = set(prefs, "bubbleBorder", !cfg.bubbleBorder)
+                Text { text: "Bubble borders"; font: chosenFont; fontSize: 15; weight: 1 }
+                Text { text: cfg.bubbleBorder ? "ON" : "OFF"; color: cfg.bubbleBorder ? accent : muted; font: chosenFont; fontSize: 14 }
+              }
+              Button { text: (settingsCornersOpen ? "▴ Hide" : "▾ Show") + " corner rounding"; onTap: settingsCornersOpen = !settingsCornersOpen }
+              if settingsCornersOpen {
+                Text { text: "Rounded corners for"; color: accent; font: chosenFont; fontSize: 16 }
+              for pref in preferenceRows.filter(p => contains(["roundTime", "roundDate", "roundEvent", "roundAlphabet", "roundNotifications", "roundNoticeHeading", "roundClearAll", "roundSearch", "roundClose", "roundLetterCue", "roundCalendar", "roundAppLabels"], p.key)) {
+                SettingToggle { pref: pref }
+              }
+              }
+            } else {
+              Text { text: "More settings"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
+              Text { text: "Pages & launcher"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
+              Button { text: "Go to home page"; onTap: launcher("page:0") }
+              Button { text: "Go to widget page"; onTap: launcher("page:1") }
+              Button { text: "Omalauncher settings"; onTap: launcher("settings") }
+              Button {
+                text: (settingsWorldClocksOpen ? "▴ Hide" : "▾ Show") + " world clocks · " + str(len(worldZones)) + " selected"
+                onTap: settingsWorldClocksOpen = !settingsWorldClocksOpen
+              }
+              if settingsWorldClocksOpen {
+                for zone in zoneChoices {
+                  Row {
+                    fill: width
+                    padding: [10, 12]
+                    background: alpha(surface, 0.30)
+                    onTap: worldZones = contains(worldZones, zone) ? worldZones.filter(z => z != zone) : worldZones + [zone]
+                    Text { text: zone; font: chosenFont; fontSize: 14; weight: 1; maxLines: 2 }
+                    Text { text: contains(worldZones, zone) ? "✓" : "+"; color: contains(worldZones, zone) ? accent : muted; font: chosenFont; fontSize: 16 }
+                  }
+                }
+              }
+              Button { text: (settingsBackupOpen ? "▴ Hide" : "▾ Show") + " backup, import & reset"; onTap: settingsBackupOpen = !settingsBackupOpen }
+              if settingsBackupOpen {
         Button { text: "Export Omagara settings to clipboard"; onTap: copy(toJson({version: 1, prefs: cfg, zones: worldZones})) }
         Input { text: importText; placeholder: "Paste Omagara settings JSON"; lines: 3; onChange: importText = value }
         Button {
@@ -1864,6 +1928,11 @@ face "Omagara" {
           Row {
             Button { text: "Confirm reset"; onTap: { letter = highlightedLetter; appTracking = false; prefs = {}; worldZones = []; resetConfirm = false; importText = ""; importStatus = "" } }
             Button { text: "Cancel"; onTap: resetConfirm = false }
+          }
+        }
+
+              }
+            }
           }
         }
       }
