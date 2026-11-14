@@ -15,7 +15,7 @@ widget "opencode-burn" {
   meta {
     owl: 10
     description: "Paces your OpenCode free-model request quota from opencode's own session database, flags 5-hour window bursts, and says which free model to switch to."
-    version: "1.5.1"
+    version: "1.5.2"
     license: "MIT"
     category: "dev"
   }
@@ -43,10 +43,9 @@ widget "opencode-burn" {
   //
   // The optional limits.json is shared with the Omarchy bar helper, so both
   // sides apply the same per-model caps. Missing or malformed means defaults.
-  source limits = cmd("""
-    f=$HOME/.config/opencode-burn/limits.json
-    [ -r "$f" ] && jq -c . "$f" 2>/dev/null || echo '{}'
-  """) every 10m json
+  // A file source is watched rather than polled: editing it shows at once, and
+  // it costs a shell not even once.
+  source limits = file("~/.config/opencode-burn/limits.json") json
 
   let unlimited = limits != null && limits.unlimited != null
     ? limits.unlimited : ["beam-free", "longcat-2.5-preview-free"]
@@ -69,6 +68,8 @@ widget "opencode-burn" {
   onTap: screen()
 
   // ---- today's usage, per model, straight out of opencode's database ----
+  // Every five minutes, not every one: each poll is a shell, a `date` and a sqlite query, and
+  // a phone pays for each of them. The screen's `refresh` asks at once when you want it now.
   state seenLineup = [] persist  // free model ids this widget has already met
   state showAll = false persist  // the whole catalogue, or just what is free
   state deskSeen = 0 persist  // when the remote last answered
@@ -135,9 +136,12 @@ widget "opencode-burn" {
                     AND $mid IS NOT NULL),
       'models', json((SELECT json_group_array(json_object(
                    'm', mid, 'used', u, 'tok', t, 'r1h', r, 'r5h', w, 'slots', json(sl))) FROM per)));"
-  """) every 60s json timeout 20s
+  """) every 5m json timeout 20s
 
   // ---- usage from other machines, if you ask for it --------------------
+  // Polled every ten minutes: each poll is an ssh round trip per machine, the most expensive
+  // thing this widget does, and what another machine spent moves in minutes anyway. The wake
+  // button beside a machine (and `refresh` on the screen) asks at once.
   // OpenCode's free quota is per account, not per machine, so whatever
   // another machine spends is spent out of the same allowance. List them in
   // ~/.config/opencode-burn/remote, one per line, each an address and the
@@ -242,7 +246,7 @@ widget "opencode-burn" {
                    slots: [range(0;24) as $i | ([.[] | .slots[$i]] | add // 0)]})),
          current: (($d | map(select(.ok)) | sort_by(.currentAt // 0) | last) // {} | .current),
          currentAt: ([$d[].currentAt // 0] | max)}'
-  """) every 60s json timeout 40s
+  """) every 10m json timeout 40s
 
   // the phone's own model: the sandbox hostname is a container name, not the
   // handset, and this is the one thing only Android can answer
@@ -256,7 +260,7 @@ widget "opencode-burn" {
   // others rather than called "this device"
   source host = cmd("""
     (uname -n 2>/dev/null || cat /etc/hostname 2>/dev/null) | jq -R '{name: .}'
-  """) every 10m json
+  """) every 6h json
 
   // ---- the free lineup, live: it rotates, so don't hard-code it --------
 // Zen's own catalogue says which models are free; models.dev says what each one
@@ -306,9 +310,11 @@ widget "opencode-burn" {
                        if (($x.modalities.input // []) | index("audio")) then "audio" else empty end,
                        if (($x.limit.context // 0) >= 1000000) then "1M ctx" else empty end ] | .[:3]) } ]' "$lineup" || exit 1
     [ "$lineup_ok" -eq 1 ] || exit 1
-""") every 30m json timeout 120s status
+""") every 2h json timeout 120s status
 
-  source now = clock every 1s
+  // Seconds are for the countdowns and the pace dial, which move in minutes, so five is as good
+  // as one and a fifth of the wakeups.
+  source now = clock every 5s
 
   // ---- pace -----------------------------------------------------------
   let dayFrac = (now - db.day) / max(1, db.end - db.day)
@@ -1208,12 +1214,27 @@ widget "opencode-burn" {
       }
 
       // what everything above is measured against, and where to change it, on
-      // one line: the numbers, then the pointer at the slider further down
-      Text {
-        text: "based on ~${capMid} (${capLow}-${capHigh}) /day · ${winCap}/5hrs · tweak below"
-        style: small
-        color: muted
-        maxLines: 1
+      // one line: the numbers, then the pointer at the slider further down.
+      // `refresh` asks the database and the other machines now, rather than
+      // waiting for the next poll: the tile polls every few minutes so it
+      // doesn't cost the battery a live gauge would
+      Row {
+        align: center
+        Text {
+          text: "based on ~${capMid} (${capLow}-${capHigh}) /day · ${winCap}/5hrs · tweak below"
+          style: small
+          color: muted
+          maxLines: 1
+          weight: 1
+        }
+        Text {
+          text: "refresh"
+          style: small
+          color: accent
+          maxLines: 1
+          padding: [2, 6]
+          onTap: refresh()
+        }
       }
 
 
