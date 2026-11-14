@@ -1743,7 +1743,7 @@ face "Omagara" {
         Flow {
           fill: width
           gap: 6
-          for section in ["Home", "Clock", "Apps", "Alphabet", "Notifications", "Appearance", "More"] {
+          for section in ["Home", "Clock", "Apps", "Alphabet", "Notifications", "Appearance", "Backup"] {
             Button {
               text: (settingsSection == section ? "✓ " : "") + section
               color: settingsSection == section ? accent : secondaryText
