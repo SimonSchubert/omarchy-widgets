@@ -15,6 +15,17 @@ Slide onto the cog below the last alphabet letter (with haptic feedback) to navi
 
 Time format is selected under **Clock** in Omagara settings; OWL does not expose Android's system format. **Home** offers two buttons to set the persistent default: Omagara (`home.home-page = 0`) or the original tile home (`home.home-page = 1`). An optional background command changes `~/.config/omalauncher/style/style.toml` without opening a terminal. Omagara displays success or failure in Home settings and saves a backup. Omalauncher Linux is required for these two buttons, not for the face itself. Separate page-navigation buttons do not change the default. World clocks appear under Clock, corner rounding under Appearance, and export/import/reset under Backup.
 
+## v1.6 changes
+
+- **Clock:** Added manual 12-hour and 24-hour display (24-hour default) for the home clock, alarms, calendar, and world clocks. Removed the unsupported System option; older System preferences import as 24-hour.
+- **Notification timestamps:** Added a show/hide toggle and formatting that follows Omagara's clock choice.
+- **Notification alignment:** Reserved the expand arrow's 44dp slot so timestamps stay put for both expandable and ordinary notifications.
+- **Notification pull:** Added matching 64dp rubber-band resistance and 240ms rebound at the header and scroll footer, respecting Reduce Motion. Native scrolling and swipe actions remain intact.
+- **Settings layout:** Replaced the long settings page with Home, Clock, Apps, Alphabet, Notifications, Appearance, and Backup categories. Added clear ON/OFF states, selected options, and live clock-format examples.
+- **Settings navigation:** Removed nested expanding menus. World clocks live under Clock, corner rounding under Appearance, and import/export/reset under Backup.
+- **Default home:** Distinguished temporary page navigation from the persistent Omagara (page 0) or original tile home (page 1) setting.
+- **Default-home actions:** Replaced clipboard-only and full-screen terminal controls with optional background updates to `style.toml`, backup creation, and in-page success/error feedback. Omalauncher Linux is required only for those actions.
+
 ## Limitation
 
 OWL animations are capped at 60 FPS, including on 90/120 Hz displays. Higher frame rates require an Omalauncher engine change.
