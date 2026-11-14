@@ -6,7 +6,7 @@ Niagara-inspired OWL 21 home face for [Omalauncher](https://github.com/SimonSchu
 
 - **Alphabet:** Elastic A–Z navigation with app previews biased toward frequently launched apps (less aggressively near A), a letter-sized Settings cog in the shaded worm tail, distance/speed-sensitive wiggle, optional opposite-edge input, and configurable haptics.
 - **Apps:** Buffered full-height browser with elastic ends, adjustable scale, padded A–Z headings, and two compact bottom settings actions without a separate heading. Holding the cog previews only Omagara settings and Omalauncher settings. Empty Search places the most recently opened app first.
-- **Notifications:** Compact grouped cards with optional local notification timestamps, consistent magnetic swipe feedback, expandable actions/replies, bottom scroll clearance, and pull feedback.
+- **Notifications:** Compact grouped cards with optional local notification timestamps, magnetic swipe feedback, expandable actions/replies, native list scrolling, bottom clearance, and matching rubber-band rebound when pulling the top header or bottom footer.
 - **Appearance:** Connected, content-fitted shade for the clock, date, and event, with theme-aware alphabet, notification, and app-label shades. Optional shading and independent corner rounding.
 - **Controls:** System/12-hour/24-hour clock format (System default), theme/light/dark text colors, contrast, icon overlays, fonts, and Reduce Motion.
 - **Utilities:** Calendar, next alarm, timer, stopwatch, and world clocks.
