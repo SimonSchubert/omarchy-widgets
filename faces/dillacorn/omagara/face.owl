@@ -11,9 +11,6 @@ face "Omagara" {
 
   source now = clock every 1m
   source seconds = clock every 1s
-  // Backward-compatible system-format integration. Current Omalauncher does
-  // not yet supply time24h; absent means use the 24-hour fallback.
-  source sys = android.system every 1m
   source drawer = android.drawer
   source installed = android.apps
   source notices = android.notifications
@@ -118,16 +115,16 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, timeFormat: "System", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, roundAppLabels: false, centerNotificationsWithoutAlphabet: true, alphabetSide: "Right"}
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, roundAppLabels: false, centerNotificationsWithoutAlphabet: true, alphabetSide: "Right"}
   let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
   let hapticChoices = ["Off", "Reduced", "Every letter"]
-  let timeFormatChoices = ["System", "12-hour", "24-hour"]
+  let timeFormatChoices = ["12-hour", "24-hour"]
   let iconStyleChoices = ["Colored", "Theme overlay"]
   let iconOverlayChoices = [0, 10, 20, 30, 40, 50, 60]
   let faceFontChoices = ["Sans", "Serif", "Launcher"]
   let textToneChoices = ["Theme", "Light", "Dark"]
   let textContrastChoices = ["High", "Standard"]
-  let cfg = merge(defaults, prefs, {alphabetSide: contains(["Left", "Right"], prefs.alphabetSide) ? prefs.alphabetSide : "Right", searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter", timeFormat: contains(timeFormatChoices, prefs.timeFormat) ? prefs.timeFormat : "System", bubbleBorder: prefs.bubbleBorder == true, iconStyle: contains(iconStyleChoices, prefs.iconStyle) ? prefs.iconStyle : "Theme overlay", iconOverlayOpacity: contains(iconOverlayChoices, prefs.iconOverlayOpacity) ? prefs.iconOverlayOpacity : 30, faceFont: contains(faceFontChoices, prefs.faceFont) ? prefs.faceFont : "Sans", textTone: contains(textToneChoices, prefs.textTone) ? prefs.textTone : "Theme", textContrast: contains(textContrastChoices, prefs.textContrast) ? prefs.textContrast : "High"})
+  let cfg = merge(defaults, prefs, {alphabetSide: contains(["Left", "Right"], prefs.alphabetSide) ? prefs.alphabetSide : "Right", searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter", timeFormat: contains(timeFormatChoices, prefs.timeFormat) ? prefs.timeFormat : "24-hour", bubbleBorder: prefs.bubbleBorder == true, iconStyle: contains(iconStyleChoices, prefs.iconStyle) ? prefs.iconStyle : "Theme overlay", iconOverlayOpacity: contains(iconOverlayChoices, prefs.iconOverlayOpacity) ? prefs.iconOverlayOpacity : 30, faceFont: contains(faceFontChoices, prefs.faceFont) ? prefs.faceFont : "Sans", textTone: contains(textToneChoices, prefs.textTone) ? prefs.textTone : "Theme", textContrast: contains(textContrastChoices, prefs.textContrast) ? prefs.textContrast : "High"})
   // OWL cannot sample wallpaper brightness; explicit overrides keep text legible.
   let primaryText = cfg.textTone == "Light" ? #FAFAFA : cfg.textTone == "Dark" ? #101010 : foreground
   let secondaryText = cfg.textContrast == "High" ? primaryText : cfg.textTone == "Light" ? #CECECE : cfg.textTone == "Dark" ? #474747 : muted
@@ -138,11 +135,9 @@ face "Omagara" {
   let headerShade = cfg.textTone == "Light" ? alpha(#111111, 0.29) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.29) : alpha(mix(background, surface, 0.50), 0.29)
   // Slightly stronger, compact scrim for app names and section headings.
   let appLabelShade = cfg.textTone == "Light" ? alpha(#111111, 0.60) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.60) : alpha(mix(background, surface, 0.50), 0.60)
-  // Follow Android's 12/24-hour preference once Omalauncher provides the
-  // native time24h field. Until then fall back to 24-hour time; users may
-  // override either format without waiting for an engine release.
-  let systemTime24h = sys.time24h
-  let timePattern = cfg.timeFormat == "12-hour" || cfg.timeFormat == "System" && systemTime24h == false ? "h:mm a" : "HH:mm"
+  // Omalauncher OWL does not expose the Android 12/24-hour setting.
+  // Keep the selected manual format consistent across all displayed times.
+  let timePattern = cfg.timeFormat == "12-hour" ? "h:mm a" : "HH:mm"
   let alphabetSide = cfg.alphabetSide == "Left" ? -1 : 1
   let noticePanelShift = cfg.centerNotificationsWithoutAlphabet && !cfg.idleAlphabet ? 0 : alphabetSide == -1 ? 20 : -20
   let chosenFont = cfg.faceFont == "Serif" ? "serif" : cfg.faceFont == "Launcher" ? "mono" : "sans"
@@ -1764,7 +1759,7 @@ face "Omagara" {
             Button { text: (cfg.timeFormat == format ? "✓ " : "") + format; onTap: prefs = set(prefs, "timeFormat", format) }
           }
         }
-        Text { text: systemTime24h == null ? "System uses a 24-hour fallback until Omalauncher exposes Android's clock preference. Choose 12-hour or 24-hour to override." : "System follows Android's time format. Manual choices override it."; font: chosenFont; fontSize: 13; color: muted }
+        Text { text: "Choose 12-hour or 24-hour for Omagara. This does not automatically follow Android's clock setting."; font: chosenFont; fontSize: 13; color: muted }
         Text { text: "Application icon style"; color: accent; padding: [0, 18, 0, 6] }
         Flow {
           fill: width
@@ -1854,9 +1849,9 @@ face "Omagara" {
           text: "Import Omagara settings"
           onTap: {
             let imported = parseJson(importText)
-            if imported.version == 1 && all(keys(defaults), k => k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : k == "iconStyle" ? get(imported.prefs, k) == null || contains(iconStyleChoices, get(imported.prefs, k)) : k == "iconOverlayOpacity" ? get(imported.prefs, k) == null || contains(iconOverlayChoices, get(imported.prefs, k)) : k == "faceFont" ? get(imported.prefs, k) == null || contains(faceFontChoices, get(imported.prefs, k)) : k == "textTone" ? get(imported.prefs, k) == null || contains(textToneChoices, get(imported.prefs, k)) : k == "textContrast" ? get(imported.prefs, k) == null || contains(textContrastChoices, get(imported.prefs, k)) : k == "timeFormat" ? get(imported.prefs, k) == null || contains(timeFormatChoices, get(imported.prefs, k)) : k == "alphabetSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
+            if imported.version == 1 && all(keys(defaults), k => k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : k == "iconStyle" ? get(imported.prefs, k) == null || contains(iconStyleChoices, get(imported.prefs, k)) : k == "iconOverlayOpacity" ? get(imported.prefs, k) == null || contains(iconOverlayChoices, get(imported.prefs, k)) : k == "faceFont" ? get(imported.prefs, k) == null || contains(faceFontChoices, get(imported.prefs, k)) : k == "textTone" ? get(imported.prefs, k) == null || contains(textToneChoices, get(imported.prefs, k)) : k == "textContrast" ? get(imported.prefs, k) == null || contains(textContrastChoices, get(imported.prefs, k)) : k == "timeFormat" ? get(imported.prefs, k) == null || get(imported.prefs, k) == "System" || contains(timeFormatChoices, get(imported.prefs, k)) : k == "alphabetSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
               letter = highlightedLetter; appTracking = false
-              prefs = reduce(keys(defaults), (m, k) => set(m, k, k == "searchContacts" ? false : (get(imported.prefs, k) ?? get(defaults, k))), {})
+              prefs = reduce(keys(defaults), (m, k) => set(m, k, k == "searchContacts" ? false : k == "timeFormat" && get(imported.prefs, k) == "System" ? "24-hour" : (get(imported.prefs, k) ?? get(defaults, k))), {})
               worldZones = unique(imported.zones ?? [])
               importStatus = "Settings imported"
             } else { importStatus = "Invalid settings: export version 1 with boolean preferences, Application Scale 75–115 in steps of 5, valid haptic mode, icon style/overlay, face font, text color/contrast, bubble shape/border, and supported zones required" }
