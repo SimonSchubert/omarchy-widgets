@@ -143,6 +143,8 @@ face "Omagara" {
   let noticePanelShift = cfg.centerNotificationsWithoutAlphabet && !cfg.idleAlphabet ? 0 : alphabetSide == -1 ? 20 : -20
   let chosenFont = cfg.faceFont == "Serif" ? "serif" : cfg.faceFont == "Launcher" ? "mono" : "sans"
   let zoneChoices = ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland"]
+  // Optional terminal actions don't make the face require Linux.
+  let homeDefaultCommand = "apply_home() { local page=\"$1\" file=\"$HOME/.config/omalauncher/style/style.toml\" stage backup; [[ \"$page\" == 0 || \"$page\" == 1 ]] || return 1; [[ -f \"$file\" && ! -L \"$file\" && -w \"$file\" ]] || return 1; stage=\"$(mktemp \"$file.omagara.XXXXXX\")\" || return 1; cp -p -- \"$file\" \"$stage\" || { rm -f -- \"$stage\"; return 1; }; if grep -Eq '^[[:space:]]*\\[home\\][[:space:]]*$' \"$stage\"; then sed -i -E '/^[[:space:]]*\\[home\\][[:space:]]*$/,/^[[:space:]]*\\[/ { /^[[:space:]]*home-page[[:space:]]*=/d; }' \"$stage\" && sed -i -E \"/^[[:space:]]*\\[home\\][[:space:]]*$/a home-page = $page\" \"$stage\" || { rm -f -- \"$stage\"; return 1; }; else printf '\\n[home]\\nhome-page = %s\\n' \"$page\" >> \"$stage\" || { rm -f -- \"$stage\"; return 1; }; fi; grep -Fxq \"home-page = $page\" \"$stage\" || { rm -f -- \"$stage\"; return 1; }; backup=\"$(mktemp \"$file.backup.XXXXXX\")\" || { rm -f -- \"$stage\"; return 1; }; cp -p -- \"$file\" \"$backup\" && chmod --reference=\"$file\" \"$stage\" && mv -f -- \"$stage\" \"$file\" || { rm -f -- \"$stage\"; return 1; }; printf 'Saved home page %s. Backup: %s\\n' \"$page\" \"$backup\"; }; if apply_home \"$1\"; then printf 'Home page updated.\\n'; else printf 'Home page update FAILED; original file was kept.\\n' >&2; fi; printf 'Press Enter to close this window...'; read -r _"
   let preferenceRows = [
     {section: "Appearance", key: "icons", name: "App icons"},
     {key: "clock", name: "Show clock"}, {key: "date", name: "Show date"},
@@ -1760,16 +1762,20 @@ face "Omagara" {
             gap: 8
             if shownSection == "Home" {
               Text { text: "Default home"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
-              Text { text: "Home opens on the selected default page."; font: chosenFont; fontSize: 14 }
-              Text { text: "0 = Omagara · 1 = original Omalauncher home"; font: chosenFont; fontSize: 13; color: secondaryText }
-              Text { text: "Edit ~/.config/omalauncher/style/style.toml under [home] to change the persistent default."; font: chosenFont; fontSize: 12; color: secondaryText }
+              Text { text: "Choose which Omalauncher page opens when you press Home."; font: chosenFont; fontSize: 14 }
               Flow {
                 fill: width
                 gap: 8
-                Button { text: "Copy Omagara default"; onTap: copy("home-page = 0") }
-                Button { text: "Copy original home default"; onTap: copy("home-page = 1") }
+                Button {
+                  text: "Set Omagara as default"
+                  onTap: terminal("bash -c " + sh(homeDefaultCommand) + " _ 0", "Set Omagara home")
+                }
+                Button {
+                  text: "Restore original home"
+                  onTap: terminal("bash -c " + sh(homeDefaultCommand) + " _ 1", "Restore original home")
+                }
               }
-              Text { text: "Replace the existing home-page line under [home], or create [home] if absent. Omalauncher reloads it automatically."; font: chosenFont; fontSize: 12; color: secondaryText }
+              Text { text: "Opens a terminal to apply the setting and save a backup. Press Home after it reports success. Requires Omalauncher Linux."; font: chosenFont; fontSize: 12; color: secondaryText }
               Text { text: "Switch page temporarily"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
               Button { text: "View Omagara"; onTap: launcher("page:0") }
               Button { text: "View original tile home"; onTap: launcher("page:1") }
