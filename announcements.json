@@ -1,4 +1,52 @@
 {
   "version": 1,
-  "messages": []
+  "messages": [
+    {
+      "id": "contest-christmas-2026",
+      "end": "2026-11-15T15:00:00Z",
+      "title": {
+        "en": "christmas widget contest",
+        "de": "weihnachts-widget-wettbewerb",
+        "es": "concurso de widgets navideños",
+        "id": "kontes widget natal",
+        "pt": "concurso de widgets de natal",
+        "ru": "конкурс новогодних виджетов",
+        "zh": "圣诞小组件大赛"
+      },
+      "countdown": {
+        "label": {
+          "en": "entries close in",
+          "de": "einsendeschluss in",
+          "es": "cierra en",
+          "id": "ditutup dalam",
+          "pt": "encerra em",
+          "ru": "до конца приёма",
+          "zh": "距截止还有"
+        }
+      },
+      "body": {
+        "en": "Build a Christmas-themed full-screen widget. I'll judge by beauty, usefulness and performance. The winner gets $25. Max 2 entries per person.\n\n1. swipe right from your first page and tell your agent what to build\n2. submit it: settings › pages › share › open GitHub issue\n3. reply to the post on X with a screenshot or video",
+        "de": "Bau ein Full-Screen-Widget zum Thema Weihnachten. Ich bewerte Schönheit, Nützlichkeit und Performance. Der Gewinner bekommt 25 $. Höchstens 2 Einsendungen pro Person.\n\n1. wisch von deiner ersten Seite nach rechts und sag deinem Agenten, was er bauen soll\n2. reich es ein: einstellungen › seiten › teilen › GitHub-issue öffnen\n3. antworte auf den Post auf X mit einem Screenshot oder Video",
+        "es": "Crea un widget de pantalla completa con temática navideña. Lo juzgaré por belleza, utilidad y rendimiento. El ganador se lleva 25 $. Máximo 2 participaciones por persona.\n\n1. desliza a la derecha desde tu primera página y dile a tu agente qué crear\n2. envíalo: configuración › páginas › compartir › abrir issue en GitHub\n3. responde a la publicación en X con una captura o un vídeo",
+        "id": "Buat widget layar penuh bertema Natal. Saya menilai dari keindahan, kegunaan, dan performa. Pemenang mendapat $25. Maksimal 2 karya per orang.\n\n1. geser ke kanan dari halaman pertama dan beri tahu agen apa yang harus dibuat\n2. kirim: setelan › halaman › bagikan › buka issue GitHub\n3. balas postingan di X dengan screenshot atau video",
+        "pt": "Crie um widget de tela cheia com tema de Natal. Vou julgar beleza, utilidade e desempenho. O vencedor ganha US$ 25. Máximo de 2 participações por pessoa.\n\n1. deslize para a direita a partir da primeira página e diga ao seu agente o que criar\n2. envie: configurações › páginas › compartilhar › abrir issue no GitHub\n3. responda ao post no X com uma captura de tela ou vídeo",
+        "ru": "Создайте полноэкранный виджет на тему Рождества. Оцениваю красоту, пользу и производительность. Победитель получает $25. Не больше 2 работ от одного человека.\n\n1. проведите вправо от первой страницы и скажите агенту, что сделать\n2. отправьте: настройки › страницы › поделиться › открыть issue на GitHub\n3. ответьте на пост в X скриншотом или видео",
+        "zh": "制作一个圣诞主题的全屏小组件。评选标准：美观、实用、性能。获胜者可得 25 美元。每人最多 2 件作品。\n\n1. 从第一页向右滑动，告诉你的智能体要做什么\n2. 提交：设置 › 页面 › 分享 › 提交 GitHub issue\n3. 在 X 上回复这条帖子，附上截图或视频"
+      },
+      "buttons": [
+        {
+          "label": {
+            "en": "open the post on X",
+            "de": "post auf X öffnen",
+            "es": "abrir la publicación en X",
+            "id": "buka postingan di X",
+            "pt": "abrir o post no X",
+            "ru": "открыть пост в X",
+            "zh": "在 X 上查看帖子"
+          },
+          "url": "https://x.com/simonschubert/status/2121619192835199320"
+        }
+      ]
+    }
+  ]
 }
