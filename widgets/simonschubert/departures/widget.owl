@@ -2,7 +2,7 @@ widget "departures" {
   size: 3x2
   minSize: 2x1
   requires { pacman: [] }
-  meta { description: "Live departures from a stop you pick, anywhere Transitous has open timetables: line, direction, platform and minutes to go, with delays. Tap the tile for the full board or to change the stop"; version: "1.7"; license: "MIT"; category: "world"; owl: 17 }
+  meta { description: "Live departures from a stop you pick, anywhere Transitous has open timetables: line, direction, platform and minutes to go, with delays. Tap the tile for the full board or to change the stop"; version: "1.8"; license: "MIT"; category: "world"; owl: 17 }
 
   // What it says, in the phone's language where it has a set. Stops, lines, directions and modes come as Transitous names them.
   strings {
@@ -41,6 +41,12 @@ widget "departures" {
       tooMany: "请求过多"; offline: "transitous 离线"; search: "搜索站点"; change: "更换站点"
       searching: "正在搜索…"; noStops: q => "没有叫“${q}”的站点"; next: "即将发车"; refresh: "刷新"
       data: "数据：Transitous，来自公开时刻表。运营方公布实时时间的线路会显示延误"
+    }
+    ru {
+      title: "отправления"; pick: "Нажмите, чтобы выбрать остановку."; noneSoon: "ближайших отправлений нет"; now: "сейчас"; min: "мин"
+      tooMany: "слишком много запросов"; offline: "transitous офлайн"; search: "найти остановку"; change: "сменить остановку"
+      searching: "поиск…"; noStops: q => "нет остановок «${q}»"; next: "ближайшие отправления"; refresh: "обновить"
+      data: "данные: Transitous, из открытых расписаний. Задержки видны там, где перевозчик публикует данные в реальном времени"
     }
   }
 

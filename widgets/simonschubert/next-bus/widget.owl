@@ -2,7 +2,7 @@ widget "next bus" {
   size: 6x2
   minSize: 4x2
   requires { pacman: [] }
-  meta { description: "Your next bus, tram or train, live, and whether you need to run for it: pick a stop, a line and how long you walk there, anywhere Transitous has open timetables. Tap the tile to change them"; version: "1.5"; license: "MIT"; category: "world"; owl: 17 }
+  meta { description: "Your next bus, tram or train, live, and whether you need to run for it: pick a stop, a line and how long you walk there, anywhere Transitous has open timetables. Tap the tile to change them"; version: "1.6"; license: "MIT"; category: "world"; owl: 17 }
 
   // What it says, in the phone's language where it has a set. Stops, lines and directions come as Transitous
   // names them. leaveNow and run sit in a 170dp column at 22 and 26sp: about 12 letters at most.
@@ -72,6 +72,17 @@ widget "next bus" {
       search: "搜索站点"; change: "更换站点"; searching: "正在搜索…"; noStops: q => "没有叫“${q}”的站点"
       yourLine: "你的线路"; anyLine: "任意线路"; whatever: "哪班先到坐哪班"; walkTo: "步行到站"
       data: "数据：Transitous，来自公开时刻表。运营方公布实时时间的线路会显示延误"
+    }
+    ru {
+      title: "ближайший автобус"; relax: "не спешите"; leaveInMin: m => "выход через ${m} мин"; leaveIn: "выход через"; leaveNow: "выходите"
+      brisk: "идите быстрее"; run: "бегом!"; toStop: t => "${t} до остановки"
+      pick: "Нажмите, чтобы выбрать остановку, линию и время пешком до неё."; nothing: "ближайших рейсов нет"
+      to: d => "→ ${d}"; walkMin: m => "${m} мин пешком"; fromWalk: (stop, m) => "${stop} · ${m} мин пешком"
+      min: "мин"; mins: m => "${m} мин"; yourStop: "ваша остановка"; timetable: "по расписанию"; onTime: "вовремя"; then: "затем"
+      noneLater: "следующих пока нет"; noLater: "следующих пока нет"; tooMany: "слишком много запросов"; offline: "transitous офлайн"
+      search: "найти остановку"; change: "сменить остановку"; searching: "поиск…"; noStops: q => "нет остановок «${q}»"
+      yourLine: "ваша линия"; anyLine: "любая линия"; whatever: "что уйдёт первым"; walkTo: "пешком до остановки"
+      data: "данные: Transitous, из открытых расписаний. Задержки видны там, где перевозчик публикует данные в реальном времени"
     }
   }
 

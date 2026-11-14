@@ -1,5 +1,5 @@
 widget "wikipedia" {
-  meta { description: "Wikipedia's featured article of the day, what everyone is reading, and on this day in history"; version: "1.5"; license: "MIT"; category: "news"; owl: 16 }
+  meta { description: "Wikipedia's featured article of the day, what everyone is reading, and on this day in history"; version: "1.6"; license: "MIT"; category: "news"; owl: 16 }
 
   // What it says, and which Wikipedia it reads, in the phone's language where it has a set. The feed has no
   // featured article for the other languages' Wikipedias, nor on this day for Indonesian's; those parts stay away.
@@ -10,6 +10,7 @@ widget "wikipedia" {
     pt { wiki: "pt"; featured: "artigo destacado"; mostRead: "mais lidos"; onThisDay: "neste dia" }
     de { wiki: "de"; featured: "artikel des tages"; mostRead: "meistgelesen"; onThisDay: "an diesem tag" }
     zh { wiki: "zh"; featured: "特色条目"; mostRead: "最多阅读"; onThisDay: "历史上的今天" }
+    ru { wiki: "ru"; featured: "избранная статья"; mostRead: "самое читаемое"; onThisDay: "в этот день" }
   }
   size: 6x4
   minSize: 4x3

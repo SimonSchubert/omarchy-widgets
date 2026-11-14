@@ -1,5 +1,5 @@
 widget "bitcoin" {
-  meta { description: "Bitcoin from CoinGecko: price, change over 1 hour, 24 hours and 7 days, the day's range and a 7-day chart. Tap it for market cap, volume, supply and the all-time high"; version: "2.4"; license: "MIT"; category: "finance"; owl: 17 }
+  meta { description: "Bitcoin from CoinGecko: price, change over 1 hour, 24 hours and 7 days, the day's range and a 7-day chart. Tap it for market cap, volume, supply and the all-time high"; version: "2.5"; license: "MIT"; category: "finance"; owl: 17 }
 
   // What it says, in the phone's language where it has a set. Prices stay in US dollars, written the US way.
   strings {
@@ -50,6 +50,14 @@ widget "bitcoin" {
       ath: "历史最高"; rank: "排名"; byCap: "按市值"; supply: "供应量"
       mined: m => "已挖出 ${m}M"; of: m => "共 ${m}M"; toGo: (p, k) => "已挖出 ${p}%，还剩 ${k}k btc"
       open: "在 coingecko 上打开"; updated: t => "数据：coingecko · 更新于 ${t} utc"
+    }
+    ru {
+      busy: "coingecko перегружен, пробуем снова"; offline: "coingecko офлайн"; h1: "1ч"; h24: "24ч"; d7: "7д"
+      hour: "1 час"; day: "24 часа"; week: "7 дней"; last7: "последние 7 дней"; now: "сейчас"; daysAgo: d => "${d}д"
+      market: "рынок"; cap: "капитализация"; today: p => "${p}% за сегодня"; volume: "объём 24ч"; ofCap: p => "${p}% капитализации"
+      ath: "рекорд"; rank: "место"; byCap: "по капитализации"; supply: "предложение"
+      mined: m => "добыто ${m} млн"; of: m => "из ${m} млн"; toGo: (p, k) => "добыто ${p}%, осталось ${k} тыс. btc"
+      open: "открыть на coingecko"; updated: t => "данные: coingecko · обновлено в ${t} utc"
     }
   }
   size: 3x3

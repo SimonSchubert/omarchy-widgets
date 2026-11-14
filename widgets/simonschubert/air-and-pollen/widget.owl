@@ -1,5 +1,5 @@
 widget "air and pollen" {
-  meta { description: "Air quality and today's pollen where you are, from Open-Meteo (Copernicus), located by IP or a city you type, via wttr.in. Tap it for the next 24 hours, pollutants and every pollen type"; version: "1.6"; license: "MIT"; category: "world"; owl: 17 }
+  meta { description: "Air quality and today's pollen where you are, from Open-Meteo (Copernicus), located by IP or a city you type, via wttr.in. Tap it for the next 24 hours, pollutants and every pollen type"; version: "1.7"; license: "MIT"; category: "world"; owl: 17 }
 
   // What it says, in the phone's language where it has a set. us and eu are the two indexes' levels, good
   // to worst, in each agency's words where it has them; advice goes with them, pollen is none to high.
@@ -88,6 +88,21 @@ widget "air and pollen" {
       ozone: "臭氧"; uvIndex: "紫外线指数"; pollenLong: "花粉 · 未来 24 小时"
       europeOnlyLong: "open-meteo 只提供欧洲的花粉预报。"; peak: v => "峰值 ${v}"
       data: "数据：哥白尼大气监测服务，经由 open-meteo"
+    }
+    ru {
+      title: "воздух и пыльца"; air: "воздух"; city: "город · пусто = авто"; unknown: "местоположение неизвестно"; offline: "open-meteo офлайн"
+      us: ["хорошо", "умеренно", "вредно для некоторых", "вредно", "очень вредно", "опасно"]
+      eu: ["хорошо", "приемлемо", "умеренно", "плохо", "очень плохо", "крайне плохо"]
+      advice: ["отличное время для прогулки", "можно спокойно заниматься обычными делами на улице", "чувствительным людям лучше не перенапрягаться на улице", "стоит снизить нагрузку на улице", "лучше меньше бывать на улице", "избегайте активности на улице"]
+      pollen: ["нет", "мало", "средне", "много"]
+      plant: k => get({"birch": "берёза", "alder": "ольха", "olive": "олива", "grass": "злаки", "mugwort": "полынь", "ragweed": "амброзия"}, k, k)
+      plantLevel: (plant, level) => "${plant}: ${level}"
+      pollenLevel: (plant, level) => "пыльца " + get({"берёза": "берёзы", "ольха": "ольхи", "олива": "оливы", "злаки": "злаков", "полынь": "полыни", "амброзия": "амброзии"}, plant, plant) + ": ${level}"
+      noPollen: "пыльцы нет"; uv: v => "уф ${v}"; pollenShort: "пыльца · ближайшие 24 ч"; europeOnly: "здесь нет прогноза пыльцы (только европа)"
+      noneInAir: "пыльцы в воздухе нет"; next24: "ближайшие 24 часа"; now: "сейчас"; pollutants: "загрязнители сейчас · мкг/м³"
+      ozone: "озон"; uvIndex: "уф-индекс"; pollenLong: "пыльца · ближайшие 24 часа"
+      europeOnlyLong: "open-meteo прогнозирует пыльцу только в европе."; peak: v => "пик ${v}"
+      data: "данные: copernicus atmosphere monitoring service через open-meteo"
     }
   }
   size: 3x2
