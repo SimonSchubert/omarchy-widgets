@@ -109,10 +109,7 @@ face "Omagara" {
   state resetConfirm = false
   state importText = ""
   state importStatus = ""
-  state settingsSection = "Clock"
-  state settingsCornersOpen = false
-  state settingsWorldClocksOpen = false
-  state settingsBackupOpen = false
+  state settingsSection = "Home"
   state clockTab = "alarms"
   state timerMinutes = "5"
   state timerDeadline = 0 persist
@@ -1742,11 +1739,11 @@ face "Omagara" {
       Column {
         fill: true
         gap: 8
-        // A fixed category selector replaces the difficult single long page.
+        // Clearly named categories; no hidden nested menus.
         Flow {
           fill: width
           gap: 6
-          for section in ["Clock", "Apps", "Alphabet", "Notifications", "Style", "More"] {
+          for section in ["Home", "Clock", "Apps", "Alphabet", "Notifications", "Appearance", "More"] {
             Button {
               text: (settingsSection == section ? "✓ " : "") + section
               color: settingsSection == section ? accent : secondaryText
@@ -1761,7 +1758,24 @@ face "Omagara" {
             weight: 1
             scroll: true
             gap: 8
-            if shownSection == "Clock" {
+            if shownSection == "Home" {
+              Text { text: "Default home"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
+              Text { text: "Home opens on the selected default page."; font: chosenFont; fontSize: 14 }
+              Text { text: "0 = Omagara · 1 = original Omalauncher home"; font: chosenFont; fontSize: 13; color: secondaryText }
+              Text { text: "Edit ~/.config/omalauncher/style/style.toml under [home] to change the persistent default."; font: chosenFont; fontSize: 12; color: secondaryText }
+              Flow {
+                fill: width
+                gap: 8
+                Button { text: "Copy Omagara default"; onTap: copy("home-page = 0") }
+                Button { text: "Copy original home default"; onTap: copy("home-page = 1") }
+              }
+              Text { text: "Replace the existing home-page line under [home], or create [home] if absent. Omalauncher reloads it automatically."; font: chosenFont; fontSize: 12; color: secondaryText }
+              Text { text: "Switch page temporarily"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
+              Button { text: "View Omagara"; onTap: launcher("page:0") }
+              Button { text: "View original tile home"; onTap: launcher("page:1") }
+              Text { text: "Launcher"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
+              Button { text: "Open Omalauncher settings"; onTap: launcher("settings") }
+            } else if shownSection == "Clock" {
               Text { text: "Clock & date"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
               Text { text: "Time format"; font: chosenFont; fontSize: 15 }
               Flow {
@@ -1778,6 +1792,14 @@ face "Omagara" {
               Text { text: "Home header"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
               for pref in preferenceRows.filter(p => contains(["clock", "date", "event", "clockTap", "dateTap", "eventTap"], p.key)) {
                 SettingToggle { pref: pref }
+              }
+              Text { text: "World clocks · " + str(len(worldZones)) + " selected"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
+              Flow {
+                fill: width
+                gap: 6
+                for zone in zoneChoices {
+                  Button { text: (contains(worldZones, zone) ? "✓ " : "+ ") + zone; onTap: worldZones = contains(worldZones, zone) ? worldZones.filter(z => z != zone) : worldZones + [zone] }
+                }
               }
             } else if shownSection == "Apps" {
               Text { text: "Apps & search"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
@@ -1837,7 +1859,7 @@ face "Omagara" {
               for pref in preferenceRows.filter(p => contains(["notifications", "notificationTimes", "previews", "grouping", "actions"], p.key)) {
                 SettingToggle { pref: pref }
               }
-            } else if shownSection == "Style" {
+            } else if shownSection == "Appearance" {
               Text { text: "Appearance"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
               Text { text: "Text color"; font: chosenFont; fontSize: 15 }
               Flow {
@@ -1876,37 +1898,13 @@ face "Omagara" {
                 Text { text: "Bubble borders"; font: chosenFont; fontSize: 15; weight: 1 }
                 Text { text: cfg.bubbleBorder ? "ON" : "OFF"; color: cfg.bubbleBorder ? accent : muted; font: chosenFont; fontSize: 14 }
               }
-              Button { text: (settingsCornersOpen ? "▴ Hide" : "▾ Show") + " corner rounding"; onTap: settingsCornersOpen = !settingsCornersOpen }
-              if settingsCornersOpen {
-                Text { text: "Rounded corners for"; color: accent; font: chosenFont; fontSize: 16 }
+              Text { text: "Rounded corners"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
               for pref in preferenceRows.filter(p => contains(["roundTime", "roundDate", "roundEvent", "roundAlphabet", "roundNotifications", "roundNoticeHeading", "roundClearAll", "roundSearch", "roundClose", "roundLetterCue", "roundCalendar", "roundAppLabels"], p.key)) {
                 SettingToggle { pref: pref }
               }
-              }
             } else {
-              Text { text: "More settings"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
-              Text { text: "Pages & launcher"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
-              Button { text: "Go to home page"; onTap: launcher("page:0") }
-              Button { text: "Go to widget page"; onTap: launcher("page:1") }
-              Button { text: "Omalauncher settings"; onTap: launcher("settings") }
-              Button {
-                text: (settingsWorldClocksOpen ? "▴ Hide" : "▾ Show") + " world clocks · " + str(len(worldZones)) + " selected"
-                onTap: settingsWorldClocksOpen = !settingsWorldClocksOpen
-              }
-              if settingsWorldClocksOpen {
-                for zone in zoneChoices {
-                  Row {
-                    fill: width
-                    padding: [10, 12]
-                    background: alpha(surface, 0.30)
-                    onTap: worldZones = contains(worldZones, zone) ? worldZones.filter(z => z != zone) : worldZones + [zone]
-                    Text { text: zone; font: chosenFont; fontSize: 14; weight: 1; maxLines: 2 }
-                    Text { text: contains(worldZones, zone) ? "✓" : "+"; color: contains(worldZones, zone) ? accent : muted; font: chosenFont; fontSize: 16 }
-                  }
-                }
-              }
-              Button { text: (settingsBackupOpen ? "▴ Hide" : "▾ Show") + " backup, import & reset"; onTap: settingsBackupOpen = !settingsBackupOpen }
-              if settingsBackupOpen {
+              Text { text: "Backup & reset"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
+              Text { text: "Export or restore Omagara preferences."; font: chosenFont; fontSize: 13; color: secondaryText }
         Button { text: "Export Omagara settings to clipboard"; onTap: copy(toJson({version: 1, prefs: cfg, zones: worldZones})) }
         Input { text: importText; placeholder: "Paste Omagara settings JSON"; lines: 3; onChange: importText = value }
         Button {
@@ -1931,7 +1929,6 @@ face "Omagara" {
           }
         }
 
-              }
             }
           }
         }
