@@ -1,7 +1,7 @@
 app "readeck" {
   edge: true
 
-  meta { owl: 18; description: "A Readeck client for a server or an exported library: unread, favorites and archive, labels and search, a reader, notes and bulk changes, plus saving a link"; version: "2.1"; license: "MIT"; category: "news" }
+  meta { owl: 18; description: "A Readeck client for a server or an export: lists, labels, search, a reader with pictures, notes and bulk changes. Summary and tidy-up use Claude Code, which sends the text to Anthropic"; version: "2.2"; license: "MIT"; category: "news" }
 
   title: readId != "" ? item.title ?? "reading" : view == "setup" ? "connect" : view == "labels" ? "labels" : label != "" ? label : capitalize(view)
   back: readId != "" || view == "labels" || view == "setup" || label != ""
@@ -60,10 +60,10 @@ set -uo pipefail
 umask 077
 bin="$HOME/.local/bin"
 mkdir -p "$bin" || exit 1
-if ! grep -qxF '# owl-readeck 1.13' "$bin/owl-readeck" 2>/dev/null; then
+if ! grep -qF '# owl-readeck 1.18' "$bin/owl-readeck" 2>/dev/null; then
   cat > "$bin/owl-readeck" << 'READECK_LIB_END'
 #!/bin/bash
-# owl-readeck 1.13: the script side of the Readeck app (readeck.owl).
+# owl-readeck 1.18: the script side of the Readeck app (readeck.owl).
 # Fetches a Readeck server's bookmarks into the export the app reads, imports
 # a Readeck export without a server, and saves changes to bookmarks.
 # Every run says what it is doing in readeck-sync.json or readeck-op.err, so the
@@ -81,7 +81,7 @@ mkdir -p "$HOME/.cache/omalauncher" 2>/dev/null || true
 errfile="$cache/readeck-other.err"
 case "$mode" in
   fetch | reload) errfile="$cache/readeck-sync.err" ;;
-  change | bulk | add | delete | labeladd | labelrm | import | import-file)
+  change | bulk | add | delete | labelrm | import | import-file)
     errfile="$cache/readeck-op.err" ;;
 esac
 : > "$errfile" 2>/dev/null || true
@@ -231,7 +231,7 @@ import_from() {
     [ -f "$info" ] || continue
     box=$(dirname "$info")
     id=$(basename "$box")
-    [ -f "$box/container/index.html" ] && { extract "$id" "$box/container/index.html" || true; }
+    [ -f "$box/container/index.html" ] && { extract "$id" "$box/container/index.html" || true; localize_images "$id" "" "" || true; }
     for name in $(jq -r '(.Files // {}) | to_entries[]
                           | select(.key as $k | ["article", "log", "props"] | index($k) | not)
                           | .value.name' "$info" 2>/dev/null); do
@@ -246,6 +246,11 @@ import_from() {
       esac
       jq -cn --arg id "$id" --arg k "$key" --arg f "$copy" '{id: $id, k: $k, f: $f}' \
         >> "$work/paths.tmp"
+    done
+    # The article's own pictures (_resources/) too, so its img lines localise.
+    for res in "$box/container/_resources/"*; do
+      [ -f "$res" ] || continue
+      cp "$res" "$img_dir/$id-$(basename "$res")" 2>/dev/null || continue
     done
   done
   # Point each bookmark's pictures at their copies, in one pass over the list.
@@ -263,9 +268,10 @@ import_from() {
   # An import is the whole library now; changes from before it must not replay over it.
   ( flock 7; : > "$journal" ) 7> "$journal.lock"
 }
-# The local AI harness (Claude Code, from mise): a prompt in, text out, with no tools
-# and no session, so it only writes an answer. Finds it even when mise has no version
-# set for the shim, which is how it is on this phone.
+# The AI harness, Claude Code: a prompt in, text out, with no tools and no session, so
+# it only writes an answer. It is not local: Claude Code sends the prompt and the
+# article's text to Anthropic, on the user's own Claude account. Finds it even when
+# mise has no version set for the shim, which is how it is on this phone.
 ai_bin() {
   if [ -n "${OWL_READECK_AI:-}" ] && [ -x "${OWL_READECK_AI}" ]; then
     echo "$OWL_READECK_AI"
@@ -370,6 +376,54 @@ extract() {
   mv "$read_dir/$1.jsonl.tmp" "$read_dir/$1.jsonl"
 }
 
+# localize_images ID BASE TOKEN: point the article's img lines at files on disk,
+# so the reader draws them without the server and without a token in a URL.
+# Server-relative srcs are downloaded with the token; an export's relative srcs
+# already have their copies in img_dir; external http srcs are left for the
+# Image node to fetch. One jq pass in, one out, so long articles stay fast.
+localize_images() {
+  id="$1" base="$2" token="$3"
+  f="$read_dir/$id.jsonl"
+  [ -f "$f" ] || return 0
+  mkdir -p "$img_dir" 2>/dev/null || return 0
+  work=$(mktemp -d "$cache/readeck-img.XXXXXX") || return 0
+  jq -s -r 'to_entries[] | select(.value.k == "img") | "\(.key)\t\(.value.t // "")"' \
+    "$f" > "$work/list" 2>/dev/null || { rm -rf "$work"; return 0; }
+  [ -s "$work/list" ] || { rm -rf "$work"; return 0; }
+  : > "$work/map"
+  while IFS=$'\t' read -r i t; do
+    [ -n "$t" ] || continue
+    new=""; url=""
+    case "$t" in
+      http://* | https://*)
+        [ -n "$base" ] && [ "${t#"$base"/}" != "$t" ] && url="$t" ;;
+      /*) [ -n "$base" ] && url="$base$t" ;;
+      *) cand="$img_dir/$id-$(basename "$t")"; [ -f "$cand" ] && new="$cand" ;;
+    esac
+    if [ -n "$url" ]; then
+      ext="${t##*.}"
+      case "$ext" in jpg | jpeg | png | gif | webp | svg | avif) ;; *) ext=jpg ;; esac
+      dest="$img_dir/$id-img$i.$ext"
+      curl -fsS --max-time 30 -H "Authorization: Bearer $token" -o "$dest" "$url" 2>/dev/null \
+        && new="$dest"
+    fi
+    [ -n "$new" ] && jq -cn --argjson i "$i" --arg f "$new" '{i: $i, f: $f}' >> "$work/map"
+  done < "$work/list"
+  if [ -s "$work/map" ]; then
+    jq -c -s --slurpfile m "$work/map" '
+      $m as $ix
+      | to_entries
+      | map(.key as $k | .value
+            | if .k == "img" then
+                (first($ix[] | select(.i == $k)) // null) as $e
+                | if $e != null then .t = $e.f else . end
+              else . end)
+      | .[]
+    ' "$f" > "$f.img" 2>/dev/null && mv "$f.img" "$f"
+  fi
+  rm -rf "$work"
+}
+
 case "$mode" in
 add)
   # add BASE TOKEN URL: save a link to read.
@@ -432,7 +486,10 @@ bulk)
         printf "%s\n" "$id" >> "$opfail"
       fi
     ' _ < "$work/ids" 2>/dev/null
-    nfail=$(grep -c '^' "$opfail" 2>/dev/null || echo 0)
+    # wc -l, not grep -c: grep -c prints 0 but exits 1 on an empty file, and the
+    # "|| echo 0" then made nfail "0\n0", killing the script after every all-ok bulk.
+    nfail=$(wc -l < "$opfail" 2>/dev/null || echo 0)
+    case "$nfail" in ''|*[!0-9]*) nfail=0 ;; esac
     ok=$((total - nfail))
   else
     apply "$json" "$5"
@@ -448,7 +505,7 @@ delete)
     "couldn't delete the bookmark"
   ;;
 ai-check)
-  # ai-check: "ok" when the local AI harness can be used, "no" when it can't.
+  # ai-check: "ok" when Claude Code is there to use, "no" when it isn't.
   if bin=$(ai_bin); then
     echo "ok $("$bin" --version 2>/dev/null | head -1)"
   else
@@ -475,18 +532,15 @@ labels)
   # labels BASE TOKEN: the server's labels and their counts, one a line.
   [ $# -eq 3 ] || die "usage: $0 labels BASE TOKEN"
   curl -fsS --max-time 20 -H 'Accept: application/json' -H "Authorization: Bearer $3" \
-    "$2/api/labels" > "$cache/readeck-labels.json" || die "couldn't fetch the labels"
+    "$2/api/bookmarks/labels" > "$cache/readeck-labels.json" || die "couldn't fetch the labels"
   jq -r 'if type == "array" then .[] | "\(.name)\t\(.bookmark_count // .count // 0)" else empty end' \
     "$cache/readeck-labels.json" 2>/dev/null || true
   ;;
-labeladd | labelrm)
-  # labeladd BASE TOKEN NAME: make a label. labelrm ...: delete one.
-  [ $# -eq 4 ] || die "usage: $0 labeladd|labelrm BASE TOKEN NAME"
-  if [ "$mode" = labeladd ]; then
-    http POST "$2/api/labels" "$3" "$(jq -cn --arg n "$4" '{name: $n}')" "couldn't add the label"
-  else
-    http DELETE "$2/api/labels/$(jq -rn --arg v "$4" '$v|@uri')" "$3" "" "couldn't delete the label"
-  fi
+labelrm)
+  # labelrm BASE TOKEN NAME: delete a label. Readeck has no API to make one; a label
+  # comes with the first bookmark given it.
+  [ $# -eq 4 ] || die "usage: $0 labelrm BASE TOKEN NAME"
+  http DELETE "$2/api/bookmarks/labels?name=$(jq -rn --arg v "$4" '$v|@uri')" "$3" "" "couldn't delete the label"
   ;;
 status)
   # status BASE TOKEN: what the server says about the token, for "connect".
@@ -503,7 +557,8 @@ status)
   esac
   ;;
 summary)
-  # summary ID: a short summary of the article, from the local AI harness, kept in
+  # summary ID: a short summary of the article, from Claude Code (which sends the text
+  # to Anthropic), kept in
   # $cache/readeck-ai/<id>.summary so it's made once.
   [ $# -eq 2 ] || die "usage: $0 summary ID"
   id="$2"
@@ -512,7 +567,7 @@ summary)
   out_file="$ai_dir/$id.summary"
   [ -s "$out_file" ] && { cat "$out_file"; exit 0; }
   mkdir -p "$ai_dir" || die "couldn't make the AI folder"
-  body=$(jq -r '.t' "$src" 2>/dev/null | head -c 12000) || die "couldn't read the article"
+  body=$(jq -r 'select(.k != "img") | .t' "$src" 2>/dev/null | head -c 12000) || die "couldn't read the article"
   [ -n "$body" ] || die "the article's text is empty"
   ans=$(printf '%s' "$body" | ai 'You are a summariser. The text given to you is one article. Write a summary of it in at most 3 sentences and no more than 70 words: plain prose, no headings, no bullet points, no commentary about the text, no questions, no preamble. Reply with the summary alone.') \
     || die "the AI harness couldn't summarise it"
@@ -522,7 +577,7 @@ summary)
   cat "$out_file"
   ;;
 pretty)
-  # pretty ID: the article's text tidied by the local AI harness — same words, same
+  # pretty ID: the article's text tidied by Claude Code (sent to Anthropic) — same words, same
   # paragraphs, cast to well-formed sentences — kept in $ai_dir/<id>.pretty as the
   # same JSON lines the reader draws.
   [ $# -eq 2 ] || die "usage: $0 pretty ID"
@@ -537,7 +592,7 @@ pretty)
   batch=; size=0
   tidy() {
     [ -n "$batch" ] || return 0
-    ans=$(printf '%s' "$batch" | ai 'You tidy extracted web article text. The input is JSON lines: {"k": kind, "t": text}, where kind is h (heading), p (paragraph), q (quote), li (list item) or fig (caption).
+    ans=$(printf '%s' "$batch" | ai 'You tidy extracted web article text. The input is JSON lines: {"k": kind, "t": text}, where kind is h (heading), p (paragraph), q (quote), li (list item), fig (caption) or img (an image path). Keep img lines exactly as they are, path included.
 
 Rewrite each "t" so it reads cleanly: mend sentences broken by extraction, fix stray spaces, doubled punctuation and hyphenation, and use typographic quotes and dashes. Keep the same words and the same meaning: do not summarise, shorten, add or reorder anything. Keep the same kinds and exactly one output line for each input line.
 
@@ -576,6 +631,7 @@ read)
     "$2/api/bookmarks/$(jq -rn --arg v "$4" '$v|@uri')/article") \
     || die "couldn't fetch the article"
   printf '%s' "$body" | extract "$4" -
+  localize_images "$4" "$2" "$3"
   ;;
 import)
   # import BASE TOKEN: the server's export, made now, read here.
@@ -613,7 +669,7 @@ fetch | reload)
     q="$1" tag="$2" page="$3"
     code=$(curl -sS --compressed --max-time 25 -H 'Accept: application/json' \
       -H "Authorization: Bearer $token" -w '%{http_code}' \
-      "$base/api/bookmarks?$q&limit=100&page=$page&sort=-created" \
+      "$base/api/bookmarks?$q&limit=100&offset=$(( (page - 1) * 100 ))&sort=-created" \
       -o "$work/$tag-$page.json" 2>/dev/null) || {
       echo "$q page $page" >> "$work/fail"; return 1; }
     case "$code" in
@@ -632,7 +688,7 @@ fetch | reload)
   p2=$!
   curl -sS --compressed --max-time 20 -H 'Accept: application/json' \
     -H "Authorization: Bearer $token" -o "$work/labels.json" \
-    "$base/api/labels" 2>/dev/null &
+    "$base/api/bookmarks/labels" 2>/dev/null &
   pl=$!
   wait "$p1" "$p2" "$pl" || true
   if [ -s "$work/fail" ]; then
@@ -661,9 +717,14 @@ fetch | reload)
     [ "$n" -ge 100 ] || continue
     page=2
     while [ "$page" -le "$pages" ]; do
-      while [ "$(jobs -rp | wc -l)" -ge 6 ]; do wait -n || true; done
-      get_page "$q" "$tag" "$page" &
-      page=$((page + 1))
+      # Six at a time, then wait for the batch: under proot `jobs -rp`/`wait -n`
+      # can spin forever on unreaped children and stall the whole sync.
+      n=0
+      while [ "$n" -lt 6 ] && [ "$page" -le "$pages" ]; do
+        get_page "$q" "$tag" "$page" &
+        page=$((page + 1)); n=$((n + 1))
+      done
+      wait
     done
   done
   wait
@@ -711,16 +772,16 @@ fetch | reload)
 *)
   die "usage: $0 fetch|reload|import BASE TOKEN [PAGES] | read BASE TOKEN ID |
        import-file FILE | add BASE TOKEN URL | change BASE TOKEN ID JSON | delete BASE TOKEN ID |
-       labels BASE TOKEN | labeladd|labelrm BASE TOKEN NAME | status BASE TOKEN | find WORDS |
+       labels BASE TOKEN | labelrm BASE TOKEN NAME | status BASE TOKEN | find WORDS |
        bulk BASE TOKEN JSON IDSJSON | summary ID | pretty ID | ai-check"
   ;;
 esac
 READECK_LIB_END
 fi
-if ! grep -qxF '# owl-readeck-read 1.0' "$bin/owl-readeck-read" 2>/dev/null; then
+if ! grep -qF '# owl-readeck-read 1.1' "$bin/owl-readeck-read" 2>/dev/null; then
   cat > "$bin/owl-readeck-read" << 'READECK_READ_END'
 #!/usr/bin/env python3
-# owl-readeck-read 1.0: the reader side of the launcher's Readeck app (readeck.owl).
+# owl-readeck-read 1.1: the reader side of the launcher's Readeck app (readeck.owl).
 # Turns a Readeck article's HTML (its export's container/index.html, or the
 # server's /article endpoint) into the light text the app draws: one element a
 # line, "heading: ", "quote: " and "list: " marking what isn't a paragraph, so
@@ -729,7 +790,8 @@ if ! grep -qxF '# owl-readeck-read 1.0' "$bin/owl-readeck-read" 2>/dev/null; the
 #   owl-readeck-read HTMLFILE OUT    write OUT (JSON lines: {"k": kind, "t": text})
 #   owl-readeck-read - OUT           read the HTML from stdin
 #
-# Kinds: h (heading), p (paragraph), q (quote), li (list item), pre (code), fig.
+# Kinds: h (heading), p (paragraph), q (quote), li (list item), pre (code), fig,
+# img (an image's src, drawn by the reader; the helper localises it).
 import json
 import re
 import sys
@@ -775,6 +837,14 @@ class Reader(HTMLParser):
             self.flush()
             self.skip = 1
             return
+        if tag == "img":
+            at = dict(attrs)
+            self.flush()
+            if at.get("src"):
+                self.blocks.append({"k": "img", "t": at["src"]})
+            if at.get("alt"):
+                self.blocks.append({"k": "fig", "t": at["alt"]})
+            return
         if tag in BLOCK:
             self.flush()
             if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
@@ -791,6 +861,9 @@ class Reader(HTMLParser):
             self.pre += 1
 
     def handle_startendtag(self, tag, attrs):
+        if tag.lower() == "img":
+            self.handle_starttag(tag, attrs)
+            return
         if tag.lower() in BLOCK and not self.skip:
             self.flush()
 
@@ -883,8 +956,8 @@ echo ready""") every 1h
   state editing = false
   // Whether the article's text is on show under its details, and not only the page's link.
   state reading = false persist
-  // Whether the reader shows the tidied text and the summary (both made by the local AI
-  // harness, once each), and whether those are being made now.
+  // Whether the reader shows the tidied text and the summary (both made by Claude Code,
+  // which sends the text to Anthropic, once each), and whether those are being made now.
   state pretty = true persist
   state aiWant = ""
   state newUrl = ""
@@ -897,6 +970,9 @@ echo ready""") every 1h
   state current = null persist
   state pending = [] persist
   state opSeq = 0 persist
+  // Every queued op by its number, so an answer that lands after the queue has
+  // moved on (a retry, a restarted command) still finds its op and its row.
+  state sent = {} persist
   state override = {} persist
   state saving = {} persist
   state okIds = {} persist
@@ -965,7 +1041,7 @@ echo ready""") every 1h
   // as what it reads changes), so "sync now", pull-to-refresh and connect act at once
   // instead of on the next minute. The helper does the pages in parallel and writes
   // readeck-sync.json, which says when it began and how it ended.
-  source fetched = cmd(!helpers || server == "" || token == "" ? "echo waiting ${sh(fetchN)}" : "owl-readeck fetch ${sh(server)} ${sh(token)} 10 >/dev/null 2>&1 && echo done ${sh(fetchN)} || echo failed ${sh(fetchN)}") every 5m timeout 240s
+  source fetched = cmd(!helpers || server == "" || token == "" ? "echo waiting ${sh(fetchN)}" : "owl-readeck fetch ${sh(server)} ${sh(token)} 10 >/dev/null 2>&1 && echo done ${sh(fetchN)} || echo failed ${sh(fetchN)}") every 15m timeout 240s
   // One change at a time: `current` is sent, `pending` waits behind it. The command
   // depends on `current` alone, so a second tap can't rewrite or cancel the first; its
   // answer carries the op's own number, so identical answers still count.
@@ -974,11 +1050,11 @@ echo ready""") every 1h
   // edited on disk alone). The single changes with a server go from the phone,
   // in the trigger below, so nothing here can come between a tap and the server.
   source ran = cmd(
-    !helpers || current == null || (server != "" && token != "" && (current.mode == "change" || current.mode == "add" || current.mode == "labeladd" || current.mode == "labelrm")) ? "echo idle"
+    !helpers || current == null || (server != "" && token != "" && (current.mode == "change" || current.mode == "add")) ? "echo idle"
     : current.mode == "change" ? "owl-readeck change ${sh(server)} ${sh(token)} ${sh(current.id)} ${sh(current.json)} >/dev/null 2>&1; rc=$?; echo ${int(current.n)} $rc; head -1 \"$HOME/.cache/omalauncher/readeck-op.err\" 2>/dev/null; echo @@IDS@@; cat \"$HOME/.cache/omalauncher/readeck-op-failed.txt\" 2>/dev/null"
     : current.mode == "bulk" ? "owl-readeck bulk ${sh(server)} ${sh(token)} ${sh(current.json)} ${sh(toJson(current.ids ?? []))} >/dev/null 2>&1; rc=$?; echo ${int(current.n)} $rc; head -1 \"$HOME/.cache/omalauncher/readeck-op.err\" 2>/dev/null; echo @@IDS@@; cat \"$HOME/.cache/omalauncher/readeck-op-failed.txt\" 2>/dev/null"
     : current.mode == "add" ? "owl-readeck add ${sh(server)} ${sh(token)} ${sh(current.id)} >/dev/null 2>&1; rc=$?; echo ${int(current.n)} $rc; head -1 \"$HOME/.cache/omalauncher/readeck-op.err\" 2>/dev/null; echo @@IDS@@"
-    : current.mode == "labeladd" ? "owl-readeck labeladd ${sh(server)} ${sh(token)} ${sh(current.id)} >/dev/null 2>&1; rc=$?; echo ${int(current.n)} $rc; head -1 \"$HOME/.cache/omalauncher/readeck-op.err\" 2>/dev/null; echo @@IDS@@"
+
     : current.mode == "labelrm" ? "owl-readeck labelrm ${sh(server)} ${sh(token)} ${sh(current.id)} >/dev/null 2>&1; rc=$?; echo ${int(current.n)} $rc; head -1 \"$HOME/.cache/omalauncher/readeck-op.err\" 2>/dev/null; echo @@IDS@@"
     : current.mode == "import" ? "owl-readeck import-file ${sh(current.id)} >/dev/null 2>&1; rc=$?; echo ${int(current.n)} $rc; head -1 \"$HOME/.cache/omalauncher/readeck-op.err\" 2>/dev/null; echo @@IDS@@"
     : "echo ${int(current.n)} 1; echo @@IDS@@") every 12h timeout 900s
@@ -1036,6 +1112,7 @@ echo ready""") every 1h
           override = reduce(ids, (acc, id) => set(acc, id, merge(get(acc, id, {}), o.patch)), override)
         }
         let op = merge(o, {n: opSeq})
+        sent = set(sent, "${opSeq}", op)
         if current == null { current = op } else { pending = pending + [op] }
         if o.mode == "bulk" { picked = []; picking = false }
         notice = ""
@@ -1060,15 +1137,16 @@ echo ready""") every 1h
       let w = words(head)
       let n = num(w[0] ?? "0")
       let code = w[1] ?? ""
-      if current != null && n == current.n {
-        let op = current
+      let op = current != null && n == current.n ? current : get(sent, "${n}", null)
+      if op != null {
+        sent = remove(sent, "${n}")
         let ids = op.mode == "bulk" ? (op.ids ?? []) : op.mode == "change" ? [op.id] : []
         if code == "0" {
           saving = reduce(ids, (acc, id) => set(acc, id, max(0, get(acc, id, 0) - 1)), saving)
           okIds = reduce(ids, (acc, id) => set(acc, id, true), okIds)
           failed = reduce(ids, (acc, id) => remove(acc, id), failed)
           retry = reduce(ids, (acc, id) => remove(acc, id), retry)
-          notice = op.mode == "bulk" ? "changed" : op.mode == "import" ? "imported" : op.mode == "add" ? "link saved" : op.mode == "labeladd" ? "label added" : op.mode == "labelrm" ? "label deleted" : "saved"
+          notice = op.mode == "bulk" ? "changed" : op.mode == "import" ? "imported" : op.mode == "add" ? "link saved" : op.mode == "labelrm" ? "label deleted" : "saved"
           lastErr = ""
           lastOpAt = now
           if op.mode == "import" {
@@ -1079,7 +1157,7 @@ echo ready""") every 1h
             failed = {}
             retry = {}
           }
-          if op.mode == "add" || op.mode == "labeladd" || op.mode == "labelrm" {
+          if op.mode == "add" || op.mode == "labelrm" {
             if syncing { syncAgain = true } else { fetchN = fetchN + 1 }
           }
         } else {
@@ -1094,8 +1172,10 @@ echo ready""") every 1h
             // the old value back over a change the server may well have kept.
             saving = reduce(ids, (acc, id) => set(acc, id, max(0, get(acc, id, 0) - 1)), saving)
             wants = wants + [toJson(merge(op, {tries: (op.tries ?? 0) + 1}))]
-            current = len(pending) > 0 ? first(pending) : null
-            pending = drop(pending, 1)
+            if current != null && n == current.n {
+              current = len(pending) > 0 ? first(pending) : null
+              pending = drop(pending, 1)
+            }
           } else {
             let msg = rawMsg == "" ? "interrupted; tap retry" : replace(rawMsg, "readeck: ", "")
             let bad = lines(tail).filter(l => l != "" && l != "@@IDS@@")
@@ -1117,8 +1197,10 @@ echo ready""") every 1h
             }
           }
         }
-        current = len(pending) > 0 ? first(pending) : null
-        pending = drop(pending, 1)
+        if current != null && n == current.n {
+          current = len(pending) > 0 ? first(pending) : null
+          pending = drop(pending, 1)
+        }
       }
     }
   }
@@ -1132,10 +1214,6 @@ echo ready""") every 1h
         opResult = post(server + "/api/bookmarks/" + enc(current.id), parseJson(current.json), {Authorization: "Bearer ${token}"}, method: "PATCH")
       } else if current.mode == "add" {
         opResult = post(server + "/api/bookmarks", {url: current.id}, {Authorization: "Bearer ${token}"}, method: "POST")
-      } else if current.mode == "labeladd" {
-        opResult = post(server + "/api/labels", {name: current.id}, {Authorization: "Bearer ${token}"}, method: "POST")
-      } else if current.mode == "labelrm" {
-        opResult = post(server + "/api/labels/" + enc(current.id), null, {Authorization: "Bearer ${token}"}, method: "DELETE")
       }
     }
   }
@@ -1144,16 +1222,17 @@ echo ready""") every 1h
   on opResult first {
     if opResult != null && current != null {
       let op = current
+      sent = remove(sent, "${op.n}")
       let ids = op.mode == "change" ? [op.id] : []
       if opResult.ok {
         saving = reduce(ids, (acc, id) => set(acc, id, max(0, get(acc, id, 0) - 1)), saving)
         okIds = reduce(ids, (acc, id) => set(acc, id, true), okIds)
         failed = reduce(ids, (acc, id) => remove(acc, id), failed)
         retry = reduce(ids, (acc, id) => remove(acc, id), retry)
-        notice = op.mode == "add" ? "link saved" : op.mode == "labeladd" ? "label added" : op.mode == "labelrm" ? "label deleted" : "saved"
+        notice = op.mode == "add" ? "link saved" : op.mode == "labelrm" ? "label deleted" : "saved"
         lastErr = ""
         lastOpAt = now
-        if op.mode == "add" || op.mode == "labeladd" || op.mode == "labelrm" {
+        if op.mode == "add" || op.mode == "labelrm" {
           if syncing { syncAgain = true } else { fetchN = fetchN + 1 }
         }
       } else {
@@ -1178,12 +1257,14 @@ echo ready""") every 1h
   source article = file("~/.cache/omalauncher/readeck-read/${readId}.jsonl")
   let plain = lines(article).map(l => parseJson(l)).filter(p => p != null)
 
-  // The local AI harness (Claude Code, on this system), for a summary and for tidying
-  // the text. Both are made once per article and kept, and neither is needed to read.
-  source aiCheck = cmd(!helpers ? "echo no" : "owl-readeck ai-check 2>/dev/null || echo no") every 1m
+  // Claude Code, when it's installed, for a summary and for tidying the text. It is not
+  // local: it sends the article's text to Anthropic, on the user's Claude account, and
+  // only when a button asks. Both are made once per article and kept, and neither is
+  // needed to read.
+  source aiCheck = cmd(!helpers ? "echo no" : "owl-readeck ai-check 2>/dev/null || echo no") every 15m
   let aiOk = startsWith(aiCheck ?? "", "ok")
-  // The harness's name, for the buttons: "local AI" says enough, "2.1.302 (Claude Code)" doesn't.
-  let aiName = "local AI"
+  // The harness's name, for the buttons: Claude Code, which sends the text to Anthropic.
+  let aiName = "Claude Code"
   // What the harness made of this article: a summary, and the tidied text.
   source madeSummary = file("~/.cache/omalauncher/readeck-ai/${readId}.summary")
   source madePretty = file("~/.cache/omalauncher/readeck-ai/${readId}.pretty")
@@ -1217,9 +1298,10 @@ echo ready""") every 1h
   // Two values, each its own shell word: "summary" or "pretty", and the article's id.
   let aiMode = first(split(aiWant, " "))
   let aiId = last(split(aiWant, " "))
-  source aiRan = cmd(!helpers || trim(aiWant ?? "") == "" ? "echo idle" : "owl-readeck ${sh(aiMode)} ${sh(aiId)} >/dev/null 2>&1 && echo ok || echo failed") every 1m
+  source aiRan = cmd(!helpers || trim(aiWant ?? "") == "" ? "echo idle" : "owl-readeck ${sh(aiMode)} ${sh(aiId)} >/dev/null 2>&1 && echo ok || echo failed") every 1m timeout 300s
+  // A run cut off by its timeout comes back empty: dropped too, so it isn't sent again every minute.
   on aiRan {
-    if value == "ok" || value == "failed" { aiWant = "" }
+    if value == "ok" || value == "failed" || value == "" { aiWant = "" }
   }
 
   // Off the server, or from the export (importing one writes its articles' text too).
@@ -1330,7 +1412,7 @@ echo ready""") every 1h
             swipeX = 0
             haptic()
           }
-          Text { text: b.prog == 100 ? "mark unread" : "mark read"; style: label; color: foreground; maxLines: 1 }
+          Text { text: b.prog == 100 ? "mark unread" : "mark read"; style: label; color: foreground; maxLines: 1; align: center; padding: [0, 8] }
         }
         Spacer { weight: 1 }
         Box {
@@ -1345,7 +1427,7 @@ echo ready""") every 1h
             swipeX = 0
             haptic()
           }
-          Text { text: b.arch ? "restore" : "archive"; style: label; color: foreground; maxLines: 1 }
+          Text { text: b.arch ? "restore" : "archive"; style: label; color: foreground; maxLines: 1; align: center; padding: [0, 8] }
         }
       }
       Row {
@@ -1622,6 +1704,18 @@ echo ready""") every 1h
                     Text { text: "•"; style: body; fontSize: textSize; font: readFont; color: muted; width: 10 }
                     Text { text: p.t; style: body; fontSize: textSize; font: readFont; weight: 1 }
                   }
+                } else if p.k == "img" {
+                  // A picture in the article, localised by the helper so it reads
+                  // offline; contained, not cropped, so diagrams stay whole.
+                  Box {
+                    fill: width
+                    height: 240
+                    radius: 6 * corners
+                    clip: true
+                    background: alpha(foreground, 0.04)
+                    onLongPress: { hl = set(hl, readId, hlList.any(x => x == i) ? hlList.filter(x => x != i) : hlList + [i]); haptic() }
+                    Image { src: p.t; fill: true; fit: contain }
+                  }
                 } else if p.k == "fig" {
                   Text { text: p.t; style: small; color: muted; padding: [pgap, 2]; radius: 4 * corners; background: hlList.any(x => x == i) ? alpha(accent, 0.16) : null; onLongPress: { hl = set(hl, readId, hlList.any(x => x == i) ? hlList.filter(x => x != i) : hlList + [i]); haptic() } }
                 } else {
@@ -1693,7 +1787,7 @@ echo ready""") every 1h
           }
         }
         Text { text: "${item.authors}${item.authors != "" && item.mins != null ? " · " : ""}${item.mins != null ? "${item.mins} min" : ""}${item.words != null ? " · ${fmtNum(item.words)} words" : ""}${item.lang != "" ? " · ${upper(item.lang)}" : ""}"; style: label; color: muted; maxLines: 2; visible: item.authors != "" || item.mins != null || item.words != null }
-        // A summary by the phone's own AI: made once, kept beside the article.
+        // A summary by Claude Code (the text went to Anthropic): made once, kept beside the article.
         if summary != "" {
           Column {
             gap: 4
@@ -1704,7 +1798,7 @@ echo ready""") every 1h
               gap: 6
               align: center
               Text { text: "summary"; style: label; color: accent; width: 80 }
-              Text { text: "made on this phone by ${aiName}"; style: label; color: muted; maxLines: 1 }
+              Text { text: "made by ${aiName} · text sent to Anthropic"; style: label; color: muted; maxLines: 1 }
             }
             Text { text: summary; style: body; fontSize: textSize; font: readFont }
           }
@@ -1837,6 +1931,7 @@ echo ready""") every 1h
       Column {
         fill: true
         gap: 0
+
         if view == "labels" {
           Column {
             scroll: true
@@ -1850,10 +1945,10 @@ echo ready""") every 1h
               haptic()
             }
             Text { text: "${len(labels)} labels"; style: label; color: muted; padding: [0, 4] }
-            // A label to make; the × deletes one (asks twice, since it's for good).
-            Input { placeholder: "new label…"; clear: true; onSubmit: { if trim(value) != "" { wants = wants + [toJson({mode: "labeladd", id: trim(value)})]; haptic() } } }
-            if current != null && (current.mode == "labeladd" || current.mode == "labelrm") {
-              Text { text: current.mode == "labeladd" ? "adding the label…" : "deleting the label…"; style: label; color: accent; padding: [2, 4] }
+            // The × deletes a label (asks twice, since it's for good). Readeck has no
+            // API to make one: a label comes with the first bookmark given it.
+            if current != null && current.mode == "labelrm" {
+              Text { text: "deleting the label…"; style: label; color: accent; padding: [2, 4] }
             }
             if notice != "" {
               Text { text: "✓ ${notice}"; style: label; color: green; padding: [2, 4] }
