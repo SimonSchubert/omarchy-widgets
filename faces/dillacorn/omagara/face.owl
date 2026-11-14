@@ -59,7 +59,8 @@ face "Omagara" {
   state appElasticFrom = 0
   state appElasticStarted = 0
   state appElasticReturning = false
-  // The native notification list keeps its own scroll and variable row heights.
+  // The native notification list keeps scrolling and variable-height rows.
+  // Its header and final spacer are the safe elastic edge touch regions.
   state noticeEndPull = 0
   state noticeEndFrom = 0
   state noticeEndStarted = 0
@@ -289,7 +290,8 @@ face "Omagara" {
   // Additional content after the last card: it can scroll above the Search
   // button rather than remaining partly hidden underneath it.
   let noticeTailSpace = max(120, searchBottom - screenInset + 100)
-  // No per-frame update at rest; each return samples time for only 240ms.
+  // Matching 64dp resistance and 240ms rebound at both notification ends.
+  // Read time only while returning; keep native lazy scrolling untouched.
   let noticeEndAge = noticeEndReturning ? max(0, time - noticeEndStarted) : 0
   let noticeEndVisual = cfg.reduceMotion ? 0 : noticeEndReturning ? noticeEndFrom * pow(max(0, 1 - noticeEndAge / 0.24), 3) : noticeEndPull
   let noticeEndDone = noticeEndReturning && noticeEndAge >= 0.24
@@ -298,6 +300,7 @@ face "Omagara" {
   let noticeTopVisual = cfg.reduceMotion ? 0 : noticeTopReturning ? noticeTopFrom * pow(max(0, 1 - noticeTopAge / 0.24), 3) : noticeTopPull
   let noticeTopDone = noticeTopReturning && noticeTopAge >= 0.24
   on noticeTopDone { if value { noticeTopReturning = false; noticeTopPull = 0; noticeTopFrom = 0 } }
+  let noticeElasticY = clamp(noticeTopVisual - noticeEndVisual, -64, 64)
 
   // One stable viewport, one continuous A–Z/# document. Only intersecting
   // rows are instantiated: OWL 21 lazy Columns expose no scroll controller.
@@ -785,8 +788,9 @@ face "Omagara" {
       height: max(0, noticeBottom - noticeTop)
       clip: true
       gap: 6
-      // Pulling the header down stretches the whole panel gently at its top.
-      offset: [0, noticeTopVisual]
+      // The top header pulls down and the final spacer pulls up. Apply the
+      // same rubber-band offset to the clipped viewport in either direction.
+      offset: [0, noticeElasticY]
       if notices == null {
         Text { text: "Loading notifications…"; font: chosenFont; fontSize: 12; color: muted }
       } else if !notices.available {
@@ -806,10 +810,15 @@ face "Omagara" {
           gap: 8
           align: center
           drag: vertical
+          onPress: {
+            // Catch the panel mid-return without a jump on the next pull.
+            noticeTopPull = noticeTopVisual
+            noticeTopReturning = false
+          }
           onDrag: {
             if !cfg.reduceMotion && dy > 0 {
               noticeTopReturning = false
-              noticeTopPull = min(44, noticeTopPull + dy * (0.48 / (1 + noticeTopPull / 60)))
+              noticeTopPull = min(64, noticeTopPull + dy * (0.55 / (1 + noticeTopPull / 64)))
             } else if dy < 0 {
               noticeTopPull = max(0, noticeTopPull + dy * 0.75)
             }
@@ -858,12 +867,17 @@ face "Omagara" {
             width: noticeWidth
             height: noticeTailSpace
             drag: vertical
-            onDrag: {
+            onPress: {
+              // Preserve any in-progress rebound when the footer is grabbed.
+              noticeEndPull = noticeEndVisual
               noticeEndReturning = false
+            }
+            onDrag: {
               if !cfg.reduceMotion && dy < 0 {
-                noticeEndPull = min(70, noticeEndPull - dy * (0.42 / (1 + noticeEndPull / 72)))
+                noticeEndReturning = false
+                noticeEndPull = min(64, noticeEndPull - dy * (0.55 / (1 + noticeEndPull / 64)))
               } else if dy > 0 {
-                noticeEndPull = max(0, noticeEndPull - dy * 0.7)
+                noticeEndPull = max(0, noticeEndPull - dy * 0.75)
               }
             }
             onDragEnd: {
@@ -872,7 +886,7 @@ face "Omagara" {
               noticeEndReturning = !cfg.reduceMotion && noticeEndPull > 0
               if cfg.reduceMotion { noticeEndPull = 0 }
             }
-            // Feedback will render at the physical display edge, not in the footer.
+            // Visible rebound is applied to the clipped notification viewport.
           }
         }
       }
