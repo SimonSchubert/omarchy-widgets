@@ -682,23 +682,31 @@ face "Omagara" {
           // Compact native notification timestamp; no added timers or polling.
           Text { text: fmtTime(item.time, timePattern); font: chosenFont; fontSize: 11; color: secondaryText; maxLines: 1 }
         }
-        if stacked || cfg.actions && cfg.previews && len(item.actions ?? []) > 0 {
-          Text {
-            text: stacked ? (expandedStack == stack ? "▴" : "▾") : expandedNoticeActions == dragId ? "▴" : "▾"
-            width: 44
-            height: 44
-            align: center
-            fontSize: 22
-            color: primaryText
-            onTap: {
-              if stacked {
-                expandedStack = expandedStack == stack ? "" : stack
-                expandedNoticeActions = ""
-              } else {
-                expandedNoticeActions = expandedNoticeActions == dragId ? "" : dragId
+        // Always reserve the chevron's 44dp slot, including notifications
+        // without actions. The timestamp stays at the same right-hand position
+        // whether the expand arrow exists or the stack is open/closed.
+        Box {
+          width: 44
+          height: 44
+          align: center
+          if stacked || cfg.actions && cfg.previews && len(item.actions ?? []) > 0 {
+            Text {
+              text: stacked ? (expandedStack == stack ? "▴" : "▾") : expandedNoticeActions == dragId ? "▴" : "▾"
+              width: 44
+              height: 44
+              align: center
+              fontSize: 22
+              color: primaryText
+              onTap: {
+                if stacked {
+                  expandedStack = expandedStack == stack ? "" : stack
+                  expandedNoticeActions = ""
+                } else {
+                  expandedNoticeActions = expandedNoticeActions == dragId ? "" : dragId
+                }
+                replyKey = ""
+                replyDraft = ""
               }
-              replyKey = ""
-              replyDraft = ""
             }
           }
         }
