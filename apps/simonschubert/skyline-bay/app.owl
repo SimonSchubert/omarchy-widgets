@@ -1,5 +1,5 @@
 app "skyline bay" {
-  meta { owl: 22; description: "A 3D island city builder: lay roads, zone homes, shops and industry, bring power and water, add services and parks, and grow a hamlet into a skyline"; version: "1.7"; license: "MIT"; category: "games" }
+  meta { owl: 22; description: "A 3D island city builder: lay roads, zone homes, shops and industry, bring power and water, add services and parks, and grow a hamlet into a skyline"; version: "1.8"; license: "MIT"; category: "games" }
   // How it works. The island is 22 x 22 tiles, kept in two persisted lists: g (what's on a tile) and lv (how far a
   // zoned lot has grown, 0 to 3). Every 2 seconds a tick settles the cash, and lots with demand for their zone grow a
   // level if what they need is there: a road that reaches the highway, power, water (from level 2), land value
@@ -1080,9 +1080,11 @@ app "skyline bay" {
   let PRECT = pa < 0 || pb < 0 ? [] : tool == 1 || tool == 8 ? (HFIRST ? [[min(CX[pa], CX[pb]), CZ[pa], max(CX[pa], CX[pb]), CZ[pa]], [CX[pb], min(CZ[pa], CZ[pb]), CX[pb], max(CZ[pa], CZ[pb])]]
       : [[CX[pa], min(CZ[pa], CZ[pb]), CX[pa], max(CZ[pa], CZ[pb])], [min(CX[pa], CX[pb]), CZ[pb], max(CX[pa], CX[pb]), CZ[pb]]])
     : [[min(CX[pa], CX[pb]), min(CZ[pa], CZ[pb]), max(CX[pa], CX[pb]), max(CZ[pa], CZ[pb])]]
-  let PV = PCELLS.filter(c => OWNED[c] && (tool == 8 ? GG[c] != 7 && SUBL[c] == 0 : tool == 1 ? (GG[c] == 0 || GG[c] == 5 || GG[c] == 6 || (GG[c] >= 2 && GG[c] <= 4 && LV[c] == 0))
-    : tool <= 4 ? (GG[c] == 0 || GG[c] == 5 || (GG[c] >= 2 && GG[c] <= 4 && GG[c] != tool && LV[c] == 0))
-    : c != HC && GG[c] != 0 && GG[c] != 6 && GG[c] != 7))
+  // beach sand off the map's rim can be built on straight away, or bulldozed to grass
+  let SANDOK = range(NN).map(c => GG[c] == 7 && CX[c] > 0 && CZ[c] > 0 && CX[c] < N - 1 && CZ[c] < N - 1)
+  let PV = PCELLS.filter(c => OWNED[c] && (tool == 8 ? GG[c] != 7 && SUBL[c] == 0 : tool == 1 ? (GG[c] == 0 || GG[c] == 5 || GG[c] == 6 || SANDOK[c] || (GG[c] >= 2 && GG[c] <= 4 && LV[c] == 0))
+    : tool <= 4 ? (GG[c] == 0 || GG[c] == 5 || SANDOK[c] || (GG[c] >= 2 && GG[c] <= 4 && GG[c] != tool && LV[c] == 0))
+    : c != HC && GG[c] != 0 && GG[c] != 6 && (GG[c] != 7 || SANDOK[c])))
   // a tunnel tool dragged only over tunnels fills them in
   let PFILL = tool == 8 && len(PV) == 0 ? PCELLS.filter(c => SUBL[c] == 1) : []
   let PCOST = sum(PV.map(c => tool == 8 ? (GG[c] == 6 ? 80 : 40) : tool == 1 ? (GG[c] == 6 ? 60 : 10) + (GG[c] == 5 ? 3 : 0) : tool <= 4 ? 5 + (GG[c] == 5 ? 3 : 0) : GG[c] >= 10 ? 0 : 5))
@@ -1132,7 +1134,7 @@ app "skyline bay" {
     : SK == 24 ? ["Runs the buses that stop at bus stops", "${len(BSTOPS)} bus stop${len(BSTOPS) == 1 ? "" : "s"} in the city", "Upkeep $30 /min"]
     : SK == 25 ? [KC[24] > 0 ? "Buses stop here: traffic eases by a third 3 tiles round" : "Needs a bus depot to run buses", "Upkeep $2 /min"]
     : SK == 26 ? [any(STON, s => s == sel) ? "Linked: traffic eases by 60% 4 tiles round" : "Dig a tunnel to another station to open it", "Upkeep $36 /min"]
-    : SK == 6 ? ["Roads can bridge it ($60 a tile)"] : SK == 5 ? ["Clearing costs $5"] : SK == 7 ? ["Nothing can be built on the beach"] : ["Free to build on"]
+    : SK == 6 ? ["Roads can bridge it ($60 a tile)"] : SK == 5 ? ["Clearing costs $5"] : SK == 7 ? (SANDOK[sel] ? ["Build on it straight away, or bulldoze it to grass ($5)"] : ["The island's rim: nothing can be built here"]) : ["Free to build on"]
 
   // ---- the look -------------------------------------------------------------------------------------------------
   let FONT = "https://raw.githubusercontent.com/google/fonts/main/ofl/lilitaone/LilitaOne-Regular.ttf"
@@ -1452,7 +1454,7 @@ app "skyline bay" {
               } else if tool == 23 && !HAS[6] {
                 msg = "RESEARCH ROCKETRY FIRST"
                 msgT = now
-              } else if !(GG[cell] == 0 || GG[cell] == 5 || (GG[cell] >= 2 && GG[cell] <= 4 && LV[cell] == 0)) {
+              } else if !(GG[cell] == 0 || GG[cell] == 5 || SANDOK[cell] || (GG[cell] >= 2 && GG[cell] <= 4 && LV[cell] == 0)) {
                 msg = "PICK AN EMPTY TILE"
                 msgT = now
               } else if coins < TCOST[tool] {
