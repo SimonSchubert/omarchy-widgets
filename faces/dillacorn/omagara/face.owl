@@ -269,9 +269,8 @@ face "Omagara" {
   // Prefer timed current/upcoming events, then an all-day event covering today.
   let todayEvents = (agenda.events ?? []).filter(e => trim(e.title ?? "") != "" && e.start < dayEnd && e.end > now && e.end > dayStart).sortBy(e => e.allDay ? dayEnd : max(now, e.start))
   let todayEvent = first(todayEvents)
-  // Shape the backdrop from the ACTUAL displayed labels, not the screen width.
-  // OWL 21 does not expose font text measurement. Glyph-weighted advances
-  // avoid the old full-width boxes without clipping ordinary date formats.
+  // Fit one rectangular header shade to the widest visible text row.
+  // OWL 21 lacks font measurement; estimated widths keep the shade compact.
   let headerClockText = fmtTime(now, timePattern)
   let headerDateText = fmtTime(now, "EEEE, d MMMM")
   let headerEventText = todayEvent != null ? todayEvent.title + " · " + (todayEvent.allDay ? "Today" : fmtTime(todayEvent.start, timePattern)) : ""
@@ -1299,8 +1298,8 @@ face "Omagara" {
       gap: 0
       padding: [screenLeft + 24, screenTop + 12, screenRight + 24, 0]
       visible: !browsing
-      // One connected, content-fitted ribbon behind time, date and event.
-      // No gaps, no full-width shade, and no separate overlapping panels.
+      // One uniform-width rectangle behind the time, date and event.
+      // Preserve optional rounding only at the outer corners.
       Box {
         fill: width
         height: headerPadTop + headerShapeHeight
@@ -1310,33 +1309,18 @@ face "Omagara" {
             fill: width
             height: headerShapeHeight
             offset: [0, headerPadTop]
-            let row0 = first(headerRows)
-            let row1 = get(headerRows, 1, row0)
-            let row2 = get(headerRows, 2, row1)
-            let rowCount = len(headerRows)
-            let mid0 = row0.h / 2
-            let mid1 = row0.h + row1.h / 2
-            let mid2 = row0.h + row1.h + row2.h / 2
-            let seg01 = max(1, mid1 - mid0)
-            let seg12 = max(1, mid2 - mid1)
             let topRounded = cfg.clock ? cfg.roundTime : cfg.date ? cfg.roundDate : cfg.roundEvent
             let bottomRounded = cfg.event && todayEvent != null ? cfg.roundEvent : cfg.date ? cfg.roundDate : cfg.roundTime
             let topR = topRounded ? 8 : 0
             let bottomR = bottomRounded ? 8 : 0
-            // Blend widths continuously through the row centers so the
-            // connected shadow tapers naturally without little side divots.
+            // Single width for every row; keep the existing outer-corner options.
+            let shadeWidth = min(headerShapeMax, 16 + max(cfg.clock ? headerClockWidth : 0, max(cfg.date ? headerDateWidth : 0, cfg.event && todayEvent != null ? headerEventWidth : 0)))
             let slices = map(range(ceil(headerShapeHeight / 2) + 1), i => min(headerShapeHeight, i * 2))
             let shapeEdge = map(slices, y => {
               y: y,
-              half: (
-                rowCount <= 1 ? row0.w : rowCount == 2 ? (
-                  y <= mid0 ? row0.w : y >= mid1 ? row1.w : row0.w + (row1.w - row0.w) * (0.5 - 0.5 * cos(rad(180 * clamp((y - mid0) / seg01, 0, 1))))
-                ) : (
-                  y <= mid0 ? row0.w : y < mid1 ? row0.w + (row1.w - row0.w) * (0.5 - 0.5 * cos(rad(180 * clamp((y - mid0) / seg01, 0, 1)))) : y >= mid2 ? row2.w : row1.w + (row2.w - row1.w) * (0.5 - 0.5 * cos(rad(180 * clamp((y - mid1) / seg12, 0, 1))))
-                )
-              ) / 2
-              - (topR > 0 && y < topR ? topR - sqrt(max(0, topR * topR - pow(y - topR, 2))) : 0)
-              - (bottomR > 0 && y > headerShapeHeight - bottomR ? bottomR - sqrt(max(0, bottomR * bottomR - pow(y - headerShapeHeight + bottomR, 2))) : 0)
+              half: shadeWidth / 2
+                - (topR > 0 && y < topR ? topR - sqrt(max(0, topR * topR - pow(y - topR, 2))) : 0)
+                - (bottomR > 0 && y > headerShapeHeight - bottomR ? bottomR - sqrt(max(0, bottomR * bottomR - pow(y - headerShapeHeight + bottomR, 2))) : 0)
             })
             path(map(shapeEdge, p => [width / 2 + p.half, p.y]) + reverse(map(shapeEdge, p => [width / 2 - p.half, p.y])), closed: true, fill: headerShade)
           }
