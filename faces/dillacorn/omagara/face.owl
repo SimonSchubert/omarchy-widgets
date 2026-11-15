@@ -1086,11 +1086,13 @@ face "Omagara" {
                   (railCurveStrength > 0 ? (1 + cos(rad(min(abs(j / contourSteps - 0.5 - fingerPosition) / max(10, min(14, len(alphabet) * 0.58)), 1) * 180))) / 2 * railCurveStrength : 0) - alphabetSide * (wiggleActive ? wiggleOffsets[j] : 0),
                 y: cfg.roundAlphabet ? 12 + j / max(1, (len(alphabet) + 1) * contourSteps) * max(0, railPaintHeight - 24) : j * railStep / contourSteps
               })
-              path(map(wormSamples, p => [p.x - 12, p.y]) + reverse(map(wormSamples, p => [p.x + 12, p.y])), closed: true, fill: legibilityShade)
-              if cfg.roundAlphabet {
-                circle(first(wormSamples).x, first(wormSamples).y, 12, fill: legibilityShade)
-                circle(last(wormSamples).x, last(wormSamples).y, 12, fill: legibilityShade)
-              }
+              // Draw the rounded caps in one translucent path to avoid
+              // dark seams from overlapping semi-transparent circles.
+              let wormRight = map(wormSamples, p => [p.x + 12, p.y])
+              let wormLeft = reverse(map(wormSamples, p => [p.x - 12, p.y]))
+              let wormBottomCap = cfg.roundAlphabet ? map(range(9), i => [last(wormSamples).x + 12 * cos(rad(i * 22.5)), last(wormSamples).y + 12 * sin(rad(i * 22.5))]) : []
+              let wormTopCap = cfg.roundAlphabet ? map(range(9), i => [first(wormSamples).x + 12 * cos(rad(180 + i * 22.5)), first(wormSamples).y + 12 * sin(rad(180 + i * 22.5))]) : []
+              path(wormRight + wormBottomCap + wormLeft + wormTopCap, closed: true, fill: legibilityShade)
             }
           }
           Column {
@@ -1250,7 +1252,7 @@ face "Omagara" {
             fontSize: 20 * rowScale
             color: primaryText
             maxLines: 1
-            padding: cfg.shadeAppLabels && thumbView ? [2 * rowScale, 5 * rowScale] : [0, 0]
+            padding: cfg.shadeAppLabels && thumbView ? [2 * rowScale, 10 * rowScale] : [0, 0]
             background: cfg.shadeAppLabels && thumbView ? appLabelShade : transparent
             radius: cfg.shadeAppLabels && cfg.roundAppLabels && thumbView ? 6 * rowScale : 0
           }
@@ -1264,7 +1266,7 @@ face "Omagara" {
               fontSize: 11 * rowScale
               color: secondaryText
               maxLines: 1
-              padding: cfg.shadeAppLabels && thumbView ? [1 * rowScale, 5 * rowScale] : [0, 0]
+              padding: cfg.shadeAppLabels && thumbView ? [1 * rowScale, 10 * rowScale] : [0, 0]
               background: cfg.shadeAppLabels && thumbView ? appLabelShade : transparent
               radius: cfg.shadeAppLabels && cfg.roundAppLabels && thumbView ? 4 * rowScale : 0
             }
@@ -1460,7 +1462,7 @@ face "Omagara" {
                     fontSize: 22 * appScale
                     color: secondaryText
                     maxLines: 1
-                    padding: cfg.shadeAppLabels ? [8 * appScale, 3 * appScale] : [0, 0]
+                    padding: cfg.shadeAppLabels ? [8 * appScale, 7 * appScale] : [0, 0]
                     background: cfg.shadeAppLabels ? appLabelShade : transparent
                     radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 4 * appScale : 0
                   }
@@ -1516,7 +1518,7 @@ face "Omagara" {
                       fontSize: 17 * appScale
                       color: primaryText
                       maxLines: 2
-                      padding: cfg.shadeAppLabels ? [2 * appScale, 5 * appScale] : [0, 0]
+                      padding: cfg.shadeAppLabels ? [2 * appScale, 10 * appScale] : [0, 0]
                       background: cfg.shadeAppLabels ? appLabelShade : transparent
                       radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 6 * appScale : 0
                     }
