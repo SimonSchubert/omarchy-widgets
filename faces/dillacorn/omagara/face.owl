@@ -1093,8 +1093,9 @@ face "Omagara" {
               let wormTopSlope = clamp((get(wormSamples, 1, wormTop).x - wormTop.x) / max(1, railStep / contourSteps), -1.25, 1.25)
               let wormBottomSlope = clamp((wormBottom.x - get(wormSamples, len(wormSamples) - 2, wormBottom).x) / max(1, railStep / contourSteps), -1.25, 1.25)
               let wormLeft = map(wormSamples, p => [p.x - 12, p.y])
-              let wormRight = reverse(map(wormSamples, p => [p.x + 12, p.y]))
-              let capAngles = map(range(15), i => rad((i + 1) * 11.25))
+              let wormRight = drop(reverse(map(wormSamples, p => [p.x + 12, p.y])), 1)
+              // Include the 180-degree end exactly, then skip its duplicate on the right edge.
+              let capAngles = map(range(16), i => rad((i + 1) * 11.25))
               let wormBottomArc = map(capAngles, a => [wormBottom.x - 12 * cos(a) + 12 * wormBottomSlope * sin(a), wormBottom.y + 12 * sin(a)])
               let wormTopArc = map(capAngles, a => [wormTop.x + 12 * cos(a) - 12 * wormTopSlope * sin(a), wormTop.y - 12 * sin(a)])
               path(cfg.roundAlphabet ? wormLeft + wormBottomArc + wormRight + wormTopArc : wormLeft + wormRight, closed: true, fill: alphabetShade)
