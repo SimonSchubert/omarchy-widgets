@@ -1090,8 +1090,8 @@ face "Omagara" {
               // dark seams from overlapping semi-transparent circles.
               let wormRight = map(wormSamples, p => [p.x + 12, p.y])
               let wormLeft = reverse(map(wormSamples, p => [p.x - 12, p.y]))
-              let wormBottomCap = cfg.roundAlphabet ? map(range(9), i => [last(wormSamples).x + 12 * cos(rad(i * 22.5)), last(wormSamples).y + 12 * sin(rad(i * 22.5))]) : []
-              let wormTopCap = cfg.roundAlphabet ? map(range(9), i => [first(wormSamples).x + 12 * cos(rad(180 + i * 22.5)), first(wormSamples).y + 12 * sin(rad(180 + i * 22.5))]) : []
+              let wormBottomCap = cfg.roundAlphabet ? map(range(7), i => [last(wormSamples).x + 12 * cos(rad((i + 1) * 22.5)), last(wormSamples).y + 12 * sin(rad((i + 1) * 22.5))]) : []
+              let wormTopCap = cfg.roundAlphabet ? map(range(7), i => [first(wormSamples).x + 12 * cos(rad(180 + (i + 1) * 22.5)), first(wormSamples).y + 12 * sin(rad(180 + (i + 1) * 22.5))]) : []
               path(wormRight + wormBottomCap + wormLeft + wormTopCap, closed: true, fill: legibilityShade)
             }
           }
