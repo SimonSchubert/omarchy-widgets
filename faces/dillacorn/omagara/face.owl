@@ -301,6 +301,9 @@ face "Omagara" {
   // Preserve a minimum gap above the independently scrolling notifications.
   let headerBottom = screenTop + 12 + headerPadTop + headerShapeHeight + 30
   let noticeTop = max(headerBottom, screenTop + availableHeight * 0.24)
+  // Place Search and Close 12dp inward from the visible alphabet rail.
+  // Both controls follow Alphabet position rather than adding a second setting.
+  let controlLeft = screenLeft + 60
   let controlRight = screenRight + 60
   // Raise Search and Close about 8dp to free a little more room below.
   // The launcher's native home-swipe handler owns the pull-down gesture.
@@ -336,9 +339,10 @@ face "Omagara" {
   let appPanelHeight = max(0, appSafeBottom - appSafeTop)
   let appFade = min(60, appPanelHeight / 5)
   let appEdgeSpace = appFade + 8
-  // Let app rows accept taps all the way to the right safe edge. The
-  // alphabet rail and Search/Close buttons are rendered above the list.
-  let appPanelWidth = max(80, availableWidth - 48)
+  // Keep app icons clear of Search/Close when the rail is on the left.
+  // The right-handed app list retains its original width and start position.
+  let appPanelInset = alphabetSide == -1 ? 112 : 48
+  let appPanelWidth = max(80, availableWidth - appPanelInset)
   let appSections = fullAlphabet.filter(c => !cfg.hideEmpty || len(get(groups, c, [])) > 0)
   let appSectionEnds = scan(appSections, (height, c) => height + appLabelHeight + len(get(groups, c, [])) * appRowHeight, 0)
   let appSectionStarts = map(appSections, (c, i) => appEdgeSpace + (i == 0 ? 0 : appSectionEnds[i - 1]))
@@ -350,7 +354,7 @@ face "Omagara" {
   // alphabet cog. Keep a small bottom inset rather than the old oversized
   // padding. Close and Search stay on the right, clear of the menu text.
   let appMenuTail = max(28, appSafeBottom - (railTop + railHeight + railStep / 2) - appRowHeight / 2)
-  let appMenuTextWidth = max(32, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 46 * appScale)
+  let appMenuTextWidth = max(32, min(appPanelWidth - 52 * appScale, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 46 * appScale))
   let appDocumentHeight = appMenuBottom + appMenuTail
   let appMaxScroll = max(0, appDocumentHeight - appPanelHeight)
   // Read time ONLY while gliding. An every-frame trigger would keep OWL's
@@ -1418,7 +1422,7 @@ face "Omagara" {
       Box {
         width: appPanelWidth
         height: appPanelHeight
-        offset: [screenLeft + 48, appSafeTop + appElasticVisual]
+        offset: [screenLeft + appPanelInset, appSafeTop + appElasticVisual]
         clip: true
         drag: vertical
         onPress: {
@@ -1661,8 +1665,8 @@ face "Omagara" {
     }
     Box {
       fill: true
-      align: bottomEnd
-      padding: [0, 0, controlRight, searchBottom + 64]
+      align: alphabetSide == -1 ? "bottomStart" : "bottomEnd"
+      padding: alphabetSide == -1 ? [controlLeft, 0, 0, searchBottom + 64] : [0, 0, controlRight, searchBottom + 64]
       visible: browsing && activeSide == 0
       Box {
         size: 48
@@ -1677,8 +1681,8 @@ face "Omagara" {
     }
     Box {
       fill: true
-      align: bottomEnd
-      padding: [0, 0, controlRight, searchBottom]
+      align: alphabetSide == -1 ? "bottomStart" : "bottomEnd"
+      padding: alphabetSide == -1 ? [controlLeft, 0, 0, searchBottom] : [0, 0, controlRight, searchBottom]
       Box {
         size: 48
         // Lower-letter magnification crosses this area; restore on release.
@@ -1698,22 +1702,26 @@ face "Omagara" {
         }
       }
     }
-    // Passive six-dot vertical grip embedded in the horizontal handle.
-    // It suggests either swipe direction without an arrow or a new touch target;
-    // Omalauncher's native home gestures still own the cleared area.
+    // Passive L-shaped swipe cue: the elbow runs beside Search, then turns
+    // inward toward the six-dot grip. Mirror the artwork with Alphabet position.
+    // The cue has no touch handlers; Omalauncher owns the native home swipe.
     if cfg.showSwipeCue && !browsing && activeSide == 0 {
+      let cueLeft = alphabetSide == -1
+      let cueElbowX = cueLeft ? 54 : 72
+      let cueDotX = cueLeft ? 90 : 32
       Box {
         fill: true
-        align: bottomEnd
-        padding: [0, 0, controlRight, searchBottom - 26]
+        align: cueLeft ? "bottomStart" : "bottomEnd"
+        padding: cueLeft ? [controlLeft, 0, 0, searchBottom - 28] : [0, 0, controlRight, searchBottom - 28]
         Canvas {
-          width: 48
-          height: 18
-          line(5, 9, 16, 9, stroke: alpha(primaryText, 0.55), width: 1.8, cap: round)
-          line(32, 9, 43, 9, stroke: alpha(primaryText, 0.55), width: 1.8, cap: round)
-          for y in [4, 9, 14] {
-            circle(22, y, 1.6, fill: alpha(primaryText, 0.86))
-            circle(26, y, 1.6, fill: alpha(primaryText, 0.86))
+          width: 126
+          height: 58
+          line(cueElbowX, 6, cueElbowX, 40, stroke: alpha(primaryText, 0.55), width: 1.8, cap: round)
+          line(cueElbowX, 40, cueLeft ? 78 : 48, 40, stroke: alpha(primaryText, 0.55), width: 1.8, cap: round)
+          line(cueLeft ? 106 : 20, 40, cueLeft ? 114 : 12, 40, stroke: alpha(primaryText, 0.55), width: 1.8, cap: round)
+          for y in [35, 40, 45] {
+            circle(cueDotX, y, 1.6, fill: alpha(primaryText, 0.86))
+            circle(cueDotX + 4, y, 1.6, fill: alpha(primaryText, 0.86))
           }
         }
       }
