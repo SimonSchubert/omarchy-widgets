@@ -1,7 +1,7 @@
 app "readeck" {
   edge: true
 
-  meta { owl: 18; description: "A Readeck client for a server or an export: lists, labels, search, a reader with pictures, notes and bulk changes. Summary and tidy-up use Claude Code, which sends the text to Anthropic"; version: "2.2"; license: "MIT"; category: "news" }
+  meta { owl: 18; description: "A Readeck client for a server or an export: lists, labels, search, a reader with pictures, notes and bulk changes. Summary and tidy-up use Claude Code, which sends the text to Anthropic"; version: "2.3"; license: "MIT"; category: "news" }
 
   title: readId != "" ? item.title ?? "reading" : view == "setup" ? "connect" : view == "labels" ? "labels" : label != "" ? label : capitalize(view)
   back: readId != "" || view == "labels" || view == "setup" || label != ""
@@ -778,10 +778,10 @@ fetch | reload)
 esac
 READECK_LIB_END
 fi
-if ! grep -qF '# owl-readeck-read 1.1' "$bin/owl-readeck-read" 2>/dev/null; then
+if ! grep -qF '# owl-readeck-read 1.2' "$bin/owl-readeck-read" 2>/dev/null; then
   cat > "$bin/owl-readeck-read" << 'READECK_READ_END'
 #!/usr/bin/env python3
-# owl-readeck-read 1.1: the reader side of the launcher's Readeck app (readeck.owl).
+# owl-readeck-read 1.2: the reader side of the launcher's Readeck app (readeck.owl).
 # Turns a Readeck article's HTML (its export's container/index.html, or the
 # server's /article endpoint) into the light text the app draws: one element a
 # line, "heading: ", "quote: " and "list: " marking what isn't a paragraph, so
