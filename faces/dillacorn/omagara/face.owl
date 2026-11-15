@@ -1907,7 +1907,7 @@ face "Omagara" {
                   fill: width
                   gap: 6
                   for preset in customTextPresets {
-                    Button { text: preset.name; color: preset.hex; onTap: prefs = set(prefs, "customTextHex", preset.hex) }
+                    Button { text: preset.name + " (" + preset.hex + ")"; onTap: prefs = set(prefs, "customTextHex", preset.hex) }
                   }
                 }
                 Input { text: customTextEntry; placeholder: "#RRGGBB"; onChange: customTextEntry = value }
