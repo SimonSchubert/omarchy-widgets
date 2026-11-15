@@ -1087,19 +1087,25 @@ face "Omagara" {
               offset: [alphabetSide == 1 ? -railMaxReach : 0, -12]
               // Use the same wave as the glyphs, sampled at every letter center.
               // In idle/drag states, retain the original four-point contour.
+              // Rounded mode trims only the two end clearances; square mode
+              // keeps its original coordinates and the glyphs never move.
+              let wormCapInset = cfg.roundAlphabet ? min(3, railStep * 0.15) : 0
               let wormSamples = map(range((len(alphabet) + 1) * contourSteps + 1), j => {
                 x: (alphabetSide == 1 ? railMaxReach + 22 : 22) - alphabetSide * railCurvePull *
                   (railCurveStrength > 0 ? (1 + cos(rad(min(abs(j / contourSteps - 0.5 - fingerPosition) / max(10, min(14, len(alphabet) * 0.58)), 1) * 180))) / 2 * railCurveStrength : 0) - alphabetSide * (wiggleActive ? wiggleOffsets[j] : 0),
-                // Keep the original glyph-coordinate geometry; Canvas adds cap clearance.
-                y: 12 + j * railStep / contourSteps
+                // Fade each inset over one cell so the cap and letter share a smooth outline.
+                y: 12 + j * railStep / contourSteps + wormCapInset * max(0, 1 - j / contourSteps) - wormCapInset * max(0, 1 - ((len(alphabet) + 1) * contourSteps - j) / contourSteps)
               })
               // Round each end as a real half-circle, sheared to follow the
               // ribbon's local tangent when the thumb bends the alphabet.
               // One translucent filled path prevents overlapping dark seams.
               let wormTop = first(wormSamples)
               let wormBottom = last(wormSamples)
-              let wormTopSlope = clamp((get(wormSamples, 1, wormTop).x - wormTop.x) / max(1, railStep / contourSteps), -1.25, 1.25)
-              let wormBottomSlope = clamp((wormBottom.x - get(wormSamples, len(wormSamples) - 2, wormBottom).x) / max(1, railStep / contourSteps), -1.25, 1.25)
+              // Use the actual sample spacing after the subtle cap inset.
+              let wormTopNext = get(wormSamples, 1, wormTop)
+              let wormBottomPrev = get(wormSamples, len(wormSamples) - 2, wormBottom)
+              let wormTopSlope = clamp((wormTopNext.x - wormTop.x) / max(1, wormTopNext.y - wormTop.y), -1.25, 1.25)
+              let wormBottomSlope = clamp((wormBottom.x - wormBottomPrev.x) / max(1, wormBottom.y - wormBottomPrev.y), -1.25, 1.25)
               let wormLeft = map(wormSamples, p => [p.x - 12, p.y])
               let wormRight = drop(reverse(map(wormSamples, p => [p.x + 12, p.y])), 1)
               // Include the 180-degree end exactly, then skip its duplicate on the right edge.
