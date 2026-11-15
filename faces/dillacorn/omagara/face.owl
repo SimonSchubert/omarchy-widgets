@@ -599,7 +599,7 @@ face "Omagara" {
       fill: width
       gap: 4
       padding: [14, 8]
-      radius: cfg.roundNotifications ? 999 : 0
+      radius: cfg.roundNotifications ? 14 : 0
       border: cfg.bubbleBorder ? 1 : 0
       borderColor: border
       background: noticeCardShade
@@ -852,7 +852,7 @@ face "Omagara" {
             color: primaryText
             padding: [7, 9]
             background: cfg.shadeNoticeLabels ? noticeHeadingShade : transparent
-            radius: cfg.roundNoticeHeading ? 16 : 0
+            radius: cfg.roundNoticeHeading ? 7 : 0
           }
           Spacer { weight: 1 }
           if clearableNotices > 0 {
@@ -863,7 +863,7 @@ face "Omagara" {
               color: primaryText
               padding: [7, 9]
               background: cfg.shadeNoticeLabels ? noticeHeadingShade : transparent
-              radius: cfg.roundClearAll ? 16 : 0
+              radius: cfg.roundClearAll ? 7 : 0
               onTap: notification("clear")
             }
           }
@@ -1307,7 +1307,7 @@ face "Omagara" {
       padding: [screenLeft + 24, screenTop + 12, screenRight + 24, 0]
       visible: !browsing
       // One uniform-width rectangle behind the time, date and event.
-      // Enabled ends receive a full half-height pill radius.
+      // Optional rounding is subtle; the header remains rectangular.
       Box {
         fill: width
         height: headerPadTop + headerShapeHeight
@@ -1319,11 +1319,10 @@ face "Omagara" {
             offset: [0, headerPadTop]
             let topRounded = cfg.clock ? cfg.roundTime : cfg.date ? cfg.roundDate : cfg.roundEvent
             let bottomRounded = cfg.event && todayEvent != null ? cfg.roundEvent : cfg.date ? cfg.roundDate : cfg.roundTime
-            // A half-height radius forms the full capsule at either enabled end.
+            // Restore the compact v1.6 outer-corner treatment, not a capsule.
+            let topR = topRounded ? 8 : 0
+            let bottomR = bottomRounded ? 8 : 0
             let shadeWidth = min(headerShapeMax, 16 + max(cfg.clock ? headerClockWidth : 0, max(cfg.date ? headerDateWidth : 0, cfg.event && todayEvent != null ? headerEventWidth : 0)))
-            let pillR = min(shadeWidth / 2, headerShapeHeight / 2)
-            let topR = topRounded ? pillR : 0
-            let bottomR = bottomRounded ? pillR : 0
             let slices = map(range(ceil(headerShapeHeight / 2) + 1), i => min(headerShapeHeight, i * 2))
             let shapeEdge = map(slices, y => {
               y: y,
