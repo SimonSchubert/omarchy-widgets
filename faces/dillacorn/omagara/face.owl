@@ -119,7 +119,7 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, roundAppLabels: false, centerNotificationsWithoutAlphabet: true, alphabetSide: "Right"}
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, roundAppLabels: false, centerNotificationsWithoutAlphabet: true, alphabetSide: "Right"}
   let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
   let hapticChoices = ["Off", "Reduced", "Every letter"]
   let timeFormatChoices = ["12-hour", "24-hour"]
@@ -128,17 +128,18 @@ face "Omagara" {
   let faceFontChoices = ["Sans", "Serif", "Launcher"]
   let textToneChoices = ["Theme", "Light", "Dark"]
   let textContrastChoices = ["High", "Standard"]
-  let cfg = merge(defaults, prefs, {alphabetSide: contains(["Left", "Right"], prefs.alphabetSide) ? prefs.alphabetSide : "Right", searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter", timeFormat: contains(timeFormatChoices, prefs.timeFormat) ? prefs.timeFormat : "24-hour", bubbleBorder: prefs.bubbleBorder == true, iconStyle: contains(iconStyleChoices, prefs.iconStyle) ? prefs.iconStyle : "Theme overlay", iconOverlayOpacity: contains(iconOverlayChoices, prefs.iconOverlayOpacity) ? prefs.iconOverlayOpacity : 30, faceFont: contains(faceFontChoices, prefs.faceFont) ? prefs.faceFont : "Sans", textTone: contains(textToneChoices, prefs.textTone) ? prefs.textTone : "Theme", textContrast: contains(textContrastChoices, prefs.textContrast) ? prefs.textContrast : "High"})
+  let shadeOpacityControls = [{key: "shadeHeaderOpacity", name: "Clock, date and event"}, {key: "shadeAlphabetOpacity", name: "Alphabet worm"}, {key: "shadeNoticeOpacity", name: "Notification headings"}, {key: "shadeCardOpacity", name: "Notification cards"}, {key: "shadeAppOpacity", name: "App labels"}]
+  let cfg = merge(defaults, prefs, {alphabetSide: contains(["Left", "Right"], prefs.alphabetSide) ? prefs.alphabetSide : "Right", searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter", timeFormat: contains(timeFormatChoices, prefs.timeFormat) ? prefs.timeFormat : "24-hour", shadeHeaderOpacity: contains(range(101), prefs.shadeHeaderOpacity) ? prefs.shadeHeaderOpacity : 29, shadeAlphabetOpacity: contains(range(101), prefs.shadeAlphabetOpacity) ? prefs.shadeAlphabetOpacity : 49, shadeNoticeOpacity: contains(range(101), prefs.shadeNoticeOpacity) ? prefs.shadeNoticeOpacity : 49, shadeCardOpacity: contains(range(101), prefs.shadeCardOpacity) ? prefs.shadeCardOpacity : 48, shadeAppOpacity: contains(range(101), prefs.shadeAppOpacity) ? prefs.shadeAppOpacity : 78, bubbleBorder: prefs.bubbleBorder == true, iconStyle: contains(iconStyleChoices, prefs.iconStyle) ? prefs.iconStyle : "Theme overlay", iconOverlayOpacity: contains(iconOverlayChoices, prefs.iconOverlayOpacity) ? prefs.iconOverlayOpacity : 30, faceFont: contains(faceFontChoices, prefs.faceFont) ? prefs.faceFont : "Sans", textTone: contains(textToneChoices, prefs.textTone) ? prefs.textTone : "Theme", textContrast: contains(textContrastChoices, prefs.textContrast) ? prefs.textContrast : "High"})
   // OWL cannot sample wallpaper brightness; explicit overrides keep text legible.
   let primaryText = cfg.textTone == "Light" ? #FAFAFA : cfg.textTone == "Dark" ? #101010 : foreground
   let secondaryText = cfg.textContrast == "High" ? primaryText : cfg.textTone == "Light" ? #CECECE : cfg.textTone == "Dark" ? #474747 : muted
-  // Theme-aware scrim to keep header and index legible over detailed wallpapers.
-  // Forced light/dark text receives its opposite backing color.
-  let legibilityShade = cfg.textTone == "Light" ? alpha(#111111, 0.49) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.49) : alpha(mix(background, surface, 0.50), 0.49)
-  // Only the fitted, connected header backdrop uses this subtle scrim.
-  let headerShade = cfg.textTone == "Light" ? alpha(#111111, 0.29) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.29) : alpha(mix(background, surface, 0.50), 0.29)
-  // Stronger compact scrim keeps app names readable over bright, detailed wallpapers.
-  let appLabelShade = cfg.textTone == "Light" ? alpha(#111111, 0.78) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.78) : alpha(mix(background, surface, 0.50), 0.78)
+  // Independent opacity, retaining the existing theme-aware shade colors.
+  let shadeBase = cfg.textTone == "Light" ? #111111 : cfg.textTone == "Dark" ? #FFFFFF : mix(background, surface, 0.50)
+  let alphabetShade = alpha(shadeBase, cfg.shadeAlphabetOpacity / 100)
+  let noticeHeadingShade = alpha(shadeBase, cfg.shadeNoticeOpacity / 100)
+  let headerShade = alpha(shadeBase, cfg.shadeHeaderOpacity / 100)
+  let appLabelShade = alpha(shadeBase, cfg.shadeAppOpacity / 100)
+  let noticeCardShade = alpha(background, cfg.shadeCardOpacity / 100)
   // Omalauncher OWL does not expose the Android 12/24-hour setting.
   // Keep the selected manual format consistent across all displayed times.
   let timePattern = cfg.timeFormat == "12-hour" ? "h:mm a" : "HH:mm"
@@ -601,7 +602,7 @@ face "Omagara" {
       radius: cfg.roundNotifications ? 14 : 0
       border: cfg.bubbleBorder ? 1 : 0
       borderColor: border
-      background: alpha(background, 0.48)
+      background: noticeCardShade
       onTap: {
         if summary && len(get(noticeGroups, stack, [])) > 1 {
           expandedStack = expandedStack == stack ? "" : stack
@@ -850,7 +851,7 @@ face "Omagara" {
             fontSize: 14
             color: primaryText
             padding: [7, 9]
-            background: cfg.shadeNoticeLabels ? legibilityShade : transparent
+            background: cfg.shadeNoticeLabels ? noticeHeadingShade : transparent
             radius: cfg.roundNoticeHeading ? 7 : 0
           }
           Spacer { weight: 1 }
@@ -861,7 +862,7 @@ face "Omagara" {
               fontSize: 14
               color: primaryText
               padding: [7, 9]
-              background: cfg.shadeNoticeLabels ? legibilityShade : transparent
+              background: cfg.shadeNoticeLabels ? noticeHeadingShade : transparent
               radius: cfg.roundClearAll ? 7 : 0
               onTap: notification("clear")
             }
@@ -1096,7 +1097,7 @@ face "Omagara" {
               let capAngles = map(range(15), i => rad((i + 1) * 11.25))
               let wormBottomArc = map(capAngles, a => [wormBottom.x - 12 * cos(a) + 12 * wormBottomSlope * sin(a), wormBottom.y + 12 * sin(a)])
               let wormTopArc = map(capAngles, a => [wormTop.x + 12 * cos(a) - 12 * wormTopSlope * sin(a), wormTop.y - 12 * sin(a)])
-              path(cfg.roundAlphabet ? wormLeft + wormBottomArc + wormRight + wormTopArc : wormLeft + wormRight, closed: true, fill: legibilityShade)
+              path(cfg.roundAlphabet ? wormLeft + wormBottomArc + wormRight + wormTopArc : wormLeft + wormRight, closed: true, fill: alphabetShade)
             }
           }
           Column {
@@ -1916,6 +1917,11 @@ face "Omagara" {
               for pref in preferenceRows.filter(p => contains(["reduceMotion", "shadeHeader", "shadeAlphabet", "shadeNoticeLabels", "shadeAppLabels"], p.key)) {
                 SettingToggle { pref: pref }
               }
+              Text { text: "Shade opacity"; font: chosenFont; color: accent; fontSize: 16; padding: [0, 12, 0, 2] }
+              for shadeControl in shadeOpacityControls {
+                Text { text: shadeControl.name + ": " + str(get(cfg, shadeControl.key)) + "%"; font: chosenFont; color: secondaryText; fontSize: 14 }
+                Slider { value: get(cfg, shadeControl.key); min: 0; max: 100; step: 1; live: true; onChange: prefs = set(prefs, shadeControl.key, clamp(round(value), 0, 100)) }
+              }
               Row {
                 fill: width
                 align: center
@@ -1938,12 +1944,12 @@ face "Omagara" {
           text: "Import Omagara settings"
           onTap: {
             let imported = parseJson(importText)
-            if imported.version == 1 && all(keys(defaults), k => k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : k == "iconStyle" ? get(imported.prefs, k) == null || contains(iconStyleChoices, get(imported.prefs, k)) : k == "iconOverlayOpacity" ? get(imported.prefs, k) == null || contains(iconOverlayChoices, get(imported.prefs, k)) : k == "faceFont" ? get(imported.prefs, k) == null || contains(faceFontChoices, get(imported.prefs, k)) : k == "textTone" ? get(imported.prefs, k) == null || contains(textToneChoices, get(imported.prefs, k)) : k == "textContrast" ? get(imported.prefs, k) == null || contains(textContrastChoices, get(imported.prefs, k)) : k == "timeFormat" ? get(imported.prefs, k) == null || get(imported.prefs, k) == "System" || contains(timeFormatChoices, get(imported.prefs, k)) : k == "alphabetSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
+            if imported.version == 1 && all(keys(defaults), k => (k == "shadeHeaderOpacity" || k == "shadeAlphabetOpacity" || k == "shadeNoticeOpacity" || k == "shadeCardOpacity" || k == "shadeAppOpacity") ? get(imported.prefs, k) == null || contains(range(101), get(imported.prefs, k)) : k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : k == "iconStyle" ? get(imported.prefs, k) == null || contains(iconStyleChoices, get(imported.prefs, k)) : k == "iconOverlayOpacity" ? get(imported.prefs, k) == null || contains(iconOverlayChoices, get(imported.prefs, k)) : k == "faceFont" ? get(imported.prefs, k) == null || contains(faceFontChoices, get(imported.prefs, k)) : k == "textTone" ? get(imported.prefs, k) == null || contains(textToneChoices, get(imported.prefs, k)) : k == "textContrast" ? get(imported.prefs, k) == null || contains(textContrastChoices, get(imported.prefs, k)) : k == "timeFormat" ? get(imported.prefs, k) == null || get(imported.prefs, k) == "System" || contains(timeFormatChoices, get(imported.prefs, k)) : k == "alphabetSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
               letter = highlightedLetter; appTracking = false
               prefs = reduce(keys(defaults), (m, k) => set(m, k, k == "searchContacts" ? false : k == "timeFormat" && get(imported.prefs, k) == "System" ? "24-hour" : (get(imported.prefs, k) ?? get(defaults, k))), {})
               worldZones = unique(imported.zones ?? [])
               importStatus = "Settings imported"
-            } else { importStatus = "Invalid settings: export version 1 with boolean preferences, Application Scale 75–115 in steps of 5, valid haptic mode, icon style/overlay, face font, text color/contrast, bubble shape/border, and supported zones required" }
+            } else { importStatus = "Invalid settings: export version 1 with valid preferences, shade opacity 0–100, app scale 75–115, haptic mode, icon style, font, text settings, and supported zones required" }
           }
         }
         if importStatus != "" { Text { text: importStatus; fontSize: 13; color: muted } }
