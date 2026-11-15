@@ -121,7 +121,7 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, showSwipeCue: true, roundAppLabels: false, centerNotificationsWithoutAlphabet: true, alphabetSide: "Right"}
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, showSwipeCue: true, roundAppLabels: false, centerNotificationsWithoutAlphabet: true, alphabetSide: "Right", controlSide: "Right"}
   let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
   let hapticChoices = ["Off", "Reduced", "Every letter"]
   let timeFormatChoices = ["12-hour", "24-hour"]
@@ -134,7 +134,7 @@ face "Omagara" {
   let roundingKeys = ["roundTime", "roundDate", "roundEvent", "roundAlphabet", "roundNotifications", "roundNoticeHeading", "roundClearAll", "roundSearch", "roundClose", "roundLetterCue", "roundCalendar", "roundAppLabels"]
   let textContrastChoices = ["High", "Standard"]
   let shadeOpacityControls = [{key: "shadeHeaderOpacity", name: "Clock, date and event"}, {key: "shadeAlphabetOpacity", name: "Alphabet worm"}, {key: "shadeNoticeOpacity", name: "Notification headings"}, {key: "shadeCardOpacity", name: "Notification cards"}, {key: "shadeAppOpacity", name: "App labels"}, {key: "shadeButtonOpacity", name: "Search and close buttons"}]
-  let cfg = merge(defaults, prefs, {alphabetSide: contains(["Left", "Right"], prefs.alphabetSide) ? prefs.alphabetSide : "Right", searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter", timeFormat: contains(timeFormatChoices, prefs.timeFormat) ? prefs.timeFormat : "24-hour", shadeHeaderOpacity: contains(range(101), prefs.shadeHeaderOpacity) ? prefs.shadeHeaderOpacity : 29, shadeAlphabetOpacity: contains(range(101), prefs.shadeAlphabetOpacity) ? prefs.shadeAlphabetOpacity : 49, shadeNoticeOpacity: contains(range(101), prefs.shadeNoticeOpacity) ? prefs.shadeNoticeOpacity : 49, shadeCardOpacity: contains(range(101), prefs.shadeCardOpacity) ? prefs.shadeCardOpacity : 48, shadeAppOpacity: contains(range(101), prefs.shadeAppOpacity) ? prefs.shadeAppOpacity : 78, shadeButtonOpacity: contains(range(101), prefs.shadeButtonOpacity) ? prefs.shadeButtonOpacity : 85, bubbleBorder: prefs.bubbleBorder == true, iconStyle: contains(iconStyleChoices, prefs.iconStyle) ? prefs.iconStyle : "Theme overlay", iconOverlayOpacity: contains(iconOverlayChoices, prefs.iconOverlayOpacity) ? prefs.iconOverlayOpacity : 30, faceFont: contains(faceFontChoices, prefs.faceFont) ? prefs.faceFont : "Sans", textTone: contains(textToneChoices, prefs.textTone) ? prefs.textTone : "Theme", customTextHex: match(prefs.customTextHex ?? "", "^#[0-9A-Fa-f]{6}$") != null ? upper(prefs.customTextHex) : "#FAFAFA", shadeColorMode: contains(shadeColorChoices, prefs.shadeColorMode) ? prefs.shadeColorMode : "Theme", shadeCustomHex: match(prefs.shadeCustomHex ?? "", "^#[0-9A-Fa-f]{6}$") != null ? upper(prefs.shadeCustomHex) : "#555555", textContrast: "High"})
+  let cfg = merge(defaults, prefs, {alphabetSide: contains(["Left", "Right"], prefs.alphabetSide) ? prefs.alphabetSide : "Right", controlSide: contains(["Left", "Right"], prefs.controlSide) ? prefs.controlSide : "Right", searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter", timeFormat: contains(timeFormatChoices, prefs.timeFormat) ? prefs.timeFormat : "24-hour", shadeHeaderOpacity: contains(range(101), prefs.shadeHeaderOpacity) ? prefs.shadeHeaderOpacity : 29, shadeAlphabetOpacity: contains(range(101), prefs.shadeAlphabetOpacity) ? prefs.shadeAlphabetOpacity : 49, shadeNoticeOpacity: contains(range(101), prefs.shadeNoticeOpacity) ? prefs.shadeNoticeOpacity : 49, shadeCardOpacity: contains(range(101), prefs.shadeCardOpacity) ? prefs.shadeCardOpacity : 48, shadeAppOpacity: contains(range(101), prefs.shadeAppOpacity) ? prefs.shadeAppOpacity : 78, shadeButtonOpacity: contains(range(101), prefs.shadeButtonOpacity) ? prefs.shadeButtonOpacity : 85, bubbleBorder: prefs.bubbleBorder == true, iconStyle: contains(iconStyleChoices, prefs.iconStyle) ? prefs.iconStyle : "Theme overlay", iconOverlayOpacity: contains(iconOverlayChoices, prefs.iconOverlayOpacity) ? prefs.iconOverlayOpacity : 30, faceFont: contains(faceFontChoices, prefs.faceFont) ? prefs.faceFont : "Sans", textTone: contains(textToneChoices, prefs.textTone) ? prefs.textTone : "Theme", customTextHex: match(prefs.customTextHex ?? "", "^#[0-9A-Fa-f]{6}$") != null ? upper(prefs.customTextHex) : "#FAFAFA", shadeColorMode: contains(shadeColorChoices, prefs.shadeColorMode) ? prefs.shadeColorMode : "Theme", shadeCustomHex: match(prefs.shadeCustomHex ?? "", "^#[0-9A-Fa-f]{6}$") != null ? upper(prefs.shadeCustomHex) : "#555555", textContrast: "High"})
   let allRounded = all(roundingKeys, k => get(cfg, k) == true)
   let anyRounded = any(roundingKeys, k => get(cfg, k) == true)
   // OWL cannot sample wallpaper brightness; explicit overrides keep text legible.
@@ -155,6 +155,7 @@ face "Omagara" {
   // Keep the selected manual format consistent across all displayed times.
   let timePattern = cfg.timeFormat == "12-hour" ? "h:mm a" : "HH:mm"
   let alphabetSide = cfg.alphabetSide == "Left" ? -1 : 1
+  let controlSide = cfg.controlSide == "Left" ? -1 : 1
   let noticePanelShift = cfg.centerNotificationsWithoutAlphabet && !cfg.idleAlphabet ? 0 : alphabetSide == -1 ? 20 : -20
   let chosenFont = cfg.faceFont == "Serif" ? "serif" : cfg.faceFont == "Launcher" ? "mono" : "sans"
   let zoneChoices = ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland"]
@@ -301,8 +302,8 @@ face "Omagara" {
   // Preserve a minimum gap above the independently scrolling notifications.
   let headerBottom = screenTop + 12 + headerPadTop + headerShapeHeight + 30
   let noticeTop = max(headerBottom, screenTop + availableHeight * 0.24)
-  // Place Search and Close 12dp inward from the visible alphabet rail.
-  // Both controls follow Alphabet position rather than adding a second setting.
+  // Search, Close and the gesture cue have their own side preference.
+  // Keep their 12dp clearance from a rail when both use the same edge.
   let controlLeft = screenLeft + 60
   let controlRight = screenRight + 60
   // Raise Search and Close about 8dp to free a little more room below.
@@ -339,9 +340,9 @@ face "Omagara" {
   let appPanelHeight = max(0, appSafeBottom - appSafeTop)
   let appFade = min(60, appPanelHeight / 5)
   let appEdgeSpace = appFade + 8
-  // Keep app icons clear of Search/Close when the rail is on the left.
-  // The right-handed app list retains its original width and start position.
-  let appPanelInset = alphabetSide == -1 ? 112 : 48
+  // Keep icons clear of Search/Close whenever those controls use the left.
+  // The right-control app list retains its original width and position.
+  let appPanelInset = controlSide == -1 ? 112 : 48
   let appPanelWidth = max(80, availableWidth - appPanelInset)
   let appSections = fullAlphabet.filter(c => !cfg.hideEmpty || len(get(groups, c, [])) > 0)
   let appSectionEnds = scan(appSections, (height, c) => height + appLabelHeight + len(get(groups, c, [])) * appRowHeight, 0)
@@ -352,9 +353,9 @@ face "Omagara" {
   let appMenuBottom = appMenuTop + 2 * appRowHeight
   // At the end of the list, align the last Settings action beside the
   // alphabet cog. Keep a small bottom inset rather than the old oversized
-  // padding. Close and Search follow the alphabet side and stay clear of icons.
+  // padding. Close and Search follow the selected control side, not the alphabet.
   let appMenuTail = max(28, appSafeBottom - (railTop + railHeight + railStep / 2) - appRowHeight / 2)
-  let appMenuTextWidth = alphabetSide == -1 ? max(32, min(appPanelWidth - 52 * appScale, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 46 * appScale)) : max(32, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 46 * appScale)
+  let appMenuTextWidth = controlSide == -1 ? max(32, min(appPanelWidth - 52 * appScale, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 46 * appScale)) : max(32, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 46 * appScale)
   let appDocumentHeight = appMenuBottom + appMenuTail
   let appMaxScroll = max(0, appDocumentHeight - appPanelHeight)
   // Read time ONLY while gliding. An every-frame trigger would keep OWL's
@@ -1665,8 +1666,8 @@ face "Omagara" {
     }
     Box {
       fill: true
-      align: alphabetSide == -1 ? "bottomStart" : "bottomEnd"
-      padding: alphabetSide == -1 ? [controlLeft, 0, 0, searchBottom + 64] : [0, 0, controlRight, searchBottom + 64]
+      align: controlSide == -1 ? "bottomStart" : "bottomEnd"
+      padding: controlSide == -1 ? [controlLeft, 0, 0, searchBottom + 64] : [0, 0, controlRight, searchBottom + 64]
       visible: browsing && activeSide == 0
       Box {
         size: 48
@@ -1681,8 +1682,8 @@ face "Omagara" {
     }
     Box {
       fill: true
-      align: alphabetSide == -1 ? "bottomStart" : "bottomEnd"
-      padding: alphabetSide == -1 ? [controlLeft, 0, 0, searchBottom] : [0, 0, controlRight, searchBottom]
+      align: controlSide == -1 ? "bottomStart" : "bottomEnd"
+      padding: controlSide == -1 ? [controlLeft, 0, 0, searchBottom] : [0, 0, controlRight, searchBottom]
       Box {
         size: 48
         // Lower-letter magnification crosses this area; restore on release.
@@ -1703,10 +1704,10 @@ face "Omagara" {
       }
     }
     // Passive L-shaped swipe cue: the elbow runs beside Search, then turns
-    // inward toward the six-dot grip. Mirror the artwork with Alphabet position.
+    // inward toward the six-dot grip. Mirror it with Search and close position.
     // The cue has no touch handlers; Omalauncher owns the native home swipe.
     if cfg.showSwipeCue && !browsing && activeSide == 0 {
-      let cueLeft = alphabetSide == -1
+      let cueLeft = controlSide == -1
       let cueElbowX = cueLeft ? 54 : 72
       let cueDotX = cueLeft ? 90 : 32
       Box {
@@ -1921,6 +1922,14 @@ face "Omagara" {
                   Button { text: (cfg.alphabetSide == edge ? "✓ " : "") + edge; onTap: prefs = set(prefs, "alphabetSide", edge) }
                 }
               }
+              Text { text: "Search and close position"; font: chosenFont; fontSize: 15; padding: [0, 12, 0, 0] }
+              Flow {
+                fill: width
+                gap: 8
+                for edge in ["Left", "Right"] {
+                  Button { text: (cfg.controlSide == edge ? "✓ " : "") + edge; onTap: prefs = set(prefs, "controlSide", edge) }
+                }
+              }
               for pref in preferenceRows.filter(p => contains(["idleAlphabet", "hideEmpty", "leftInput", "centerNotificationsWithoutAlphabet", "curve"], p.key)) {
                 SettingToggle { pref: pref }
               }
@@ -2044,7 +2053,7 @@ face "Omagara" {
           text: "Import Omagara settings"
           onTap: {
             let imported = parseJson(importText)
-            if imported.version == 1 && all(keys(defaults), k => (k == "shadeHeaderOpacity" || k == "shadeAlphabetOpacity" || k == "shadeNoticeOpacity" || k == "shadeCardOpacity" || k == "shadeAppOpacity" || k == "shadeButtonOpacity") ? get(imported.prefs, k) == null || contains(range(101), get(imported.prefs, k)) : k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : k == "iconStyle" ? get(imported.prefs, k) == null || contains(iconStyleChoices, get(imported.prefs, k)) : k == "iconOverlayOpacity" ? get(imported.prefs, k) == null || contains(iconOverlayChoices, get(imported.prefs, k)) : k == "faceFont" ? get(imported.prefs, k) == null || contains(faceFontChoices, get(imported.prefs, k)) : k == "textTone" ? get(imported.prefs, k) == null || contains(textToneChoices, get(imported.prefs, k)) : k == "textContrast" ? get(imported.prefs, k) == null || contains(textContrastChoices, get(imported.prefs, k)) : k == "customTextHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "shadeColorMode" ? get(imported.prefs, k) == null || contains(shadeColorChoices, get(imported.prefs, k)) : k == "shadeCustomHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "timeFormat" ? get(imported.prefs, k) == null || get(imported.prefs, k) == "System" || contains(timeFormatChoices, get(imported.prefs, k)) : k == "alphabetSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : k == "showSwipeCue" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
+            if imported.version == 1 && all(keys(defaults), k => (k == "shadeHeaderOpacity" || k == "shadeAlphabetOpacity" || k == "shadeNoticeOpacity" || k == "shadeCardOpacity" || k == "shadeAppOpacity" || k == "shadeButtonOpacity") ? get(imported.prefs, k) == null || contains(range(101), get(imported.prefs, k)) : k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : k == "iconStyle" ? get(imported.prefs, k) == null || contains(iconStyleChoices, get(imported.prefs, k)) : k == "iconOverlayOpacity" ? get(imported.prefs, k) == null || contains(iconOverlayChoices, get(imported.prefs, k)) : k == "faceFont" ? get(imported.prefs, k) == null || contains(faceFontChoices, get(imported.prefs, k)) : k == "textTone" ? get(imported.prefs, k) == null || contains(textToneChoices, get(imported.prefs, k)) : k == "textContrast" ? get(imported.prefs, k) == null || contains(textContrastChoices, get(imported.prefs, k)) : k == "customTextHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "shadeColorMode" ? get(imported.prefs, k) == null || contains(shadeColorChoices, get(imported.prefs, k)) : k == "shadeCustomHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "timeFormat" ? get(imported.prefs, k) == null || get(imported.prefs, k) == "System" || contains(timeFormatChoices, get(imported.prefs, k)) : k == "alphabetSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : k == "controlSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : k == "showSwipeCue" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) {
               letter = highlightedLetter; appTracking = false
               prefs = reduce(keys(defaults), (m, k) => set(m, k, k == "searchContacts" ? false : k == "textContrast" ? "High" : k == "timeFormat" && get(imported.prefs, k) == "System" ? "24-hour" : (get(imported.prefs, k) ?? get(defaults, k))), {})
               worldZones = unique(imported.zones ?? [])
