@@ -308,9 +308,9 @@ face "Omagara" {
   let noticeBottom = max(noticeTop, (tileHeight ?? 800) - searchBottom - 60)
   // One source of truth: 20dp outer left; 12dp clear of the 44dp right rail.
   let noticeWidth = max(0, availableWidth - 80)
-  // Additional content after the last card: it can scroll above the Search
-  // button rather than remaining partly hidden underneath it.
-  let noticeTailSpace = max(120, searchBottom - screenInset + 100)
+  // A full-height scroll runway lets the last notification leave the top
+  // of the clipped viewport. Keep the native swipe zone below Search clear.
+  let noticeTailSpace = max(max(120, searchBottom - screenInset + 100), noticeBottom - noticeTop)
   // Matching 64dp resistance and 240ms rebound at both notification ends.
   // Read time only while returning; keep native lazy scrolling untouched.
   let noticeEndAge = noticeEndReturning ? max(0, time - noticeEndStarted) : 0
@@ -887,11 +887,13 @@ face "Omagara" {
           for noticeRow in noticeRows key noticeRow.id {
             NotificationRow { item: noticeRow.item; stack: noticeRow.stack; summary: noticeRow.summary }
           }
-          // Scrollable footer makes the last notification readable ABOVE Search.
-          // The shadow only appears when the footer itself is pulled upward.
+          // Passive runway gives the last card enough room to scroll fully off
+          // the top. Only the last 64dp takes the end-of-list rebound gesture,
+          // so swiping down on the empty runway can still scroll back to cards.
+          Spacer { width: noticeWidth; height: max(0, noticeTailSpace - 64) }
           Box {
             width: noticeWidth
-            height: noticeTailSpace
+            height: min(64, noticeTailSpace)
             drag: vertical
             onPress: {
               // Preserve any in-progress rebound when the footer is grabbed.
