@@ -332,11 +332,17 @@ face "the guide what" {
           circle(fx + 13, fy - 3, 4, fill: cream)
           circle(fx + 14, fy - 3, 2.2, fill: navy)
         }
-        // Bubbles from the fish's mouth, wobbling up to the surface and growing as they go.
+        // Bubbles: one leaves the fish's mouth every 1.4 seconds, from wherever the fish was then, and wobbles slowly
+        // up to the surface, growing as it goes.
         for k in range(3) {
-          let rise = max(fy - wy - 6, 6)
-          let up = (time * 12 + k * 8) % rise
-          circle(fx + dir * 12 + sin(time * 3 + k * 2) * 1.6, fy - 2 - up, 1.3 + 1.4 * up / rise, stroke: alpha(cream, 0.8 - 0.3 * up / rise), width: 1)
+          let t0 = floor((time + k * 1.4) / 4.2) * 4.2 - k * 1.4
+          let age = time - t0
+          let bx = cx + R * 0.46 * sin(t0 * 0.5) + (cos(t0 * 0.5) >= 0 ? 12 : -12)
+          let by0 = cy + R * 0.24 + sin(t0 * 1.3) * R * 0.08 - 2
+          let bub = by0 - age * 6
+          if bub > wy + 3 {
+            circle(bx + sin(time * 2.2 + k * 2) * 1.4, bub, 1.2 + age * 0.35, stroke: alpha(cream, 0.85 - age * 0.12), width: 1)
+          }
         }
         // The surface, an oval seen from a little above, sloshing.
         rotate(sin(time * 1.6) * 3, cx, wy) {
@@ -492,7 +498,7 @@ face "the guide what" {
   let rh = 46
   let p = 50
   let pe = bh + 4
-  let shortW = min(W * 0.42, 180)
+  let shortW = min(W * 0.46, 196)
   let connEnd = W - 20 - screenRight
   let subW = min(connEnd - shortW - 34, 230)
   let listH = (nRows - 1) * p + rh
@@ -519,9 +525,6 @@ face "the guide what" {
         animate opacity: tween(240ms, "ease")
         background: barColors[(lastI + 5) % 8]
         animate background: tween(300ms, "ease")
-        // The open notification's own bar opens it.
-        ripple: openI >= 0 && lastRow.key != null
-        onTap: if openI >= 0 && lastRow.key != null { haptic(); notification("open", lastRow.key); selId = null }
         Row {
           fill: true
           gap: 10
@@ -546,12 +549,25 @@ face "the guide what" {
           }
         }
       }
+      // While a bar is open, its own bar is a key: a target laid over it then only, so the bar, parked off the side
+      // while closed, never takes a tap meant for the page beside.
+      if openI >= 0 {
+        Box {
+          width: connEnd - shortW - 14
+          height: rh
+          radius: rh / 2
+          offset: [shortW + 14, -(nRows - 1 - lastI) * p]
+          // The open notification's own bar opens it.
+          ripple: openI >= 0 && lastRow.key != null
+          onTap: if openI >= 0 && lastRow.key != null { haptic(); notification("open", lastRow.key); selId = null }
+        }
+      }
       for j in range(6) {
         Box {
           width: subW
           height: bh
           radius: bh / 2
-          offset: openI >= 0 && j < len(lastItems) ? [connEnd - subW, -((nRows - 1 - lastI) * p + rh + 4 + j * pe)] : [W + 40, -(nRows - 1 - lastI) * p]
+          offset: openI >= 0 && j < len(lastItems) ? [connEnd - subW, -((nRows - 1 - lastI) * p + rh + 4 + j * pe)] : [connEnd - subW, -(nRows - 1 - lastI) * p]
           animate offset: spring(0.72, 520 - j * 60)
           opacity: openI >= 0 && j < len(lastItems) ? 1 : 0
           animate opacity: tween(260ms, "ease")
@@ -582,44 +598,65 @@ face "the guide what" {
         }
       }
       for r, i in rows key r.id {
+        // The bar's rounded start, at the screen's edge where the page beside sees it; it stays put as the bar folds.
         Box {
-          width: r.w + 18
+          width: rh
           height: rh
           radius: rh / 2
-          offset: [-18 + (openI >= 0 ? shortW - r.w : 0) + (i == openI ? 14 : 0) + 3 * sin(beat * 1.3 + i * 2.1), -(nRows - 1 - i) * p]
-          animate offset: tween(650ms, "ease")
           background: r.c
-          onTap: { haptic(); if r.go == "access" { notification("open", "") } else if openI == i { selId = null } else { selId = r.id; lastId = r.id } }
-          onLongPress: if r.key != null { haptic(); notification("dismiss", r.key) }
-          Row {
-            fill: true
-            gap: 10
-            align: center
-            padding: [32, 0, 0, 0]
-            if openI < 0 {
-              Column {
-                weight: 1
-                gap: 0
-                Text { text: r.t; font: cabin; fontSize: 14.5; fontWeight: 600; letterSpacing: 0.5; color: label; maxLines: 1 }
-                if (r.t2 ?? "") != "" {
-                  Text { text: r.t2; font: cabin; fontSize: 12.5; color: cream; maxLines: 1 }
-                }
-              }
-              if (r.n ?? "") != "" {
-                Text { text: r.n; font: cabin; fontSize: 12; fontWeight: 700; color: alpha(cream, 0.85) }
-              }
-            } else {
-              Text { text: r.s; font: cabin; fontSize: 14.5; fontWeight: i == openI ? 700 : 500; letterSpacing: 1; color: i == openI ? cream : label; maxLines: 1; align: end; weight: 1 }
-            }
-            Box {
-              size: rh
-              radius: rh / 2
-              background: mix(r.c, ink, 0.3)
+          offset: [-18 + 3 * sin(beat * 1.3 + i * 2.1), -(nRows - 1 - i) * p]
+          animate offset: tween(650ms, "ease")
+        }
+        // The rest of the bar, through a window that starts at the middle of that rounded start. Folding into a tab,
+        // the bar slides left under the window's edge, so on this page it shrinks, and the page beside never sees more
+        // of it than the rounded start.
+        Box {
+          width: W + 18
+          height: rh
+          clip: true
+          offset: [-18 + rh / 2 + 3 * sin(beat * 1.3 + i * 2.1), -(nRows - 1 - i) * p]
+          animate offset: tween(650ms, "ease")
+          Box {
+            width: r.w + 18
+            height: rh
+            radius: rh / 2
+            offset: [-rh / 2 + (openI >= 0 ? shortW - r.w : 0) + (i == openI ? 14 : 0), 0]
+            animate offset: tween(650ms, "ease")
+            background: r.c
+            onTap: { haptic(); if r.go == "access" { notification("open", "") } else if openI == i { selId = null } else { selId = r.id; lastId = r.id } }
+            onLongPress: if r.key != null { haptic(); notification("dismiss", r.key) }
+            Row {
+              fill: true
+              gap: 10
               align: center
-              scale: i == openI && tick % 2 == 0 ? 0.84 : 1
-              animate scale: tween(900ms, "ease")
-              if r.icon != null {
-                Box { size: 28; radius: 14; background: cream; align: center; Image { src: r.icon; size: 18 } }
+              padding: [32, 0, 0, 0]
+              if openI < 0 {
+                Column {
+                  weight: 1
+                  gap: 0
+                  Text { text: r.t; font: cabin; fontSize: 14.5; fontWeight: 600; letterSpacing: 0.5; color: label; maxLines: 1 }
+                  if (r.t2 ?? "") != "" {
+                    Text { text: r.t2; font: cabin; fontSize: 12.5; color: cream; maxLines: 1 }
+                  }
+                }
+                if (r.n ?? "") != "" {
+                  Text { text: r.n; font: cabin; fontSize: 12; fontWeight: 700; color: alpha(cream, 0.85) }
+                }
+              } else {
+                // Folded, the tab's label (the app's name) fits the tab, ending in … if it must.
+                Spacer { weight: 1 }
+                Text { text: r.s; font: cabin; fontSize: 14; fontWeight: i == openI ? 700 : 500; letterSpacing: 1; color: i == openI ? cream : label; maxLines: 1; align: end; width: shortW - rh - 30 }
+              }
+              Box {
+                size: rh
+                radius: rh / 2
+                background: mix(r.c, ink, 0.3)
+                align: center
+                scale: i == openI && tick % 2 == 0 ? 0.84 : 1
+                animate scale: tween(900ms, "ease")
+                if r.icon != null {
+                  Box { size: 28; radius: 14; background: cream; align: center; Image { src: r.icon; size: 18 } }
+                }
               }
             }
           }

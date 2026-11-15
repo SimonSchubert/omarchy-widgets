@@ -309,6 +309,8 @@ face "the guide when" {
   component Sky() {
     Box {
     fill: true
+    // Clouds and the saucer drift in from past the edges; clipped here, so they never show on the page beside.
+    clip: true
     Canvas {
       fill: true
       let gy = height - 30
@@ -532,16 +534,6 @@ face "the guide when" {
         animate opacity: tween(240ms, "ease")
         background: barColors[(lastI + 2) % 8]
         animate background: tween(300ms, "ease")
-        // The open bar's own bar does what it's about: the event opens in the calendar, the alarm in the clock, the
-        // forecast in the browser.
-        ripple: openI >= 0
-        onTap: if openI >= 0 {
-          haptic()
-          if lastRow.e != null { calendar("open", lastRow.e) }
-          else if lastRow.id == "alarm" { androidApp(alarm.app) }
-          else if lastRow.id == "wx" { url("https://wttr.in/${enc(place ?? "")}") }
-          selId = null
-        }
         Row {
           fill: true
           gap: 8
@@ -551,12 +543,32 @@ face "the guide when" {
           Box { size: rh; radius: rh / 2; background: mix(barColors[(lastI + 2) % 8], ink, 0.3) }
         }
       }
+      // While a bar is open, its own bar is a key: a target laid over it then only, so the bar, parked off the side
+      // while closed, never takes a tap meant for the page beside.
+      if openI >= 0 {
+        Box {
+          width: connEnd - shortW - 14
+          height: rh
+          radius: rh / 2
+          offset: [shortW + 14, -(nRows - 1 - lastI) * p]
+          // The open bar's own bar does what it's about: the event opens in the calendar, the alarm in the clock, the
+          // forecast in the browser.
+          ripple: openI >= 0
+          onTap: if openI >= 0 {
+            haptic()
+            if lastRow.e != null { calendar("open", lastRow.e) }
+            else if lastRow.id == "alarm" { androidApp(alarm.app) }
+            else if lastRow.id == "wx" { url("https://wttr.in/${enc(place ?? "")}") }
+            selId = null
+          }
+        }
+      }
       for j in range(6) {
         Box {
           width: subW
           height: bh
           radius: bh / 2
-          offset: openI >= 0 && j < len(lastItems) ? [connEnd - subW, -((nRows - 1 - lastI) * p + rh + 4 + j * pe)] : [W + 40, -(nRows - 1 - lastI) * p]
+          offset: openI >= 0 && j < len(lastItems) ? [connEnd - subW, -((nRows - 1 - lastI) * p + rh + 4 + j * pe)] : [connEnd - subW, -(nRows - 1 - lastI) * p]
           animate offset: spring(0.72, 520 - j * 60)
           opacity: openI >= 0 && j < len(lastItems) ? 1 : 0
           animate opacity: tween(260ms, "ease")
@@ -584,24 +596,49 @@ face "the guide when" {
         }
       }
       for r, i in rows key r.id {
+        // The bar's rounded start, at the screen's edge where the page beside sees it; it stays put as the bar folds.
         Box {
-          width: r.w + 18
+          width: rh
           height: rh
           radius: rh / 2
-          offset: [-18 + (openI >= 0 ? shortW - r.w : 0) + (i == openI ? 14 : 0) + 3 * sin(beat * 1.3 + i * 2.1), -(nRows - 1 - i) * p]
-          animate offset: tween(650ms, "ease")
           background: r.c
-          onTap: { haptic(); if r.go == "calreq" { calendar("request") } else if r.go == "calopen" { calendar("open") } else if openI == i { selId = null } else { selId = r.id; lastId = r.id } }
-          Row {
-            fill: true
-            gap: 8
-            align: center
-            padding: [30, 0, 0, 0]
-            if openI < 0 && (r.n ?? "") != "" {
-              Text { text: r.n; font: cabin; fontSize: 13; fontWeight: 700; letterSpacing: 0.5; color: cream; maxLines: 1 }
+          offset: [-18 + 3 * sin(beat * 1.3 + i * 2.1), -(nRows - 1 - i) * p]
+          animate offset: tween(650ms, "ease")
+        }
+        // The rest of the bar, through a window that starts at the middle of that rounded start. Folding into a tab,
+        // the bar slides left under the window's edge, so on this page it shrinks, and the page beside never sees more
+        // of it than the rounded start.
+        Box {
+          width: W + 18
+          height: rh
+          clip: true
+          offset: [-18 + rh / 2 + 3 * sin(beat * 1.3 + i * 2.1), -(nRows - 1 - i) * p]
+          animate offset: tween(650ms, "ease")
+          Box {
+            width: r.w + 18
+            height: rh
+            radius: rh / 2
+            offset: [-rh / 2 + (openI >= 0 ? shortW - r.w : 0) + (i == openI ? 14 : 0), 0]
+            animate offset: tween(650ms, "ease")
+            background: r.c
+            onTap: { haptic(); if r.go == "calreq" { calendar("request") } else if r.go == "calopen" { calendar("open") } else if openI == i { selId = null } else { selId = r.id; lastId = r.id } }
+            Row {
+              fill: true
+              gap: 8
+              align: center
+              padding: [30, 0, 0, 0]
+              if openI < 0 && (r.n ?? "") != "" {
+                Text { text: r.n; font: cabin; fontSize: 13; fontWeight: 700; letterSpacing: 0.5; color: cream; maxLines: 1 }
+              }
+              // Folded, the tab's label fits the tab, ending in … if it must.
+              if openI >= 0 {
+                Spacer { weight: 1 }
+                Text { text: r.s; font: cabin; fontSize: 15; fontWeight: i == openI ? 700 : 500; letterSpacing: 1; color: i == openI ? cream : label; maxLines: 1; align: end; width: shortW - rh - 26 }
+              } else {
+                Text { text: r.t; font: cabin; fontSize: 15; fontWeight: 500; letterSpacing: 1; color: label; maxLines: 1; align: end; weight: 1 }
+              }
+              Box { size: rh; radius: rh / 2; background: mix(r.c, ink, 0.3); scale: i == openI && tick % 2 == 0 ? 0.78 : 1; animate scale: tween(900ms, "ease") }
             }
-            Text { text: openI >= 0 ? r.s : r.t; font: cabin; fontSize: 15; fontWeight: i == openI ? 700 : 500; letterSpacing: 1; color: i == openI ? cream : label; maxLines: 1; align: end; weight: 1 }
-            Box { size: rh; radius: rh / 2; background: mix(r.c, ink, 0.3); scale: i == openI && tick % 2 == 0 ? 0.78 : 1; animate scale: tween(900ms, "ease") }
           }
         }
       }

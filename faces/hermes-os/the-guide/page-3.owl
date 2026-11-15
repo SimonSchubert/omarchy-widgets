@@ -24,6 +24,9 @@ face "the guide who" {
     printf ']\n'
   """) every 10s json optional
 
+  // The Claude plan, from Claude Code's login: its type and rate-limit tier only (max, default_claude_max_20x).
+  source plan = cmd("""jq -c '.claudeAiOauth | {type: .subscriptionType, tier: .rateLimitTier}' ~/.claude/.credentials.json""") every 30m json optional
+
   // Claude Code's limits, as /usage shows them, with the login Claude Code keeps; the last good answer is kept.
   source cl = cmd("""
     c=~/.cache/guide-claude-usage.json
@@ -297,6 +300,12 @@ face "the guide who" {
   let busy = len(sess.filter(s => s.status != "idle"))
   let lims = cl.limits ?? []
   let five = lims.find(l => l.kind == "session")
+  // Whether this plan has a 5-hour limit at all: the usage reply has one only for plans that do.
+  let hasFive = five != null || cl.five_hour != null
+  let fivePct = five.percent ?? cl.five_hour.utilization
+  let fiveAt = five.resets_at ?? cl.five_hour.resets_at
+  // The plan's name as the Claude app shows it: Pro, Max, Ultra (what was Max 20×), Team, Enterprise.
+  let planName = plan.type == null ? null : contains(plan.tier ?? "", "20x") ? "ULTRA" : upper(plan.type)
   let week = lims.find(l => l.kind == "weekly_all")
   // A weekly limit of one model's own, like Fable's, when the plan has one.
   let scoped = lims.find(l => l.kind == "weekly_scoped")
@@ -308,7 +317,7 @@ face "the guide who" {
   let gptWk = rl.secondary_window
   let gpt5Reset = gpt5.reset_at ?? (gpt5.reset_after_seconds == null ? null : now + gpt5.reset_after_seconds)
   // Minutes until the short limits reset.
-  let fiveIn = max(0, floor((num(parseTime(five.resets_at ?? ""), now) - now) / 60))
+  let fiveIn = max(0, floor((num(parseTime(fiveAt ?? ""), now) - now) / 60))
   let gpt5In = max(0, floor((num(gpt5Reset, now) - now) / 60))
   let gptWkReset = gptWk.reset_at ?? (gptWk.reset_after_seconds == null ? null : now + gptWk.reset_after_seconds)
   // Each limit's name from its length, as plans differ: 5 hours and a week on paid plans, 30 days on free.
@@ -474,10 +483,11 @@ face "the guide who" {
       Box {
         fill: width
         onTap: { haptic(); androidApp("com.anthropic.claude") }
-        Caption { t: "CLAUDE CODE"; note: !linux ? "" : len(sess) == 0 ? "NO SESSIONS RUNNING" : "${len(sess)} RUNNING · ${busy} BUSY"; padding: [22 + screenLeft, 0, 22 + screenRight, 0] }
+        Caption { t: "CLAUDE CODE" + (planName == null ? "" : " · " + planName); note: !linux ? "" : len(sess) == 0 ? "NO SESSIONS RUNNING" : "${len(sess)} RUNNING · ${busy} BUSY"; padding: [22 + screenLeft, 0, 22 + screenRight, 0] }
       }
-      // No 5-hour window is open until the first message after the last one closed.
-      Meter { name: "5 HOURS"; pct: five == null && cl.limits != null ? 0 : five.percent; note: five == null ? (clErr == "" ? "NOT STARTED" : clErr) : five.resets_at == null ? "" : "RESETS IN " + (fiveIn >= 60 ? "${floor(fiveIn / 60)}H ${fiveIn % 60}M" : "${fiveIn}M"); tint: violet }
+      if hasFive {
+        Meter { name: "5 HOURS"; pct: fivePct; note: fiveAt == null ? "" : "RESETS IN " + (fiveIn >= 60 ? "${floor(fiveIn / 60)}H ${fiveIn % 60}M" : "${fiveIn}M"); tint: violet }
+      }
       Meter { name: "WEEK"; pct: week.percent; note: week == null ? clErr : week.resets_at == null ? "" : "RESETS " + upper(fmtTime(parseTime(week.resets_at), "EEE HH:mm")); tint: plum }
       if scoped != null {
         Meter { name: "WEEK · ${scopedName}"; pct: scoped.percent; note: scoped.resets_at == null ? "" : "RESETS " + upper(fmtTime(parseTime(scoped.resets_at), "EEE HH:mm")); tint: amber }
@@ -572,17 +582,6 @@ face "the guide who" {
         animate opacity: tween(240ms, "ease")
         background: menuColors[(lastI + 2) % 7]
         animate background: tween(300ms, "ease")
-        // The open session's own bar resumes it, or opens a shell in a running one's folder.
-        ripple: openI >= 0 && lastRow.ses != null
-        onTap: if openI >= 0 && lastRow.ses != null {
-          haptic()
-          let ses = lastRow.ses
-          let dir = (ses.cwd ?? "") == "" ? "." : ses.cwd
-          if ses.kind == "codex" { terminal("cd ${sh(dir)} && codex resume ${sh(ses.id)}", "codex") }
-          else if ses.run { terminal("cd ${sh(dir)} && exec bash -l", "shell") }
-          else { terminal("cd ${sh(dir)} && claude --resume ${sh(ses.id)}", "claude") }
-          selId = null
-        }
         Row {
           fill: true
           gap: 8
@@ -592,12 +591,33 @@ face "the guide who" {
           Box { size: rh; radius: rh / 2; background: mix(menuColors[(lastI + 2) % 7], ink, 0.3) }
         }
       }
+      // While a bar is open, its own bar is a key: a target laid over it then only, so the bar, parked off the side
+      // while closed, never takes a tap meant for the page beside.
+      if openI >= 0 {
+        Box {
+          width: connEnd - shortW - 14
+          height: rh
+          radius: rh / 2
+          offset: [shortW + 14, -(nRows - 1 - lastI) * p]
+          // The open session's own bar resumes it, or opens a shell in a running one's folder.
+          ripple: openI >= 0 && lastRow.ses != null
+          onTap: if openI >= 0 && lastRow.ses != null {
+            haptic()
+            let ses = lastRow.ses
+            let dir = (ses.cwd ?? "") == "" ? "." : ses.cwd
+            if ses.kind == "codex" { terminal("cd ${sh(dir)} && codex resume ${sh(ses.id)}", "codex") }
+            else if ses.run { terminal("cd ${sh(dir)} && exec bash -l", "shell") }
+            else { terminal("cd ${sh(dir)} && claude --resume ${sh(ses.id)}", "claude") }
+            selId = null
+          }
+        }
+      }
       for j in range(6) {
         Box {
           width: subW
           height: bh
           radius: bh / 2
-          offset: openI >= 0 && j < len(lastItems) ? [connEnd - subW, -((nRows - 1 - lastI) * p + rh + 4 + j * pe)] : [W + 40, -(nRows - 1 - lastI) * p]
+          offset: openI >= 0 && j < len(lastItems) ? [connEnd - subW, -((nRows - 1 - lastI) * p + rh + 4 + j * pe)] : [connEnd - subW, -(nRows - 1 - lastI) * p]
           animate offset: spring(0.72, 520 - j * 60)
           opacity: openI >= 0 && j < len(lastItems) ? 1 : 0
           animate opacity: tween(260ms, "ease")
@@ -630,24 +650,49 @@ face "the guide who" {
         }
       }
       for r, i in rows key r.id {
+        // The bar's rounded start, at the screen's edge where the page beside sees it; it stays put as the bar folds.
         Box {
-          width: r.w + 18
+          width: rh
           height: rh
           radius: rh / 2
-          offset: [-18 + (openI >= 0 ? shortW - r.w : 0) + (i == openI ? 14 : 0) + 3 * sin(beat * 1.3 + i * 2.1), -(nRows - 1 - i) * p]
-          animate offset: tween(650ms, "ease")
           background: r.c
-          onTap: { haptic(); if openI == i { selId = null } else { selId = r.id; lastId = r.id } }
-          Row {
-            fill: true
-            gap: 8
-            align: center
-            padding: [30, 0, 0, 0]
-            if openI < 0 && (r.n ?? "") != "" {
-              Text { text: r.n; font: cabin; fontSize: 13; fontWeight: 700; letterSpacing: 0.5; color: cream; maxLines: 1 }
+          offset: [-18 + 3 * sin(beat * 1.3 + i * 2.1), -(nRows - 1 - i) * p]
+          animate offset: tween(650ms, "ease")
+        }
+        // The rest of the bar, through a window that starts at the middle of that rounded start. Folding into a tab,
+        // the bar slides left under the window's edge, so on this page it shrinks, and the page beside never sees more
+        // of it than the rounded start.
+        Box {
+          width: W + 18
+          height: rh
+          clip: true
+          offset: [-18 + rh / 2 + 3 * sin(beat * 1.3 + i * 2.1), -(nRows - 1 - i) * p]
+          animate offset: tween(650ms, "ease")
+          Box {
+            width: r.w + 18
+            height: rh
+            radius: rh / 2
+            offset: [-rh / 2 + (openI >= 0 ? shortW - r.w : 0) + (i == openI ? 14 : 0), 0]
+            animate offset: tween(650ms, "ease")
+            background: r.c
+            onTap: { haptic(); if openI == i { selId = null } else { selId = r.id; lastId = r.id } }
+            Row {
+              fill: true
+              gap: 8
+              align: center
+              padding: [30, 0, 0, 0]
+              if openI < 0 && (r.n ?? "") != "" {
+                Text { text: r.n; font: cabin; fontSize: 13; fontWeight: 700; letterSpacing: 0.5; color: cream; maxLines: 1 }
+              }
+              // Folded, the tab's label fits the tab, ending in … if it must.
+              if openI >= 0 {
+                Spacer { weight: 1 }
+                Text { text: r.s; font: cabin; fontSize: 15; fontWeight: i == openI ? 700 : 500; letterSpacing: 1; color: i == openI ? cream : label; maxLines: 1; align: end; width: shortW - rh - 26 }
+              } else {
+                Text { text: r.t; font: cabin; fontSize: 15; fontWeight: 500; letterSpacing: 1; color: label; maxLines: 1; align: end; weight: 1 }
+              }
+              Box { size: rh; radius: rh / 2; background: mix(r.c, ink, 0.3); scale: i == openI && tick % 2 == 0 ? 0.78 : 1; animate scale: tween(900ms, "ease") }
             }
-            Text { text: openI >= 0 ? r.s : r.t; font: cabin; fontSize: 15; fontWeight: i == openI ? 700 : 500; letterSpacing: 1; color: i == openI ? cream : label; maxLines: 1; align: end; weight: 1 }
-            Box { size: rh; radius: rh / 2; background: mix(r.c, ink, 0.3); scale: i == openI && tick % 2 == 0 ? 0.78 : 1; animate scale: tween(900ms, "ease") }
           }
         }
       }
