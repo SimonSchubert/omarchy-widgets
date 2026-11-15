@@ -594,8 +594,6 @@ face "Omagara" {
     let swipeDistance = abs(noticeDragX)
     // Both branches share the same resistant baseline. No zero reset at haptic.
     let magneticX = sign(noticeDragX) * min(noticeWidth, min(swipeDistance, dismissThreshold) * (stacked ? 0.54 : 0.32) + max(0, swipeDistance - dismissThreshold) * (stacked ? 1.65 : 1.30) + (swipeDistance >= dismissThreshold ? 12 : 0))
-    let swipeArmed = draggingHere && swipeDistance >= dismissThreshold
-    let stackArmed = stacked && swipeArmed
     Column {
       fill: width
       gap: 4
@@ -726,7 +724,7 @@ face "Omagara" {
       }
       if summary && len(get(noticeGroups, stack, [])) > 1 {
         Text {
-          text: stackArmed ? "Release to dismiss ${len(groupClearables)} notifications" : draggingHere ? "Swipe farther to dismiss ${len(groupClearables)} notifications" : "${len(groupItems)} notifications"
+          text: "${len(groupItems)} notifications"
           font: chosenFont
           fontSize: 13
           color: accent
@@ -1076,27 +1074,29 @@ face "Omagara" {
           if cfg.shadeAlphabet && len(alphabet) > 0 {
             Canvas {
               width: railMaxReach + 44
-              height: railPaintHeight
-              offset: [alphabetSide == 1 ? -railMaxReach : 0, 0]
+              height: railPaintHeight + 24
+              offset: [alphabetSide == 1 ? -railMaxReach : 0, -12]
               // Use the same wave as the glyphs, sampled at every letter center.
               // In idle/drag states, retain the original four-point contour.
               let wormSamples = map(range((len(alphabet) + 1) * contourSteps + 1), j => {
                 x: (alphabetSide == 1 ? railMaxReach + 22 : 22) - alphabetSide * railCurvePull *
                   (railCurveStrength > 0 ? (1 + cos(rad(min(abs(j / contourSteps - 0.5 - fingerPosition) / max(10, min(14, len(alphabet) * 0.58)), 1) * 180))) / 2 * railCurveStrength : 0) - alphabetSide * (wiggleActive ? wiggleOffsets[j] : 0),
-                // Match the glyph cells exactly during idle, stretch, and rebound.
-                y: j * railStep / contourSteps
+                // Keep the original glyph-coordinate geometry; Canvas adds cap clearance.
+                y: 12 + j * railStep / contourSteps
               })
-              // A single contour avoids double-darkened shading. Arc samples
-              // round the caps smoothly, without moving the letter centers.
-              let wormCap = min(12, railStep * 0.45)
-              let wormBody = wormSamples.filter(p => p.y > wormCap && p.y < railPaintHeight - wormCap)
-              let wormTopX = first(wormBody).x
-              let wormBottomX = last(wormBody).x
-              let wormLeft = [[wormTopX - 12, wormCap]] + map(wormBody, p => [p.x - 12, p.y]) + [[wormBottomX - 12, railPaintHeight - wormCap]]
-              let wormBottomArc = map(range(12), i => [wormBottomX - 12 * cos(rad((i + 1) * 15)), railPaintHeight - wormCap + wormCap * sin(rad((i + 1) * 15))])
-              let wormRight = reverse(map(wormBody, p => [p.x + 12, p.y])) + [[wormTopX + 12, wormCap]]
-              let wormTopArc = map(range(12), i => [wormTopX + 12 * cos(rad((i + 1) * 15)), wormCap - wormCap * sin(rad((i + 1) * 15))])
-              path(cfg.roundAlphabet ? wormLeft + wormBottomArc + wormRight + wormTopArc : map(wormSamples, p => [p.x - 12, p.y]) + reverse(map(wormSamples, p => [p.x + 12, p.y])), closed: true, fill: legibilityShade)
+              // Round each end as a real half-circle, sheared to follow the
+              // ribbon's local tangent when the thumb bends the alphabet.
+              // One translucent filled path prevents overlapping dark seams.
+              let wormTop = first(wormSamples)
+              let wormBottom = last(wormSamples)
+              let wormTopSlope = clamp((get(wormSamples, 1, wormTop).x - wormTop.x) / max(1, railStep / contourSteps), -1.25, 1.25)
+              let wormBottomSlope = clamp((wormBottom.x - get(wormSamples, len(wormSamples) - 2, wormBottom).x) / max(1, railStep / contourSteps), -1.25, 1.25)
+              let wormLeft = map(wormSamples, p => [p.x - 12, p.y])
+              let wormRight = reverse(map(wormSamples, p => [p.x + 12, p.y]))
+              let capAngles = map(range(15), i => rad((i + 1) * 11.25))
+              let wormBottomArc = map(capAngles, a => [wormBottom.x - 12 * cos(a) + 12 * wormBottomSlope * sin(a), wormBottom.y + 12 * sin(a)])
+              let wormTopArc = map(capAngles, a => [wormTop.x + 12 * cos(a) - 12 * wormTopSlope * sin(a), wormTop.y - 12 * sin(a)])
+              path(cfg.roundAlphabet ? wormLeft + wormBottomArc + wormRight + wormTopArc : wormLeft + wormRight, closed: true, fill: legibilityShade)
             }
           }
           Column {
@@ -1256,7 +1256,7 @@ face "Omagara" {
             fontSize: 20 * rowScale
             color: primaryText
             maxLines: 1
-            padding: cfg.shadeAppLabels && thumbView ? [2 * rowScale, 10 * rowScale] : [0, 0]
+            padding: cfg.shadeAppLabels && thumbView ? [14 * rowScale, 6 * rowScale] : [0, 0]
             background: cfg.shadeAppLabels && thumbView ? appLabelShade : transparent
             radius: cfg.shadeAppLabels && cfg.roundAppLabels && thumbView ? 6 * rowScale : 0
           }
@@ -1270,7 +1270,7 @@ face "Omagara" {
               fontSize: 11 * rowScale
               color: secondaryText
               maxLines: 1
-              padding: cfg.shadeAppLabels && thumbView ? [1 * rowScale, 10 * rowScale] : [0, 0]
+              padding: cfg.shadeAppLabels && thumbView ? [12 * rowScale, 5 * rowScale] : [0, 0]
               background: cfg.shadeAppLabels && thumbView ? appLabelShade : transparent
               radius: cfg.shadeAppLabels && cfg.roundAppLabels && thumbView ? 4 * rowScale : 0
             }
@@ -1466,7 +1466,7 @@ face "Omagara" {
                     fontSize: 22 * appScale
                     color: secondaryText
                     maxLines: 1
-                    padding: cfg.shadeAppLabels ? [8 * appScale, 7 * appScale] : [0, 0]
+                    padding: cfg.shadeAppLabels ? [12 * appScale, 7 * appScale] : [0, 0]
                     background: cfg.shadeAppLabels ? appLabelShade : transparent
                     radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 4 * appScale : 0
                   }
@@ -1522,7 +1522,7 @@ face "Omagara" {
                       fontSize: 17 * appScale
                       color: primaryText
                       maxLines: 2
-                      padding: cfg.shadeAppLabels ? [2 * appScale, 10 * appScale] : [0, 0]
+                      padding: cfg.shadeAppLabels ? [14 * appScale, 6 * appScale] : [0, 0]
                       background: cfg.shadeAppLabels ? appLabelShade : transparent
                       radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 6 * appScale : 0
                     }
@@ -1865,7 +1865,7 @@ face "Omagara" {
               Flow {
                 fill: width
                 gap: 8
-                for edge in ["Right", "Left"] {
+                for edge in ["Left", "Right"] {
                   Button { text: (cfg.alphabetSide == edge ? "✓ " : "") + edge; onTap: prefs = set(prefs, "alphabetSide", edge) }
                 }
               }
