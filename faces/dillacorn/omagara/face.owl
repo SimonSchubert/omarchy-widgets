@@ -887,11 +887,13 @@ face "Omagara" {
           for noticeRow in noticeRows key noticeRow.id {
             NotificationRow { item: noticeRow.item; stack: noticeRow.stack; summary: noticeRow.summary }
           }
-          // Scrollable footer makes the last notification readable ABOVE Search.
-          // The shadow only appears when the footer itself is pulled upward.
+          // Keep the existing scroll extent, but let downward/upward drags
+          // starting in the empty area reach the lazy notification list.
+          // A narrow terminal strip retains the end-of-list rebound effect.
+          Spacer { width: noticeWidth; height: max(0, noticeTailSpace - 12) }
           Box {
             width: noticeWidth
-            height: noticeTailSpace
+            height: min(12, noticeTailSpace)
             drag: vertical
             onPress: {
               // Preserve any in-progress rebound when the footer is grabbed.
