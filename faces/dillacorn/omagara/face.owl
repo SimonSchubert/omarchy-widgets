@@ -121,7 +121,7 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, roundAppLabels: false, centerNotificationsWithoutAlphabet: true, alphabetSide: "Right"}
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, showSwipeCue: true, roundAppLabels: false, centerNotificationsWithoutAlphabet: true, alphabetSide: "Right"}
   let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
   let hapticChoices = ["Off", "Reduced", "Every letter"]
   let timeFormatChoices = ["12-hour", "24-hour"]
@@ -175,6 +175,7 @@ face "Omagara" {
     {key: "shadeAlphabet", name: "Alphabet shade"},
     {key: "shadeNoticeLabels", name: "Notification heading shade"},
     {key: "shadeAppLabels", name: "App label shade"},
+    {key: "showSwipeCue", name: "Show swipe gesture indicator"},
     {section: "Corner rounding", key: "roundTime", name: "Clock"},
     {key: "roundDate", name: "Date"},
     {key: "roundEvent", name: "Event"},
@@ -1695,7 +1696,7 @@ face "Omagara" {
     // Passive six-dot vertical grip embedded in the horizontal handle.
     // It suggests either swipe direction without an arrow or a new touch target;
     // Omalauncher's native home gestures still own the cleared area.
-    if activeSide == 0 {
+    if cfg.showSwipeCue && !browsing && activeSide == 0 {
       Box {
         fill: true
         align: bottomEnd
@@ -1962,7 +1963,7 @@ face "Omagara" {
                 }
               }
               Text { text: "Shading & motion"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
-              for pref in preferenceRows.filter(p => contains(["reduceMotion", "shadeHeader", "shadeAlphabet", "shadeNoticeLabels", "shadeAppLabels"], p.key)) {
+              for pref in preferenceRows.filter(p => contains(["reduceMotion", "shadeHeader", "shadeAlphabet", "shadeNoticeLabels", "shadeAppLabels", "showSwipeCue"], p.key)) {
                 SettingToggle { pref: pref }
               }
               Text { text: "Shade color"; font: chosenFont; color: accent; fontSize: 16; padding: [0, 12, 0, 2] }
