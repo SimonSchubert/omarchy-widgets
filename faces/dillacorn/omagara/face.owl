@@ -298,8 +298,9 @@ face "Omagara" {
   let headerBottom = screenTop + 12 + headerPadTop + headerShapeHeight + 30
   let noticeTop = max(headerBottom, screenTop + availableHeight * 0.24)
   let controlRight = screenRight + 60
-  // Center at 89% of inset-safe height, with at least 24dp below the button.
-  let searchBottom = screenInset + max(24, availableHeight * 0.11 - 24)
+  // Raise Search and Close about 8dp to free a little more room below.
+  // The launcher's native home-swipe handler owns the pull-down gesture.
+  let searchBottom = screenInset + max(36, availableHeight * 0.11 - 16)
   // Notifications can scroll behind the Search button down to the safe bottom.
   // OWL 21 has no child-alpha masking API for a wallpaper-preserving edge fade.
   let noticeBottom = max(noticeTop, (tileHeight ?? 800) - screenInset - 10)
@@ -1687,6 +1688,20 @@ face "Omagara" {
           size: 24
           circle(10, 10, 6, stroke: primaryText, width: 2)
           line(14.5, 14.5, 21, 21, stroke: primaryText, width: 2, cap: round)
+        }
+      }
+    }
+    // A passive, centered grab-handle line indicates the native swipe-down area.
+    // No touch handlers: this must not intercept Omalauncher's home gestures.
+    if activeSide == 0 {
+      Box {
+        fill: true
+        align: bottomEnd
+        padding: [0, 0, controlRight, searchBottom - 26]
+        Canvas {
+          width: 48
+          height: 10
+          line(13, 5, 35, 5, stroke: alpha(primaryText, 0.62), width: 2.2, cap: round)
         }
       }
     }
