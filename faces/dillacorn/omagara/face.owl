@@ -352,9 +352,9 @@ face "Omagara" {
   let appMenuBottom = appMenuTop + 2 * appRowHeight
   // At the end of the list, align the last Settings action beside the
   // alphabet cog. Keep a small bottom inset rather than the old oversized
-  // padding. Close and Search stay on the right, clear of the menu text.
+  // padding. Close and Search follow the alphabet side and stay clear of icons.
   let appMenuTail = max(28, appSafeBottom - (railTop + railHeight + railStep / 2) - appRowHeight / 2)
-  let appMenuTextWidth = max(32, min(appPanelWidth - 52 * appScale, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 46 * appScale))
+  let appMenuTextWidth = alphabetSide == -1 ? max(32, min(appPanelWidth - 52 * appScale, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 46 * appScale)) : max(32, (tileWidth ?? 400) - screenLeft - controlRight - 110 - 46 * appScale)
   let appDocumentHeight = appMenuBottom + appMenuTail
   let appMaxScroll = max(0, appDocumentHeight - appPanelHeight)
   // Read time ONLY while gliding. An every-frame trigger would keep OWL's
