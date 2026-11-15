@@ -599,7 +599,7 @@ face "Omagara" {
       fill: width
       gap: 4
       padding: [14, 8]
-      radius: cfg.roundNotifications ? 14 : 0
+      radius: cfg.roundNotifications ? 999 : 0
       border: cfg.bubbleBorder ? 1 : 0
       borderColor: border
       background: noticeCardShade
@@ -852,7 +852,7 @@ face "Omagara" {
             color: primaryText
             padding: [7, 9]
             background: cfg.shadeNoticeLabels ? noticeHeadingShade : transparent
-            radius: cfg.roundNoticeHeading ? 7 : 0
+            radius: cfg.roundNoticeHeading ? 16 : 0
           }
           Spacer { weight: 1 }
           if clearableNotices > 0 {
@@ -863,7 +863,7 @@ face "Omagara" {
               color: primaryText
               padding: [7, 9]
               background: cfg.shadeNoticeLabels ? noticeHeadingShade : transparent
-              radius: cfg.roundClearAll ? 7 : 0
+              radius: cfg.roundClearAll ? 16 : 0
               onTap: notification("clear")
             }
           }
@@ -1257,9 +1257,9 @@ face "Omagara" {
             fontSize: 20 * rowScale
             color: primaryText
             maxLines: 1
-            padding: cfg.shadeAppLabels && thumbView ? [14 * rowScale, 6 * rowScale] : [0, 0]
+            padding: cfg.shadeAppLabels && thumbView ? [16 * rowScale, 6 * rowScale] : [0, 0]
             background: cfg.shadeAppLabels && thumbView ? appLabelShade : transparent
-            radius: cfg.shadeAppLabels && cfg.roundAppLabels && thumbView ? 6 * rowScale : 0
+            radius: cfg.shadeAppLabels && cfg.roundAppLabels && thumbView ? 16 * rowScale : 0
           }
         }
         if a.profile != null {
@@ -1271,9 +1271,9 @@ face "Omagara" {
               fontSize: 11 * rowScale
               color: secondaryText
               maxLines: 1
-              padding: cfg.shadeAppLabels && thumbView ? [12 * rowScale, 5 * rowScale] : [0, 0]
+              padding: cfg.shadeAppLabels && thumbView ? [14 * rowScale, 5 * rowScale] : [0, 0]
               background: cfg.shadeAppLabels && thumbView ? appLabelShade : transparent
-              radius: cfg.shadeAppLabels && cfg.roundAppLabels && thumbView ? 4 * rowScale : 0
+              radius: cfg.shadeAppLabels && cfg.roundAppLabels && thumbView ? 11 * rowScale : 0
             }
           }
         }
@@ -1306,7 +1306,7 @@ face "Omagara" {
       padding: [screenLeft + 24, screenTop + 12, screenRight + 24, 0]
       visible: !browsing
       // One uniform-width rectangle behind the time, date and event.
-      // Preserve optional rounding only at the outer corners.
+      // Enabled ends receive a full half-height pill radius.
       Box {
         fill: width
         height: headerPadTop + headerShapeHeight
@@ -1318,10 +1318,11 @@ face "Omagara" {
             offset: [0, headerPadTop]
             let topRounded = cfg.clock ? cfg.roundTime : cfg.date ? cfg.roundDate : cfg.roundEvent
             let bottomRounded = cfg.event && todayEvent != null ? cfg.roundEvent : cfg.date ? cfg.roundDate : cfg.roundTime
-            let topR = topRounded ? 8 : 0
-            let bottomR = bottomRounded ? 8 : 0
-            // Single width for every row; keep the existing outer-corner options.
+            // A half-height radius forms the full capsule at either enabled end.
             let shadeWidth = min(headerShapeMax, 16 + max(cfg.clock ? headerClockWidth : 0, max(cfg.date ? headerDateWidth : 0, cfg.event && todayEvent != null ? headerEventWidth : 0)))
+            let pillR = min(shadeWidth / 2, headerShapeHeight / 2)
+            let topR = topRounded ? pillR : 0
+            let bottomR = bottomRounded ? pillR : 0
             let slices = map(range(ceil(headerShapeHeight / 2) + 1), i => min(headerShapeHeight, i * 2))
             let shapeEdge = map(slices, y => {
               y: y,
@@ -1467,9 +1468,9 @@ face "Omagara" {
                     fontSize: 22 * appScale
                     color: secondaryText
                     maxLines: 1
-                    padding: cfg.shadeAppLabels ? [12 * appScale, 7 * appScale] : [0, 0]
+                    padding: cfg.shadeAppLabels ? [12 * appScale, 4 * appScale] : [0, 0]
                     background: cfg.shadeAppLabels ? appLabelShade : transparent
-                    radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 4 * appScale : 0
+                    radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 15 * appScale : 0
                   }
                 }
               } else if row.kind == "menuAction" {
@@ -1525,7 +1526,7 @@ face "Omagara" {
                       maxLines: 2
                       padding: cfg.shadeAppLabels ? [14 * appScale, 6 * appScale] : [0, 0]
                       background: cfg.shadeAppLabels ? appLabelShade : transparent
-                      radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 6 * appScale : 0
+                      radius: cfg.shadeAppLabels && cfg.roundAppLabels ? 15 * appScale : 0
                     }
                   }
                 }
@@ -2078,7 +2079,7 @@ face "Omagara" {
                 Column {
                   fill: width
                   padding: [12, 16]
-                  radius: cfg.roundCalendar ? 12 : 0
+                  radius: cfg.roundCalendar ? 999 : 0
                   border: cfg.bubbleBorder ? 1 : 0
                   borderColor: border
                   background: surface
