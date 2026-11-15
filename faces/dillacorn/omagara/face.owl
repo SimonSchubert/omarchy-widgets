@@ -1923,6 +1923,12 @@ face "Omagara" {
               for shadeControl in shadeOpacityControls {
                 Text { text: shadeControl.name + ": " + str(get(cfg, shadeControl.key)) + "%"; font: chosenFont; color: secondaryText; fontSize: 14 }
                 Slider { value: get(cfg, shadeControl.key); min: 0; max: 100; step: 1; live: true; onChange: prefs = set(prefs, shadeControl.key, clamp(round(value), 0, 100)) }
+                if get(cfg, shadeControl.key) != get(defaults, shadeControl.key) {
+                  Button {
+                    text: "Reset to default (" + str(get(defaults, shadeControl.key)) + "%)"
+                    onTap: prefs = set(prefs, shadeControl.key, get(defaults, shadeControl.key))
+                  }
+                }
               }
               Row {
                 fill: width
