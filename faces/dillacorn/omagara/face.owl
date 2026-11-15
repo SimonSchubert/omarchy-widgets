@@ -301,9 +301,10 @@ face "Omagara" {
   // Raise Search and Close about 8dp to free a little more room below.
   // The launcher's native home-swipe handler owns the pull-down gesture.
   let searchBottom = screenInset + max(36, availableHeight * 0.11 - 16)
-  // Notifications can scroll behind the Search button down to the safe bottom.
-  // OWL 21 has no child-alpha masking API for a wallpaper-preserving edge fade.
-  let noticeBottom = max(noticeTop, (tileHeight ?? 800) - screenInset - 10)
+  // The notification list must not capture touches in the native home gesture
+  // area. Stop 12dp above Search, leaving the lower screen clear for up/down
+  // swipes even when notifications are present. Its scroll footer remains inside.
+  let noticeBottom = max(noticeTop, (tileHeight ?? 800) - searchBottom - 60)
   // One source of truth: 20dp outer left; 12dp clear of the 44dp right rail.
   let noticeWidth = max(0, availableWidth - 80)
   // Additional content after the last card: it can scroll above the Search
