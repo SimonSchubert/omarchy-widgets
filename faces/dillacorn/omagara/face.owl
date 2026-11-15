@@ -131,9 +131,12 @@ face "Omagara" {
   let textToneChoices = ["Theme", "Light", "Dark", "Custom"]
   let customTextPresets = [{name: "White", hex: "#FAFAFA"}, {name: "Warm", hex: "#FFEBD6"}, {name: "Blue", hex: "#CEE4FF"}, {name: "Amber", hex: "#FFDB96"}, {name: "Black", hex: "#101010"}]
   let shadeColorChoices = ["Theme", "Grey", "Black", "White", "Custom"]
+  let roundingKeys = ["roundTime", "roundDate", "roundEvent", "roundAlphabet", "roundNotifications", "roundNoticeHeading", "roundClearAll", "roundSearch", "roundClose", "roundLetterCue", "roundCalendar", "roundAppLabels"]
   let textContrastChoices = ["High", "Standard"]
   let shadeOpacityControls = [{key: "shadeHeaderOpacity", name: "Clock, date and event"}, {key: "shadeAlphabetOpacity", name: "Alphabet worm"}, {key: "shadeNoticeOpacity", name: "Notification headings"}, {key: "shadeCardOpacity", name: "Notification cards"}, {key: "shadeAppOpacity", name: "App labels"}, {key: "shadeButtonOpacity", name: "Search and close buttons"}]
   let cfg = merge(defaults, prefs, {alphabetSide: contains(["Left", "Right"], prefs.alphabetSide) ? prefs.alphabetSide : "Right", searchContacts: false, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter", timeFormat: contains(timeFormatChoices, prefs.timeFormat) ? prefs.timeFormat : "24-hour", shadeHeaderOpacity: contains(range(101), prefs.shadeHeaderOpacity) ? prefs.shadeHeaderOpacity : 29, shadeAlphabetOpacity: contains(range(101), prefs.shadeAlphabetOpacity) ? prefs.shadeAlphabetOpacity : 49, shadeNoticeOpacity: contains(range(101), prefs.shadeNoticeOpacity) ? prefs.shadeNoticeOpacity : 49, shadeCardOpacity: contains(range(101), prefs.shadeCardOpacity) ? prefs.shadeCardOpacity : 48, shadeAppOpacity: contains(range(101), prefs.shadeAppOpacity) ? prefs.shadeAppOpacity : 78, shadeButtonOpacity: contains(range(101), prefs.shadeButtonOpacity) ? prefs.shadeButtonOpacity : 85, bubbleBorder: prefs.bubbleBorder == true, iconStyle: contains(iconStyleChoices, prefs.iconStyle) ? prefs.iconStyle : "Theme overlay", iconOverlayOpacity: contains(iconOverlayChoices, prefs.iconOverlayOpacity) ? prefs.iconOverlayOpacity : 30, faceFont: contains(faceFontChoices, prefs.faceFont) ? prefs.faceFont : "Sans", textTone: contains(textToneChoices, prefs.textTone) ? prefs.textTone : "Theme", customTextHex: match(prefs.customTextHex ?? "", "^#[0-9A-Fa-f]{6}$") != null ? upper(prefs.customTextHex) : "#FAFAFA", shadeColorMode: contains(shadeColorChoices, prefs.shadeColorMode) ? prefs.shadeColorMode : "Theme", shadeCustomHex: match(prefs.shadeCustomHex ?? "", "^#[0-9A-Fa-f]{6}$") != null ? upper(prefs.shadeCustomHex) : "#555555", textContrast: "High"})
+  let allRounded = all(roundingKeys, k => get(cfg, k) == true)
+  let anyRounded = any(roundingKeys, k => get(cfg, k) == true)
   // OWL cannot sample wallpaper brightness; explicit overrides keep text legible.
   // The custom #RRGGBB setting is validated before rendering.
   let primaryText = cfg.textTone == "Custom" ? cfg.customTextHex : cfg.textTone == "Light" ? #FAFAFA : cfg.textTone == "Dark" ? #101010 : foreground
@@ -2009,7 +2012,19 @@ face "Omagara" {
                 Text { text: cfg.bubbleBorder ? "ON" : "OFF"; color: cfg.bubbleBorder ? accent : muted; font: chosenFont; fontSize: 14 }
               }
               Text { text: "Rounded corners"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
-              for pref in preferenceRows.filter(p => contains(["roundTime", "roundDate", "roundEvent", "roundAlphabet", "roundNotifications", "roundNoticeHeading", "roundClearAll", "roundSearch", "roundClose", "roundLetterCue", "roundCalendar", "roundAppLabels"], p.key)) {
+              // One tap rounds every surface, or squares every surface when all
+              // are currently on. Individual toggles still work independently.
+              Row {
+                fill: width
+                gap: 8
+                align: center
+                padding: [12, 14]
+                background: alpha(surface, 0.30)
+                onTap: prefs = reduce(roundingKeys, (m, k) => set(m, k, !allRounded), prefs)
+                Text { text: "All rounded corners"; font: chosenFont; fontSize: 15; weight: 1 }
+                Text { text: allRounded ? "ON" : anyRounded ? "CUSTOM" : "OFF"; font: chosenFont; fontSize: 14; color: allRounded ? accent : muted }
+              }
+              for pref in preferenceRows.filter(p => contains(roundingKeys, p.key)) {
                 SettingToggle { pref: pref }
               }
             } else {
