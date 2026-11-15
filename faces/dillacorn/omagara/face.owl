@@ -137,8 +137,8 @@ face "Omagara" {
   let legibilityShade = cfg.textTone == "Light" ? alpha(#111111, 0.49) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.49) : alpha(mix(background, surface, 0.50), 0.49)
   // Only the fitted, connected header backdrop uses this subtle scrim.
   let headerShade = cfg.textTone == "Light" ? alpha(#111111, 0.29) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.29) : alpha(mix(background, surface, 0.50), 0.29)
-  // Slightly stronger, compact scrim for app names and section headings.
-  let appLabelShade = cfg.textTone == "Light" ? alpha(#111111, 0.60) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.60) : alpha(mix(background, surface, 0.50), 0.60)
+  // Stronger compact scrim keeps app names readable over bright, detailed wallpapers.
+  let appLabelShade = cfg.textTone == "Light" ? alpha(#111111, 0.78) : cfg.textTone == "Dark" ? alpha(#FFFFFF, 0.78) : alpha(mix(background, surface, 0.50), 0.78)
   // Omalauncher OWL does not expose the Android 12/24-hour setting.
   // Keep the selected manual format consistent across all displayed times.
   let timePattern = cfg.timeFormat == "12-hour" ? "h:mm a" : "HH:mm"
@@ -1086,11 +1086,17 @@ face "Omagara" {
                 // Match the glyph cells exactly during idle, stretch, and rebound.
                 y: j * railStep / contourSteps
               })
-              // Round the single filled contour without compressing its Y-axis.
-              // Keep each glyph center inside the full-width portion of the rail.
+              // A single contour avoids double-darkened shading. Arc samples
+              // round the caps smoothly, without moving the letter centers.
               let wormCap = min(12, railStep * 0.45)
-              let wormHalf = map(wormSamples, p => !cfg.roundAlphabet ? 12 : p.y < wormCap ? 12 * sqrt(max(0, 1 - pow((p.y - wormCap) / wormCap, 2))) : p.y > railPaintHeight - wormCap ? 12 * sqrt(max(0, 1 - pow((p.y - railPaintHeight + wormCap) / wormCap, 2))) : 12)
-              path(map(wormSamples, (p, i) => [p.x - wormHalf[i], p.y]) + reverse(map(wormSamples, (p, i) => [p.x + wormHalf[i], p.y])), closed: true, fill: legibilityShade)
+              let wormBody = wormSamples.filter(p => p.y > wormCap && p.y < railPaintHeight - wormCap)
+              let wormTopX = first(wormBody).x
+              let wormBottomX = last(wormBody).x
+              let wormLeft = [[wormTopX - 12, wormCap]] + map(wormBody, p => [p.x - 12, p.y]) + [[wormBottomX - 12, railPaintHeight - wormCap]]
+              let wormBottomArc = map(range(12), i => [wormBottomX - 12 * cos(rad((i + 1) * 15)), railPaintHeight - wormCap + wormCap * sin(rad((i + 1) * 15))])
+              let wormRight = reverse(map(wormBody, p => [p.x + 12, p.y])) + [[wormTopX + 12, wormCap]]
+              let wormTopArc = map(range(12), i => [wormTopX + 12 * cos(rad((i + 1) * 15)), wormCap - wormCap * sin(rad((i + 1) * 15))])
+              path(cfg.roundAlphabet ? wormLeft + wormBottomArc + wormRight + wormTopArc : map(wormSamples, p => [p.x - 12, p.y]) + reverse(map(wormSamples, p => [p.x + 12, p.y])), closed: true, fill: legibilityShade)
             }
           }
           Column {
