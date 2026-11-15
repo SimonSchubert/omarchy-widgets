@@ -1692,8 +1692,9 @@ face "Omagara" {
         }
       }
     }
-    // A passive, centered grab-handle line indicates the native swipe-down area.
-    // No touch handlers: this must not intercept Omalauncher's home gestures.
+    // Passive six-dot vertical grip embedded in the horizontal handle.
+    // It suggests either swipe direction without an arrow or a new touch target;
+    // Omalauncher's native home gestures still own the cleared area.
     if activeSide == 0 {
       Box {
         fill: true
@@ -1701,8 +1702,13 @@ face "Omagara" {
         padding: [0, 0, controlRight, searchBottom - 26]
         Canvas {
           width: 48
-          height: 10
-          line(13, 5, 35, 5, stroke: alpha(primaryText, 0.62), width: 2.2, cap: round)
+          height: 18
+          line(5, 9, 16, 9, stroke: alpha(primaryText, 0.55), width: 1.8, cap: round)
+          line(32, 9, 43, 9, stroke: alpha(primaryText, 0.55), width: 1.8, cap: round)
+          for y in [4, 9, 14] {
+            circle(22, y, 1.6, fill: alpha(primaryText, 0.86))
+            circle(26, y, 1.6, fill: alpha(primaryText, 0.86))
+          }
         }
       }
     }
