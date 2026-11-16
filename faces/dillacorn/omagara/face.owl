@@ -887,80 +887,73 @@ face "Omagara" {
       if hasMedia || showMusicApps {
         Column {
           fill: width
-          gap: 4
-          padding: [8, 6]
+          gap: 3
+          padding: [8, 4]
           background: noticeCardShade
           radius: cfg.roundNotifications ? 12 : 0
           if hasMedia {
-            // Give the song title its own full-width metadata row.
+            // One compact row like the original player. The title can wrap
+            // onto a second line while fixed-size controls never shift.
             Row {
               fill: width
-              gap: 8
+              gap: 3
               align: center
               if playback.art != null {
-                Image { src: playback.art; size: 38; label: "Now playing artwork" }
+                Image { src: playback.art; size: 32; label: "Now playing artwork" }
               }
               Column {
                 weight: 1
-                gap: 2
+                gap: 1
                 onTap: media("open")
-                Text { text: playback.title; font: chosenFont; fontSize: 14; maxLines: 3; color: primaryText }
+                Text { text: playback.title; font: chosenFont; fontSize: 13; maxLines: 2; color: primaryText }
                 Text { text: playback.artist ?? playback.app ?? ""; font: chosenFont; fontSize: 11; maxLines: 1; color: secondaryText }
               }
-              if showMusicApps {
-                Box {
-                  width: 36
-                  height: 40
-                  align: center
-                  onTap: musicAppsExpanded = !musicAppsExpanded
-                  Text { text: musicAppsExpanded ? "▴" : "▾"; font: chosenFont; fontSize: 19; color: accent; align: center }
-                }
-              }
-            }
-            // A stable second row holds three minimal icon controls.
-            // Every button has a fixed hitbox: play/pause no longer indents.
-            Row {
-              fill: width
-              align: center
-              justify: center
-              gap: 10
               Box {
-                width: 44
-                height: 40
+                width: 30
+                height: 36
                 align: center
                 onTap: media("previous")
                 Canvas {
-                  size: 22
-                  line(15, 5, 8, 11, stroke: primaryText, width: 2.5, cap: round)
-                  line(8, 11, 15, 17, stroke: primaryText, width: 2.5, cap: round)
+                  size: 18
+                  line(13, 4, 6, 9, stroke: primaryText, width: 2.2, cap: round)
+                  line(6, 9, 13, 14, stroke: primaryText, width: 2.2, cap: round)
                 }
               }
               Box {
-                width: 48
-                height: 40
+                width: 32
+                height: 36
                 align: center
                 onTap: media("toggle")
                 Canvas {
-                  size: 22
+                  size: 20
                   let cx = width / 2
                   let cy = height / 2
                   if playback.playing == true {
-                    rect(cx - 7, cy - 8, 5, 16, radius: 1, fill: accent)
-                    rect(cx + 2, cy - 8, 5, 16, radius: 1, fill: accent)
+                    rect(cx - 6, cy - 7, 4, 14, radius: 1, fill: accent)
+                    rect(cx + 2, cy - 7, 4, 14, radius: 1, fill: accent)
                   } else {
-                    path([[cx - 5, cy - 9], [cx + 9, cy], [cx - 5, cy + 9]], closed: true, fill: accent)
+                    path([[cx - 4, cy - 8], [cx + 8, cy], [cx - 4, cy + 8]], closed: true, fill: accent)
                   }
                 }
               }
               Box {
-                width: 44
-                height: 40
+                width: 30
+                height: 36
                 align: center
                 onTap: media("next")
                 Canvas {
-                  size: 22
-                  line(7, 5, 14, 11, stroke: primaryText, width: 2.5, cap: round)
-                  line(14, 11, 7, 17, stroke: primaryText, width: 2.5, cap: round)
+                  size: 18
+                  line(5, 4, 12, 9, stroke: primaryText, width: 2.2, cap: round)
+                  line(12, 9, 5, 14, stroke: primaryText, width: 2.2, cap: round)
+                }
+              }
+              if showMusicApps {
+                Box {
+                  width: 24
+                  height: 36
+                  align: center
+                  onTap: musicAppsExpanded = !musicAppsExpanded
+                  Text { text: musicAppsExpanded ? "▴" : "▾"; font: chosenFont; fontSize: 16; color: accent; align: center }
                 }
               }
             }
