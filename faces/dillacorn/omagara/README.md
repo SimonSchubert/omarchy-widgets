@@ -6,7 +6,7 @@ Niagara-inspired OWL 21 home face for [Omalauncher](https://github.com/SimonSchu
 
 - **Alphabet:** Elastic A–Z navigation, frequently launched app previews, hide apps from the worm without hiding them from Search, optional launch-score sorting within letters, a Settings cog, optional opposite-edge input, and configurable haptics.
 - **Apps:** Buffered full-height browser with elastic ends, adjustable scale, padded A–Z headings, and two compact bottom settings actions without a separate heading. Holding the cog previews only Omagara settings and Omalauncher settings. Empty Search places the most recently opened app first.
-- **Notifications:** Grouped cards, selected-app alert compression, adjustable start height with automatic space recovery, optional timestamps, swipe feedback, expandable actions/replies, and native scrolling.
+- **Notifications:** Grouped cards, optional per-app hiding (Omagara only) and alert compression, adjustable start height with automatic space recovery, optional timestamps, swipe feedback, expandable actions/replies, and native scrolling.
 - **Appearance:** Clock, date and event alignment with the notification column (or screen center), automatic centering when the home alphabet is hidden, adjustable text/shade colors, opacity, and corners.
 - **Settings:** Home, Clock, Apps, Alphabet, Notifications, Appearance, Holidays, and Backup; 12/24-hour time, icons, fonts, and Reduce Motion.
 - **Media:** Optional compact native playback controls and expandable, user-selected music-app launch shortcuts on external audio devices.
@@ -19,7 +19,7 @@ Time format is selected under **Clock** in Omagara settings; OWL does not expose
 ## v1.8 changes
 
 - Hide apps from the alphabetical worm while keeping them accessible in normal Search. Sort apps within letters by recent launcher usage.
-- Adjust notification start height automatically or manually. Compress active alerts from selected applications without dismissing them.
+- Adjust notification start height automatically or manually. Hide selected apps' notifications only in Omagara, or compress repetitive alerts. Hidden notifications remain in Android's shade and are unaffected by Omagara Clear all.
 - Add a compact media player with two-line song titles, fixed play/pause control and simple chevrons. Expand music-app shortcuts manually when external audio is connected.
 - Align the clock, date and event with the media/notification column by default, or choose screen center. Hiding the home alphabet centers the content automatically.
 - Keep left/right alphabet input independently configurable. Identify duplicate app names by icon, package ID and profile in settings.
