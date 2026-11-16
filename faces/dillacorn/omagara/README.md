@@ -8,7 +8,7 @@ Niagara-inspired OWL 21 home face for [Omalauncher](https://github.com/SimonSchu
 - **Apps:** Buffered full-height browser with elastic ends, adjustable scale, padded A–Z headings, and two compact bottom settings actions without a separate heading. Holding the cog previews only Omagara settings and Omalauncher settings. Empty Search places the most recently opened app first.
 - **Notifications:** Compact grouped cards with consistently aligned optional timestamps, magnetic swipe feedback, expandable actions/replies, native list scrolling, bottom clearance, and matching rubber-band rebound when pulling the top header or bottom footer.
 - **Appearance:** Compact clock, date and event shades; theme or custom shade colors, independent opacity sliders, adjustable text colors, and individual or global corner rounding.
-- **Settings:** Home, Clock, Apps, Alphabet, Notifications, Appearance, and Backup. Manual 12-hour/24-hour format (24-hour default), custom text hex, icons, fonts, and Reduce Motion.
+- **Settings:** Home, Clock, Apps, Alphabet, Notifications, Appearance, Holidays, and Backup. Manual 12-hour/24-hour format (24-hour default), custom text hex, icons, fonts, and Reduce Motion.
 - **Utilities:** Calendar, next alarm, timer, stopwatch, and world clocks.
 
 Slide onto the cog below the last alphabet letter (with haptic feedback) to navigate to the bottom settings menu. Select Omagara settings or Omalauncher settings there. Long-press Search still opens Omagara settings directly.
@@ -24,6 +24,7 @@ Time format is selected under **Clock** in Omagara settings; OWL does not expose
 - **Controls:** Independent Left/Right placement for alphabet and Search, plus X position (follow Search, Left, or Right). X aligns with Search when placed on the opposite side.
 - **Settings:** Save/export the new appearance and navigation preferences, while retaining compatibility with older backups.
 - **Default-home command:** Retains the upstream v1.6.1 inline command for transparent store review.
+- **Holiday Easter eggs:** Enabled by default on Halloween (Oct 31), Christmas (Dec 25), and New Year's Day (Jan 1), using the phone's local date. Tap the small decoration near Search for a one-time animation (rolling pumpkin, snowfall, or fading gold sparkle). Opening the alphabet re-arms it. Preview each holiday or turn off the feature under Holidays. Reduce Motion skips the animations.
 
 ## v1.6 changes
 
