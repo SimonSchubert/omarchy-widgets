@@ -246,9 +246,10 @@ face "Omagara" {
   at timerDeadline { timerDeadline = 0; timerLeft = 0; notify("Omagara timer", "Time is up") }
 
   let fullAlphabet = split("A B C D E F G H I J K L M N O P Q R S T U V W X Y Z #", " ")
-  // Hide only from Omagara, not Android or the stock drawer. Keep profile keys distinct.
-  // Usage order applies WITHIN each letter; the A-Z worm remains deterministic.
-  let apps = (installed ?? []).filter(a => !contains(hiddenAppKeys, a.key)).sortBy(a => cfg.sortMode == "Most used" ? -(a.score ?? 0) : lower(trim(a.name)))
+  // Hidden app keys affect only the A-Z worm/browser, never normal Search.
+  // Keep profile-specific app keys distinct and retain usage ordering within letters.
+  let searchApps = (installed ?? []).sortBy(a => cfg.sortMode == "Most used" ? -(a.score ?? 0) : lower(trim(a.name)))
+  let apps = searchApps.filter(a => !contains(hiddenAppKeys, a.key))
   let pickerApps = (installed ?? []).filter(a => trim(appPickerQuery) == "" || contains(lower(a.name), lower(trim(appPickerQuery))) || contains(lower(a.package), lower(trim(appPickerQuery)))).sortBy(a => lower(a.name)).take(40)
   let selectedMusicApps = (installed ?? []).filter(a => contains(musicAppKeys, a.key)).sortBy(a => lower(a.name)).take(5)
   let hasMedia = cfg.mediaPlayer && playback != null && playback.available != false && trim(playback.title ?? "") != ""
@@ -262,8 +263,8 @@ face "Omagara" {
   let alphabet = railHeld || railReturning || railWiggling ? heldAlphabet : liveAlphabet
   // Put the single most recently opened Android app first only when Search is empty.
   // android.apps.last is launcher-maintained history; no new permission needed.
-  let lastOpenedApp = first(apps.filter(a => a.last != null).sortBy(a => -(a.last ?? 0)))
-  let searchResults = trim(queryText) == "" ? (lastOpenedApp == null ? apps : [lastOpenedApp] + apps.filter(a => a.key != lastOpenedApp.key)) : rank(apps, trim(queryText))
+  let lastOpenedApp = first(searchApps.filter(a => a.last != null).sortBy(a => -(a.last ?? 0)))
+  let searchResults = trim(queryText) == "" ? (lastOpenedApp == null ? searchApps : [lastOpenedApp] + searchApps.filter(a => a.key != lastOpenedApp.key)) : rank(searchApps, trim(queryText))
   let availableHeight = (tileHeight ?? 800) - screenTop - screenInset
   let compact = availableHeight < 560
   let availableWidth = (tileWidth ?? 400) - screenLeft - screenRight
@@ -2167,8 +2168,8 @@ face "Omagara" {
               }
               Text { text: "Most used sorts within each A–Z letter using Omalauncher launch scores."; font: chosenFont; fontSize: 12; color: secondaryText }
               for pref in preferenceRows.filter(p => p.key == "musicShortcuts") { SettingToggle { pref: pref } }
-              Text { text: "Hide apps / choose music shortcuts"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
-              Text { text: "Hidden in Omagara only. Select up to five music shortcuts."; font: chosenFont; fontSize: 12; color: secondaryText }
+              Text { text: "Alphabet visibility / music shortcuts"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
+              Text { text: "Hidden apps are removed only from the A–Z worm. They remain available in normal Search. Select up to five music shortcuts."; font: chosenFont; fontSize: 12; color: secondaryText }
               Text { text: str(len(hiddenAppKeys)) + " hidden · " + str(len(musicAppKeys)) + " music apps"; font: chosenFont; fontSize: 13; color: secondaryText }
               Input { text: appPickerQuery; placeholder: "Find an installed app…"; onChange: appPickerQuery = value }
               for a in (installed ?? []).filter(a => contains(hiddenAppKeys, a.key) || contains(musicAppKeys, a.key)).sortBy(a => lower(a.name)) key a.key {
