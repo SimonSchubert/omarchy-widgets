@@ -895,11 +895,11 @@ face "Omagara" {
             Text { text: playback.title; font: chosenFont; fontSize: 13; maxLines: 1; color: primaryText }
             Text { text: playback.artist ?? playback.app ?? ""; font: chosenFont; fontSize: 11; maxLines: 1; color: secondaryText }
           }
-          Text { text: "◀"; font: chosenFont; fontSize: 18; color: primaryText; padding: [5, 8]; onTap: media("previous") }
+          Text { text: "⏮"; font: chosenFont; fontSize: 18; color: primaryText; padding: [5, 8]; onTap: media("previous") }
           Text { text: playback.playing == true ? "Ⅱ" : "▶"; font: chosenFont; fontSize: 19; color: accent; padding: [5, 8]; onTap: media("toggle") }
-          Text { text: "▶"; font: chosenFont; fontSize: 18; color: primaryText; padding: [5, 8]; onTap: media("next") }
+          Text { text: "⏭"; font: chosenFont; fontSize: 18; color: primaryText; padding: [5, 8]; onTap: media("next") }
         }
-      } else if mediaNeedsAccess {
+      } else if mediaNeedsAccess && !cfg.notifications {
         Text { text: "Media controls need notification access. Tap to allow."; font: chosenFont; fontSize: 12; color: accent; onTap: media("open") }
       }
       // Selected music shortcuts appear on external audio outputs.
@@ -2161,7 +2161,7 @@ face "Omagara" {
                     Button { text: "Unhide"; onTap: hiddenAppKeys = hiddenAppKeys.filter(k => k != a.key) }
                   }
                   if contains(musicAppKeys, a.key) {
-                    Button { text: "Unmusic"; onTap: musicAppKeys = musicAppKeys.filter(k => k != a.key) }
+                    Button { text: "Remove music"; onTap: musicAppKeys = musicAppKeys.filter(k => k != a.key) }
                   }
                 }
               }
