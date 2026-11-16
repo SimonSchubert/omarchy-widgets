@@ -136,7 +136,7 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", headerAlignment: "Content column", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, sortMode: "Alphabetical", musicShortcuts: true, mediaPlayer: true, noticeAutoPosition: true, noticeStartPercent: 24, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, holidayEasterEggs: true, showSwipeCue: true, roundAppLabels: false, centerNotificationsWithoutAlphabet: true, alphabetSide: "Right", controlSide: "Right", closeSide: "Follow search"}
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", headerAlignment: "Content column", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, sortMode: "Alphabetical", musicShortcuts: true, mediaPlayer: true, noticeAutoPosition: true, noticeStartPercent: 24, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, holidayEasterEggs: true, showSwipeCue: true, roundAppLabels: false, alphabetSide: "Right", controlSide: "Right", closeSide: "Follow search"}
   let sortModeChoices = ["Alphabetical", "Most used"]
   let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
   let hapticChoices = ["Off", "Reduced", "Every letter"]
@@ -188,7 +188,9 @@ face "Omagara" {
   let alphabetSide = cfg.alphabetSide == "Left" ? -1 : 1
   let controlSide = cfg.controlSide == "Left" ? -1 : 1
   let closeSide = cfg.closeSide == "Follow search" ? controlSide : cfg.closeSide == "Left" ? -1 : 1
-  let noticePanelShift = cfg.centerNotificationsWithoutAlphabet && !cfg.idleAlphabet ? 0 : alphabetSide == -1 ? 20 : -20
+  // Only the visible alphabet needs room. Hidden worm => center media, notifications
+  // and the content-aligned header automatically, regardless of older saved prefs.
+  let noticePanelShift = cfg.idleAlphabet ? (alphabetSide == -1 ? 20 : -20) : 0
   let chosenFont = cfg.faceFont == "Serif" ? "serif" : cfg.faceFont == "Launcher" ? "mono" : "sans"
   let zoneChoices = ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland"]
   // Optional terminal actions don't make the face require Linux.
@@ -224,10 +226,9 @@ face "Omagara" {
     {key: "roundLetterCue", name: "Selected letter"},
     {key: "roundCalendar", name: "Calendar events"},
     {key: "roundAppLabels", name: "App labels"},
-    {section: "Navigation", key: "idleAlphabet", name: "Show alphabet on home"},
+    {section: "Navigation", key: "idleAlphabet", name: "Show alphabet when idle"},
     {key: "hideEmpty", name: "Hide empty letters"},
-    {key: "leftInput", name: "Opposite-edge gestures"},
-    {key: "centerNotificationsWithoutAlphabet", name: "Center notifications without alphabet"},
+    {key: "leftInput", name: "Enable opposite-edge alphabet gestures"},
     {key: "curve", name: "Curved alphabet"},
     {section: "Notifications", key: "notifications", name: "Show notifications"},
     {key: "notificationTimes", name: "Show notification timestamps"},
@@ -1796,17 +1797,23 @@ face "Omagara" {
         background: linear(0, 0, 0, 1, [transparent, alpha(primaryText, min(0.26, noticeEndVisual / 230))])
       }
     }
-    Box {
-      fill: true
-      align: topStart
-      padding: [screenLeft + (alphabetSide == -1 ? 4 : 0), railTop, 0, 0]
-      AlphabetRail { side: -1; visible: alphabetSide == -1 || cfg.leftInput }
+    // Create touch handlers only on the configured edge, plus the optional
+    // opposite edge. An inactive edge has no node or gesture detector at all.
+    if alphabetSide == -1 || cfg.leftInput {
+      Box {
+        fill: true
+        align: topStart
+        padding: [screenLeft + (alphabetSide == -1 ? 4 : 0), railTop, 0, 0]
+        AlphabetRail { side: -1 }
+      }
     }
-    Box {
-      fill: true
-      align: topEnd
-      padding: [0, railTop, screenRight + 4, 0]
-      AlphabetRail { side: 1; visible: alphabetSide == 1 || cfg.leftInput }
+    if alphabetSide == 1 || cfg.leftInput {
+      Box {
+        fill: true
+        align: topEnd
+        padding: [0, railTop, screenRight + 4, 0]
+        AlphabetRail { side: 1 }
+      }
     }
     // Letter-height gear centered in the worm's shaded tail, below the
     // alphabet hit cells. Keep the background entirely on the worm Canvas.
@@ -2318,9 +2325,10 @@ face "Omagara" {
                   Button { text: (cfg.closeSide == edge ? "✓ " : "") + edge; onTap: prefs = set(prefs, "closeSide", edge) }
                 }
               }
-              for pref in preferenceRows.filter(p => contains(["idleAlphabet", "hideEmpty", "leftInput", "centerNotificationsWithoutAlphabet", "curve"], p.key)) {
+              for pref in preferenceRows.filter(p => contains(["idleAlphabet", "hideEmpty", "leftInput", "curve"], p.key)) {
                 SettingToggle { pref: pref }
               }
+              Text { text: "When the alphabet is hidden, notifications, music and the content-aligned header center automatically. The chosen alphabet edge still opens it; opposite-edge gestures are optional."; font: chosenFont; fontSize: 12; color: secondaryText }
               Text { text: "Haptic feedback"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
               Flow {
                 fill: width
