@@ -1,0 +1,109 @@
+widget "agenda" {
+  size: 3x6
+  minSize: 3x3
+
+  meta {
+    owl: 18
+    description: "The next events from the phone's calendars, by day, with the next one counting down. Nothing is read until you allow it; a tap opens the calendar app"
+    version: "1.0"
+    license: "MIT"
+    category: "productivity"
+  }
+
+  // The phone's calendars, local and synced, and a clock so "in 25m" stays true.
+  source c = android.calendar
+  source now = clock every 1m
+
+  let todayKey = fmtTime(now, "yyyy-MM-dd")
+  // Noon plus a day: the date is tomorrow even across a daylight-saving change.
+  let tomorrowKey = fmtTime(parseTime(todayKey + " 12:00") + 86400, "yyyy-MM-dd")
+  let upcoming = (c.events ?? []).filter(e => e.end > now)
+  let next = first(upcoming)
+  // An event already under way counts on today, not on the day it began.
+  let days = groupBy(upcoming, e => fmtTime(max(e.start, now), "yyyy-MM-dd"))
+  let dayKeys = keys(days)
+  let todayCount = count(upcoming, e => fmtTime(max(e.start, now), "yyyy-MM-dd") == todayKey)
+
+  Column {
+    gap: 8
+    fill: true
+
+    Row {
+      gap: 8
+      align: center
+      Text { text: "agenda"; style: muted; weight: 1; maxLines: 1; onTap: calendar("open") }
+      if todayCount > 0 {
+        Text { text: todayCount == 1 ? "1 today" : "${todayCount} today"; style: label; color: accent; maxLines: 1; onTap: calendar("open") }
+      }
+    }
+    Row {
+      gap: 6
+      align: center
+      Text { text: lower(fmtTime(now, "EEEE")); style: label; color: accent; maxLines: 1; onTap: calendar("open") }
+      Text { text: lower(fmtTime(now, "d MMMM")); style: small; color: muted; maxLines: 1; onTap: calendar("open") }
+    }
+    Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
+
+    if !c.granted {
+      Column {
+        gap: 6
+        weight: 1
+        justify: center
+        align: center
+        Text { text: "your next events"; style: body; align: center }
+        Text { text: "let the launcher read the calendars on the phone"; style: small; color: muted; align: center }
+        Button { text: "allow calendar"; onTap: calendar("request") }
+      }
+    } else if len(upcoming) == 0 {
+      Column {
+        gap: 6
+        weight: 1
+        justify: center
+        align: center
+        Text { text: "nothing scheduled"; style: body; align: center }
+        Text { text: "the next two weeks are free"; style: small; color: muted; align: center }
+        Button { text: "open calendar"; onTap: calendar("open") }
+      }
+    } else {
+      Column {
+        gap: 6
+        weight: 1
+        scroll: true
+        lazy: true
+        for k in dayKeys key k {
+          let label = k == todayKey ? "today" : k == tomorrowKey ? "tomorrow" : lower(fmtTime(parseTime(k), "EEE d MMM"))
+          Text { text: label; style: label; color: accent; maxLines: 1 }
+          for e in get(days, k, []) key e.id {
+            Row {
+              gap: 8
+              align: top
+              onTap: calendar("open", e)
+              Box { width: 3; height: 24; radius: 1.5; background: e.color }
+              Column {
+                gap: 1
+                weight: 1
+                Text {
+                  text: e.allDay ? "all day" : fmtTime(e.start, "HH:mm")
+                  style: label
+                  color: e.id == next.id ? accent : muted
+                  maxLines: 1
+                }
+                Text { text: e.title != "" ? e.title : e.calendar; bold: e.id == next.id; maxLines: 1 }
+                Text { text: e.location != "" ? e.location : e.calendar; style: small; color: muted; maxLines: 1 }
+              }
+              if e.id == next.id && !e.allDay {
+                Text {
+                  text: e.start > now ? fmtAgo(e.start, now) : "now"
+                  style: label
+                  color: accent
+                  maxLines: 1
+                }
+              }
+            }
+          }
+        }
+        Spacer { height: 8 }
+      }
+    }
+  }
+}
