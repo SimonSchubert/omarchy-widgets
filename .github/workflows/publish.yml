@@ -58,7 +58,7 @@ jobs:
       - name: Site
         run: |
           mkdir _site
-          cp -r index.json faces.json apps.json widgets faces apps w _site/
+          cp -r index.json faces.json apps.json announcements.json widgets faces apps w _site/
           touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@v3
         with:

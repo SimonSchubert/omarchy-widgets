@@ -1,0 +1,960 @@
+widget "notes" {
+  // Tasks, notes and meetings, kept as text files in ~/Notes and synced with Google Drive (optional).
+  // Its helper script is inside this file (helper, below); the widget writes it to
+  // ~/.local/share/notes-widget/ on first run and again whenever this file brings a newer one.
+  // The tile has no text boxes: all typing happens in the full-screen window (screen), which Android
+  // sizes above the keyboard and Back closes cleanly.
+  meta { owl: 18; description: "Tasks, notes and meeting notes kept as text files, with optional two-way Google Drive sync"; version: "1.0"; license: "MIT"; category: "productivity" }
+  requires { pacman: ["python"] }
+  size: 6x9
+  minSize: 3x4
+
+  source now = clock every 1m
+  source st = file("~/.cache/facenotes/state.json") json
+  source opened = file("~/.cache/facenotes/opened.json") json   // an older meeting's text, asked for when it's opened
+
+  state sel = "Today" persist        // the open tab: a list's name or "@meetings"
+  state allMeet = false              // show every meeting, not just pinned + the latest 30
+  state confirm = ""                 // name waiting for a second tap to delete
+  state mode = "add"                 // what the screen shows: "add", "order", "new", "meeting", "drive", "edit"
+  state newName = ""
+  state addText = ""                 // what is typed in the add box
+  // the editor
+  state edName = ""                  // "Meetings/2026-11-14 10.00 Standup" or a note's name
+  state edTitle = ""
+  state edText = ""                  // what the editor starts from; never follows the file, so typing isn't reset
+  state draft = null                 // what's typed
+  state saved = null                 // the last text written
+  state flip = {}                   // meetings whose star was tapped since the data last came: drawn flipped until it does
+  state moving = ""                 // the list whose move-tab bar is open
+  state tabOrder = null              // the tab row as just moved or pinned, drawn until fresh data comes
+  state loading = false              // waiting for an older meeting's text
+
+  // ---- the helper script: installed by the widget itself ----
+  let helper = """#!/usr/bin/env python3
+'''facenotes: tasks + notes kept as text files in ~/Notes, synced with Google Drive via rclone.
+
+Checklists are  <name>.md  with "- [ ] item" / "- [x] item" lines.
+Notes are       <name>.txt with free text.
+The notes widget reads ~/.cache/facenotes/state.json and calls this script.
+
+  facenotes state                    rebuild state.json
+  facenotes add <list> <text>        add a task (to the top)
+  facenotes toggle <list> <n>        tick / untick task n
+  facenotes del <list> <n>           delete task n
+  facenotes cleardone <list>         delete every ticked task
+  facenotes move <list> <n> up|down  move task n past its neighbour (open among open, ticked among ticked)
+  facenotes movelist <name> left|right  move a list's tab
+  facenotes pin <Meetings/name>      pin / unpin a meeting to the top
+  facenotes pintab <name|@meetings>  pin / unpin a tab to the front of the tab row
+  facenotes open <Meetings/name>     put an older meeting's text in opened.json for the editor
+  facenotes save <note> <text>       write a note (created if new; "Meetings/<name>" for a meeting)
+  facenotes new <name> list|note     create a list or note
+  facenotes remove <name>            delete a list or note (kept in ~/Notes/.trash)
+  facenotes sync                     two-way sync ~/Notes <-> Google Drive
+  facenotes drive-ls                 list text files in Drive (for picking)
+  facenotes drive-get <path>         copy a Drive file into ~/Notes
+  facenotes setup                    connect Google Drive (interactive, run in a terminal)
+  facenotes reconnect                sign in to Google again when the sign-in has expired
+'''
+import datetime, json, os, re, shutil, subprocess, sys, time
+
+NOTES = os.path.expanduser("~/Notes")
+CACHE = os.path.expanduser("~/.cache/facenotes")
+STATE = os.path.join(CACHE, "state.json")
+OPENED = os.path.join(CACHE, "opened.json")
+FULL = 30   # meetings (besides pinned ones) whose text goes in state.json; the widget reads at most 1 MB
+META = os.path.join(CACHE, "meta.json")
+REMOTE = os.environ.get("FACENOTES_REMOTE", "gdrive")
+FOLDER = os.environ.get("FACENOTES_FOLDER", "Notes")
+SYNC_HOUR = int(os.environ.get("FACENOTES_SYNC_HOUR", "21"))
+TASK = re.compile(r"^\s*[-*] \[( |x|X)\] ?(.*)$")
+DEFAULTS = [("Today", ".md"), ("Grocery", ".md")]
+MEETINGS = os.path.join(NOTES, "Meetings")
+TABS = os.path.join(NOTES, ".tab-order.txt")  # list names left to right; in ~/Notes so it syncs with Drive
+PINS = os.path.join(NOTES, ".pinned.txt")
+TABPINS = os.path.join(NOTES, ".pinned-tabs.txt")   # pinned tabs (list names or @meetings), kept first   # one pinned meeting per line; in ~/Notes so it syncs with Drive
+
+
+def pins():
+    try:
+        return [l.strip() for l in read(PINS).splitlines() if l.strip()]
+    except FileNotFoundError:
+        return []
+
+
+def tab_order():
+    try:
+        return [l.strip() for l in read(TABS).splitlines() if l.strip()]
+    except FileNotFoundError:
+        return meta().get("order", [])   # where the order was kept before it synced
+
+
+def tab_pins():
+    try:
+        return [l.strip() for l in read(TABPINS).splitlines() if l.strip()]
+    except FileNotFoundError:
+        return []
+
+
+def tabs_of(lists):
+    '''The tab row left to right: list names and @meetings, in the saved order, pinned ones first.'''
+    custom = {n: i for i, n in enumerate(tab_order())}
+    names = [e["name"] for e in lists] + ["@meetings"]
+    # lists come already in order; @meetings goes after the lists unless it was moved
+    names.sort(key=lambda n: (custom.get(n, 9999), 1 if n == "@meetings" else 0))
+    pinned = set(tab_pins())
+    names.sort(key=lambda n: n not in pinned)
+    return [{"name": n, "pinned": n in pinned} for n in names]
+
+
+def set_pins(names):
+    write(PINS, "".join(n + "\n" for n in names))
+
+
+def meta():
+    try:
+        with open(META) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def set_meta(**kw):
+    m = meta()
+    m.update(kw)
+    tmp = META + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(m, f)
+    os.replace(tmp, META)
+
+
+def safe(name):
+    name = re.sub(r"[/\\\x00]", "-", name).strip().strip(".")
+    return name[:60] or "Untitled"
+
+
+def path_of(name):
+    for ext in (".md", ".txt"):
+        p = os.path.join(NOTES, name + ext)
+        if os.path.exists(p):
+            return p
+    sys.exit(f"no list or note called {name!r}")
+
+
+def read(p):
+    with open(p, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def write(p, text):
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, p)
+
+
+def tasks_of(text):
+    '''(line index, done, text) for each task line.'''
+    out = []
+    for i, line in enumerate(text.splitlines()):
+        m = TASK.match(line)
+        if m:
+            out.append((i, m.group(1) != " ", m.group(2)))
+        elif line.strip() and not line.startswith("#"):
+            out.append((i, False, line.strip().lstrip("-* ").strip()))
+    return out
+
+
+def rclone_ok():
+    return shutil.which("rclone") is not None
+
+
+def remote_ok():
+    if not rclone_ok():
+        return False
+    r = subprocess.run(["rclone", "listremotes"], capture_output=True, text=True)
+    return f"{REMOTE}:" in r.stdout.split()
+
+
+def next_sync():
+    now = datetime.datetime.now()
+    t = now.replace(hour=SYNC_HOUR, minute=0, second=0, microsecond=0)
+    if t <= now:
+        t += datetime.timedelta(days=1)
+    return int(t.timestamp())
+
+
+def build_state():
+    os.makedirs(NOTES, exist_ok=True)
+    os.makedirs(CACHE, exist_ok=True)
+    m = meta()
+    if not m.get("seeded"):
+        for name, ext in DEFAULTS:
+            p = os.path.join(NOTES, name + ext)
+            if not os.path.exists(p):
+                write(p, "")
+        set_meta(seeded=True)
+        m = meta()
+    order = {n: i for i, (n, _) in enumerate(DEFAULTS)}
+    custom = {n: i for i, n in enumerate(tab_order())}
+    lists = []
+    for fn in os.listdir(NOTES):
+        base, ext = os.path.splitext(fn)
+        if fn.startswith(".") or ext not in (".md", ".txt"):
+            continue
+        p = os.path.join(NOTES, fn)
+        text = read(p)
+        entry = {"name": base, "kind": "list" if ext == ".md" else "note", "file": p,
+                 "modified": int(os.path.getmtime(p))}
+        if ext == ".md":
+            items = [{"n": n, "done": d, "text": t} for n, (_, d, t) in enumerate(tasks_of(text))]
+            # open tasks first, ticked ones after, each in file order
+            entry["items"] = [x for x in items if not x["done"]] + [x for x in items if x["done"]]
+            entry["open"] = sum(1 for x in items if not x["done"])
+        else:
+            entry["body"] = text
+            entry["open"] = 0
+        lists.append(entry)
+    lists.sort(key=lambda e: (custom.get(e["name"], 9999), order.get(e["name"], 99), e["name"].lower()))
+    meetings = []
+    os.makedirs(MEETINGS, exist_ok=True)
+    for fn in os.listdir(MEETINGS):
+        base, ext = os.path.splitext(fn)
+        if fn.startswith(".") or ext not in (".txt", ".md"):
+            continue
+        p = os.path.join(MEETINGS, fn)
+        text = read(p)
+        m_ = re.match(r"(\d{4}-\d{2}-\d{2})(?: (\d{2})\.(\d{2}))? (.*)", base)
+        lines = [l.strip() for l in text.splitlines() if l.strip() and not l.startswith("#") and not l.strip().endswith(":") and l.strip() not in ("- [ ]", "- [ ] ")]
+        meetings.append({"name": "Meetings/" + base, "file": p, "body": text,
+                         "title": m_.group(4) if m_ else base,
+                         "date": m_.group(1) if m_ else "",
+                         "time": f"{m_.group(2)}:{m_.group(3)}" if m_ and m_.group(2) else "",
+                         "preview": " · ".join(lines[:2])[:120],
+                         "modified": int(os.path.getmtime(p))})
+    pinned = set(pins())
+    for x in meetings:
+        x["pinned"] = x["name"] in pinned
+        try:
+            d = datetime.date.fromisoformat(x["date"])
+            x["label"] = d.strftime("%a %-d %b") + ("" if d.year == datetime.date.today().year else d.strftime(" %Y"))
+        except ValueError:
+            x["label"] = x["date"] or "undated"
+    meetings.sort(key=lambda x: (x["date"], x["time"], x["modified"]), reverse=True)
+    meetings.sort(key=lambda x: not x["pinned"])
+    for x in meetings[sum(x["pinned"] for x in meetings) + FULL:]:
+        x["body"] = None   # older ones: the widget asks for the text with "open"
+    state = {
+        "lists": lists,
+        "meetings": meetings,
+        "tabs": tabs_of(lists),
+        "rclone": rclone_ok(),
+        "remote": remote_ok(),
+        "remoteName": f"{REMOTE}:{FOLDER}",
+        "sync": m.get("sync", {"status": "never", "time": 0, "msg": ""}),
+        "nextSync": next_sync(),
+        "drive": m.get("drive", {"status": "idle", "files": [], "msg": ""}),
+        "updated": int(time.time()),
+    }
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f)
+    os.replace(tmp, STATE)
+
+
+def edit_tasks(name, fn):
+    p = path_of(name)
+    lines = read(p).splitlines()
+    tasks = tasks_of("\n".join(lines))
+    fn(lines, tasks)
+    write(p, "\n".join(lines) + ("\n" if lines else ""))
+
+
+def notify(title, text=""):
+    if shutil.which("omalauncher"):
+        subprocess.run(["omalauncher", "notify", title, text], capture_output=True)
+
+
+def sync():
+    if not remote_ok():
+        set_meta(sync={"status": "error", "time": int(time.time()),
+                       "msg": "Google Drive not connected: run facenotes setup"})
+        return
+    set_meta(sync={**meta().get("sync", {}), "status": "running"})
+    build_state()
+    dest = f"{REMOTE}:{FOLDER}"
+    ffile = os.path.join(CACHE, "filters.txt")
+    write(ffile, "- .trash/**\n- *.tmp\n+ *.md\n+ *.txt\n- *\n")
+    common = ["--filters-file", ffile, "--create-empty-src-dirs", "--resilient",
+              "--recover", "--conflict-resolve", "newer", "-q"]
+    first = not meta().get("bisynced")
+    cmd = ["rclone", "bisync", NOTES, dest] + common + (["--resync"] if first else [])
+    if first:
+        subprocess.run(["rclone", "mkdir", dest], capture_output=True)
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0 and not first:
+        # bisync refuses after an interrupted run; a resync recovers it
+        r = subprocess.run(cmd + ["--resync"], capture_output=True, text=True)
+    ok = r.returncode == 0
+    if ok:
+        set_meta(bisynced=True)
+    errs = [re.sub(r"\x1b\[[0-9;]*m", "", l) for l in r.stderr.splitlines() if "ERROR" in l or "Failed" in l]
+    msg = "" if ok else (errs or ["sync failed"])[-1][:200]
+    auth = not ok and re.search(r"invalid_grant|token.*(expired|revoked)|couldn't fetch token|oauth2", r.stderr, re.I)
+    if auth:
+        msg = "Google sign-in expired: tap reconnect drive"
+    set_meta(sync={"status": "ok" if ok else "auth" if auth else "error", "time": int(time.time()), "msg": msg})
+    if not ok:
+        notify("Notes sync failed", msg)
+
+
+def drive_ls():
+    if not remote_ok():
+        set_meta(drive={"status": "error", "files": [], "msg": "Google Drive not connected"})
+        return
+    set_meta(drive={"status": "loading", "files": meta().get("drive", {}).get("files", []), "msg": ""})
+    build_state()
+    r = subprocess.run(["rclone", "lsjson", f"{REMOTE}:", "-R", "--files-only", "--max-depth", "3",
+                        "--include", "*.{md,txt}", "--fast-list"], capture_output=True, text=True)
+    if r.returncode != 0:
+        errs = [l for l in r.stderr.splitlines() if "client_id" not in l]
+        set_meta(drive={"status": "error", "files": [], "msg": (errs or ["failed"])[-1][:200]})
+        return
+    files = [f for f in json.loads(r.stdout or "[]") if not f["Name"].startswith(".")]
+    files.sort(key=lambda f: f.get("ModTime", ""), reverse=True)
+    out = [{"path": f["Path"], "name": f["Name"], "size": f.get("Size", 0),
+            "time": f.get("ModTime", "")[:10]} for f in files[:80]]
+    set_meta(drive={"status": "ok", "files": out, "msg": ""})
+
+
+def drive_get(path):
+    base, ext = os.path.splitext(os.path.basename(path))
+    name = safe(base)
+    dest = os.path.join(NOTES, name + ext)
+    n = 2
+    while os.path.exists(dest) and not path.startswith(FOLDER + "/"):
+        dest = os.path.join(NOTES, f"{name} {n}{ext}")
+        n += 1
+    r = subprocess.run(["rclone", "copyto", f"{REMOTE}:{path}", dest], capture_output=True, text=True)
+    if r.returncode != 0:
+        notify("Couldn't fetch from Drive", path)
+
+
+def reconnect():
+    print("Signing in to Google Drive again.\nYour browser opens: pick your account, Continue, Allow, then come back here.\n")
+    env = {**os.environ, "BROWSER": "xdg-open"}
+    subprocess.run(["rclone", "config", "update", REMOTE, "config_is_local=true"], env=env,
+                   stdout=subprocess.DEVNULL)
+    print("\nSigned in. Syncing...")
+    sync()
+    build_state()
+    print("sync:", meta().get("sync", {}).get("status"))
+    input("\nPress Enter to close.")
+
+
+def setup():
+    print("Connecting Google Drive for facenotes.\n"
+          "A browser page opens: sign in and allow access, then come back here.\n")
+    if not rclone_ok():
+        print("Installing rclone, which does the syncing...")
+        subprocess.run(["pacman", "-S", "--needed", "--noconfirm", "rclone"])
+        if not rclone_ok():
+            input("Couldn't install rclone. Press Enter to close.")
+            sys.exit(1)
+    if remote_ok():
+        print(f"Already connected as remote '{REMOTE}'.")
+    else:
+        env = {**os.environ, "BROWSER": "xdg-open"}
+        subprocess.run(["rclone", "config", "create", REMOTE, "drive", "scope=drive"], env=env)
+    subprocess.run(["rclone", "mkdir", f"{REMOTE}:{FOLDER}"])
+    build_state()
+    print("\nDone. Running the first sync...")
+    sync()
+    build_state()
+    print(meta().get("sync"))
+    input("\nPress Enter to close.")
+
+
+def main():
+    a = sys.argv[1:]
+    if not a:
+        print(__doc__)
+        return
+    c = a[0]
+    os.makedirs(NOTES, exist_ok=True)
+    os.makedirs(CACHE, exist_ok=True)
+    if c == "state":
+        pass
+    elif c == "add" and len(a) >= 3 and a[2].strip():
+        def f(lines, tasks):
+            # first task line (or after a heading) so the newest shows on top
+            at = tasks[0][0] if tasks else len(lines)
+            lines.insert(at, f"- [ ] {a[2].strip()}")
+        edit_tasks(a[1], f)
+    elif c == "toggle":
+        def f(lines, tasks):
+            i, done, t = tasks[int(a[2])]
+            lines[i] = f"- [{' ' if done else 'x'}] {t}"
+        edit_tasks(a[1], f)
+    elif c == "del":
+        edit_tasks(a[1], lambda lines, tasks: lines.pop(tasks[int(a[2])][0]))
+    elif c == "cleardone":
+        def f(lines, tasks):
+            for i, done, _ in reversed(tasks):
+                if done:
+                    lines.pop(i)
+        edit_tasks(a[1], f)
+    elif c == "move":
+        def f(lines, tasks):
+            n = int(a[2])
+            same = [t for t in tasks if t[1] == tasks[n][1]]
+            k = same.index(tasks[n])
+            j = k - 1 if a[3] == "up" else k + 1
+            if 0 <= j < len(same):
+                i1, i2 = same[k][0], same[j][0]
+                lines[i1], lines[i2] = lines[i2], lines[i1]
+        edit_tasks(a[1], f)
+    elif c == "movelist":
+        build_state()
+        with open(STATE) as fh:
+            tabs = json.load(fh)["tabs"]
+        names = [t["name"] for t in tabs]
+        if a[1] in names:
+            k = names.index(a[1])
+            j = k - 1 if a[2] == "left" else k + 1
+            if 0 <= j < len(names) and tabs[j]["pinned"] == tabs[k]["pinned"]:   # pinned ones stay ahead
+                names[k], names[j] = names[j], names[k]
+            write(TABS, "".join(n + "\n" for n in names))
+    elif c == "pintab":
+        build_state()
+        with open(STATE) as fh:
+            tabs = json.load(fh)["tabs"]
+        ps = tab_pins()
+        ps = [x for x in ps if x != a[1]] if a[1] in ps else ps + [a[1]]
+        write(TABPINS, "".join(n + "\n" for n in ps))
+        names = [t["name"] for t in tabs]
+        write(TABS, "".join(n + "\n" for n in [n for n in names if n in ps] + [n for n in names if n not in ps]))
+    elif c == "pin":
+        ps = pins()
+        set_pins([x for x in ps if x != a[1]] if a[1] in ps else ps + [a[1]])
+    elif c == "open":
+        p = next(os.path.join(NOTES, a[1] + e) for e in (".txt", ".md") if os.path.exists(os.path.join(NOTES, a[1] + e)))
+        tmp = OPENED + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump({"name": a[1], "body": read(p), "t": time.time()}, fh)
+        os.replace(tmp, OPENED)
+        return
+    elif c == "save":
+        name = "/".join(safe(x) for x in a[1].split("/"))
+        p = next((os.path.join(NOTES, name + e) for e in (".txt", ".md") if os.path.exists(os.path.join(NOTES, name + e))),
+                 os.path.join(NOTES, name + ".txt"))
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        write(p, a[2] if len(a) > 2 else "")
+        try:
+            with open(OPENED) as fh:
+                if json.load(fh).get("name") == name:
+                    os.remove(OPENED)
+        except Exception:
+            pass
+    elif c == "new":
+        name = safe(a[1])
+        ext = ".txt" if len(a) > 2 and a[2] == "note" else ".md"
+        p = os.path.join(NOTES, name + ext)
+        if not os.path.exists(os.path.join(NOTES, name + ".md")) and not os.path.exists(os.path.join(NOTES, name + ".txt")):
+            write(p, "")
+    elif c == "remove":
+        p = path_of(a[1])
+        os.makedirs(os.path.join(NOTES, ".trash"), exist_ok=True)
+        shutil.move(p, os.path.join(NOTES, ".trash", f"{int(time.time())}-{os.path.basename(p)}"))
+        if a[1] in pins():
+            set_pins([x for x in pins() if x != a[1]])
+        if a[1] in tab_pins():
+            write(TABPINS, "".join(n + "\n" for n in tab_pins() if n != a[1]))
+    elif c == "sync":
+        sync()
+    elif c == "drive-ls":
+        drive_ls()
+    elif c == "drive-get":
+        drive_get(a[1])
+    elif c == "reconnect":
+        reconnect()
+        return
+    elif c == "setup":
+        setup()
+        return
+    else:
+        print(__doc__)
+        sys.exit(1)
+    build_state()
+
+
+if __name__ == "__main__":
+    main()
+"""
+  let helperVersion = "80782f5fc45b"
+  source installed = file("~/.local/share/notes-widget/version")
+  when installed != null && trim(installed) != helperVersion {
+    run("d=~/.local/share/notes-widget && mkdir -p $d && printf '%s' ${sh(helper)} > $d/facenotes.tmp && mv $d/facenotes.tmp $d/facenotes && printf '%s' ${sh(helperVersion)} > $d/version && python3 $d/facenotes state")
+  }
+
+  let fn = "python3 ~/.local/share/notes-widget/facenotes"
+  let lists = st.lists ?? []
+  // the tab row: {name, pinned}, lists by name and "@meetings", pinned ones first
+  let tabs = tabOrder ?? st.tabs ?? flatten([lists.map(l => ({name: l.name, pinned: false})), [{name: "@meetings", pinned: false}]])
+  let mi = tabs.map(t => t.name).indexOf(moving)
+  let canLeft = mi > 0 && tabs[mi - 1].pinned == tabs[mi].pinned
+  let canRight = mi >= 0 && mi < len(tabs) - 1 && tabs[mi + 1].pinned == tabs[mi].pinned
+  on st { flip = {}; tabOrder = null }                // fresh data: it has the pins, so draw them as they are
+  let meetings = st.meetings ?? []
+  let pinCount = len(meetings.filter(m => m.pinned))
+  let shownMeet = allMeet ? meetings : meetings.take(pinCount + 30)
+  let cur = lists.find(l => l.name == sel)
+  let tab = cur != null ? "list" : sel == "@meetings" ? "@meetings" : "list"
+  let shown = cur ?? lists[0]
+  let syncing = st.sync.status == "running"
+  let small = (tileHeight ?? 999) < 300
+
+  // End-of-day sync at 21:00 (the script works out the next one).
+  at st.remote ? st.nextSync : 0 { run("${fn} sync") }
+  when st == "" || st == null { run("${fn} state") }
+  // The editor saves itself every few seconds while you type.
+  when loading && opened.name == edName { edText = opened.body; saved = opened.body; draft = null; loading = false }
+  every 3s { if mode == "edit" && edName != "" && draft != null && draft != saved { run("${fn} save ${sh(edName)} ${sh(draft)}"); saved = draft } }
+
+  component T(text, size = 16, tint = foreground, bold = false, lines = 1) {
+    Text { text: text; bold: bold; fontSize: size; color: tint; maxLines: lines }
+  }
+
+  component Chip(label, active = false, count = 0) {
+    Row {
+      gap: 6
+      align: center
+      padding: [12, 7]
+      radius: 18 * corners
+      background: active ? accent : alpha(surface, 0.6)
+      Text { text: label; bold: active; fontSize: 14; color: active ? background : foreground; maxLines: 1 }
+      if count > 0 {
+        Text { text: "${count}"; fontSize: 12; color: active ? background : muted }
+      }
+    }
+  }
+
+  component Key(label, tint = accent) {
+    Text { text: label; bold: true; fontSize: 15; color: tint; padding: [16, 9]; radius: 10 * corners; border: 1; borderColor: alpha(tint, 0.6) }
+  }
+
+  component Link(label, tint = muted) {
+    Text { text: label; fontSize: 14; color: tint; padding: [10, 10] }
+  }
+
+  // ---- header: date, sync state ----
+  component Header() {
+    Row {
+      gap: 8
+      align: center
+      Column {
+        gap: 0
+        weight: 1
+        Text { text: lower(fmtTime(now, "EEEE")); fontSize: 12; color: accent }
+        Text { text: fmtTime(now, "d MMMM"); fontSize: 22; maxLines: 1 }
+      }
+      Column {
+        gap: 0
+        onTap: if !st.remote { terminal("${fn} setup", "Connect Google Drive") } else if st.sync.status == "auth" { terminal("${fn} reconnect", "Reconnect Google Drive") } else { run("${fn} sync") }
+        Row {
+          gap: 6
+          align: center
+          Box { size: 9; radius: 5; background: !st.remote ? yellow : st.sync.status == "error" || st.sync.status == "auth" ? red : syncing ? accent : green }
+          T { text: syncing ? "syncing…" : !st.remote ? "connect drive" : st.sync.status == "auth" ? "reconnect drive" : "sync now"; size: 13; bold: true }
+        }
+        if !small {
+          Text {
+            text: !st.remote ? "tap to sign in" : st.sync.time > 0 ? "${fmtAgo(st.sync.time, now)} ago · next ${fmtTime(st.nextSync, "HH:mm")}" : "next ${fmtTime(st.nextSync, "HH:mm")}"
+            fontSize: 11; color: muted; align: end; maxLines: 1
+          }
+        }
+      }
+    }
+    if (st.sync.status == "error" || st.sync.status == "auth") && st.sync.msg != "" {
+      T { text: st.sync.msg; size: 12; tint: red; lines: 2 }
+    }
+  }
+
+  // ---- tabs ----
+  component Tabs() {
+    Flow {
+      gap: 6
+      for t in tabs key t.name {
+        Box {
+          // long-press belongs to home on a tile: tapping the open tab again (or "move") shows its move bar
+          onTap: if sel == t.name || (t.name != "@meetings" && tab == "list" && shown.name == t.name) { haptic(); moving = moving == t.name ? "" : t.name } else { sel = t.name; confirm = ""; moving = ""; allMeet = false }
+          if t.name == "@meetings" {
+            Chip { label: t.pinned ? "★ Meetings" : "Meetings"; active: tab == "@meetings"; count: len(meetings) }
+          } else {
+            Chip { label: t.pinned ? "★ ${t.name}" : t.name; active: tab == "list" && shown.name == t.name; count: lists.find(l => l.name == t.name).open ?? 0 }
+          }
+        }
+      }
+      Box { onTap: { mode = "new"; newName = ""; screen() }; Chip { label: "+ new" } }
+      if st.remote {
+        Box { onTap: { mode = "drive"; run("${fn} drive-ls"); screen() }; Chip { label: "drive ↓" } }
+      }
+    }
+  }
+
+  // move and pin for the open tab (a list's name or "@meetings")
+  component TabTools(name) {
+    Text { text: "move"; fontSize: 14; color: moving == name ? accent : muted; padding: [4, 10]; onTap: { haptic(); moving = moving == name ? "" : name } }
+    Text {
+      text: (tabs.find(t => t.name == name).pinned ?? false) ? "★" : "☆"; fontSize: 17; color: (tabs.find(t => t.name == name).pinned ?? false) ? accent : muted; padding: [10, 6]
+      onTap: {
+        haptic()
+        tabOrder = flatten([tabs.filter(t => t.name == name ? !t.pinned : t.pinned), tabs.filter(t => t.name == name ? t.pinned : !t.pinned)]).map(t => t.name == name ? merge(t, {pinned: !t.pinned}) : t)
+        run("${fn} pintab ${sh(name)}")
+      }
+    }
+  }
+
+  component Confirm() {
+    if moving != "" && mi >= 0 {
+      Row {
+        gap: 8
+        align: center
+        padding: [10, 4]
+        radius: 14 * corners
+        background: alpha(surface, 0.6)
+        Text { text: "move tab"; fontSize: 14; color: muted; weight: 1 }
+        Text { text: "◀"; fontSize: 16; color: canLeft ? accent : muted; padding: [16, 8]
+               onTap: if canLeft { haptic(); tabOrder = set(set(tabs, mi, tabs[mi - 1]), mi - 1, tabs[mi]); run("${fn} movelist ${sh(moving)} left") } }
+        Text { text: "▶"; fontSize: 16; color: canRight ? accent : muted; padding: [16, 8]
+               onTap: if canRight { haptic(); tabOrder = set(set(tabs, mi, tabs[mi + 1]), mi + 1, tabs[mi]); run("${fn} movelist ${sh(moving)} right") } }
+        Text { text: "done"; fontSize: 14; color: muted; padding: [10, 8]; onTap: moving = "" }
+      }
+    }
+    if confirm != "" {
+      Row {
+        gap: 8
+        align: center
+        padding: 10
+        radius: 14 * corners
+        background: alpha(red, 0.18)
+        Text { text: "delete “${startsWith(confirm, "Meetings/") ? sub(confirm, 26, len(confirm)) : confirm}”?"; fontSize: 14; color: foreground; maxLines: 2; weight: 1 }
+        Text { text: "cancel"; fontSize: 14; color: muted; padding: [10, 10]; onTap: confirm = "" }
+        Text { text: "delete"; bold: true; fontSize: 14; color: red; padding: [14, 8]; radius: 10 * corners; border: 1; borderColor: alpha(red, 0.6); onTap: { run("${fn} remove ${sh(confirm)}"); if confirm == edName { edName = ""; draft = null }; if !startsWith(confirm, "Meetings/") { sel = "Today" }; confirm = "" } }
+      }
+    }
+  }
+
+  // ---- one checklist row (tile and screen) ----
+  component Item(it, list, arrange = false) {
+    Row {
+      gap: 8
+      align: center
+      padding: [2, 4, 0, 4]
+      Box { size: 34; align: center; onTap: { haptic(); run("${fn} toggle ${sh(list)} ${sh(it.n)}") }
+        Box { size: 20; radius: 4 * corners; align: center; border: 2; borderColor: it.done ? accent : muted; background: it.done ? accent : null
+          if it.done { Text { text: "󰄬"; font: icon; fontSize: 15; color: background; align: center } }
+        }
+      }
+      Box { weight: 1; onTap: run("${fn} toggle ${sh(list)} ${sh(it.n)}")
+        T { text: it.text; size: 16; tint: it.done ? muted : foreground; lines: 2 }
+      }
+      if arrange {
+        Text { text: "↑"; bold: true; fontSize: 20; color: accent; padding: [12, 6]; onTap: { haptic(); run("${fn} move ${sh(list)} ${sh(it.n)} up") } }
+        Text { text: "↓"; bold: true; fontSize: 20; color: accent; padding: [12, 6]; onTap: { haptic(); run("${fn} move ${sh(list)} ${sh(it.n)} down") } }
+      } else {
+        Box { size: 36; align: center; onTap: run("${fn} del ${sh(list)} ${sh(it.n)}")
+          Text { text: "󰅖"; font: icon; fontSize: 16; color: muted; align: center }
+        }
+      }
+    }
+  }
+
+
+  // ---- the tile's body ----
+  component ListView() {
+    Column {
+      gap: 0
+      weight: 1
+      scroll: true
+      if len(shown.items) == 0 {
+        T { text: "nothing here yet: tap + add"; size: 14; tint: muted; lines: 2 }
+      }
+      for it in shown.items key "${it.n}:${it.text}" {
+        Item { it: it; list: shown.name }
+      }
+    }
+    Row {
+      gap: 8
+      align: center
+      Text { text: "+ add"; bold: true; fontSize: 15; color: accent; padding: [16, 9]; radius: 10 * corners; border: 1; borderColor: alpha(accent, 0.6); onTap: { mode = "add"; addText = ""; screen() } }
+      if len(shown.items) > shown.open {
+        T { text: "${len(shown.items) - shown.open} done"; size: 13; tint: muted }
+        Spacer { weight: 1 }
+        Text { text: "clear done"; fontSize: 14; color: accent; padding: [10, 10]; onTap: run("${fn} cleardone ${sh(shown.name)}") }
+      } else {
+        Spacer { weight: 1 }
+      }
+    }
+  }
+
+  component NoteTile() {
+    Column {
+      weight: 1
+      fill: width
+      padding: 12
+      radius: 14 * corners
+      background: alpha(surface, 0.6)
+      scroll: true
+      onTap: { mode = "edit"; edName = shown.name; edTitle = shown.name; edText = shown.body; draft = null; saved = shown.body; screen() }
+      Text { text: shown.body == "" ? "tap to write…" : shown.body; fontSize: 15; color: shown.body == "" ? muted : foreground }
+    }
+    Row {
+      gap: 8
+      align: center
+      T { text: "saved ${fmtAgo(shown.modified, now)} ago"; size: 12; tint: muted }
+      Spacer { weight: 1 }
+      Text { text: "write"; bold: true; fontSize: 15; color: accent; padding: [16, 9]; radius: 10 * corners; border: 1; borderColor: alpha(accent, 0.6); onTap: { mode = "edit"; edName = shown.name; edTitle = shown.name; edText = shown.body; draft = null; saved = shown.body; screen() } }
+    }
+  }
+
+  component MeetingsTile() {
+    Column {
+      gap: 2
+      weight: 1
+      scroll: true
+      if len(meetings) == 0 {
+        T { text: "no meetings yet: tap + meeting"; size: 14; tint: muted; lines: 2 }
+      } else {
+        T { text: "tap ☆ to pin a meeting, ★ to unpin it"; size: 12; tint: muted }
+      }
+      for m, i in shownMeet key m.name {
+        if m.pinned && i == 0 {
+          Text { text: "pinned"; fontSize: 13; color: accent; padding: [4, 8, 0, 2] }
+        }
+        if !m.pinned && (i == 0 || shownMeet[i - 1].pinned || shownMeet[i - 1].date != m.date) {
+          Text { text: m.date == fmtTime(now, "yyyy-MM-dd") ? "today" : lower(m.label ?? m.date); fontSize: 13; color: accent; padding: [4, 8, 0, 2] }
+        }
+        Row {
+          gap: 10
+          align: center
+          padding: [8, 6, 0, 6]
+          onTap: if m.body != null { mode = "edit"; edName = m.name; edTitle = m.title; edText = m.body; draft = null; saved = m.body; loading = false; screen() } else { mode = "edit"; edName = m.name; edTitle = m.title; edText = ""; draft = null; saved = null; loading = true; run("${fn} open ${sh(m.name)}"); screen() }
+          T { text: m.pinned ? (m.date == fmtTime(now, "yyyy-MM-dd") ? m.time : sub(m.label ?? "", 4, len(m.label ?? ""))) : m.time; size: 13; tint: m.pinned ? accent : muted }
+          Column {
+            gap: 0
+            weight: 1
+            T { text: m.title; size: 16; bold: true }
+            if m.preview != "" { T { text: m.preview; size: 12; tint: muted } }
+          }
+          Text { text: m.pinned != get(flip, m.name, false) ? "★" : "☆"; fontSize: 17; color: m.pinned != get(flip, m.name, false) ? accent : muted; padding: [10, 6]; onTap: { haptic(); flip = set(flip, m.name, !get(flip, m.name, false)); run("${fn} pin ${sh(m.name)}") } }
+          Text { text: "✕"; fontSize: 15; color: muted; padding: [10, 8]; onTap: { haptic(); confirm = m.name } }
+        }
+      }
+    }
+    Row {
+      gap: 8
+      align: center
+      Text { text: "+ meeting"; bold: true; fontSize: 15; color: accent; padding: [16, 9]; radius: 10 * corners; border: 1; borderColor: alpha(accent, 0.6); onTap: { mode = "meeting"; screen() } }
+      Spacer { weight: 1 }
+      if len(meetings) > pinCount + 30 {
+        Column {
+          gap: 0
+          onTap: allMeet = !allMeet
+          Text { text: allMeet ? "all ${len(meetings)} · since ${lower(meetings.filter(x => !x.pinned).sortBy(x => x.date).take(1)[0].label ?? "")}" : "latest 30 of ${len(meetings)}"; fontSize: 12; color: muted; align: end; maxLines: 1 }
+          Text { text: allMeet ? "show latest 30" : "show all"; bold: true; fontSize: 14; color: accent; align: end; padding: [0, 4, 0, 0] }
+        }
+      }
+    }
+  }
+
+  Column {
+    gap: 10
+    fill: true
+    Header { }
+    Tabs { }
+    Confirm { }
+    if tab == "@meetings" {
+      Row {
+        gap: 4
+        align: center
+        Text { text: "Meetings"; fontSize: 19; maxLines: 1; weight: 1 }
+        TabTools { name: "@meetings" }
+      }
+      MeetingsTile { }
+    } else if shown == null {
+      T { text: "loading notes…"; tint: muted }
+    } else {
+      Row {
+        gap: 4
+        align: center
+        Text { text: shown.name; fontSize: 19; maxLines: 1; weight: 1 }
+        if shown.kind == "list" {
+          Text { text: "reorder"; fontSize: 14; color: len(shown.items) > 1 ? muted : alpha(muted, 0.4); padding: [4, 10]; onTap: if len(shown.items) > 1 { mode = "order"; screen() } }
+        }
+        TabTools { name: shown.name }
+        Text { text: "edit"; fontSize: 14; color: muted; padding: [4, 10]; onTap: run("omarchy-edit ${sh(shown.file)}") }
+        Text { text: "delete"; fontSize: 14; color: red; padding: [4, 10]; onTap: { haptic(); confirm = shown.name } }
+      }
+      if shown.kind == "list" {
+        ListView { }
+      } else {
+        NoteTile { }
+      }
+    }
+  }
+
+  // ---- the full-screen window: everything you type happens here ----
+  screen {
+    title: mode == "edit" ? edTitle : mode == "order" ? "reorder ${lower(shown.name ?? "")}" : mode == "add" ? (shown.name ?? "add") : mode == "meeting" ? "new meeting" : mode == "drive" ? "from google drive" : "new list or note"
+    Column {
+      gap: 12
+      fill: true
+      padding: [14, 8]
+
+      if mode == "add" && shown != null {
+        Row {
+          gap: 8
+          align: center
+          padding: [14, 2, 6, 2]
+          radius: 16 * corners
+          background: alpha(surface, 0.7)
+          T { text: "+"; size: 22; tint: accent; bold: true }
+          Input { text: addText; placeholder: "add to ${lower(shown.name)}"; clear: true; underline: false; weight: 1; fontSize: 17; focus: true
+                  onChange: addText = value
+                  onSubmit: { if trim(value) != "" { run("${fn} add ${sh(shown.name)} ${sh(trim(value))}") }; addText = "" } }
+          Text { text: "add"; bold: true; fontSize: 15; color: trim(addText) != "" ? background : muted; background: trim(addText) != "" ? accent : alpha(muted, 0.15); padding: [16, 9]; radius: 10 * corners
+                 onTap: if trim(addText) != "" { haptic(); run("${fn} add ${sh(shown.name)} ${sh(trim(addText))}"); addText = "" } }
+        }
+        Column {
+          gap: 0
+          weight: 1
+          scroll: true
+          for it in shown.items key "${it.n}:${it.text}" {
+            Item { it: it; list: shown.name }
+          }
+        }
+        Row { Spacer { weight: 1 }; Text { text: "done"; bold: true; fontSize: 15; color: accent; padding: [16, 9]; radius: 10 * corners; border: 1; borderColor: alpha(accent, 0.6); onTap: { if trim(addText) != "" { run("${fn} add ${sh(shown.name)} ${sh(trim(addText))}"); addText = "" }; close() } } }
+      }
+
+      if mode == "order" && shown != null {
+        T { text: "tap ↑ ↓ to move a task. ticked ones stay below the open ones."; size: 13; tint: muted; lines: 2 }
+        Column {
+          gap: 0
+          weight: 1
+          scroll: true
+          for it in shown.items key "${it.n}:${it.text}" {
+            Item { it: it; list: shown.name; arrange: true }
+          }
+        }
+        Row { Spacer { weight: 1 }; Text { text: "done"; bold: true; fontSize: 15; color: accent; padding: [16, 9]; radius: 10 * corners; border: 1; borderColor: alpha(accent, 0.6); onTap: close() } }
+      }
+
+      if mode == "meeting" {
+        T { text: "meeting title (Standup, 1:1 with Sam…)"; size: 14; tint: accent }
+        Box { padding: [14, 4]; radius: 16 * corners; background: alpha(surface, 0.7)
+          Input {
+            placeholder: "title, enter"; underline: false; fill: width; fontSize: 17; focus: true
+            onSubmit: if trim(value) != "" {
+              edTitle = replace(trim(value), "[/\\\\]", "-")
+              edName = "Meetings/${fmtTime(now, "yyyy-MM-dd HH.mm")} ${edTitle}"
+              edText = "# ${edTitle}\n${fmtTime(now, "EEEE d MMMM yyyy, HH:mm")}\n\nAttendees:\n\nNotes:\n\n\nAction items:\n- [ ] "
+              draft = edText
+              saved = null
+              sel = "@meetings"
+              mode = "edit"
+            }
+          }
+        }
+        Spacer { weight: 1 }
+      }
+
+      if mode == "new" {
+        T { text: "new list or note"; size: 15; tint: accent }
+        Box { padding: [14, 4]; radius: 16 * corners; background: alpha(surface, 0.7)
+          Input { placeholder: "name, e.g. Packing, Ideas"; underline: false; fill: width; fontSize: 17; focus: true; onChange: newName = value }
+        }
+        Row {
+          gap: 10
+          Text { text: "☐ checklist"; bold: true; fontSize: 15; color: accent; padding: [16, 9]; radius: 10 * corners; border: 1; borderColor: alpha(accent, 0.6); onTap: if trim(newName) != "" { run("${fn} new ${sh(trim(newName))} list"); sel = trim(newName); close() } }
+          Text { text: "✎ note"; bold: true; fontSize: 15; color: accent; padding: [16, 9]; radius: 10 * corners; border: 1; borderColor: alpha(accent, 0.6); onTap: if trim(newName) != "" { run("${fn} new ${sh(trim(newName))} note"); sel = trim(newName); close() } }
+        }
+        T { text: "long-press a tab on the widget to delete it."; size: 13; tint: muted; lines: 2 }
+        Spacer { weight: 1 }
+      }
+
+      if mode == "drive" {
+        Row {
+          gap: 8
+          align: center
+          T { text: "pick a text file from google drive"; size: 14; tint: accent }
+          Spacer { weight: 1 }
+          Text { text: "refresh"; fontSize: 14; color: muted; padding: [10, 10]; onTap: run("${fn} drive-ls") }
+        }
+        if !st.remote {
+          T { text: "Google Drive isn't connected yet."; size: 14; tint: muted }
+          Text { text: "connect google drive"; bold: true; fontSize: 15; color: accent; padding: [16, 9]; radius: 10 * corners; border: 1; borderColor: alpha(accent, 0.6); onTap: terminal("${fn} setup", "Connect Google Drive") }
+        } else if st.drive.status == "loading" {
+          T { text: "loading…"; size: 14; tint: muted }
+        } else if st.drive.status == "error" {
+          T { text: st.drive.msg; size: 14; tint: red; lines: 3 }
+        } else if len(st.drive.files) == 0 {
+          T { text: "no .txt or .md files found"; size: 14; tint: muted }
+        }
+        Column {
+          gap: 2
+          weight: 1
+          scroll: true
+          for f in st.drive.files ?? [] key f.path {
+            Row {
+              gap: 12
+              align: center
+              padding: [10, 8]
+              onTap: { haptic(); run("${fn} drive-get ${sh(f.path)}"); sel = replace(f.name, "\\.(md|txt)$", ""); close() }
+              T { text: endsWith(f.name, ".md") ? "list" : "note"; size: 12; tint: accent }
+              Column {
+                gap: 0
+                weight: 1
+                T { text: f.name; size: 16 }
+                T { text: "${f.path} · ${f.time}"; size: 12; tint: muted }
+              }
+              T { text: "↓"; tint: muted }
+            }
+          }
+        }
+      }
+
+      if mode == "edit" && loading {
+        T { text: "opening…"; size: 15; tint: muted }
+        Spacer { weight: 1 }
+      }
+
+      if mode == "edit" && !loading {
+        Input {
+          text: edText
+          lines: 400
+          underline: false
+          fontSize: 17
+          weight: 1
+          fill: width
+          focus: true
+          onChange: draft = value
+        }
+        Row {
+          gap: 2
+          align: center
+          T { text: draft == null || draft == saved ? "saved" : "saving…"; size: 13; tint: draft == null || draft == saved ? muted : yellow }
+          Spacer { weight: 1 }
+          Text { text: "+ time"; fontSize: 14; color: muted; maxLines: 1; padding: [8, 10]; onTap: { edText = (draft ?? edText) + "\n— ${fmtTime(now, "HH:mm")} — "; draft = edText } }
+          Text { text: "+ action"; fontSize: 14; color: muted; maxLines: 1; padding: [8, 10]; onTap: { edText = (draft ?? edText) + "\n- [ ] "; draft = edText } }
+          if startsWith(edName, "Meetings/") {
+            Text { text: confirm == edName ? "sure?" : "delete"; bold: confirm == edName; fontSize: 14; color: red; maxLines: 1; padding: [8, 10]
+                   onTap: if confirm == edName { run("${fn} remove ${sh(edName)}"); confirm = ""; edName = ""; draft = null; close() } else { haptic(); confirm = edName } }
+          }
+          Text { text: "done"; bold: true; fontSize: 15; color: accent; maxLines: 1; padding: [12, 9]; radius: 10 * corners; border: 1; borderColor: alpha(accent, 0.6); onTap: { if draft != null && draft != saved { run("${fn} save ${sh(edName)} ${sh(draft)}"); saved = draft }; close() } }
+        }
+      }
+    }
+  }
+}

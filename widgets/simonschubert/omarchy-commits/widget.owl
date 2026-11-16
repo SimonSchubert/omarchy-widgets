@@ -2,7 +2,7 @@ widget "omarchy" {
   size: 4x3
   minSize: 3x3
   requires { pacman: [] }
-  meta { description: "Latest commits on omacom/omarchy, branch quattro. Tap the tile for the full feed, then a commit to open it."; version: "1.4"; license: "MIT"; category: "dev"; owl: 17 }
+  meta { description: "Latest commits on omacom/omarchy, branch quattro. Tap the tile for the full feed, then a commit to open it."; version: "1.5"; license: "MIT"; category: "dev"; owl: 17 }
 
   // What it says, in the phone's language where it has a set. Commits and the branch come as GitHub has them.
   strings {
@@ -29,6 +29,10 @@ widget "omarchy" {
     zh {
       someone: "某人"; rateLimited: "请求过多"; offline: "github 离线"; loading: "正在加载…"; refresh: "刷新"
       now: "刚刚"; minutes: n => "${n}分钟"; hours: n => "${n}小时"; days: n => "${n}天"; commits: n => "${n} 个提交"
+    }
+    ru {
+      someone: "кто-то"; rateLimited: "слишком много запросов"; offline: "github офлайн"; loading: "загрузка…"; refresh: "обновить"
+      now: "сейчас"; minutes: n => "${n} мин"; hours: n => "${n} ч"; days: n => "${n} д"; commits: n => "${n} " + (n % 10 == 1 && n % 100 != 11 ? "коммит" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "коммита" : "коммитов")
     }
   }
 
