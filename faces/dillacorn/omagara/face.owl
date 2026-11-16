@@ -1049,7 +1049,8 @@ face "Omagara" {
               padding: [7, 9]
               background: cfg.shadeNoticeLabels ? noticeHeadingShade : transparent
               radius: cfg.roundClearAll ? 7 : 0
-              onTap: notification("clear")
+              // Clear only visible items. Native global clear would dismiss hidden apps.
+              onTap: pendingStackDismiss = noticeItems.filter(n => n.clearable).map(n => n.key)
             }
           }
         }
