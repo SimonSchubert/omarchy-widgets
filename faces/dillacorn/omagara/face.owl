@@ -891,23 +891,21 @@ face "Omagara" {
           background: noticeCardShade
           radius: cfg.roundNotifications ? 12 : 0
           if hasMedia {
+            // Give the song title its own full-width metadata row.
             Row {
               fill: width
-              gap: 6
+              gap: 8
               align: center
               if playback.art != null {
-                Image { src: playback.art; size: 32; label: "Now playing artwork" }
+                Image { src: playback.art; size: 38; label: "Now playing artwork" }
               }
               Column {
                 weight: 1
                 gap: 2
                 onTap: media("open")
-                Text { text: playback.title; font: chosenFont; fontSize: 13; maxLines: 1; color: primaryText }
+                Text { text: playback.title; font: chosenFont; fontSize: 14; maxLines: 3; color: primaryText }
                 Text { text: playback.artist ?? playback.app ?? ""; font: chosenFont; fontSize: 11; maxLines: 1; color: secondaryText }
               }
-              Text { text: "⏮"; font: chosenFont; fontSize: 18; color: primaryText; padding: [5, 8]; onTap: media("previous") }
-              Text { text: playback.playing == true ? "Ⅱ" : "▶"; font: chosenFont; fontSize: 19; color: accent; padding: [5, 8]; onTap: media("toggle") }
-              Text { text: "⏭"; font: chosenFont; fontSize: 18; color: primaryText; padding: [5, 8]; onTap: media("next") }
               if showMusicApps {
                 Box {
                   width: 36
@@ -915,6 +913,53 @@ face "Omagara" {
                   align: center
                   onTap: musicAppsExpanded = !musicAppsExpanded
                   Text { text: musicAppsExpanded ? "▴" : "▾"; font: chosenFont; fontSize: 19; color: accent; align: center }
+                }
+              }
+            }
+            // A stable second row holds three minimal icon controls.
+            // Every button has a fixed hitbox: play/pause no longer indents.
+            Row {
+              fill: width
+              align: center
+              justify: center
+              gap: 10
+              Box {
+                width: 44
+                height: 40
+                align: center
+                onTap: media("previous")
+                Canvas {
+                  size: 22
+                  line(15, 5, 8, 11, stroke: primaryText, width: 2.5, cap: round)
+                  line(8, 11, 15, 17, stroke: primaryText, width: 2.5, cap: round)
+                }
+              }
+              Box {
+                width: 48
+                height: 40
+                align: center
+                onTap: media("toggle")
+                Canvas {
+                  size: 22
+                  let cx = width / 2
+                  let cy = height / 2
+                  if playback.playing == true {
+                    rect(cx - 7, cy - 8, 5, 16, radius: 1, fill: accent)
+                    rect(cx + 2, cy - 8, 5, 16, radius: 1, fill: accent)
+                  } else {
+                    path([[cx - 5, cy - 9], [cx + 9, cy], [cx - 5, cy + 9]], closed: true, fill: accent)
+                  }
+                }
+              }
+              Box {
+                width: 44
+                height: 40
+                align: center
+                onTap: media("next")
+                Canvas {
+                  size: 22
+                  line(7, 5, 14, 11, stroke: primaryText, width: 2.5, cap: round)
+                  line(14, 11, 7, 17, stroke: primaryText, width: 2.5, cap: round)
                 }
               }
             }
