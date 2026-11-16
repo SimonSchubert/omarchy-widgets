@@ -14,6 +14,9 @@ face "Omagara" {
   source drawer = android.drawer
   source installed = android.apps
   source notices = android.notifications
+  // Native event-driven data; no face-level polling or Bluetooth scanning.
+  source playback = android.media
+  source audio = android.volume
   source agenda = android.calendar
   source nextAlarm = android.alarm
   // Transient navigation only: no favorites, saved app lists or polling.
@@ -248,6 +251,10 @@ face "Omagara" {
   let apps = (installed ?? []).filter(a => !contains(hiddenAppKeys, a.key)).sortBy(a => cfg.sortMode == "Most used" ? -(a.score ?? 0) : lower(trim(a.name)))
   let pickerApps = (installed ?? []).filter(a => trim(appPickerQuery) == "" || contains(lower(a.name), lower(trim(appPickerQuery))) || contains(lower(a.package), lower(trim(appPickerQuery)))).sortBy(a => lower(a.name)).take(40)
   let selectedMusicApps = (installed ?? []).filter(a => contains(musicAppKeys, a.key)).sortBy(a => lower(a.name)).take(5)
+  let hasMedia = cfg.mediaPlayer && playback != null && playback.available != false && trim(playback.title ?? "") != ""
+  let mediaNeedsAccess = cfg.mediaPlayer && playback != null && playback.available == false
+  let audioConnected = audio != null && contains(["bluetooth", "wired", "usb", "dock"], audio.output.type ?? "")
+  let showMusicApps = cfg.musicShortcuts && audioConnected && len(selectedMusicApps) > 0
   let groups = groupBy(apps, a => contains(fullAlphabet, upper(sub(trim(a.name), 0, 1))) ? upper(sub(trim(a.name), 0, 1)) : "#")
   // Freeze mapping and geometry for the entire touch, even if apps update.
   let liveAlphabet = cfg.hideEmpty ? fullAlphabet.filter(c => len(get(groups, c, [])) > 0) : fullAlphabet
@@ -869,6 +876,51 @@ face "Omagara" {
       // The top header pulls down and the final spacer pulls up. Apply the
       // same rubber-band offset to the clipped viewport in either direction.
       offset: [0, noticeElasticY]
+      // Compact native player; the underlying Media session supplies playback state.
+      if hasMedia {
+        Row {
+          fill: width
+          gap: 6
+          align: center
+          padding: [8, 6]
+          background: noticeCardShade
+          radius: cfg.roundNotifications ? 12 : 0
+          if playback.art != null {
+            Image { src: playback.art; size: 32; label: "Now playing artwork" }
+          }
+          Column {
+            weight: 1
+            gap: 2
+            onTap: media("open")
+            Text { text: playback.title; font: chosenFont; fontSize: 13; maxLines: 1; color: primaryText }
+            Text { text: playback.artist ?? playback.app ?? ""; font: chosenFont; fontSize: 11; maxLines: 1; color: secondaryText }
+          }
+          Text { text: "◀"; font: chosenFont; fontSize: 18; color: primaryText; padding: [5, 8]; onTap: media("previous") }
+          Text { text: playback.playing == true ? "Ⅱ" : "▶"; font: chosenFont; fontSize: 19; color: accent; padding: [5, 8]; onTap: media("toggle") }
+          Text { text: "▶"; font: chosenFont; fontSize: 18; color: primaryText; padding: [5, 8]; onTap: media("next") }
+        }
+      } else if mediaNeedsAccess {
+        Text { text: "Media controls need notification access. Tap to allow."; font: chosenFont; fontSize: 12; color: accent; onTap: media("open") }
+      }
+      // Selected music shortcuts appear on external audio outputs.
+      if showMusicApps {
+        Column {
+          fill: width
+          gap: 4
+          padding: [8, 6]
+          background: noticeCardShade
+          radius: cfg.roundNotifications ? 12 : 0
+          Text { text: "Music · " + (audio.output.name ?? audio.output.type ?? "Connected"); font: chosenFont; fontSize: 12; color: secondaryText; maxLines: 1 }
+          Flow {
+            fill: width
+            gap: 6
+            for a in selectedMusicApps key a.key {
+              Button { text: a.name; onTap: androidApp(a.key) }
+            }
+          }
+        }
+      }
+      if cfg.notifications {
       if notices == null {
         Text { text: "Loading notifications…"; font: chosenFont; fontSize: 12; color: muted }
       } else if !notices.available {
@@ -968,6 +1020,7 @@ face "Omagara" {
             // Visible rebound is applied to the clipped notification viewport.
           }
         }
+      }
       }
     }
   }
@@ -1623,7 +1676,7 @@ face "Omagara" {
         fill: true
         align: topStart
         padding: [screenLeft + 40, noticeTop, screenRight + 40, 0]
-        visible: cfg.notifications && !browsing && activeSide == 0
+        visible: (cfg.notifications || hasMedia || mediaNeedsAccess || showMusicApps) && !browsing && activeSide == 0
         offset: [noticePanelShift, 0]
         NotificationPanel {}
       }
@@ -1632,7 +1685,7 @@ face "Omagara" {
         fill: true
         align: topStart
         padding: [screenLeft + 40, noticeTop, screenRight + 40, 0]
-        visible: cfg.notifications && !browsing && activeSide == 0
+        visible: (cfg.notifications || hasMedia || mediaNeedsAccess || showMusicApps) && !browsing && activeSide == 0
         offset: [noticePanelShift, 0]
         animate offset: tween(260ms, "ease")
         NotificationPanel {}
