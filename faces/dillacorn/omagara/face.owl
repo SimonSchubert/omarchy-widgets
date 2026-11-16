@@ -134,7 +134,7 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, sortMode: "Alphabetical", musicShortcuts: false, mediaPlayer: false, noticeAutoPosition: true, noticeStartPercent: 24, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, holidayEasterEggs: true, showSwipeCue: true, roundAppLabels: false, centerNotificationsWithoutAlphabet: true, alphabetSide: "Right", controlSide: "Right", closeSide: "Follow search"}
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", clock: true, date: true, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, sortMode: "Alphabetical", musicShortcuts: false, mediaPlayer: true, noticeAutoPosition: true, noticeStartPercent: 24, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, holidayEasterEggs: true, showSwipeCue: true, roundAppLabels: false, centerNotificationsWithoutAlphabet: true, alphabetSide: "Right", controlSide: "Right", closeSide: "Follow search"}
   let sortModeChoices = ["Alphabetical", "Most used"]
   let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
   let hapticChoices = ["Off", "Reduced", "Every letter"]
@@ -343,9 +343,9 @@ face "Omagara" {
   let headerEventHeight = 24
   let headerPadTop = compact ? 0 : 20
   let headerShapeMax = max(100, availableWidth - 60)
-  let headerClockWidth = min(headerShapeMax, 16 + headerClockFont * sum(map(range(len(headerClockText)), i => contains(":., ", sub(headerClockText, i, i + 1)) ? 0.27 : 0.64)))
-  let headerDateWidth = min(headerShapeMax, 28 + 16 * sum(map(range(len(headerDateText)), i => contains("iltfjI!.,:; '1", sub(headerDateText, i, i + 1)) ? 0.30 : contains("MW@QO", sub(headerDateText, i, i + 1)) ? 0.77 : 0.55)))
-  let headerEventWidth = min(headerShapeMax, 26 + 13 * sum(map(range(len(headerEventText)), i => contains("iltfjI!.,:; '1", sub(headerEventText, i, i + 1)) ? 0.30 : contains("MW@QO", sub(headerEventText, i, i + 1)) ? 0.77 : 0.55)))
+  let headerClockWidth = min(headerShapeMax, 16 + headerClockFont * (cfg.faceFont == "Launcher" ? 0.68 * len(headerClockText) : sum(map(range(len(headerClockText)), i => contains(":., ", sub(headerClockText, i, i + 1)) ? 0.27 : 0.64))))
+  let headerDateWidth = min(headerShapeMax, 28 + 16 * (cfg.faceFont == "Launcher" ? 0.68 * len(headerDateText) : sum(map(range(len(headerDateText)), i => contains("iltfjI!.,:; '1", sub(headerDateText, i, i + 1)) ? 0.30 : contains("MW@QO", sub(headerDateText, i, i + 1)) ? 0.77 : 0.55))))
+  let headerEventWidth = min(headerShapeMax, 26 + 13 * (cfg.faceFont == "Launcher" ? 0.68 * len(headerEventText) : sum(map(range(len(headerEventText)), i => contains("iltfjI!.,:; '1", sub(headerEventText, i, i + 1)) ? 0.30 : contains("MW@QO", sub(headerEventText, i, i + 1)) ? 0.77 : 0.55))))
   let headerRows = (cfg.clock ? [{w: headerClockWidth, h: headerClockHeight}] : []) + (cfg.date ? [{w: headerDateWidth, h: headerDateHeight}] : []) + (cfg.event && todayEvent != null ? [{w: headerEventWidth, h: headerEventHeight}] : [])
   let headerShapeHeight = sum(map(headerRows, r => r.h))
   // All three header switches free vertical space; manual placement still clears visible rows.
@@ -1409,6 +1409,25 @@ face "Omagara" {
     }
   }
 
+  // One app label for selectors: package IDs disambiguate identically named apps
+  // while the profile badge distinguishes work and cloned installations.
+  component AppIdentity(a) {
+    Row {
+      fill: width
+      align: center
+      gap: 10
+      if a.icon != null && a.icon != "" {
+        Image { src: a.icon; size: 30; label: a.name + " · " + a.package }
+      }
+      Column {
+        weight: 1
+        gap: 2
+        Text { text: a.name + (a.profile == null ? "" : " · " + a.profile); font: chosenFont; fontSize: 14; color: primaryText; maxLines: 1 }
+        Text { text: a.package; font: "mono"; fontSize: 11; color: secondaryText; maxLines: 2 }
+      }
+    }
+  }
+
   component AppRows(choices, searchView = false) {
     Column {
       lazy: true
@@ -2152,16 +2171,22 @@ face "Omagara" {
               Text { text: "Hidden in Omagara only. Select up to five music shortcuts."; font: chosenFont; fontSize: 12; color: secondaryText }
               Text { text: str(len(hiddenAppKeys)) + " hidden · " + str(len(musicAppKeys)) + " music apps"; font: chosenFont; fontSize: 13; color: secondaryText }
               Input { text: appPickerQuery; placeholder: "Find an installed app…"; onChange: appPickerQuery = value }
-              for a in (installed ?? []).filter(a => contains(hiddenAppKeys, a.key) || contains(musicAppKeys, a.key)).sortBy(a => lower(a.name)) {
-                Row {
+              for a in (installed ?? []).filter(a => contains(hiddenAppKeys, a.key) || contains(musicAppKeys, a.key)).sortBy(a => lower(a.name)) key a.key {
+                Column {
                   fill: width
-                  gap: 8
-                  Text { text: a.name + (a.profile == null ? "" : " · " + a.profile); weight: 1; font: chosenFont; fontSize: 13; maxLines: 1 }
-                  if contains(hiddenAppKeys, a.key) {
-                    Button { text: "Unhide"; onTap: hiddenAppKeys = hiddenAppKeys.filter(k => k != a.key) }
-                  }
-                  if contains(musicAppKeys, a.key) {
-                    Button { text: "Remove music"; onTap: musicAppKeys = musicAppKeys.filter(k => k != a.key) }
+                  gap: 6
+                  padding: [8, 6]
+                  background: alpha(surface, 0.20)
+                  AppIdentity { a: a }
+                  Flow {
+                    fill: width
+                    gap: 6
+                    if contains(hiddenAppKeys, a.key) {
+                      Button { text: "Unhide"; onTap: hiddenAppKeys = hiddenAppKeys.filter(k => k != a.key) }
+                    }
+                    if contains(musicAppKeys, a.key) {
+                      Button { text: "Remove music"; onTap: musicAppKeys = musicAppKeys.filter(k => k != a.key) }
+                    }
                   }
                 }
               }
@@ -2171,7 +2196,7 @@ face "Omagara" {
                   gap: 4
                   padding: [8, 6]
                   background: alpha(surface, 0.20)
-                  Text { text: a.name + (a.profile == null ? "" : " · " + a.profile); font: chosenFont; fontSize: 14; maxLines: 1 }
+                  AppIdentity { a: a }
                   Flow {
                     fill: width
                     gap: 6
@@ -2234,13 +2259,27 @@ face "Omagara" {
               Text { text: "Pick noisy apps such as Ring. Alerts become an expandable count, not dismissed. Messaging apps are never selected automatically."; font: chosenFont; fontSize: 12; color: secondaryText }
               Text { text: str(len(compactAlertApps)) + " selected"; font: chosenFont; fontSize: 13; color: secondaryText }
               Input { text: appPickerQuery; placeholder: "Find an app to compress…"; onChange: appPickerQuery = value }
-              for a in (installed ?? []).filter(a => contains(compactAlertApps, toJson([a.package, a.profile]))).sortBy(a => lower(a.name)) {
-                Button { text: "Normal alerts: " + a.name; onTap: compactAlertApps = compactAlertApps.filter(k => k != toJson([a.package, a.profile])) }
+              for a in (installed ?? []).filter(a => contains(compactAlertApps, toJson([a.package, a.profile]))).sortBy(a => lower(a.name)) key a.key {
+                Column {
+                  fill: width
+                  gap: 6
+                  padding: [8, 6]
+                  background: alpha(surface, 0.20)
+                  AppIdentity { a: a }
+                  Button { text: "Restore normal alerts"; onTap: compactAlertApps = compactAlertApps.filter(k => k != toJson([a.package, a.profile])) }
+                }
               }
               for a in pickerApps key a.key {
-                Button {
-                  text: (contains(compactAlertApps, toJson([a.package, a.profile])) ? "✓ Compact: " : "Compact: ") + a.name + (a.profile == null ? "" : " · " + a.profile)
-                  onTap: compactAlertApps = contains(compactAlertApps, toJson([a.package, a.profile])) ? compactAlertApps.filter(k => k != toJson([a.package, a.profile])) : compactAlertApps + [toJson([a.package, a.profile])]
+                Column {
+                  fill: width
+                  gap: 6
+                  padding: [8, 6]
+                  background: alpha(surface, 0.20)
+                  AppIdentity { a: a }
+                  Button {
+                    text: contains(compactAlertApps, toJson([a.package, a.profile])) ? "Restore normal alerts" : "Compress alerts"
+                    onTap: compactAlertApps = contains(compactAlertApps, toJson([a.package, a.profile])) ? compactAlertApps.filter(k => k != toJson([a.package, a.profile])) : compactAlertApps + [toJson([a.package, a.profile])]
+                  }
                 }
               }
               Text { text: "Only active notifications are available. A full daily history still requires Omalauncher engine support."; font: chosenFont; fontSize: 12; color: secondaryText }
