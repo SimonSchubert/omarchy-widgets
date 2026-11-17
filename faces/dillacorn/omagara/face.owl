@@ -190,7 +190,6 @@ face "Omagara" {
   state homeEditOriginalMusicAreaSize = 0
   // Quick shade edits belong to the same Save/Cancel session as Home layout.
   state homeEditOriginalShadePrefs = {}
-  state homeShadeMenuOpen = false
   state alphabetRailShift = 0 persist
   state headerSpacing = 0 persist
   state noticeSpacing = 0 persist
@@ -1884,7 +1883,6 @@ face "Omagara" {
                homeEditOriginalMusicAreaExpanded = musicAreaExpanded
                homeEditOriginalMusicAreaSize = musicAreaSize
               homeEditOriginalShadePrefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(cfg, item.key)), {})
-              homeShadeMenuOpen = false
             }
             layoutEditMode = "home"
             moveMode = "pin"
@@ -2010,7 +2008,6 @@ face "Omagara" {
         musicAreaExpanded = homeEditOriginalMusicAreaExpanded
         musicAreaSize = homeEditOriginalMusicAreaSize
         prefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(homeEditOriginalShadePrefs, item.key, get(defaults, item.key))), prefs)
-        homeShadeMenuOpen = false
         moveMode = ""
         moveKey = ""
         moveLetter = ""
@@ -2036,7 +2033,6 @@ face "Omagara" {
           pinnedLayouts = pinDraftLayouts
           pinnedAppKeys = pinDraftKeys
         }
-        homeShadeMenuOpen = false
         moveMode = ""
         moveKey = ""
         moveLetter = ""
@@ -2099,42 +2095,38 @@ face "Omagara" {
   }
 
 
-  // One editor-only popup toggles the existing per-element shade preferences.
-  // It stays independent of the precise opacity controls in Appearance.
-  component HomeQuickShades() {
+  // Editor-only visibility controls stay beside their corresponding content.
+  // The backdrop remains visible while that shade is hidden, so it can be restored.
+  component ShadeEye(prefKey) {
     Box {
-      width: 100
-      height: 40
+      size: 40
       align: center
       background: alpha(surface, 0.78)
       border: 1
-      borderColor: alpha(accent, homeShadeMenuOpen ? 0.82 : 0.36)
+      borderColor: alpha(accent, get(cfg, prefKey) ? 0.36 : 0.72)
       radius: cfg.roundAppLabels ? 7 : 0
-      onTap: homeShadeMenuOpen = !homeShadeMenuOpen
-      Text { text: "Shades"; font: chosenFont; fontSize: 12; color: primaryText; align: center }
-      Popup {
-        visible: homeShadeMenuOpen && layoutEditMode == "home" && !browsing
-        onDismiss: homeShadeMenuOpen = false
-        position: above
-        width: 220
-        gap: 0
-        Column {
-          fill: width
-          gap: 0
-          for item in quickShadeToggles key item.key {
-            Row {
-              fill: width
-              height: 34
-              gap: 8
-              align: center
-              padding: [10, 6]
-              onTap: prefs = set(prefs, item.key, !get(cfg, item.key))
-              Text { text: item.name; font: chosenFont; fontSize: 13; color: primaryText; weight: 1 }
-              Text { text: get(cfg, item.key) ? "ON" : "OFF"; font: chosenFont; fontSize: 12; color: get(cfg, item.key) ? accent : muted }
-            }
-          }
+      onTap: prefs = set(prefs, prefKey, !get(cfg, prefKey))
+      Canvas {
+        size: 20
+        path([[1, 10], [4, 6.5], [7, 4.5], [10, 4], [13, 4.5], [16, 6.5], [19, 10], [16, 13.5], [13, 15.5], [10, 16], [7, 15.5], [4, 13.5]], closed: true, stroke: primaryText, width: 1.5)
+        circle(10, 10, 3, stroke: primaryText, width: 1.5)
+        if !get(cfg, prefKey) {
+          line(2, 18, 18, 2, stroke: accent, width: 2.2, cap: round)
         }
       }
+    }
+  }
+
+  // Keep the Worm eye adjacent to its adjustment bar on either side.
+  component WormEditControls() {
+    Row {
+      width: 148
+      height: 40
+      gap: 4
+      align: center
+      if alphabetSide == 1 { ShadeEye { prefKey: "shadeAlphabet" } }
+      LayoutSpacingHandle { zone: "rail" }
+      if alphabetSide == -1 { ShadeEye { prefKey: "shadeAlphabet" } }
     }
   }
 
@@ -2199,6 +2191,7 @@ face "Omagara" {
                     fontSize: 12
                     color: secondaryText
                     weight: 1
+                    align: end
                     maxLines: 1
                     onTap: { if cfg.dateTap && layoutEditMode == "" { pickedEvent = null; queryText = ""; screenMode = "calendar"; screen() } }
                   }
@@ -2295,22 +2288,29 @@ face "Omagara" {
               align: center
             }
           }
+          // Shade eye stays beside Compact/Expand, without covering the clock.
+          Box {
+            width: 40
+            height: 40
+            offset: [max(0, min(96, noticeWidth - 180)), headerPadTop + headerShapeHeight + 4 + max(0, headerSpacing)]
+            ShadeEye { prefKey: "shadeHeader" }
+          }
           Box {
             width: 136
             height: 40
             offset: [max(0, noticeWidth - 136), headerPadTop + headerShapeHeight + 4 + max(0, headerSpacing)]
             LayoutSpacingHandle { zone: "header" }
           }
-          // Dock Worm/Reset beside the time, mirroring with Alphabet's side.
-          // It occupies the clock row instead of crossing media or pin rows.
+          // The Worm eye and drag handle overlap the time in edit mode rather
+          // than forcing the clock or date to make space for either control.
           Box {
-            width: 104
+            width: 148
             height: 40
             offset: [
-              alphabetSide == 1 ? max(0, noticeWidth - 104) : 0,
+              alphabetSide == 1 ? max(0, noticeWidth - 148) : 0,
               headerPadTop + max(0, ((compactHeader ? 44 : cfg.clock ? headerClockHeight : headerDateHeight) - 40) / 2)
             ]
-            LayoutSpacingHandle { zone: "rail" }
+            WormEditControls {}
           }
         }
       }
@@ -2821,14 +2821,13 @@ face "Omagara" {
           if layoutEditMode == "home" {
             // The editor lane has real document height. Pins/notifications
             // flow below it instead of being obscured by overlay handles.
-            Row {
-              fill: width
+            Box {
+              width: noticeWidth
               height: 46
-              gap: 8
-              align: center
               Box {
                 width: 100
                 height: 40
+                offset: [0, 2]
                 align: center
                 background: alpha(surface, 0.78)
                 border: 1
@@ -2837,8 +2836,18 @@ face "Omagara" {
                 onTap: musicAreaExpanded = !musicAreaExpanded
                 Text { text: musicAreaExpanded ? "Compact" : "Expand"; font: chosenFont; fontSize: 12; color: primaryText; align: center }
               }
-              Spacer { weight: 1 }
-              LayoutSpacingHandle { zone: "music" }
+              Box {
+                width: 40
+                height: 40
+                offset: [104, 2]
+                ShadeEye { prefKey: "shadeMediaCard" }
+              }
+              Box {
+                width: 116
+                height: 40
+                offset: [max(0, noticeWidth - 116), 2]
+                LayoutSpacingHandle { zone: "music" }
+              }
             }
           }
         }
@@ -2911,6 +2920,18 @@ face "Omagara" {
         }
       } else {
         HomePinnedRowsContent {}
+      }
+      // Label shade control belongs below visible standalone pinned-app labels.
+      // Horizontal icon-only stacks do not need an unrelated eye control.
+      if layoutEditMode == "home" && any(pinnedRows, pins => len(pins) == 1) {
+        Row {
+          fill: width
+          height: 40
+          align: center
+          gap: 8
+          Text { text: "App labels"; font: chosenFont; fontSize: 12; color: secondaryText }
+          ShadeEye { prefKey: "shadeAppLabels" }
+        }
       }
       // Always expose an alignment action in Home editing. Select a pin
       // to shift only its logical row; Shift all works without a selection.
@@ -2985,12 +3006,6 @@ face "Omagara" {
           width: noticeWidth
           height: 46 + noticeSpacing
           Box {
-            width: 100
-            height: 40
-            offset: [0, 4 + noticeSpacing]
-            HomeQuickShades {}
-          }
-          Box {
             width: 136
             height: 40
             offset: [max(0, noticeWidth - 136), 4 + noticeSpacing]
@@ -3028,6 +3043,7 @@ face "Omagara" {
             background: cfg.shadeNoticeLabels ? noticeHeadingShade : transparent
             radius: cfg.roundNoticeHeading ? 7 : 0
           }
+          if homeEditorVisible { ShadeEye { prefKey: "shadeNoticeLabels" } }
           Spacer { weight: 1 }
           if clearableNotices > 0 {
             Text {
@@ -3044,6 +3060,17 @@ face "Omagara" {
           }
         }
       }
+      }
+      // Place the card eye immediately above visible notification cards.
+      if homeEditorVisible && cfg.notifications && len(noticeRows) > 0 {
+        Row {
+          fill: width
+          height: 40
+          align: end
+          gap: 6
+          Text { text: "Card shade"; font: chosenFont; fontSize: 12; color: secondaryText }
+          ShadeEye { prefKey: "shadeNoticeCards" }
+        }
       }
       // This loop is a DIRECT lazy-column child, not nested in the
       // notification-access conditional. Large lists stay virtualized.
@@ -4027,7 +4054,7 @@ face "Omagara" {
         fill: true
         align: wormHandleOnLeft ? "topStart" : "topEnd"
         padding: wormHandleOnLeft ? [screenLeft + 42, wormEditorTop, 0, 0] : [0, wormEditorTop, screenRight + 42, 0]
-        LayoutSpacingHandle { zone: "rail" }
+        WormEditControls {}
       }
     }
     // Letter-height gear centered in the worm's shaded tail, below the
@@ -4129,11 +4156,17 @@ face "Omagara" {
           }
         }
       }
-      // Settings cog sits directly above ✓ with identical styling.
+      // The Search shade eye sits beside Settings; Settings stays over ✓.
       Box {
         fill: true
         align: controlSide == -1 ? "bottomStart" : "bottomEnd"
         padding: controlSide == -1 ? [controlLeft, 0, 0, searchBottom + 56] : [0, 0, controlRight, searchBottom + 56]
+        Row {
+          width: 96
+          height: 48
+          gap: 8
+          align: center
+          if controlSide == 1 { ShadeEye { prefKey: "shadeButtons" } }
           Box {
             size: 48
             radius: cfg.roundSearch ? 24 : 0
@@ -4144,6 +4177,8 @@ face "Omagara" {
             onTap: { menu = ""; settingsSection = "Home"; resetConfirm = false; screenMode = "settings"; screen() }
             Text { text: "⚙"; font: chosenFont; fontSize: 25; color: primaryText; align: center }
           }
+          if controlSide == -1 { ShadeEye { prefKey: "shadeButtons" } }
+        }
       }
     } else {
       Box {
@@ -4171,7 +4206,6 @@ face "Omagara" {
                homeEditOriginalMusicAreaExpanded = musicAreaExpanded
                homeEditOriginalMusicAreaSize = musicAreaSize
               homeEditOriginalShadePrefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(cfg, item.key)), {})
-              homeShadeMenuOpen = false
             layoutEditMode = "home"
             moveMode = ""; moveKey = ""; moveLetter = ""
             moveDragX = 0; moveDragY = 0; moveDragging = false
@@ -4615,7 +4649,6 @@ face "Omagara" {
                homeEditOriginalMusicAreaExpanded = musicAreaExpanded
                homeEditOriginalMusicAreaSize = musicAreaSize
               homeEditOriginalShadePrefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(cfg, item.key)), {})
-              homeShadeMenuOpen = false
                   layoutEditMode = "home"; moveMode = ""; browsing = false; activeSide = 0; railHeld = false; close()
                 }
               }
