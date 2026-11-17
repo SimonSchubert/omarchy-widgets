@@ -1,5 +1,5 @@
 face "Omagara" {
-  meta { owl: 21; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.9"; license: "MIT"; category: "home" }
+  meta { owl: 21; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.9.1"; license: "MIT"; category: "home" }
   // Omalauncher OWL time animations are capped at 60 FPS, regardless of display Hz.
   // Keep the highest supported rate; reduce work rather than reducing responsiveness.
   fps: 60
@@ -188,6 +188,9 @@ face "Omagara" {
   state homeEditOriginalCompactHeader = false
   state homeEditOriginalMusicAreaExpanded = false
   state homeEditOriginalMusicAreaSize = 0
+  // Quick shade edits belong to the same Save/Cancel session as Home layout.
+  state homeEditOriginalShadePrefs = {}
+  state homeShadeMenuOpen = false
   state alphabetRailShift = 0 persist
   state headerSpacing = 0 persist
   state noticeSpacing = 0 persist
@@ -206,7 +209,7 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", headerAlignment: "Content column", clock: true, date: true, dateAbbreviated: false, batteryPercentage: false, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, sortMode: "Most used", compactPins: false, musicShortcuts: true, mediaPlayer: true, noticeAutoPosition: true, noticeStartPercent: 24, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, holidayEasterEggs: true, showSwipeCue: true, roundAppLabels: false, alphabetSide: "Right", controlSide: "Right", closeSide: "Follow search"}
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", headerAlignment: "Content column", clock: true, date: true, dateAbbreviated: false, batteryPercentage: false, event: true, notifications: true, previews: true, curve: true, reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, sortMode: "Most used", compactPins: false, musicShortcuts: true, mediaPlayer: true, noticeAutoPosition: true, noticeStartPercent: 24, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeMediaCard: true, shadeNoticeCards: true, shadeButtons: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, holidayEasterEggs: true, showSwipeCue: true, roundAppLabels: false, alphabetSide: "Right", controlSide: "Right", closeSide: "Follow search"}
   let sortModeChoices = ["Most used", "Alphabetical"]
   let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
   let hapticChoices = ["Off", "Reduced", "Every letter"]
@@ -222,6 +225,7 @@ face "Omagara" {
   let roundingKeys = ["roundTime", "roundDate", "roundEvent", "roundAlphabet", "roundNotifications", "roundNoticeHeading", "roundClearAll", "roundSearch", "roundClose", "roundLetterCue", "roundCalendar", "roundAppLabels"]
   let textContrastChoices = ["High", "Standard"]
   let shadeOpacityControls = [{key: "shadeHeaderOpacity", name: "Clock, date and event"}, {key: "shadeAlphabetOpacity", name: "Alphabet worm"}, {key: "shadeNoticeOpacity", name: "Notification headings"}, {key: "shadeCardOpacity", name: "Notification cards"}, {key: "shadeAppOpacity", name: "App labels"}, {key: "shadeButtonOpacity", name: "Search and close buttons"}]
+  let quickShadeToggles = [{key: "shadeHeader", name: "Clock / date"}, {key: "shadeAlphabet", name: "Alphabet worm"}, {key: "shadeMediaCard", name: "Media player"}, {key: "shadeNoticeCards", name: "Notification cards"}, {key: "shadeNoticeLabels", name: "Notification headings"}, {key: "shadeAppLabels", name: "App labels"}, {key: "shadeButtons", name: "Search / buttons"}]
   let cfg = merge(defaults, prefs, {alphabetSide: contains(["Left", "Right"], prefs.alphabetSide) ? prefs.alphabetSide : "Right", controlSide: contains(["Left", "Right"], prefs.controlSide) ? prefs.controlSide : "Right", closeSide: contains(["Follow search", "Left", "Right"], prefs.closeSide) ? prefs.closeSide : "Follow search", searchContacts: false, sortMode: contains(sortModeChoices, prefs.sortMode) ? prefs.sortMode : "Most used", noticeAutoPosition: prefs.noticeAutoPosition != false, noticeStartPercent: contains(range(6, 51), prefs.noticeStartPercent) ? prefs.noticeStartPercent : 24, appScale: contains(appScaleChoices, prefs.appScale) ? prefs.appScale : 80, hapticFeedback: contains(hapticChoices, prefs.hapticFeedback) ? prefs.hapticFeedback : "Every letter", timeFormat: contains(timeFormatChoices, prefs.timeFormat) ? prefs.timeFormat : "24-hour", shadeHeaderOpacity: contains(range(101), prefs.shadeHeaderOpacity) ? prefs.shadeHeaderOpacity : 29, shadeAlphabetOpacity: contains(range(101), prefs.shadeAlphabetOpacity) ? prefs.shadeAlphabetOpacity : 49, shadeNoticeOpacity: contains(range(101), prefs.shadeNoticeOpacity) ? prefs.shadeNoticeOpacity : 49, shadeCardOpacity: contains(range(101), prefs.shadeCardOpacity) ? prefs.shadeCardOpacity : 48, shadeAppOpacity: contains(range(101), prefs.shadeAppOpacity) ? prefs.shadeAppOpacity : 78, shadeButtonOpacity: contains(range(101), prefs.shadeButtonOpacity) ? prefs.shadeButtonOpacity : 85, bubbleBorder: prefs.bubbleBorder == true, iconStyle: contains(iconStyleChoices, prefs.iconStyle) ? prefs.iconStyle : "Theme overlay", iconOverlayOpacity: contains(iconOverlayChoices, prefs.iconOverlayOpacity) ? prefs.iconOverlayOpacity : 30, faceFont: contains(faceFontChoices, prefs.faceFont) ? prefs.faceFont : "Sans", headerAlignment: contains(headerAlignmentChoices, prefs.headerAlignment) ? prefs.headerAlignment : "Content column", textTone: contains(textToneChoices, prefs.textTone) ? prefs.textTone : "Theme", customTextHex: match(prefs.customTextHex ?? "", "^#[0-9A-Fa-f]{6}$") != null ? upper(prefs.customTextHex) : "#FAFAFA", shadeColorMode: contains(shadeColorChoices, prefs.shadeColorMode) ? prefs.shadeColorMode : "Theme", shadeCustomHex: match(prefs.shadeCustomHex ?? "", "^#[0-9A-Fa-f]{6}$") != null ? upper(prefs.shadeCustomHex) : "#555555", textContrast: "High"})
   // Existing v1.8 Alphabetical preferences otherwise override the new default.
   when !mostUsedMigrationDone {
@@ -483,7 +487,7 @@ face "Omagara" {
   // without battery. Battery ON retains the shorter month in both modes.
   // Missing battery data never produces a fabricated percentage.
   let headerBatteryLevel = get(battery ?? {}, "level")
-  let headerBatteryText = cfg.batteryPercentage && headerBatteryLevel != null ? " " + str(clamp(round(headerBatteryLevel), 0, 100)) + "%" : ""
+  let headerBatteryText = cfg.batteryPercentage && headerBatteryLevel != null ? "   " + str(clamp(round(headerBatteryLevel), 0, 100)) + "%" : ""
   let headerDatePattern = cfg.dateAbbreviated ? "EEE, MMM d" : cfg.batteryPercentage ? "EEEE, MMM d" : "EEEE, MMMM d"
   let headerDateText = fmtTime(now, headerDatePattern) + headerBatteryText
   let compactHeaderDateText = fmtTime(now, "EEE, MMM d") + headerBatteryText
@@ -496,7 +500,8 @@ face "Omagara" {
   let headerClockGlyphUnits = cfg.faceFont == "Launcher" ? 0.68 * len(headerClockText) : sum(map(range(len(headerClockText)), i => contains(":., ", sub(headerClockText, i, i + 1)) ? 0.27 : 0.64))
   let headerClockWidthBudget = max(70, min(headerShapeMax, noticeWidth - 12))
   let headerClockFont = floor(clamp(min(48, (availableHeight - 320) / 6, 48 + min(0, headerSpacing) * 0.62, (headerClockWidthBudget - 16) / max(0.1, headerClockGlyphUnits)), 18, 48))
-  let headerClockHeight = round(63 * headerClockFont / 48)
+  // Reserve a real text line plus vertical breathing room at the smallest clock size.
+  let headerClockHeight = max(32, round(63 * headerClockFont / 48))
   let compactHeaderClockFont = floor(clamp(min(27, headerClockFont * 0.67, (min(118, noticeWidth * 0.36) - 4) / max(0.1, headerClockGlyphUnits)), 14, 27))
   let headerDateHeight = 27
   let headerEventHeight = 24
@@ -1022,7 +1027,7 @@ face "Omagara" {
       radius: cfg.roundNotifications ? 14 : 0
       border: cfg.bubbleBorder ? 1 : 0
       borderColor: border
-      background: noticeCardShade
+      background: cfg.shadeNoticeCards ? noticeCardShade : transparent
       onTap: {
         if summary && len(get(noticeGroups, stack, [])) > 1 {
           expandedStack = expandedStack == stack ? "" : stack
@@ -1878,6 +1883,8 @@ face "Omagara" {
               homeEditOriginalCompactHeader = compactHeader
                homeEditOriginalMusicAreaExpanded = musicAreaExpanded
                homeEditOriginalMusicAreaSize = musicAreaSize
+              homeEditOriginalShadePrefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(cfg, item.key)), {})
+              homeShadeMenuOpen = false
             }
             layoutEditMode = "home"
             moveMode = "pin"
@@ -1991,7 +1998,7 @@ face "Omagara" {
       radius: cfg.roundSearch ? 24 : 0
       border: cfg.bubbleBorder ? 1 : 0
       borderColor: border
-      background: alpha(surface, cfg.shadeButtonOpacity / 100)
+      background: alpha(surface, cfg.shadeButtons ? cfg.shadeButtonOpacity / 100 : 0)
       align: center
       onTap: {
         pinnedAppKeys = homeEditOriginalPinKeys
@@ -2002,6 +2009,8 @@ face "Omagara" {
         compactHeader = homeEditOriginalCompactHeader
         musicAreaExpanded = homeEditOriginalMusicAreaExpanded
         musicAreaSize = homeEditOriginalMusicAreaSize
+        prefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(homeEditOriginalShadePrefs, item.key, get(defaults, item.key))), prefs)
+        homeShadeMenuOpen = false
         moveMode = ""
         moveKey = ""
         moveLetter = ""
@@ -2020,13 +2029,14 @@ face "Omagara" {
       radius: cfg.roundSearch ? 24 : 0
       border: cfg.bubbleBorder ? 1 : 0
       borderColor: border
-      background: alpha(surface, cfg.shadeButtonOpacity / 100)
+      background: alpha(surface, cfg.shadeButtons ? cfg.shadeButtonOpacity / 100 : 0)
       align: center
       onTap: {
         if moveMode == "pin" && moveOriginIndex >= 0 && moveTargetIndex >= 0 && moveTargetIndex < len(moveKeys) && pinDraftChanged {
           pinnedLayouts = pinDraftLayouts
           pinnedAppKeys = pinDraftKeys
         }
+        homeShadeMenuOpen = false
         moveMode = ""
         moveKey = ""
         moveLetter = ""
@@ -2088,6 +2098,46 @@ face "Omagara" {
     }
   }
 
+
+  // One editor-only popup toggles the existing per-element shade preferences.
+  // It stays independent of the precise opacity controls in Appearance.
+  component HomeQuickShades() {
+    Box {
+      width: 100
+      height: 40
+      align: center
+      background: alpha(surface, 0.78)
+      border: 1
+      borderColor: alpha(accent, homeShadeMenuOpen ? 0.82 : 0.36)
+      radius: cfg.roundAppLabels ? 7 : 0
+      onTap: homeShadeMenuOpen = !homeShadeMenuOpen
+      Text { text: "Shades"; font: chosenFont; fontSize: 12; color: primaryText; align: center }
+      Popup {
+        visible: homeShadeMenuOpen && layoutEditMode == "home" && !browsing
+        onDismiss: homeShadeMenuOpen = false
+        position: above
+        width: 220
+        gap: 0
+        Column {
+          fill: width
+          gap: 0
+          for item in quickShadeToggles key item.key {
+            Row {
+              fill: width
+              height: 34
+              gap: 8
+              align: center
+              padding: [10, 6]
+              onTap: prefs = set(prefs, item.key, !get(cfg, item.key))
+              Text { text: item.name; font: chosenFont; fontSize: 13; color: primaryText; weight: 1 }
+              Text { text: get(cfg, item.key) ? "ON" : "OFF"; font: chosenFont; fontSize: 12; color: get(cfg, item.key) ? accent : muted }
+            }
+          }
+        }
+      }
+    }
+  }
+
   // The clock, date and event are content in the same home scroll document.
   component HomeHeader() {
       Box {
@@ -2106,7 +2156,8 @@ face "Omagara" {
             // Restore the compact v1.6 outer-corner treatment, not a capsule.
             let topR = topRounded ? 8 : 0
             let bottomR = bottomRounded ? 8 : 0
-            let shadeWidth = compactHeader ? min(headerShapeMax, 22 + (cfg.clock ? min(headerClockWidth * 0.58, 116) : 0) + (cfg.date ? min(headerDateWidth, 165) : 0)) : min(headerShapeMax, 16 + max(cfg.clock ? headerClockWidth : 0, max(cfg.date ? headerDateWidth : 0, cfg.event && todayEvent != null ? headerEventWidth : 0)))
+                      // Match the Home content column, including compact mode.
+            let shadeWidth = width
             let slices = map(range(ceil(headerShapeHeight / 2) + 1), i => min(headerShapeHeight, i * 2))
             let shapeEdge = map(slices, y => {
               y: y,
@@ -2129,10 +2180,6 @@ face "Omagara" {
                 align: center
                 gap: 8
                 padding: [6, 2]
-                // Reserve the worm-side slot even when Clock is compact.
-                if homeEditorVisible && alphabetSide == -1 {
-                  Spacer { width: 108 }
-                }
                 if cfg.clock {
                   Text {
                     text: headerClockText
@@ -2155,9 +2202,6 @@ face "Omagara" {
                     maxLines: 1
                     onTap: { if cfg.dateTap && layoutEditMode == "" { pickedEvent = null; queryText = ""; screenMode = "calendar"; screen() } }
                   }
-                }
-                if homeEditorVisible && alphabetSide == 1 {
-                  Spacer { width: 108 }
                 }
               }
             }
@@ -2191,8 +2235,6 @@ face "Omagara" {
                 color: primaryText
                 align: center
                 maxLines: 1
-                // In Home edit mode use the space opposite the Worm control.
-                offset: [homeEditorVisible ? (alphabetSide == 1 ? -54 : 54) : 0, 0]
                 onTap: { if cfg.clockTap && layoutEditMode == "" { queryText = ""; screenMode = "clock"; screen() } }
               }
             }
@@ -2210,7 +2252,6 @@ face "Omagara" {
                 color: secondaryText
                 align: center
                 maxLines: 1
-                offset: [homeEditorVisible && !cfg.clock ? (alphabetSide == 1 ? -54 : 54) : 0, 0]
                 onTap: { if cfg.dateTap && layoutEditMode == "" { pickedEvent = null; queryText = ""; screenMode = "calendar"; screen() } }
               }
             }
@@ -2282,7 +2323,7 @@ face "Omagara" {
       size: 48
 
       align: center
-      background: alpha(surface, cfg.shadeButtonOpacity / 100)
+      background: alpha(surface, cfg.shadeButtons ? cfg.shadeButtonOpacity / 100 : 0)
       border: cfg.bubbleBorder ? 1 : 0
       borderColor: border
       radius: cfg.roundSearch ? 24 : 0
@@ -2305,7 +2346,7 @@ face "Omagara" {
       size: 48
 
       align: center
-      background: alpha(surface, cfg.shadeButtonOpacity / 100)
+      background: alpha(surface, cfg.shadeButtons ? cfg.shadeButtonOpacity / 100 : 0)
       border: cfg.bubbleBorder ? 1 : 0
       borderColor: border
       radius: cfg.roundSearch ? 24 : 0
@@ -2666,7 +2707,7 @@ face "Omagara" {
           fill: width
           gap: 3
           padding: [8, 4]
-          background: noticeCardShade
+          background: cfg.shadeMediaCard ? noticeCardShade : transparent
           radius: cfg.roundNotifications ? 12 : 0
           if hasMedia {
             // Compact artwork can grow a little without switching layouts.
@@ -2683,6 +2724,7 @@ face "Omagara" {
                   src: playback.art
                   size: musicAreaExpanded ? max(48, min(128 + round(musicAreaSize * 0.55), noticeWidth - 148)) : compactArtSize
                   label: "Now playing artwork"
+                  onTap: media("open")
                 }
               }
               if musicAreaExpanded {
@@ -2942,6 +2984,12 @@ face "Omagara" {
         Box {
           width: noticeWidth
           height: 46 + noticeSpacing
+          Box {
+            width: 100
+            height: 40
+            offset: [0, 4 + noticeSpacing]
+            HomeQuickShades {}
+          }
           Box {
             width: 136
             height: 40
@@ -4043,7 +4091,7 @@ face "Omagara" {
         radius: cfg.roundClose ? 24 : 0
         border: cfg.bubbleBorder ? 1 : 0
         borderColor: border
-        background: alpha(surface, cfg.shadeButtonOpacity / 100)
+        background: alpha(surface, cfg.shadeButtons ? cfg.shadeButtonOpacity / 100 : 0)
         align: center
         onTap: { appVelocity = 0; browsing = false; activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; queryText = ""; menu = ""; expandedStack = ""; replyKey = ""; replyDraft = "" }
         Text { text: "×"; font: chosenFont; fontSize: 26; color: primaryText; align: center }
@@ -4091,7 +4139,7 @@ face "Omagara" {
             radius: cfg.roundSearch ? 24 : 0
             border: cfg.bubbleBorder ? 1 : 0
             borderColor: border
-            background: alpha(surface, cfg.shadeButtonOpacity / 100)
+            background: alpha(surface, cfg.shadeButtons ? cfg.shadeButtonOpacity / 100 : 0)
             align: center
             onTap: { menu = ""; settingsSection = "Home"; resetConfirm = false; screenMode = "settings"; screen() }
             Text { text: "⚙"; font: chosenFont; fontSize: 25; color: primaryText; align: center }
@@ -4109,7 +4157,7 @@ face "Omagara" {
         radius: cfg.roundSearch ? 24 : 0
         border: cfg.bubbleBorder ? 1 : 0
         borderColor: border
-        background: alpha(surface, cfg.shadeButtonOpacity / 100)
+        background: alpha(surface, cfg.shadeButtons ? cfg.shadeButtonOpacity / 100 : 0)
         align: center
         onTap: { activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; menu = ""; appVelocity = 0; browsing = false; queryText = ""; expandedStack = ""; replyKey = ""; replyDraft = ""; screenMode = "search"; screen() }
         onLongPress: {
@@ -4122,6 +4170,8 @@ face "Omagara" {
             homeEditOriginalCompactHeader = compactHeader
                homeEditOriginalMusicAreaExpanded = musicAreaExpanded
                homeEditOriginalMusicAreaSize = musicAreaSize
+              homeEditOriginalShadePrefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(cfg, item.key)), {})
+              homeShadeMenuOpen = false
             layoutEditMode = "home"
             moveMode = ""; moveKey = ""; moveLetter = ""
             moveDragX = 0; moveDragY = 0; moveDragging = false
@@ -4564,6 +4614,8 @@ face "Omagara" {
                   homeEditOriginalCompactHeader = compactHeader
                homeEditOriginalMusicAreaExpanded = musicAreaExpanded
                homeEditOriginalMusicAreaSize = musicAreaSize
+              homeEditOriginalShadePrefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(cfg, item.key)), {})
+              homeShadeMenuOpen = false
                   layoutEditMode = "home"; moveMode = ""; browsing = false; activeSide = 0; railHeld = false; close()
                 }
               }
@@ -4911,7 +4963,7 @@ face "Omagara" {
                 }
               }
               Text { text: "Shading & motion"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
-              for pref in preferenceRows.filter(p => contains(["reduceMotion", "shadeHeader", "shadeAlphabet", "shadeNoticeLabels", "shadeAppLabels", "showSwipeCue"], p.key)) {
+              for pref in preferenceRows.filter(p => contains(["reduceMotion", "shadeHeader", "shadeAlphabet", "shadeMediaCard", "shadeNoticeCards", "shadeNoticeLabels", "shadeAppLabels", "shadeButtons", "showSwipeCue"], p.key)) {
                 SettingToggle { pref: pref }
               }
               Text { text: "Shade color"; font: chosenFont; color: accent; fontSize: 16; padding: [0, 12, 0, 2] }
@@ -5000,7 +5052,7 @@ face "Omagara" {
           text: "Import Omagara settings"
           onTap: {
             let imported = parseJson(importText)
-            if imported.version == 1 && all(keys(defaults), k => (k == "shadeHeaderOpacity" || k == "shadeAlphabetOpacity" || k == "shadeNoticeOpacity" || k == "shadeCardOpacity" || k == "shadeAppOpacity" || k == "shadeButtonOpacity") ? get(imported.prefs, k) == null || contains(range(101), get(imported.prefs, k)) : k == "sortMode" ? get(imported.prefs, k) == null || contains(sortModeChoices, get(imported.prefs, k)) || get(imported.prefs, k) == "Manual" : k == "noticeStartPercent" ? get(imported.prefs, k) == null || contains(range(6, 51), get(imported.prefs, k)) : k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : k == "iconStyle" ? get(imported.prefs, k) == null || contains(iconStyleChoices, get(imported.prefs, k)) : k == "iconOverlayOpacity" ? get(imported.prefs, k) == null || contains(iconOverlayChoices, get(imported.prefs, k)) : k == "faceFont" ? get(imported.prefs, k) == null || contains(faceFontChoices, get(imported.prefs, k)) : k == "headerAlignment" ? get(imported.prefs, k) == null || contains(headerAlignmentChoices, get(imported.prefs, k)) : k == "textTone" ? get(imported.prefs, k) == null || contains(textToneChoices, get(imported.prefs, k)) : k == "textContrast" ? get(imported.prefs, k) == null || contains(textContrastChoices, get(imported.prefs, k)) : k == "customTextHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "shadeColorMode" ? get(imported.prefs, k) == null || contains(shadeColorChoices, get(imported.prefs, k)) : k == "shadeCustomHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "timeFormat" ? get(imported.prefs, k) == null || get(imported.prefs, k) == "System" || contains(timeFormatChoices, get(imported.prefs, k)) : k == "alphabetSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : k == "controlSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : k == "closeSide" ? get(imported.prefs, k) == null || contains(["Follow search", "Left", "Right"], get(imported.prefs, k)) : k == "showSwipeCue" || k == "holidayEasterEggs" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts" || k == "notificationTimes" || k == "mediaPlayer" || k == "musicShortcuts" || k == "noticeAutoPosition" || k == "compactPins" || k == "batteryPercentage" || k == "dateAbbreviated") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) && sub(toJson(imported.hiddenApps ?? []), 0, 1) == "[" && sub(toJson(imported.musicApps ?? []), 0, 1) == "[" && sub(toJson(imported.compactAlerts ?? []), 0, 1) == "[" && sub(toJson(imported.hiddenNotifications ?? []), 0, 1) == "[" && sub(toJson(imported.manualMoves ?? []), 0, 1) == "[" && all(imported.manualMoves ?? [], m => m.key != null && m.anchor != null && contains(fullAlphabet, m.letter) && (m.after == true || m.after == false)) && sub(toJson(imported.rightAlignedApps ?? []), 0, 1) == "[" && (imported.layout == null || (num(get(imported.layout, "rail", 0)) != null && num(get(imported.layout, "header", 0)) != null && num(get(imported.layout, "notices", 0)) != null && (get(imported.layout, "compact", false) == true || get(imported.layout, "compact", false) == false) && (get(imported.layout, "musicExpanded", false) == true || get(imported.layout, "musicExpanded", false) == false) && num(get(imported.layout, "musicSize", 0)) != null && num(get(imported.layout, "musicSize", 0)) >= 0 && num(get(imported.layout, "musicSize", 0)) <= 80)) && sub(toJson(imported.pinnedApps ?? []), 0, 1) == "[" && sub(toJson(imported.pinLayouts ?? []), 0, 1) == "[" && all(imported.pinLayouts ?? [], p => p.key != null && (p.showLabel == null || p.showLabel == true || p.showLabel == false) && (p.newRow == null || p.newRow == true || p.newRow == false) && (p.alignRight == null || p.alignRight == true || p.alignRight == false)) && sub(toJson(imported.folders ?? []), 0, 1) == "[" && all(imported.folders ?? [], f => f.id != null && f.name != null && trim(f.name) != "" && len(f.name) <= 32 && sub(toJson(f.keys ?? []), 0, 1) == "[") && (imported.folderSerial == null || num(imported.folderSerial) >= 0 && num(imported.folderSerial) < 1000000000) {
+            if imported.version == 1 && all(keys(defaults), k => (k == "shadeHeaderOpacity" || k == "shadeAlphabetOpacity" || k == "shadeNoticeOpacity" || k == "shadeCardOpacity" || k == "shadeAppOpacity" || k == "shadeButtonOpacity") ? get(imported.prefs, k) == null || contains(range(101), get(imported.prefs, k)) : k == "sortMode" ? get(imported.prefs, k) == null || contains(sortModeChoices, get(imported.prefs, k)) || get(imported.prefs, k) == "Manual" : k == "noticeStartPercent" ? get(imported.prefs, k) == null || contains(range(6, 51), get(imported.prefs, k)) : k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : k == "iconStyle" ? get(imported.prefs, k) == null || contains(iconStyleChoices, get(imported.prefs, k)) : k == "iconOverlayOpacity" ? get(imported.prefs, k) == null || contains(iconOverlayChoices, get(imported.prefs, k)) : k == "faceFont" ? get(imported.prefs, k) == null || contains(faceFontChoices, get(imported.prefs, k)) : k == "headerAlignment" ? get(imported.prefs, k) == null || contains(headerAlignmentChoices, get(imported.prefs, k)) : k == "textTone" ? get(imported.prefs, k) == null || contains(textToneChoices, get(imported.prefs, k)) : k == "textContrast" ? get(imported.prefs, k) == null || contains(textContrastChoices, get(imported.prefs, k)) : k == "customTextHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "shadeColorMode" ? get(imported.prefs, k) == null || contains(shadeColorChoices, get(imported.prefs, k)) : k == "shadeCustomHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "timeFormat" ? get(imported.prefs, k) == null || get(imported.prefs, k) == "System" || contains(timeFormatChoices, get(imported.prefs, k)) : k == "alphabetSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : k == "controlSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : k == "closeSide" ? get(imported.prefs, k) == null || contains(["Follow search", "Left", "Right"], get(imported.prefs, k)) : k == "showSwipeCue" || k == "holidayEasterEggs" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts" || k == "notificationTimes" || k == "mediaPlayer" || k == "musicShortcuts" || k == "noticeAutoPosition" || k == "compactPins" || k == "batteryPercentage" || k == "dateAbbreviated" || k == "shadeMediaCard" || k == "shadeNoticeCards" || k == "shadeButtons") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) && sub(toJson(imported.hiddenApps ?? []), 0, 1) == "[" && sub(toJson(imported.musicApps ?? []), 0, 1) == "[" && sub(toJson(imported.compactAlerts ?? []), 0, 1) == "[" && sub(toJson(imported.hiddenNotifications ?? []), 0, 1) == "[" && sub(toJson(imported.manualMoves ?? []), 0, 1) == "[" && all(imported.manualMoves ?? [], m => m.key != null && m.anchor != null && contains(fullAlphabet, m.letter) && (m.after == true || m.after == false)) && sub(toJson(imported.rightAlignedApps ?? []), 0, 1) == "[" && (imported.layout == null || (num(get(imported.layout, "rail", 0)) != null && num(get(imported.layout, "header", 0)) != null && num(get(imported.layout, "notices", 0)) != null && (get(imported.layout, "compact", false) == true || get(imported.layout, "compact", false) == false) && (get(imported.layout, "musicExpanded", false) == true || get(imported.layout, "musicExpanded", false) == false) && num(get(imported.layout, "musicSize", 0)) != null && num(get(imported.layout, "musicSize", 0)) >= 0 && num(get(imported.layout, "musicSize", 0)) <= 80)) && sub(toJson(imported.pinnedApps ?? []), 0, 1) == "[" && sub(toJson(imported.pinLayouts ?? []), 0, 1) == "[" && all(imported.pinLayouts ?? [], p => p.key != null && (p.showLabel == null || p.showLabel == true || p.showLabel == false) && (p.newRow == null || p.newRow == true || p.newRow == false) && (p.alignRight == null || p.alignRight == true || p.alignRight == false)) && sub(toJson(imported.folders ?? []), 0, 1) == "[" && all(imported.folders ?? [], f => f.id != null && f.name != null && trim(f.name) != "" && len(f.name) <= 32 && sub(toJson(f.keys ?? []), 0, 1) == "[") && (imported.folderSerial == null || num(imported.folderSerial) >= 0 && num(imported.folderSerial) < 1000000000) {
               letter = highlightedLetter; appTracking = false
               prefs = reduce(keys(defaults), (m, k) => set(m, k, k == "searchContacts" ? false : k == "textContrast" ? "High" : k == "timeFormat" && get(imported.prefs, k) == "System" ? "24-hour" : k == "sortMode" && get(imported.prefs, k) == "Manual" ? "Most used" : (get(imported.prefs, k) ?? get(defaults, k))), {})
               worldZones = unique(imported.zones ?? [])
