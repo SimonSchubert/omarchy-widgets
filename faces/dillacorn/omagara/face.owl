@@ -2301,17 +2301,6 @@ face "Omagara" {
             offset: [max(0, noticeWidth - 136), headerPadTop + headerShapeHeight + 4 + max(0, headerSpacing)]
             LayoutSpacingHandle { zone: "header" }
           }
-          // The Worm eye and drag handle overlap the time in edit mode rather
-          // than forcing the clock or date to make space for either control.
-          Box {
-            width: 148
-            height: 40
-            offset: [
-              alphabetSide == 1 ? max(0, noticeWidth - 148) : 0,
-              headerPadTop + max(0, ((compactHeader ? 44 : cfg.clock ? headerClockHeight : headerDateHeight) - 40) / 2)
-            ]
-            WormEditControls {}
-          }
         }
       }
   }
@@ -2921,6 +2910,20 @@ face "Omagara" {
       } else {
         HomePinnedRowsContent {}
       }
+      // Position the Worm handle and its eye below pinned apps, ahead of
+      // pin-row alignment. Mirror to the alphabet side without touching clock.
+      if layoutEditMode == "home" {
+        Box {
+          width: noticeWidth
+          height: 46
+          Box {
+            width: 148
+            height: 40
+            offset: [alphabetSide == 1 ? max(0, noticeWidth - 148) : 0, 3]
+            WormEditControls {}
+          }
+        }
+      }
       // Label shade control belongs below visible standalone pinned-app labels.
       // Horizontal icon-only stacks do not need an unrelated eye control.
       if layoutEditMode == "home" && any(pinnedRows, pins => len(pins) == 1) {
@@ -2999,12 +3002,23 @@ face "Omagara" {
           }
         }
       }
-      // The editor clearance includes positive spacing, keeping the bar
-      // outside Notifications and entirely inside its own hit-test region.
+      // Keep the notification-card eye in the Alerts edit lane instead of
+      // putting an unrelated label between the heading and first card.
       if homeEditorVisible {
         Box {
           width: noticeWidth
           height: 46 + noticeSpacing
+          if cfg.notifications && len(noticeRows) > 0 {
+            Row {
+              width: 96
+              height: 40
+              gap: 4
+              align: center
+              offset: [0, 4 + noticeSpacing]
+              Text { text: "Cards"; font: chosenFont; fontSize: 11; color: secondaryText }
+              ShadeEye { prefKey: "shadeNoticeCards" }
+            }
+          }
           Box {
             width: 136
             height: 40
@@ -3060,18 +3074,6 @@ face "Omagara" {
           }
         }
       }
-      }
-      // Place the card eye immediately above visible notification cards.
-      if homeEditorVisible && cfg.notifications && len(noticeRows) > 0 {
-        Row {
-          fill: width
-          height: 40
-          align: center
-          justify: end
-          gap: 6
-          Text { text: "Card shade"; font: chosenFont; fontSize: 12; color: secondaryText }
-          ShadeEye { prefKey: "shadeNoticeCards" }
-        }
       }
       // This loop is a DIRECT lazy-column child, not nested in the
       // notification-access conditional. Large lists stay virtualized.
@@ -4047,10 +4049,9 @@ face "Omagara" {
         }
       }
     }
-    // If the entire clock/date/event header is disabled, preserve the Home
-    // worm editor as an edge control rather than losing its drag handle.
-    if (layoutEditMode == "alphabet" && browsing) ||
-       (layoutEditMode == "home" && !browsing && len(headerRows) == 0) {
+    // Alphabet editing retains its separate edge handle. Home editing always
+    // shows the Worm handle in the pinned-app section, even without a header.
+    if layoutEditMode == "alphabet" && browsing {
       Box {
         fill: true
         align: wormHandleOnLeft ? "topStart" : "topEnd"
