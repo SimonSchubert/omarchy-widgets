@@ -3066,7 +3066,8 @@ face "Omagara" {
         Row {
           fill: width
           height: 40
-          align: end
+          align: center
+          justify: end
           gap: 6
           Text { text: "Card shade"; font: chosenFont; fontSize: 12; color: secondaryText }
           ShadeEye { prefKey: "shadeNoticeCards" }
