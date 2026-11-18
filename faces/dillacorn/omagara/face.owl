@@ -4158,19 +4158,20 @@ face "Omagara" {
         MoveControls {}
       }
     } else if layoutEditMode == "home" && !browsing {
-      // ✓ replaces Search exactly. × is to its left with right-side worm,
-      // and to its right with left-side worm. The cog still sits over Search.
+      // ✓ stays in Search's original slot. × is on its inward side:
+      // right of ✓ for left Search, left of ✓ for right Search.
+      // Use the Search side, not the independent alphabet side.
       Box {
         fill: true
         align: controlSide == -1 ? "bottomStart" : "bottomEnd"
         padding: controlSide == -1 ?
-          [controlLeft - (alphabetSide == 1 ? 56 : 0), 0, 0, searchBottom] :
-          [0, 0, controlRight - (alphabetSide == -1 ? 56 : 0), searchBottom]
+          [controlLeft, 0, 0, searchBottom] :
+          [0, 0, controlRight, searchBottom]
         Row {
           width: 104
           height: 48
           gap: 8
-          if alphabetSide == -1 {
+          if controlSide == -1 {
             HomeEditSaveButton {}
             HomeEditCancelButton {}
           } else {
@@ -4179,12 +4180,14 @@ face "Omagara" {
           }
         }
       }
-      // Global shade visibility, anchored to the bottom-left of Home editing.
-      // Avoid overlap when Search controls are also on the left.
+      // Mirror All Shades opposite the alphabet worm, independent of Search.
+      // Raise it only if Search and the shade toggle occupy the same edge.
       Box {
         fill: true
-        align: bottomStart
-        padding: [screenLeft + 8, 0, 0, searchBottom + (controlSide == -1 ? 120 : 0)]
+        align: alphabetSide == 1 ? "bottomStart" : "bottomEnd"
+        padding: alphabetSide == 1 ?
+          [screenLeft + 8, 0, 0, searchBottom + (controlSide == -1 ? 120 : 0)] :
+          [0, 0, screenRight + 8, searchBottom + (controlSide == 1 ? 120 : 0)]
         Box {
           width: 140
           height: 48
