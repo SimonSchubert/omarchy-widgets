@@ -19,6 +19,7 @@ Time format, **Abbreviate weekday and month**, and **Show battery percentage bes
 ## v1.9.1 changes
 
 - **Inline shade visibility:** Home editing now offers individual eye/slashed-eye controls beside the clock, alphabet Worm, media player, notification headings and cards, pinned app labels (when present), and Search/buttons. Shades toggle immediately; Home ✓ saves changes, while × restores their previous values. The existing Appearance settings retain fine-grained opacity controls.
+- **All Shades shortcut:** A bottom-left Home editing button hides every shade at once and can restore the previous per-element choices. Its ON/OFF/MIXED indicator tracks the shades for currently visible elements, including when their eye controls are toggled individually.
 - **Cleaner Home editor:** Relocate the Worm position handle and its shade eye beneath pinned apps, above pin-row alignment controls. Remove it from the clock area. Place the notification-card eye beside Alerts gap instead of over notification content.
 - **Clock and date:** Expand the clock shade to the full Home content width, keep the clock inside the shade at its smallest size, allow the compact date/battery row to align right, and increase spacing before the battery percentage.
 - **Media artwork:** Tapping the album art opens the current media app, like tapping the song details.
