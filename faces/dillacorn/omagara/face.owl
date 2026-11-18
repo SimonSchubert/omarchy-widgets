@@ -243,7 +243,6 @@ face "Omagara" {
     pinLayoutMigrationDone = true
   }
   let allRounded = all(roundingKeys, k => get(cfg, k) == true)
-  let allShadesHidden = all(quickShadeToggles, item => get(cfg, item.key) == false)
   let anyRounded = any(roundingKeys, k => get(cfg, k) == true)
   // OWL cannot sample wallpaper brightness; explicit overrides keep text legible.
   // The custom #RRGGBB setting is validated before rendering.
@@ -515,6 +514,19 @@ face "Omagara" {
   let headerShapeHeight = compactHeader ? ((cfg.clock || cfg.date ? 44 : 0) + (cfg.event && todayEvent != null ? 22 : 0)) : sum(map(headerRows, r => r.h))
   // Temporary editor space prevents drag controls from covering Home content.
   let homeEditorVisible = layoutEditMode == "home" || moveMode == "pin"
+  // A global shade control reflects what the editor currently exposes.
+  // Hidden media, notification and label preferences cannot falsely keep it
+  // in MIXED when every visible shade has been manually turned off.
+  let visibleShadeToggles = quickShadeToggles.filter(item =>
+    item.key == "shadeHeader" ? len(headerRows) > 0 :
+    item.key == "shadeMediaCard" ? (hasMedia || showMusicApps) :
+    item.key == "shadeNoticeCards" ? cfg.notifications && len(noticeRows) > 0 :
+    item.key == "shadeNoticeLabels" ? cfg.notifications && len(regularNoticeItems) > 0 :
+    item.key == "shadeAppLabels" ? any(pinnedRows, pins => len(pins) == 1) :
+    true)
+  let allShadesOn = all(visibleShadeToggles, item => get(cfg, item.key) == true)
+  let allShadesHidden = all(visibleShadeToggles, item => get(cfg, item.key) == false)
+  let allShadesStatus = allShadesOn ? "ON" : allShadesHidden ? "OFF" : "MIXED"
   let headerEditorLane = homeEditorVisible && len(headerRows) > 0 ? 48 : 0
   // Home editing places Worm beside the clock, not over the media or pins.
   // The Alphabet editor keeps a separate handle beside the upper worm.
@@ -4179,7 +4191,7 @@ face "Omagara" {
           align: center
           background: alpha(surface, 0.78)
           border: 1
-          borderColor: alpha(accent, 0.50)
+          borderColor: alpha(accent, allShadesOn ? 0.36 : allShadesHidden ? 0.72 : 0.55)
           radius: cfg.roundAppLabels ? 7 : 0
           onTap: {
             if allShadesHidden {
@@ -4203,7 +4215,7 @@ face "Omagara" {
                 line(2, 18, 18, 2, stroke: accent, width: 2.2, cap: round)
               }
             }
-            Text { text: "All shades"; font: chosenFont; fontSize: 12; color: primaryText }
+            Text { text: "Shades " + allShadesStatus; font: chosenFont; fontSize: 12; color: primaryText }
           }
         }
       }
