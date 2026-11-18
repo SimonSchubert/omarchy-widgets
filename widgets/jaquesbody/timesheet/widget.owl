@@ -2,7 +2,7 @@ widget "timesheet" {
   meta {
     owl: 10
     description: "A weekly timesheet: clock-in prompts, a running balance that turns into holidays, and sick or holiday days booked whole or half right on the tile."
-    version: "2.12"
+    version: "2.13"
     license: "MIT"
     category: "productivity"
   }
@@ -2082,7 +2082,7 @@ widget "timesheet" {
                   align: center
                   gap: 8
                   padding: [2, 0, 0, 0]
-                  Text { text: "auto save: Automatically save after any change"; style: body; color: foreground; weight: 1; maxLines: 1 }
+                  Text { text: "Auto save: Automatically save after any change"; style: body; color: foreground; weight: 1; maxLines: 2 }
                   Box {
                     width: 24
                     height: 24
