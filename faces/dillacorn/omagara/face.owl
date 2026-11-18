@@ -2871,7 +2871,9 @@ face "Omagara" {
                   gap: 6
                   padding: [8, 7]
                   align: center
-                  background: alpha(surface, 0.48)
+                  // Music shortcuts inherit the media shade visibility and
+                  // opacity; All Shades OFF must leave no independent chip.
+                  background: cfg.shadeMediaCard ? noticeCardShade : transparent
                   radius: cfg.roundAppLabels ? 8 : 0
                   onTap: androidApp(a.key)
                   if a.icon != null && a.icon != "" {
