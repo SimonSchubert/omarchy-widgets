@@ -190,6 +190,8 @@ face "Omagara" {
   state homeEditOriginalMusicAreaSize = 0
   // Quick shade edits belong to the same Save/Cancel session as Home layout.
   state homeEditOriginalShadePrefs = {}
+  // Temporary snapshot for the reversible All shades shortcut.
+  state homeShadeAllRestore = {}
   state alphabetRailShift = 0 persist
   state headerSpacing = 0 persist
   state noticeSpacing = 0 persist
@@ -241,6 +243,7 @@ face "Omagara" {
     pinLayoutMigrationDone = true
   }
   let allRounded = all(roundingKeys, k => get(cfg, k) == true)
+  let allShadesHidden = all(quickShadeToggles, item => get(cfg, item.key) == false)
   let anyRounded = any(roundingKeys, k => get(cfg, k) == true)
   // OWL cannot sample wallpaper brightness; explicit overrides keep text legible.
   // The custom #RRGGBB setting is validated before rendering.
@@ -1883,6 +1886,7 @@ face "Omagara" {
                homeEditOriginalMusicAreaExpanded = musicAreaExpanded
                homeEditOriginalMusicAreaSize = musicAreaSize
               homeEditOriginalShadePrefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(cfg, item.key)), {})
+              homeShadeAllRestore = {}
             }
             layoutEditMode = "home"
             moveMode = "pin"
@@ -2008,6 +2012,7 @@ face "Omagara" {
         musicAreaExpanded = homeEditOriginalMusicAreaExpanded
         musicAreaSize = homeEditOriginalMusicAreaSize
         prefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(homeEditOriginalShadePrefs, item.key, get(defaults, item.key))), prefs)
+        homeShadeAllRestore = {}
         moveMode = ""
         moveKey = ""
         moveLetter = ""
@@ -2033,6 +2038,7 @@ face "Omagara" {
           pinnedLayouts = pinDraftLayouts
           pinnedAppKeys = pinDraftKeys
         }
+        homeShadeAllRestore = {}
         moveMode = ""
         moveKey = ""
         moveLetter = ""
@@ -2105,7 +2111,10 @@ face "Omagara" {
       border: 1
       borderColor: alpha(accent, get(cfg, prefKey) ? 0.36 : 0.72)
       radius: cfg.roundAppLabels ? 7 : 0
-      onTap: prefs = set(prefs, prefKey, !get(cfg, prefKey))
+      onTap: {
+        homeShadeAllRestore = {}
+        prefs = set(prefs, prefKey, !get(cfg, prefKey))
+      }
       Canvas {
         size: 20
         path([[1, 10], [4, 6.5], [7, 4.5], [10, 4], [13, 4.5], [16, 6.5], [19, 10], [16, 13.5], [13, 15.5], [10, 16], [7, 15.5], [4, 13.5]], closed: true, stroke: primaryText, width: 1.5)
@@ -4158,6 +4167,46 @@ face "Omagara" {
           }
         }
       }
+      // Global shade visibility, anchored to the bottom-left of Home editing.
+      // Avoid overlap when Search controls are also on the left.
+      Box {
+        fill: true
+        align: bottomStart
+        padding: [screenLeft + 8, 0, 0, searchBottom + (controlSide == -1 ? 120 : 0)]
+        Box {
+          width: 140
+          height: 48
+          align: center
+          background: alpha(surface, 0.78)
+          border: 1
+          borderColor: alpha(accent, 0.50)
+          radius: cfg.roundAppLabels ? 7 : 0
+          onTap: {
+            if allShadesHidden {
+              // Restore the prior individual shade choices after all-off.
+              // If they were all already off, enable every shade instead.
+              prefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(homeShadeAllRestore, item.key, true)), prefs)
+              homeShadeAllRestore = {}
+            } else {
+              homeShadeAllRestore = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(cfg, item.key)), {})
+              prefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, false), prefs)
+            }
+          }
+          Row {
+            align: center
+            gap: 8
+            Canvas {
+              size: 20
+              path([[1, 10], [4, 6.5], [7, 4.5], [10, 4], [13, 4.5], [16, 6.5], [19, 10], [16, 13.5], [13, 15.5], [10, 16], [7, 15.5], [4, 13.5]], closed: true, stroke: primaryText, width: 1.5)
+              circle(10, 10, 3, stroke: primaryText, width: 1.5)
+              if allShadesHidden {
+                line(2, 18, 18, 2, stroke: accent, width: 2.2, cap: round)
+              }
+            }
+            Text { text: "All shades"; font: chosenFont; fontSize: 12; color: primaryText }
+          }
+        }
+      }
       // The Search shade eye sits beside Settings; Settings stays over ✓.
       Box {
         fill: true
@@ -4208,6 +4257,7 @@ face "Omagara" {
                homeEditOriginalMusicAreaExpanded = musicAreaExpanded
                homeEditOriginalMusicAreaSize = musicAreaSize
               homeEditOriginalShadePrefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(cfg, item.key)), {})
+              homeShadeAllRestore = {}
             layoutEditMode = "home"
             moveMode = ""; moveKey = ""; moveLetter = ""
             moveDragX = 0; moveDragY = 0; moveDragging = false
@@ -4651,6 +4701,7 @@ face "Omagara" {
                homeEditOriginalMusicAreaExpanded = musicAreaExpanded
                homeEditOriginalMusicAreaSize = musicAreaSize
               homeEditOriginalShadePrefs = reduce(quickShadeToggles, (m, item) => set(m, item.key, get(cfg, item.key)), {})
+              homeShadeAllRestore = {}
                   layoutEditMode = "home"; moveMode = ""; browsing = false; activeSide = 0; railHeld = false; close()
                 }
               }
