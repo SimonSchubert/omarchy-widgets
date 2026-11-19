@@ -33,13 +33,14 @@ Languages: English and Spanish (it follows the phone's language).
 
 ## Notes
 
-- Scores refresh every 30 seconds while the widget's page is on screen.
+- Scores refresh every 2 minutes while the widget's page is on screen.
 - The US leagues have standings, scores and news, but no scorers lists.
 - Some competitions have no standings or statistics; the widget says so.
 
 ## Release notes
 
-- **2.2**: reorder the favourite leagues.
+- **2.3**: reorder the favourite leagues; this guide.
+- **2.2**: scores refresh every 2 minutes instead of every 30 seconds, to save battery.
 - **2.1**: news tab, team tab, goals and assists, wins/draws/losses, live-only and my-team-only filters.
 - **2.0**: first version in the store.
 
@@ -78,6 +79,6 @@ Resultados en directo, clasificaciones, goleadores y noticias de 60 ligas, copas
 
 ## Notas
 
-- Los resultados se actualizan cada 30 segundos mientras la página del widget está en pantalla.
+- Los resultados se actualizan cada 2 minutos mientras la página del widget está en pantalla.
 - Las ligas de EE. UU. tienen clasificación, resultados y noticias, pero no listas de goleadores.
 - Algunas competiciones no tienen clasificación o estadísticas; el widget lo indica.
