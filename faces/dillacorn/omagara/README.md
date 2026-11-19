@@ -1,4 +1,13 @@
-# Omagara v1.9.2
+# Omagara v1.9.3
+
+## v1.9.3 performance test
+
+- **Worm entrance:** Reuse time-independent cosine coefficients, vertical contour points and cap angles during the 160 ms entrance and 110 ms return. Alphabet appearance, gestures, haptics and customization are unchanged.
+- **App list:** Choose the highest launch score in one pass and update the highlighted section without per-frame filtered lists. Scroll keyed rows under one shared offset and advance the virtualized window two rows at a time instead of five. Avoid allocating a filtered list to find the first visible row; skip per-row edge-fade arithmetic for fully opaque rows.
+- **Scroll feel:** Tune the same frame-independent fling integral for a gentler 3.1/s decay, a longer settle window and lower flick threshold. Drag remains 1:1 and both viewport modes share the exact same behavior. Test on-device against Niagara before treating the feel as finalized.
+- **Engine:** Keep the 60 FPS OWL cap and slow-frame governor intact. Phone testing is required before treating frame pacing as improved.
+
+
 
 Niagara-inspired OWL 21 home face for [Omalauncher](https://github.com/SimonSchubert/omalauncher). No additional packages required.
 
