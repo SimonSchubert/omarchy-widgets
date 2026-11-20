@@ -427,11 +427,12 @@ face "Omagara" {
   // The fixed touch rail does not move; only its displayed letters do.
   let railUpperReach = max(0, railTop + railStep / 2 - screenTop - 10)
   let railLowerReach = max(0, (tileHeight ?? 800) - screenInset - 10 - (railTop + railPaintHeight))
-  // Animate only the 160ms curve entrance and 110ms release return.
+  // 200ms eased entrance softens the first-frame jump at 60 FPS without delaying direct finger tracking.
+  // The 110ms release and all touch/scroll geometry stay unchanged.
   let railEnterAge = railEntering ? max(0, time - railEnterStart) : 0
-  let railEnterT = railEntering ? clamp(railEnterAge / 0.16, 0, 1) : 1
-  let railEnterEase = 1 - pow(1 - railEnterT, 3)
-  let railEnterDone = railEntering && railEnterAge >= 0.16
+  let railEnterT = railEntering ? clamp(railEnterAge / 0.20, 0, 1) : 1
+  let railEnterEase = sin(rad(90 * railEnterT))
+  let railEnterDone = railEntering && railEnterAge >= 0.20
   on railEnterDone { if value { railEntering = false } }
   let railReturnAge = railReturning ? max(0, time - railReturnStart) : 0
   // Keep the approved 110ms release animation regardless of flick direction.
