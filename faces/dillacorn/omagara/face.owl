@@ -3886,10 +3886,10 @@ face "Omagara" {
             appElastic = 0
             if advanced {
               appTracking = true
-              // Haptics are independent of the worm's letter-change setting.
+              // OWL 21 supports haptic() with default system strength; separate from worm feedback.
               // Cap pulses on fast drags, and never vibrate against an edge.
               if cfg.staticScrollVibrate && time - staticLastHaptic >= 0.05 {
-                haptic("light")
+                haptic()
                 staticLastHaptic = time
               }
             }
@@ -4059,10 +4059,10 @@ face "Omagara" {
             appElastic = 0
             if advanced {
               appTracking = true
-              // Haptics are independent of the worm's letter-change setting.
+              // OWL 21 supports haptic() with default system strength; separate from worm feedback.
               // Cap pulses on fast drags, and never vibrate against an edge.
               if cfg.staticScrollVibrate && time - staticLastHaptic >= 0.05 {
-                haptic("light")
+                haptic()
                 staticLastHaptic = time
               }
             }
@@ -5121,7 +5121,7 @@ face "Omagara" {
                     Button { text: (cfg.staticScrollStep == stepChoice ? "✓ " : "") + stepChoice; onTap: prefs = set(prefs, "staticScrollStep", stepChoice) }
                   }
                 }
-                Text { text: "The app list jumps one step per half-row of finger movement. Choose how many rows each jump travels. Default: ½ row for smaller steps. Static mode stops fling and edge bounce; optional light vibration fires as steps advance. Alphabet worm gestures and app editing are unchanged."; font: chosenFont; fontSize: 12; color: secondaryText }
+                Text { text: "The app list jumps one step per half-row of finger movement. Choose how many rows each jump travels. Default: ½ row for smaller steps. Static mode stops fling and edge bounce; optional haptic feedback fires as steps advance. Alphabet worm gestures and app editing are unchanged."; font: chosenFont; fontSize: 12; color: secondaryText }
               }
               Text { text: "When the alphabet is hidden, notifications, music and the content-aligned header center automatically. The chosen alphabet edge still opens it; opposite-edge gestures are optional."; font: chosenFont; fontSize: 12; color: secondaryText }
               Text { text: "Haptic feedback"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
