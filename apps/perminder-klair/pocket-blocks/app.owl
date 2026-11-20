@@ -133,7 +133,9 @@ app "pocket blocks" {
         let side = rep == "left" ? (ok[0] ? -1 : 0) : rep == "right" ? (ok[1] ? 1 : 0) : 0
         if (rep == "left" || rep == "right") && side == 0 { rep = "" }
         let nx = px + side
-        let falls = rep == "down" || g + 1 >= speed
+        // A piece resting on something locks on the next tick, an eighth of a second, rather than
+        // waiting out the gravity step, so it can't still slide after it has landed.
+        let falls = rep == "down" || g + 1 >= speed || !ok[2]
         let fast = rep == "down"
         g = falls ? 0 : g + 1
         if side != 0 { px = nx }
