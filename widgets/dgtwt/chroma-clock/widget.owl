@@ -1,7 +1,7 @@
 widget "Chroma Clock" {
   meta {
     owl: 19
-    description: "A digital clock with morphing digits, animated gradients, and customizable colors and display options."
+    description: "Digits smoothly morph at each tick as gradients drift behind them. Outlines adapted from Adnan A M's TimelyTextView, inspired by Sriram Ramasubramanian's Number Tweening."
     version: "1.0"
     license: "Apache-2.0"
     category: "time"
