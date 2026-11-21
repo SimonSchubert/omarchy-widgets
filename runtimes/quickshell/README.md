@@ -113,8 +113,15 @@ Where it differs, because Android is not here:
   reports that there is none. **pickImages()** reports that there are no phone
   photos to pick.
 - **ws(...)** sources don't connect: they stay null, `send(...)` goes nowhere
-  and `on … each` never runs. `pin:` is taken and not checked: a request goes
-  out with the system's certificates, which a server with one of its own fails.
+  and `on … each` never runs. A request with `pin:` is not sent: curl
+  can pin a public key, not a certificate, so the check can't be made here,
+  and the request says so instead of going out unchecked.
+- **Requests and commands are bounded**, since every widget shares the shell:
+  a widget has 4 requests out at a time and 32 waiting, 8 `run(...)` commands
+  at a time, and `every frame { }` may act (run, post, refresh, url, sound...)
+  8 times at once and 4 times a second over time. What is past a bound is
+  left out and named in the widget's errors. A mesh's smooth normals stop
+  averaging after 4 million faces looked at, the rest taking their face's own.
 - **strings** and `lang()` take the language of Qt's locale, as the launcher
   takes the phone's.
 - **onPull** never runs: a desktop list is scrolled, not pulled.
