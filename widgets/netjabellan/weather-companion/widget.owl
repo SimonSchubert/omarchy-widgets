@@ -1,9 +1,10 @@
 widget "Weather companion" {
-  meta { owl: 19; description: "A pixel-art soldier dresses for your local weather. Tap for hourly and daily forecasts."; version: "5.0"; license: "MIT"; category: "world" }
+  meta { owl: 19; description: "A pixel-art soldier dresses for your local weather. Tap for hourly and daily forecasts."; version: "1.1"; license: "MIT"; category: "world" }
   requires { pacman: [] }
 
   strings {
     en {
+      gearThemeLabel: (name, marker) => "Gear theme · ${name} ${marker}"
       placeLanguage: "en"
       title: "Weather companion"
       weather0: "Clear"
@@ -82,7 +83,6 @@ widget "Weather companion" {
       gustsShort: speed => "Gusts · ${speed} km/h"
       cooling: time => "Cooler around ${time}"
       relativeHumidity: percent => "${percent}% RH"
-      gearThemeLabel: (name, marker) => "Gear theme · ${name} ${marker}"
       cachedAt: time => "Cached data · ${time}"
       feelsAndRange: (feels, high, low) => "Feels like ${feels} · ${high} ${low}"
       windReading: suffix => "Wind${suffix}"
@@ -92,6 +92,7 @@ widget "Weather companion" {
       nextDays: count => "${count == 1 ? "Next day" : "Next ${count} days"}"
     }
     es {
+      gearThemeLabel: (name, marker) => "Tema del equipo · ${name} ${marker}"
       placeLanguage: "es"
       title: "Weather companion"
       weather0: "Despejado"
@@ -170,7 +171,6 @@ widget "Weather companion" {
       gustsShort: speed => "Rachas · ${speed} km/h"
       cooling: time => "Refresca hacia las ${time}"
       relativeHumidity: percent => "${percent}% HR"
-      gearThemeLabel: (name, marker) => "Tema del equipo · ${name} ${marker}"
       cachedAt: time => "Datos guardados · ${time}"
       feelsAndRange: (feels, high, low) => "Sens. ${feels} · ${high} ${low}"
       windReading: suffix => "Viento${suffix}"
@@ -182,7 +182,7 @@ widget "Weather companion" {
   }
   size: 3x2
   minSize: 2x2
-  fps: 6
+  fps: !modes.saver && (rain || snow) ? 8 : 6
 
   source modes = android.modes
   source now = clock every 1s
@@ -273,14 +273,10 @@ widget "Weather companion" {
   let coldProfile = coldOffset > 0
   let warmProfile = coldOffset < 0
   let outfitFeels = feels == null ? null : feels - coldOffset
+  let layerThresholds = [24, 16, 12, 7, 3, 0]
   // Keep each layer on until the apparent temperature rises one degree above its threshold.
-  let thermalTier = outfitFeels == null ? 0 :
-    outfitFeels < (armorTier >= 6 ? 1 : 0) ? 6 :
-    outfitFeels < (armorTier >= 5 ? 4 : 3) ? 5 :
-    outfitFeels < (armorTier >= 4 ? 8 : 7) ? 4 :
-    outfitFeels < (armorTier >= 3 ? 13 : 12) ? 3 :
-    outfitFeels < (armorTier >= 2 ? 17 : 16) ? 2 :
-    outfitFeels < (armorTier >= 1 ? 25 : 24) ? 1 : 0
+  let thermalTier = outfitFeels == null ? 0 : len(range(len(layerThresholds)).filter(i =>
+    outfitFeels < layerThresholds[i] + (armorTier > i ? 1 : 0)))
   on outfitFeels first { armorTier = thermalTier }
   let code = current.weather_code
   let night = solarHours ? solarClock < riseTime || solarClock >= setTime : current.is_day == 0 && code != null
@@ -375,12 +371,8 @@ widget "Weather companion" {
   let heavy = contains([55, 57, 65, 67, 75, 82, 86, 97, 99], code)
   let medium = contains([53, 63, 73, 81, 85, 95, 96], code)
   let clouds = code == 1 ? 1 : code == 2 ? 2 : code == 3 || rain || snow ? 3 : 0
-  let vest = storm || thermalTier >= 1
-  let plate = storm || thermalTier >= 2
   let neckWrap = storm || thermalTier >= 3
   let winter = storm || thermalTier >= 4
-  let insulated = thermalTier >= 5
-  let frostCape = thermalTier >= 6
   let headband = outfitFeels != null && outfitFeels >= 29
   let canteen = outfitFeels != null && outfitFeels >= 34
   let helmet = rain || snow || winter
@@ -404,18 +396,10 @@ widget "Weather companion" {
     ".khsssssshhk.", ".ksssksskskk.", ".kssSssssSsk.", "..ksssssssk..",
     "...kksskkk..."
   ]
-  let cap = [
-    "....kkkkk....", "..kkbbbbakk..", ".kbbbbbbaadk.", "kbbbbbaaaaadk",
-    "kaaaaaaaaaadk", ".kdkkkkkkkdk."
-  ]
   let body = [
     "....kkkkk....", "..kktTTttkk..", ".ktttTTttttk.", "kttktttttkttk",
     "kssktttttkssk", ".kkkgggggkkk.", "...ktttttk...",
     "...kttkttk...", "...kttkttk...", "..kggkkkggk..", "..kkkkkkkkk.."
-  ]
-  let armor = [
-    "....kkkkk....", "..kbbabbadk..", ".kbbabbbaddk.", "kdbkabbbdkddk",
-    ".kkkabbdkkk..", "...kabddk...."
   ]
   let gearThemes = [
     {id: "classic", name: str.classic},
@@ -424,33 +408,16 @@ widget "Weather companion" {
     {id: "samurai", name: str.samurai},
     {id: "space", name: str.astronaut}
   ]
-  let gearName = (find(gearThemes, item => item.id == gearTheme)).name ?? str.classic
   let gearStyles = {
     viking: {
       tunic: "#765039", vest: "#4E5D53", trim: "#D9AC6B", detail: "#AF8056",
       light: "#EAD4A1", metal: "#A7A7A2", shade: "#5A626B", accent: "#C58C4A",
-      scarf: "#783F38", scarfLight: "#CA6755", cape: "#795745",
-      cap: [
-        ".....kkk.....", "...kkbabkk...", "..kdbbabbdk..", ".kdbbbabbbdk.",
-        ".kccccccccck.", ".kd...a...dk.", "..k...d...k.."
-      ],
-      plate: [
-        "...kkccckk...", "..kcdbbdckk..", ".kcbbabbddck.", "kcbkabbbdkdck",
-        ".kkkbdabkkk..", "...kccbbk...."
-      ]
+      scarf: "#783F38", scarfLight: "#CA6755", cape: "#795745"
     },
     modern: {
       tunic: "#787949", vest: "#4C5940", trim: "#C6B178", detail: "#8B9163",
       light: "#CACE9B", metal: "#7A845B", shade: "#4B5843", accent: "#A29B64",
       scarf: "#606A47", scarfLight: "#A5AF78", cape: "#4F624E",
-      cap: [
-        "....kkkkkk...", "..kkbbbbbdk..", ".kbcbbbdbddk.", ".kbbabbbdddk.",
-        "kbbbbcdddddk.", "kkkkkkkkkkdk.", ".........dkk."
-      ],
-      plate: [
-        "...kdddddkk..", "..kdbabbdkk..", ".kddcacacddk.", "kddkccccdkddk",
-        ".kkkdcdckkk..", "...kdddk....."
-      ],
       uniform: [
         "....kkkkk....", "..kkmTTmmkk..", ".kmtmTTmttmk.", "kmtkttmttktmk",
         "ksskmtmmtkssk", ".kkkgggggkkk.", "...kmtmtmk...",
@@ -461,14 +428,6 @@ widget "Weather companion" {
       tunic: "#3D486C", vest: "#493F64", trim: "#D4B287", detail: "#646491",
       light: "#F1C47B", metal: "#A84C58", shade: "#4C2D46", accent: "#DD775E",
       scarf: "#586A90", scarfLight: "#A6A8CF", cape: "#4E3D64",
-      cap: [
-        "....a...a....", "....aakaa....", "...kkacakkk..", "..kbbbbbbbdk.",
-        ".kccccccccddk", "kddk.....kddk", "kcc.......cck", ".kd.......dk."
-      ],
-      plate: [
-        "...kccccck...", ".kcbbbbbbcdk.", "kcakccccdkack",
-        "kddkabbbdkddk", ".kckcccdkck..", "...kbbddk...."
-      ],
       uniform: [
         "....kkkkk....", "..kkTttTtkk..", ".kmtTTmtttmk.", "kmtktmTTtkmtk",
         "ksskmttTTkssk", ".kkkgggggkkk.", "...kmtmtmk...",
@@ -479,15 +438,6 @@ widget "Weather companion" {
       tunic: "#C6BEA8", vest: "#929EA8", trim: "#F79267", detail: "#F5E6C8",
       light: "#F9EED3", metal: "#DAD8C5", shade: "#778DA4", accent: "#62B8C4",
       scarf: "#B96956", scarfLight: "#F2A478", cape: "#788396",
-      cap: [
-        "....kkkkk....", "..kkabbbbkk..", ".kabccccccbk.", "kac........bk",
-        "kac........bk", "kb.........bk", "kb.........bk", ".kb.......bk.",
-        "..kccccccck..", "...kkkkkkk..."
-      ],
-      plate: [
-        "...kkkkkkk...", "..kbbbbbbdk..", ".kbacacacbdk.", "kdbkbbbbbkdck",
-        ".kkkcdcddkk..", "...kbbddk...."
-      ],
       uniform: [
         "....kkkkk....", "..kkmTTmmkk..", ".kmmTTTmmttk.", "kmtkmmtmtktmk",
         "ksskmtmmtkssk", ".kkkgggggkkk.", "...kmtmtmk...",
@@ -495,12 +445,142 @@ widget "Weather companion" {
       ]
     }
   }
-  let gear = get(gearStyles, gearTheme)
-  let suitArt = gear.uniform ?? body
-  let armorArt = gear.plate ?? armor
-  let helmetArt = gear.cap ?? cap
-  let scarfPalette = { r: gear.scarf ?? "#AA494D", R: gear.scarfLight ?? "#E4756A" }
-
+  let gearName = (find(gearThemes, item => item.id == gearTheme)).name ?? str.classic
+  // Indexed 2× sprites exported in assets/weather-companion/equipment-2x.
+  let equipment2x = {
+    classic: {
+      helmet: [
+        "........kkkkkkkkkk........", "........kkkkkkkkkk........", "....kkkkaaaaaaaaaakkkk....",
+        "....kkkkbbbbbbbbaakkkk....", "..kkaaaabbbbbbbbaaaaddkk..", "..kkbbbaaabbbbbbaaaaddkk..",
+        "kkaabbbbbbbbaaaaaaaaaaddkk", "kkbbbbbbbbbbaaaaaaaaaaddkk", "kkaaaaaaaaaaaaaaaaadadddkk",
+        "kkaaaaaaaaaaaabbbbbbbbddkk", "..kkddkkkkkkkkkkkkkkddkk..", "..kkddkkkkkkkkkkkkkkddkk.."
+      ],
+      armor: [
+        "........kkkkkkkkkk........", "........kkkkkkkkkk........", "....kkbbaaaaaaaaaaddkk....",
+        "....kkbbbbaabbbbaaddkk....", "..kkaabbaabbbbbbaaddddkk..", "..kkbbbaaabbbbbbbbadddkk..",
+        "kkddbbkkaabbbbbbddkkddddkk", "kkddbbkkaabbbbbbddkkddddkk", "..kkkkkkaadbbbddkkkkkk....",
+        "..kkkkkkaabbbaddkkkkkk....", "......kkaabbddddkk........", "......kkaabbddddkk........"
+      ]
+    },
+    viking: {
+      helmet: [
+        "..........kkkkkk..........", "..........kkkkkk..........", "......kkkkaaaaaakkkk......",
+        "......kkkkbbaabbkkkk......", "....kkddaabbaabbaaddkk....", "....kkddbbbbaabbbbddkk....",
+        "..kkddbbbbbbaabbbbbbddkk..", "..kkddbbbbbbaabbbbbbddkk..", "..kkcccccccccccccccccckk..",
+        "..kkcacccacccacccacccakk..", "..kkdd......aa......ddkk..", "..kkdd......aa......ddkk..",
+        "....kk......dd......kk....", "....kk......dd......kk...."
+      ],
+      armor: [
+        "......kkkkcccccckkkk......", "......kkkkcccccckkkk......", "....kkccddbbbbddcckkkk....",
+        "....kkccddbbbbddcckkkk....", "..kkccbbbbaabbbbddddcckk..", "..kkccbbabaaabbbadddcckk..",
+        "kkccbbkkaabbbbbbddkkddcckk", "kkccbbkkaaabbbabddkkddcckk", "..kkkkkkbbddaabbkkkkkk....",
+        "..kkkkkkbbddaabbkkkkkk....", "......kkccccbbbbkk........", "......kkccccbbbbkk........"
+      ]
+    },
+    modern: {
+      helmet: [
+        "........kkkkkkkkkkkk......", "........kkkkkkkkkkkk......", "....kkkkaaaaaaaaaaddkk....",
+        "....kkkkbbbbbbbbbbddkk....", "..kkaaccbbbbbbddbbddddkk..", "..kkbbccddbbbbddbbddddkk..",
+        "..kkbbbbaabbbbbdddddddkk..", "..kkbbbbaabbbbbbddddddkk..", "kkaabbbbbbccddddddddddkk..",
+        "kkbbbbbbbbccddddddddddkk..", "kkkkkkkkkkkkkkkkkkkkddkk..", "kkkkkkkkkkkkkkkkkkkkddkk..",
+        "..................ddkkkk..", "..................ddkkkk.."
+      ],
+      armor: [
+        "......kkddddddddddkkkk....", "......kkddddddddddkkkk....", "....kkddbbaabbbbddkkkk....",
+        "....kkddbbaabbbbddkkkk....", "..kkddddccaaccaaccddddkk..", "..kkdddaccaaccaaccddddkk..",
+        "kkddddkkccccccccddkkddddkk", "kkddddkkcccacccaddkkddddkk", "..kkkkkkddccddcckkkkkk....",
+        "..kkkkkkddcaddcakkkkkk....", "......kkddddddkk..........", "......kkddddddkk.........."
+      ]
+    },
+    samurai: {
+      helmet: [
+        "........aa......aa........", "........aa......aa........", "........aaaakkaaaa........",
+        "........aaaakkaabb........", "......kkkkaaccaakkkkkk....", "......kkkkaaccaakkkkkk....",
+        "....kkaaaabbbbbbaabbddkk..", "....kkbbbbbbbbbbbbbbddkk..", "..kkccccccccccccccccddddkk",
+        "..kkaccaccaccaccaccaddadkk", "kkddddkk..........kkddddkk", "kkddddkk..........kkddddkk",
+        "kkcccc..............cccckk", "kkcccc..............cccckk", "..kkdd..............ddkk..",
+        "..kkdd..............ddkk.."
+      ],
+      armor: [
+        "......kkcccccccccckk......", "......kkcccccccccckk......", "..kkccaabbbbbbbbbbccddkk..",
+        "..kkccbbbbbbbbbbbbccddkk..", "kkccaakkcaccccccadkkaacckk", "kkccaakkccccccccddkkbbcckk",
+        "kkdddakkaabbbbbbadkkadddkk", "kkddddkkaabbbbbbddkkddddkk", "..kkcakkcaccccddkkcckk....",
+        "..kkcckkccccccddkkcckk....", "......kkbbbbddddkk........", "......kkbbbbddddkk........"
+      ]
+    },
+    space: {
+      helmet: [
+        "........kkkkkkkkkk........", "........kkkkkkkkkk........", "....kkkkaaaaaaaaaakkkk....",
+        "....kkkkaabbbbbbbbkkkk....", "..kkaaaaccccccccccccbbkk..", "..kkaabbccccccccccccbbkk..",
+        "kkaaca................bbkk", "kkaacc................bbkk", "kkaacc................bbkk",
+        "kkaacc................bbkk", "kkbb..................bbkk", "kkbb..................bbkk",
+        "kkbb..................bbkk", "kkbb..................bbkk", "..kkbb..............cbkk..",
+        "..kkbb..............bbkk..", "....kkcccccccccccccckk....", "....kkcccccccccccccckk....",
+        "......kkkkkkkkkkkkkk......", "......kkkkkkkkkkkkkk......"
+      ],
+      armor: [
+        "......kkkkkkkkkkkkkk......", "......kkkkkkkkkkkkkk......", "....kkaaaaaaaaaaaaddkk....",
+        "....kkbbbbbbbbbbbbddkk....", "..kkaaaaccaaccaaccbbddkk..", "..kkbbaaccaaacaaccabddkk..",
+        "kkddbbkkabbbbbabbbkkadcckk", "kkddbbkkbbbbbbbbbbkkddcckk", "..kkkkkkccddccddddkkkk....",
+        "..kkkkkkccddccddddkkkk....", "......kkbbbbddddkk........", "......kkbbbbddddkk........"
+      ]
+    }
+  }
+  let accessories2x = {
+    canteen: [
+      "...kkk...", "..kaaak..", "..kddak..",
+      "...kdk...", "..kbbdk..", ".kblbbdk.",
+      "kbbllbbdk", "kbbbbdbdk", "kdddbdddk",
+      ".kkkkkkk."
+    ],
+    band: [
+      "....kkrrrrrrrrrrrrrkk.....", "...krrRRrrrrrRRrrrrrrk....", "...krRRrrrrrrrrrrrRRrk....",
+      "....kkkkkrrrrrrrrkkkk....."
+    ],
+    visor: [
+      "......kkkkkkkkkkkkkk......", "....kkaaaaaaaaaaaaaakk....", "...kaaaallaaaaaaadddddk...",
+      "..kddaaaaaaadddddddddddk..", ".............kkddddddddkk.", "...............kkkkkkkkkk."
+    ],
+    scarf_short: [
+      "........krrrrrrrrrk.......", ".......krRRRRrrrrrrk......", "........krrrrrRRRrk.......",
+      "..............kRRrk.......", "...............krrk.......", "................kk........"
+    ],
+    scarf_long: [
+      "......krrrrrrrrrrrrrk.....", ".....krRRRRRRrrrrrrrrk....", "......krrrrrrrRRrrrrk.....",
+      ".............krRRrk.......", ".............krrRrk.......", "..............krRrk.......",
+      "..............krrrk.......", "...............krk........", "...............rrr........"
+    ],
+    scarf_carried: [
+      "..kRRRRRkk..", ".krRRRRrrrk.", "krrrRRrrrrrk",
+      ".krrrrrrrkk.", "..kkkkkrk...", ".....krRk...",
+      ".....krRrk..", "......krRk..", "......krRk..",
+      "......krrk..", "......rrr...", "......r.r..."
+    ],
+    boots: [
+      "......wwww........wwww....", ".....wlwggw......wlwggw...", "....kgggggk......kgggggk..",
+      "....kgggggk......kgggggk..", "...kggggggk......kggggggk.", "...kkkkkkkk......kkkkkkkk."
+    ],
+    mittens: [
+      ".kkk................kkk...", "kggwk..............kwggk..", "kgwgk..............kgwgk..",
+      ".kkk................kkk..."
+    ],
+    backpack: [
+      "..kkkkkkkkk...", ".kaabbbbbddk..", "kabbcbbbbdddk.",
+      "kabbbbbbbdddk.", "kbbdkkkbbdddk.", "kbbk...kbdddk.",
+      "kbbk...kbddddk", "kbbdkkkbbddddk", "kccccccbbddddk",
+      ".kccbcccddddk.", "..kkkkkkkkkk.."
+    ],
+    cape: [
+      "......kkkkkkkkkkkkkkkkkkkkkk......", "......kkkkkkkkkkkkkkkkkkkkkk......", "....kkcccccccccccccccccccccckk....",
+      "....kkcccccccccccccccccccccckk....", "..kkcccccccccccccccccccccccccckk..", "..kkcccccccccccccccccccccccccckk..",
+      "..kkccwccccccccccccccccccccccckk..", "..kkcccccccccccccccccccccccccwkk..", "..kkwcddddddccccccccddddddcckk....",
+      "..kkccddddddccccccccddddddcwkk....", "kkccddwdddccccccccccccddddddcckk..", "kkccddddddccccccccccccddddddcwkk..",
+      "kkccwdddddccccccccccccddddddcckk..", "kkccddddddccccccccccccdddddwcckk..", "kkccddwdddccccccccccccddddddcckk..",
+      "kkccddddddccccccccccccddddddcwkk..", "kkccwcddddccccccccccccddddcccckk..", "kkccccddddccccccccccccddddcwcckk..",
+      "..kkwwwwkkkkkkkkkkkkkkkkwwwwkk....", "..kkwwwwkkkkkkkkkkkkkkkkwwwwkk....", "....kkkk................kkkk......",
+      "....kkkk................kkkk......"
+    ]
+  }
   let cloudArt = [
     "....llll....", "..llccccll..", ".lccccccccl.", "lcccccccccdl",
     "lccccddddddl", ".dddddddddd."
@@ -536,6 +616,17 @@ widget "Weather companion" {
     Canvas {
       fill: width
       weight: 1
+      let gear = get(gearStyles, gearTheme)
+      let suitArt = gear.uniform ?? body
+      let equipped = get(equipment2x, gearTheme) ?? equipment2x.classic
+      let armorArt = equipped.armor
+      let helmetArt = equipped.helmet
+      let scarfPalette = { k: "#432B3D", r: gear.scarf ?? "#AA494D", R: gear.scarfLight ?? "#E4756A" }
+      let vest = storm || thermalTier >= 1
+      let hasArmor = storm || thermalTier >= 2
+      let insulated = thermalTier >= 5
+      let frostCape = thermalTier >= 6
+
       let px = max(1, min(width / (compact ? 27 : 34), height / 23))
       let x = floor((width - 13 * px) / 2)
       let holding = !storm && activePose == "hold" && windy && helmet
@@ -544,7 +635,10 @@ widget "Weather companion" {
       let crouching = !storm && activePose == "crouch"
       let bodyY = height - 21 * px
       let y = bodyY + (crouching ? px : 0)
-      let jitter = storm && activePose == "shiver" ? floor(time * 6) % 3 - 1 : 0
+      // Fade particles at the boundaries so they can wrap without flashing.
+      let animateWeather = !modes.saver && (rain || snow || windy)
+      let weatherTime = animateWeather ? time : 0
+      let jitter = storm && activePose == "shiver" ? sin(time * 12.5664) * 0.3 : 0
       let soldierX = x + jitter * px
       let cloudPalette = { l: storm ? "#6C6C85" : night ? "#788BAE" : "#E0EDF0", c: storm ? "#53546E" : night ? "#526685" : "#C2D4DE", d: storm ? "#41425D" : night ? "#364968" : "#A1B8C8" }
       let tunic = coldProfile ? (vest ? "#793D53" : "#A65D64") :
@@ -619,23 +713,28 @@ widget "Weather companion" {
 
       if rain || snow {
         for i in range(heavy ? 36 : medium ? 24 : 13) {
-          let dropX = clamp(((i * 31) % 103) * width / 103, 2 * px, width - 2 * px)
-          let dropY = (7 + (i * 7) % 14) * px
+          let phase = ((i * 5) % 14 + weatherTime * (snow ? 2 : drizzle ? 4 : 7)) % 14
+          let fade = animateWeather ? clamp(min(phase, 14 - phase) / 1.6, 0, 1) : 1
+          let drift = windy ? windSide * (phase - 7) * 0.34 : snow ? sin(phase * 0.6 + i) * 0.75 : 0
+          let dropX = clamp(((i * 31) % 103) * width / 103 + drift * px, 2 * px, width - 2 * px)
+          let dropY = (7 + phase) * px
           if snow || (hail && i % 3 == 0) {
-            rect(dropX, dropY, 0.75 * px, 0.75 * px, fill: "#F1F7FC")
+            rect(dropX, dropY, 0.75 * px, 0.75 * px, fill: alpha("#F1F7FC", fade))
             if snow && code != 77 && i % 3 == 0 {
-              rect(dropX - px / 2, dropY + px / 4, 1.75 * px, px / 3, fill: "#E0F1FA")
+              rect(dropX - px / 2, dropY + px / 4, 1.75 * px, px / 3, fill: alpha("#E0F1FA", fade))
             }
           } else {
-            line(dropX, dropY, dropX + (windy ? windSide * 1.25 * px : drizzle ? 0 : -px / 2), dropY + (drizzle ? 0.65 : 1.8) * px, stroke: icy ? "#C9F4FF" : "#8CC6F4", width: max(1, px / 3))
+            line(dropX, dropY, dropX + (windy ? windSide * 1.25 * px : drizzle ? 0 : -px / 2), dropY + (drizzle ? 0.65 : 1.8) * px, stroke: alpha(icy ? "#C9F4FF" : "#8CC6F4", fade), width: max(1, px / 3))
           }
         }
       }
       if windy {
         for i in range(4) {
-          let streakX = ((i * 27 + 12) % 95) * width / 100
+          let streakLength = (gust >= 50 ? 5 : 3) * px
+          let gustShift = animateWeather ? (sin(weatherTime * 2.7 + i * 0.7) - sin(i * 0.7)) * windSide * px : 0
+          let streakX = clamp(((i * 27 + 12) % 95) * width / 100 + gustShift, 0, width - streakLength)
           let streakY = (9 + i * 2) * px
-          rect(streakX, streakY, (gust >= 50 ? 5 : 3) * px, max(1, px / 4), fill: alpha("#E0F3FA", 0.55))
+          rect(streakX, streakY, streakLength, max(1, px / 4), fill: alpha("#E0F3FA", 0.55))
         }
       }
       if fog || haze {
@@ -648,17 +747,11 @@ widget "Weather companion" {
       }
 
       if frostCape {
-        sprite([
-          "...kkkkkkkkkkk...", "..kccccccccccck..", ".kccccccccccccck.",
-          ".kccccccccccccck.", ".kcdddccccdddck.", "kcdddccccccdddck",
-          "kcdddccccccdddck", "kcdddccccccdddck", "kccddccccccddcck",
-          ".kwwkkkkkkkkwwk.", "..kk........kk.."
-        ], soldierX - 1.5 * px, bodyY + 8 * px, px,
+        sprite(accessories2x.cape, soldierX - 1.5 * px, bodyY + 8 * px, px / 2,
           palette: { k: "#232639", c: gear.cape ?? (coldProfile ? "#874F63" : warmProfile ? "#4A7687" : "#585B79"), d: "#393D55", w: "#E7D8BB" })
       }
-      if gearTheme == "space" && plate {
-        sprite([".kkkk..", "kbbbdk.", "kabbdk.", "kbbbdk.", "kccddk.", ".kkkk.."],
-          soldierX - 2 * px, y + 8 * px, px, palette: steel)
+      if gearTheme == "space" && hasArmor {
+        sprite(accessories2x.backpack, soldierX - 2.5 * px, y + 8 * px, px / 2, palette: steel)
       }
       if crouching {
         sprite(take(suitArt, 7), soldierX, y + 8 * px, px, palette: uniform)
@@ -667,9 +760,9 @@ widget "Weather companion" {
         let uniformRows = raisedArm ? range(len(suitArt)).map(i => i >= 2 && i <= 5 ? sub(suitArt[i], 0, 10) : suitArt[i]) : suitArt
         sprite(uniformRows, soldierX, bodyY + 8 * px, px, palette: uniform)
       }
-      if plate {
-        let armorRows = raisedArm ? range(len(armorArt)).map(i => sub(armorArt[i], 0, 10)) : armorArt
-        sprite(armorRows, soldierX, y + 8 * px, px, palette: steel)
+      if hasArmor {
+        let armorRows = raisedArm ? range(len(armorArt)).map(i => sub(armorArt[i], 0, 20)) : armorArt
+        sprite(armorRows, soldierX, y + 8 * px, px / 2, palette: steel)
       }
       if winter {
         sprite(["...aakkkaa...", "...addaada..."], soldierX, bodyY + 14 * px, px, palette: steel)
@@ -694,24 +787,22 @@ widget "Weather companion" {
         }
       }
       if helmet {
-        sprite(helmetArt, soldierX, y - px, px, palette: steel)
+        sprite(helmetArt, soldierX - px / 2, y - px, px * 0.54, palette: steel)
       }
       if headband && !helmet {
-        sprite(["..rrrrrrrrr..", ".rRRRRrrrRRr."], soldierX, y + 3 * px, px,
-          palette: { r: "#36899C", R: "#72E3DE" })
+        sprite(accessories2x.band, soldierX, y + 3 * px, px / 2, palette: { k: "#245266", r: "#36899C", R: "#72E3DE" })
       }
       if canteen {
-        sprite([".aa.", ".dd.", "dbbd", "dbbd", ".dd."], soldierX - px, y + 11 * px, px,
-          palette: { a: "#F2E3BD", d: "#355362", b: "#65BDD0" })
+        sprite(accessories2x.canteen, soldierX - 1.5 * px, y + 11 * px, px * 0.55, palette: { k: "#273643", a: "#F2E3BD", d: "#355362", b: "#65BDD0", l: "#ACEDF0" })
       }
       if highUv && !helmet {
-        sprite(["..aaaaaaa....", ".adddddddda..", "........aaaa."], soldierX, y, px, palette: { a: "#F5CB78", d: "#8E5E45" })
+        sprite(accessories2x.visor, soldierX, y, px / 2, palette: { k: "#764733", a: "#F5CB78", d: "#8E5E45", l: "#FFE3A3" })
       }
       if carryHelmet && !raisedArm {
-        sprite(helmetArt, soldierX + 11 * px, y + 11 * px, px / 2, palette: steel)
+        sprite(helmetArt, soldierX + 10.5 * px, y + 10.5 * px, px * 0.29, palette: steel)
       }
       if carryScarf && !raisedArm {
-        sprite([".RRRR.", "RRrrrr", ".rrr..", "..rr..", "..rR..", "..rR..", "..rr.."], soldierX + 11 * px, y + 11 * px, px / 2, palette: scarfPalette)
+        sprite(accessories2x.scarf_carried, soldierX + 11 * px, y + 10.5 * px, px * 0.29, palette: scarfPalette)
       }
       if holding {
         sprite(["..ssk", "..ssk", "..tk.", "..tk.", "..tk.", ".ttk.", ".tk..", "ttk.."], soldierX + 9 * px, y + 2 * px, px, palette: uniform)
@@ -723,12 +814,16 @@ widget "Weather companion" {
         rect(soldierX + 12 * px, y + 6 * px, px / 2, px, fill: "#BCE9EF")
       }
       if neckWrap {
-        let scarf = winter ? ["...rrrrrrr...", "...rRRrrr....", ".......rr...."] : ["....rrrrr....", ".......RR...."]
-        sprite(scarf, soldierX, y + 8 * px, px, palette: scarfPalette)
+        let scarf = winter ? accessories2x.scarf_long : accessories2x.scarf_short
+        sprite(scarf, soldierX, y + 7.5 * px, px / 2, palette: scarfPalette)
       }
       if insulated {
-        sprite(["...w....w....", "..wgg..ggw..."], soldierX, bodyY + 17 * px, px,
-          palette: { w: "#D8C6A9", g: "#715D58" })
+        sprite(accessories2x.boots, soldierX, bodyY + 16.5 * px, px / 2,
+          palette: { k: "#282839", w: "#D8C6A9", g: "#715D58", l: "#FFF0D1" })
+        if !raisedArm {
+          sprite(accessories2x.mittens, soldierX, y + 11.5 * px, px / 2,
+            palette: { k: "#282839", w: "#D8C6A9", g: "#715D58" })
+        }
       }
       if !storm {
         if activePose == "blink" || activePose == "left" || activePose == "right" {
