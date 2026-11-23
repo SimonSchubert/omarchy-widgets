@@ -1,9 +1,17 @@
 widget "Weather companion" {
-  meta { owl: 19; description: "A pixel-art soldier dresses for your local weather. Tap for hourly and daily forecasts."; version: "1.1"; license: "MIT"; category: "world" }
+  meta { owl: 19; description: "A pixel-art soldier dresses for your local weather. Tap for hourly and daily forecasts."; version: "5.1"; license: "MIT"; category: "world" }
   requires { pacman: [] }
 
   strings {
     en {
+      choosePlace: "Choose a location"
+      searchPlace: "City or postal code · empty: auto"
+      searchingPlace: "Searching locations…"
+      noPlaces: "No matching locations."
+      placeSearchFailed: "Location search is unavailable."
+      loadingPlace: "Loading weather…"
+      placeLoadFailed: "Could not load the selected location."
+      locationCredit: "Location search data from GeoNames"
       gearThemeLabel: (name, marker) => "Gear theme · ${name} ${marker}"
       placeLanguage: "en"
       title: "Weather companion"
@@ -48,18 +56,14 @@ widget "Weather companion" {
       military: "Military"
       samurai: "Samurai"
       astronaut: "Astronaut"
-      allowLocation: "Allow location"
-      enableLocation: "Turn on location"
       weatherUnavailable: "Weather unavailable"
       cachedData: "Cached data"
-      locationExplanation: "Allow approximate location to see local weather."
-      grantLocation: "Grant location access"
+      grantLocation: "Allow automatic location"
       findingLocation: "Finding your location."
       locationSettings: "Location settings"
       coldSensitivity: "Cold sensitivity"
       lighterLayers: "Lighter layers"
       warmerLayers: "Warmer layers"
-      showingCached: "Showing cached data"
       humidity: "Humidity"
       precipToday: "Precipitation today"
       uvIndex: "UV index"
@@ -92,6 +96,14 @@ widget "Weather companion" {
       nextDays: count => "${count == 1 ? "Next day" : "Next ${count} days"}"
     }
     es {
+      choosePlace: "Elige una ubicación"
+      searchPlace: "Ciudad o código postal · vacío: auto"
+      searchingPlace: "Buscando ubicaciones…"
+      noPlaces: "No se encontraron ubicaciones."
+      placeSearchFailed: "La búsqueda de ubicaciones no está disponible."
+      loadingPlace: "Cargando el tiempo…"
+      placeLoadFailed: "No se pudo cargar la ubicación elegida."
+      locationCredit: "Datos de búsqueda de GeoNames"
       gearThemeLabel: (name, marker) => "Tema del equipo · ${name} ${marker}"
       placeLanguage: "es"
       title: "Weather companion"
@@ -136,18 +148,14 @@ widget "Weather companion" {
       military: "Militar"
       samurai: "Samurái"
       astronaut: "Astronauta"
-      allowLocation: "Dar ubicación"
-      enableLocation: "Activa la ubicación"
       weatherUnavailable: "Tiempo no disponible"
       cachedData: "Datos guardados"
-      locationExplanation: "Permite la ubicación aproximada para ver el tiempo local."
-      grantLocation: "Dar permiso de ubicación"
+      grantLocation: "Permitir ubicación automática"
       findingLocation: "Buscando tu ubicación."
       locationSettings: "Ajustes de ubicación"
       coldSensitivity: "Sensibilidad al frío"
       lighterLayers: "Menos abrigo"
       warmerLayers: "Más abrigo"
-      showingCached: "Mostrando datos guardados"
       humidity: "Humedad"
       precipToday: "Precipitación hoy"
       uvIndex: "Índice UV"
@@ -198,6 +206,19 @@ widget "Weather companion" {
   state gearMenu = false
   state savedWeather = null persist
   state savedPlace = null persist
+  state locationMode = null persist  // Adopt selections saved by the former mode switch.
+  state locationText = null persist
+  state manualPlace = null persist
+  state autoPoint = null persist
+  state autoCandidate = null
+  state forecastCandidate = null
+  state addressCandidate = null
+  state searchInput = null
+  state searchAt = 0
+  state searchQuery = ""
+  state searchPending = false
+  state searchReply = null
+  state searchDeadline = 0
 
   on now {
     if !modes.saver && floor(value) % 6 == 0 && pose == "normal" {
@@ -213,37 +234,144 @@ widget "Weather companion" {
 
   source solarClock = clock every 1m
   source here = android.location
-  source forecast = http(here.available ? "https://api.open-meteo.com/v1/forecast?latitude=${enc(fixed(here.lat, 2))}&longitude=${enc(fixed(here.lon, 2))}&timezone=auto&past_days=1&forecast_days=6&past_minutely_15=24&forecast_minutely_15=28&minutely_15=precipitation,snowfall,wind_gusts_10m&current=temperature_2m,apparent_temperature,is_day,weather_code,relative_humidity_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,visibility,pressure_msl&hourly=temperature_2m,apparent_temperature,wind_speed_10m,weather_code,precipitation_probability,is_day&daily=weather_code,temperature_2m_min,temperature_2m_max,precipitation_probability_max,precipitation_sum,sunrise,sunset,moonrise,moonset,moon_phase" : null) every 15m timeout 12s status json
+  let selectedText = locationText ?? (locationMode == "manual" ? manualPlace.name ?? "" : "")
+  let fieldText = searchInput ?? selectedText
+  let typedPlace = trim(fieldText)
+  let mode = selectedText == "" ? "auto" : "manual"
+  let wantedSearch = len(typedPlace) >= 2 && typedPlace != selectedText ? typedPlace : ""
+  // Adopt the point cached by earlier versions without asking people to choose it again.
+  let legacyCoords = split(savedWeather.key ?? "", ",")
+  let legacyPoint = savedWeather.mode == null && len(legacyCoords) == 2 ?
+    {lat: num(legacyCoords[0]), lon: num(legacyCoords[1])} : null
+  let acceptedPoint = autoPoint ?? (savedWeather.mode == "auto" ? savedWeather.point : legacyPoint)
+  let autoReading = mode == "auto" && here.available ? {lat: here.lat, lon: here.lon, stamp: here.time} : null
+  on mode {
+    if value == "auto" {
+      autoPoint = here.available ? {lat: here.lat, lon: here.lon} : null
+      autoCandidate = null
+    }
+  }
+  on autoReading first {
+    if acceptedPoint == null {
+      autoPoint = {lat: value.lat, lon: value.lon}
+    } else {
+      if autoPoint == null { autoPoint = acceptedPoint }
+      let north = (value.lat - acceptedPoint.lat) * 111
+      let east = ((value.lon - acceptedPoint.lon + 540) % 360 - 180) * 111 * cos(rad((value.lat + acceptedPoint.lat) / 2))
+      if north * north + east * east > 9 {
+        let candidateNorth = (value.lat - autoCandidate.lat) * 111
+        let candidateEast = ((value.lon - autoCandidate.lon + 540) % 360 - 180) * 111 * cos(rad((value.lat + autoCandidate.lat) / 2))
+        if autoCandidate != null && value.stamp > autoCandidate.stamp &&
+          candidateNorth * candidateNorth + candidateEast * candidateEast <= 2.25 {
+          autoPoint = {lat: value.lat, lon: value.lon}
+          autoCandidate = null
+        } else {
+          if autoCandidate == null || value.stamp > autoCandidate.stamp { autoCandidate = value }
+        }
+      } else {
+        autoCandidate = null
+      }
+    }
+  }
+  when mode != "auto" || !here.available { autoCandidate = null }
 
-  source placeLookup = http(here.available ? "https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${enc(fixed(here.lat, 2))}&longitude=${enc(fixed(here.lon, 2))}&localityLanguage=${enc(str.placeLanguage)}" : null) every 12h timeout 8s json
+  let requestedPlace = mode == "manual" ? manualPlace : here.granted ? acceptedPoint : null
+  let coordinateDigits = mode == "manual" ? 4 : 2
+  let coordinates = requestedPlace == null ? null : "${fixed(requestedPlace.lat, coordinateDigits)},${fixed(requestedPlace.lon, coordinateDigits)}"
+  let positionKey = coordinates == null ? null : mode == "manual" ? "manual:${manualPlace.id}:${coordinates}" : "auto:${coordinates}"
+  let needsAddress = mode == "auto" && positionKey != null
+  source locationForecast = http(requestedPlace != null ? "https://api.open-meteo.com/v1/forecast?latitude=${enc(fixed(requestedPlace.lat, coordinateDigits))}&longitude=${enc(fixed(requestedPlace.lon, coordinateDigits))}&timezone=auto&past_days=1&forecast_days=6&past_minutely_15=24&forecast_minutely_15=28&minutely_15=precipitation,snowfall,wind_gusts_10m&current=temperature_2m,apparent_temperature,is_day,weather_code,relative_humidity_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,visibility,pressure_msl&hourly=temperature_2m,apparent_temperature,wind_speed_10m,weather_code,precipitation_probability,is_day&daily=weather_code,temperature_2m_min,temperature_2m_max,precipitation_probability_max,precipitation_sum,sunrise,sunset,moonrise,moonset,moon_phase" : null) every 15m timeout 12s status json
+  source autoPlaceLookup = http(needsAddress ? "https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${enc(fixed(requestedPlace.lat, coordinateDigits))}&longitude=${enc(fixed(requestedPlace.lon, coordinateDigits))}&localityLanguage=${enc(str.placeLanguage)}" : null) every 12h timeout 8s status json
+  source placeSearch = http(len(searchQuery) >= 2 && (searchPending || wantedSearch == searchQuery) ?
+    "https://geocoding-api.open-meteo.com/v1/search?name=${enc(searchQuery)}&count=5&language=${enc(str.placeLanguage)}" : null) every 12h timeout 8s status json
 
-  let positionKey = here.available ? "${fixed(here.lat, 2)},${fixed(here.lon, 2)}" : null
-  on forecast first {
+  // Keep one search in flight so results always belong to their submitted query.
+  on wantedSearch first { searchAt = value == "" ? 0 : (now ?? solarClock) + 2s }
+  at searchAt {
+    if wantedSearch == "" || (searchReply.query == wantedSearch && searchReply.ok) {
+      searchAt = 0
+    } else {
+      if searchPending {
+        searchAt = now + 1s
+      } else {
+        let retry = searchQuery == wantedSearch
+        searchPending = true
+        searchDeadline = now + 12s
+        searchQuery = wantedSearch
+        searchAt = 0
+        if retry { refresh() }
+      }
+    }
+  }
+  on placeSearch first {
+    if len(searchQuery) >= 2 {
+      searchReply = {query: searchQuery, ok: value.ok, matches: value.out.results ?? []}
+      searchPending = false
+      searchDeadline = 0
+    }
+  }
+  at searchDeadline {
+    searchReply = {query: searchQuery, ok: false, matches: []}
+    searchPending = false
+    searchDeadline = 0
+  }
+  let searchHasReply = wantedSearch != "" && searchReply.query == wantedSearch &&
+    (!searchPending || searchQuery != wantedSearch)
+  let placeMatches = searchHasReply ? searchReply.matches : []
+
+  on locationForecast first {
     if positionKey != null && value.ok && value.out.current.temperature_2m != null &&
-      abs(value.out.latitude - here.lat) <= 0.3 && abs((value.out.longitude - here.lon + 540) % 360 - 180) <= 0.3 {
-      savedWeather = {key: positionKey, payload: value.out, received: solarClock ?? now}
+      abs(value.out.latitude - requestedPlace.lat) <= 0.3 && abs((value.out.longitude - requestedPlace.lon + 540) % 360 - 180) <= 0.3 {
+      forecastCandidate = {key: positionKey, payload: value.out, received: solarClock ?? now}
     }
   }
-  on placeLookup first {
-    if positionKey != null && value.latitude != null && value.longitude != null &&
-      abs(value.latitude - here.lat) <= 0.01 && abs(value.longitude - here.lon) <= 0.01 {
-      savedPlace = {key: positionKey, payload: value}
+  on autoPlaceLookup first {
+    if needsAddress && value.ok && value.out.latitude != null && value.out.longitude != null &&
+      abs(value.out.latitude - num(fixed(requestedPlace.lat, coordinateDigits))) < 0.0001 &&
+      abs((value.out.longitude - num(fixed(requestedPlace.lon, coordinateDigits)) + 540) % 360 - 180) < 0.0001 {
+      let municipality = trim(value.out.city ?? "")
+      let label = municipality != "" ? municipality : trim(value.out.locality ?? "")
+      addressCandidate = {key: positionKey, label: label}
     }
   }
-  let weather = here.granted && (!here.available || savedWeather.key == positionKey) ? savedWeather.payload : null
-  let place = here.granted && savedPlace.key == (positionKey ?? savedWeather.key) ? savedPlace.payload : null
-  let usingSaved = weather != null && (!here.available || !forecast.ok || savedWeather.received == null || solarClock - savedWeather.received > 30m)
-  let shortRangeFresh = weather != null && savedWeather.received != null && solarClock - savedWeather.received <= 1h
+  let autoLabel = addressCandidate.key == positionKey ? addressCandidate.label :
+    savedWeather.key == positionKey && savedWeather.mode == "auto" ? savedWeather.label : null
+  let addressReady = !needsAddress || autoLabel != null
+  let nextSnapshot = positionKey != null && forecastCandidate.key == positionKey && addressReady ? {
+    key: positionKey, mode: mode, payload: forecastCandidate.payload, received: forecastCandidate.received,
+    point: mode == "auto" ? {lat: requestedPlace.lat, lon: requestedPlace.lon} : null,
+    label: mode == "manual" ? manualPlace.name : autoLabel,
+    detail: mode == "manual" ? manualPlace.label : autoLabel
+  } : null
+  // Watch the responses, since the candidate snapshot can read the saved label.
+  let locationResponses = [forecastCandidate, addressCandidate]
+  on locationResponses first {
+    if nextSnapshot != null { savedWeather = nextSnapshot }
+  }
 
-  let locality = trim(place.locality ?? "")
-  let city = trim(place.city ?? "")
-  let placeName = locality != "" ? locality : city
-  let detailPlace = city != "" && lower(city) != lower(placeName) ? "${placeName}, ${city}" : placeName
+  // Keep both the displayed place and its weather attached to the same snapshot.
+  let weather = savedWeather.payload
+  let loadingLocation = positionKey != null && savedWeather.key != positionKey
+  let locationFailed = positionKey != null && ((locationForecast != null && !locationForecast.ok) ||
+    (loadingLocation && !addressReady && autoPlaceLookup != null && !autoPlaceLookup.ok))
+  let usingSaved = weather != null && (positionKey == null || locationFailed || savedWeather.received == null || solarClock - savedWeather.received > 30m)
+  let shortRangeFresh = weather != null && savedWeather.received != null && solarClock - savedWeather.received <= 1h
+  let legacyCity = savedPlace.key == savedWeather.key ? trim(savedPlace.payload.city ?? "") : ""
+  let legacyLocality = savedPlace.key == savedWeather.key ? trim(savedPlace.payload.locality ?? "") : ""
+  let placeName = savedWeather.label ?? (legacyCity != "" ? legacyCity : legacyLocality)
+  let detailPlace = savedWeather.detail ?? placeName
+  let detailStatus = wantedSearch != "" ?
+    (!searchHasReply ? str.searchingPlace : len(placeMatches) > 0 ? null : searchReply.ok ? str.noPlaces : str.placeSearchFailed) :
+    mode == "auto" && here.granted && !here.available && savedWeather.mode != "auto" ? str.findingLocation :
+    usingSaved ? (savedWeather.received == null ? str.cachedData : str.cachedAt(fmtTime(savedWeather.received, "d MMM · HH:mm", weather.timezone))) :
+    locationFailed ? str.placeLoadFailed : loadingLocation && weather == null ? str.loadingPlace :
+    typedPlace == "" && here.granted && !here.available && weather == null ? str.findingLocation : null
+
   let compact = (tileWidth ?? 180) < 155
   let locationSize = compact ? 8 : 9
   // Reserve room for the footer padding and the current monospace font.
   let shortTile = compact && (tileHeight ?? 0) < 155
-  let locationFits = here.granted && placeName != "" && (tileHeight ?? 0) >= 110 && len(placeName) * locationSize * 0.7 <= (tileWidth ?? 0) - 36
+  let locationFits = placeName != "" && (tileHeight ?? 0) >= 110 && len(placeName) * locationSize * 0.7 <= (tileWidth ?? 0) - 36
 
   let labels = {
     "0": str.weather0, "1": str.weather1, "2": str.weather2, "3": str.weather3,
@@ -586,7 +714,7 @@ widget "Weather companion" {
     "lccccddddddl", ".dddddddddd."
   ]
 
-  onTap: { gearMenu = false; screen() }
+  onTap: { gearMenu = false; searchInput = null; screen() }
 
   component Rule {
     Box { fill: width; height: 1; background: alpha(muted, 0.25) }
@@ -852,7 +980,8 @@ widget "Weather companion" {
         }
         Text {
           weight: 1
-          text: !here.granted ? str.allowLocation : !here.available && weather == null ? str.enableLocation : description ?? str.weatherUnavailable
+          text: weather != null ? description ?? str.weatherUnavailable : locationFailed ? str.weatherUnavailable :
+            positionKey != null ? str.loadingPlace : str.choosePlace
           fontSize: compact ? 9 : 11
           align: temperature == null ? "start" : "end"
           maxLines: 1
@@ -894,270 +1023,319 @@ widget "Weather companion" {
       scroll: true
       padding: 8
       gap: 8
-      if !here.granted {
-        Text { text: str.locationExplanation; style: body }
-        Button { text: str.grantLocation; onTap: location("request") }
-      } else {
-        if !here.available && weather == null {
-          Text { text: str.findingLocation; style: body }
-          Button { text: str.locationSettings; onTap: settings("location") }
+      Input {
+        fill: width
+        text: fieldText
+        placeholder: str.searchPlace
+        fontSize: 12
+        onChange: {
+          if trim(value) == "" {
+            locationText = ""
+            searchInput = null
+          } else {
+            searchInput = value
+          }
+        }
+        onSubmit: {
+          if trim(value) == "" {
+            locationText = ""
+            searchInput = null
+          } else {
+            if len(trim(value)) >= 2 && trim(value) != selectedText && !searchPending {
+              searchInput = value
+              searchAt = now + 1s
+            }
+          }
+        }
+      }
+      if detailStatus != null {
+        Text { text: detailStatus; style: small; color: usingSaved && wantedSearch == "" ? yellow : muted }
+      }
+      for result, i in placeMatches key i {
+        let addressParts = unique([result.name, result.admin1, result.country].filter(part => part != null && part != ""))
+        let region = drop(addressParts, 1)
+        let resultLabel = join(addressParts, ", ")
+        Column {
+          fill: width
+          gap: 2
+          padding: [7, 9]
+          border: 1
+          borderColor: alpha(muted, 0.35)
+          radius: 6
+          onTap: {
+            manualPlace = {id: result.id, lat: result.latitude, lon: result.longitude, name: result.name, label: resultLabel}
+            locationText = result.name
+            searchInput = null
+          }
+          Text { text: result.name; style: body; color: accent; maxLines: 2 }
+          if len(region) > 0 {
+            Text { text: join(region, ", "); style: small; color: muted; maxLines: 2 }
+          }
+        }
+      }
+      if typedPlace == "" {
+        if !here.granted {
+          Button { text: str.grantLocation; onTap: location("request") }
         } else {
-          if detailPlace != "" {
-            Text { text: detailPlace; style: body; color: accent; maxLines: 2 }
+          if !here.available && (weather == null || savedWeather.mode == "manual") {
+            Button { text: str.locationSettings; onTap: settings("location") }
           }
-          Button {
-            text: str.gearThemeLabel(gearName, gearMenu ? "▴" : "▾")
-            fill: width
-            onTap: gearMenu = !gearMenu
-          }
-          if gearMenu {
-            Grid {
-              columns: 2
-              gap: 6
-              for option in gearThemes key option.id {
-                Button {
-                  fill: width
-                  text: gearTheme == option.id ? "✓ ${option.name}" : option.name
-                  onTap: { gearTheme = option.id; gearMenu = false }
-                }
+        }
+      }
+      if weather != null {
+        Button {
+          text: str.gearThemeLabel(gearName, gearMenu ? "▴" : "▾")
+          fill: width
+          onTap: gearMenu = !gearMenu
+        }
+        if gearMenu {
+          Grid {
+            columns: 2
+            gap: 6
+            for option in gearThemes key option.id {
+              Button {
+                fill: width
+                text: gearTheme == option.id ? "✓ ${option.name}" : option.name
+                onTap: { gearTheme = option.id; gearMenu = false }
               }
             }
           }
-          Column {
+        }
+        Column {
+          fill: width
+          gap: 3
+          Row {
             fill: width
-            gap: 3
-            Row {
-              fill: width
-              gap: 6
-              align: center
-              Text { text: str.coldSensitivity; style: small; weight: 1; color: muted }
-              Text { text: "${coldOffset > 0 ? "+" : ""}${coldOffset} °C"; style: small; align: end }
-            }
-            Row {
-              fill: width
-              gap: 6
-              align: center
-              Text { text: str.lighterLayers; fontSize: 9; color: muted }
-              Slider { value: coldOffset; min: -6; max: 6; step: 1; live: true; weight: 1; onChange: coldShift = round(value) }
-              Text { text: str.warmerLayers; fontSize: 9; color: muted }
-            }
-          }
-          if usingSaved {
-            Text {
-              text: savedWeather.received == null ? str.showingCached : str.cachedAt(fmtTime(savedWeather.received, "d MMM · HH:mm", zone))
-              style: small
-              color: yellow
-            }
+            gap: 6
+            align: center
+            Text { text: str.coldSensitivity; style: small; weight: 1; color: muted }
+            Text { text: "${coldOffset > 0 ? "+" : ""}${coldOffset} °C"; style: small; align: end }
           }
           Row {
+            fill: width
+            gap: 6
             align: center
-            gap: 14
-            if code != null {
-              Text { text: weatherIcon(get(icons, "${code}", 122), night); font: icon; fontSize: 46; width: 59; align: center; color: yellow }
-            }
-            Column {
-              weight: 1
-              gap: 0
-              Text { text: temperature == null ? "—" : "${round(temperature)}°C"; fontSize: 43; color: green }
-              Text { text: description ?? str.weatherUnavailable; style: body }
-            }
+            Text { text: str.lighterLayers; fontSize: 9; color: muted }
+            Slider { value: coldOffset; min: -6; max: 6; step: 1; live: true; weight: 1; onChange: coldShift = round(value) }
+            Text { text: str.warmerLayers; fontSize: 9; color: muted }
           }
-          if current != null {
-            let feels = current.apparent_temperature
+        }
+        Row {
+          align: center
+          gap: 14
+          if code != null {
+            Text { text: weatherIcon(get(icons, "${code}", 122), night); font: icon; fontSize: 46; width: 59; align: center; color: yellow }
+          }
+          Column {
+            weight: 1
+            gap: 0
+            Text { text: temperature == null ? "—" : "${round(temperature)}°C"; fontSize: 43; color: green }
+            Text { text: description ?? str.weatherUnavailable; style: body }
+          }
+        }
+        if current != null {
+          let feels = current.apparent_temperature
+          Row {
+            fill: width
+            align: end
+            gap: 10
             Text {
               text: str.feelsAndRange(feels == null ? "—" : "${round(feels)}°", todayHigh == null ? "—" : "↑${round(todayHigh)}°", todayLow == null ? "—" : "↓${round(todayLow)}°")
               fontSize: 10
               color: muted
             }
-            Rule { }
-            Grid {
-              columns: 2
-              gap: 6
-              Reading { glyph: ""; label: str.windReading(windCompass == null ? "" : " · ${windCompass}"); value: wind == null ? "—" : "${round(wind)} km/h"; tint: green }
-              Reading { glyph: ""; label: str.humidity; value: humidity == null ? "—" : "${round(humidity)} %"; tint: blue }
-              Reading { glyph: ""; label: str.precipToday; value: todayRain == null ? "—" : "${todayRain}%${todayRainAmount == null ? "" : " · ${fixed(todayRainAmount, 1)} mm"}"; tint: blue }
-              Reading { glyph: ""; label: str.uvIndex; value: uv == null ? "—" : "${fixed(uv, 1)} · ${uvLevel}"; tint: uv >= 6 ? red : yellow }
-              Reading { glyph: ""; label: str.pressure; value: pressure == null ? "—" : "${round(pressure)} hPa"; tint: foreground }
-              Reading { glyph: ""; label: str.visibility; value: visibility == null ? "—" : visibility < 1000 ? "${round(visibility)} m" : "${fixed(visibility / 1000, 1)} km"; tint: foreground }
-              Reading { glyph: ""; label: str.sunrise; value: riseTime == null ? "—" : fmtTime(riseTime, "HH:mm", zone); tint: yellow }
-              Reading { glyph: ""; label: str.sunset; value: setTime == null ? "—" : fmtTime(setTime, "HH:mm", zone); tint: yellow }
-            }
-            if gust != null {
-              Text { text: str.gustsLong(round(gust)); fontSize: 10; color: muted }
+            if detailPlace != "" {
+              Text { text: detailPlace; weight: 1; fontSize: 10; align: end; color: muted; maxLines: 2 }
             }
           }
-          if outing != null {
-            Rule { }
-            Column {
-              fill: width
-              padding: [7, 8]
-              gap: 3
-              background: surface
-              radius: 6
-              Text { text: outing.rain >= 60 ? str.driestWindow : str.bestTimeOut; style: label; color: accent }
-              Text { text: str.outing(outing.start, outing.end, round(outing.rain), round(outing.wind)); fontSize: 10 }
-            }
+          Rule { }
+          Grid {
+            columns: 2
+            gap: 6
+            Reading { glyph: ""; label: str.windReading(windCompass == null ? "" : " · ${windCompass}"); value: wind == null ? "—" : "${round(wind)} km/h"; tint: green }
+            Reading { glyph: ""; label: str.humidity; value: humidity == null ? "—" : "${round(humidity)} %"; tint: blue }
+            Reading { glyph: ""; label: str.precipToday; value: todayRain == null ? "—" : "${todayRain}%${todayRainAmount == null ? "" : " · ${fixed(todayRainAmount, 1)} mm"}"; tint: blue }
+            Reading { glyph: ""; label: str.uvIndex; value: uv == null ? "—" : "${fixed(uv, 1)} · ${uvLevel}"; tint: uv >= 6 ? red : yellow }
+            Reading { glyph: ""; label: str.pressure; value: pressure == null ? "—" : "${round(pressure)} hPa"; tint: foreground }
+            Reading { glyph: ""; label: str.visibility; value: visibility == null ? "—" : visibility < 1000 ? "${round(visibility)} m" : "${fixed(visibility / 1000, 1)} km"; tint: foreground }
+            Reading { glyph: ""; label: str.sunrise; value: riseTime == null ? "—" : fmtTime(riseTime, "HH:mm", zone); tint: yellow }
+            Reading { glyph: ""; label: str.sunset; value: setTime == null ? "—" : fmtTime(setTime, "HH:mm", zone); tint: yellow }
           }
-          if len(chart) > 0 {
-            Rule { }
+          if gust != null {
+            Text { text: str.gustsLong(round(gust)); fontSize: 10; color: muted }
+          }
+        }
+        if outing != null {
+          Rule { }
+          Column {
+            fill: width
+            padding: [7, 8]
+            gap: 3
+            background: surface
+            radius: 6
+            Text { text: outing.rain >= 60 ? str.driestWindow : str.bestTimeOut; style: label; color: accent }
+            Text { text: str.outing(outing.start, outing.end, round(outing.rain), round(outing.wind)); fontSize: 10 }
+          }
+        }
+        if len(chart) > 0 {
+          Rule { }
+          Row {
+            fill: width
+            align: center
+            gap: 6
+            Text { text: str.next24h; weight: 1; style: label; color: accent }
+            Text { text: str.tapOrSwipe; fontSize: 9; color: muted }
+          }
+          Column {
+            gap: 2
             Row {
+              gap: 0
+              for h in chart key h.key {
+                Column {
+                  gap: 2
+                  weight: 1
+                  radius: 4
+                  background: selectedHour == h.key ? surface : transparent
+                  onTap: selectedHour = selectedHour == h.key ? null : h.key
+                  Text { text: h.hour; fontSize: 10; color: selectedHour == h.key ? accent : muted; align: center }
+                  Text { text: weatherIcon(get(icons, "${h.code}", 122), h.night); font: icon; fontSize: 15; align: center }
+                }
+              }
+            }
+            Box {
               fill: width
-              align: center
-              gap: 6
-              Text { text: str.next24h; weight: 1; style: label; color: accent }
-              Text { text: str.tapOrSwipe; fontSize: 9; color: muted }
-            }
-            Column {
-              gap: 2
-              Row {
-                gap: 0
-                for h in chart key h.key {
-                  Column {
-                    gap: 2
-                    weight: 1
-                    radius: 4
-                    background: selectedHour == h.key ? surface : transparent
-                    onTap: selectedHour = selectedHour == h.key ? null : h.key
-                    Text { text: h.hour; fontSize: 10; color: selectedHour == h.key ? accent : muted; align: center }
-                    Text { text: weatherIcon(get(icons, "${h.code}", 122), h.night); font: icon; fontSize: 15; align: center }
-                  }
-                }
-              }
-              Box {
+              Canvas {
+                height: 62
                 fill: width
-                Canvas {
-                  height: 62
-                  fill: width
-                  let temps = chart.map(h => h.temp)
-                  let low = min(temps)
-                  let high = max(temps)
-                  let xs = range(len(chart)).map(i => (i + 0.5) * width / len(chart))
-                  let ys = temps.map(t => 19 + (high - t) / max(1, high - low) * 16)
-                  if len(chart) > 1 {
-                    path(range(len(chart)).map(i => [xs[i], ys[i]]), stroke: accent, width: 1.5)
-                  }
-                  for h, i in chart {
-                    let rainChance = h.rain
-                    circle(xs[i], ys[i], selectedHour == h.key ? 4 : 2, fill: selectedHour == h.key ? yellow : accent)
-                    text("${round(temps[i])}°", xs[i], ys[i] - 10, size: 10, align: center, color: foreground)
-                    if rainChance != null {
-                      text("${rainChance}%", xs[i], 48, size: 9, align: center, color: rainChance >= 30 ? accent : muted)
-                      rect(xs[i] - 8, 56, 16, 2, radius: 1, fill: surface)
-                      rect(xs[i] - 8, 56, 16 * rainChance / 100, 2, radius: 1, fill: accent)
-                    }
+                let temps = chart.map(h => h.temp)
+                let low = min(temps)
+                let high = max(temps)
+                let xs = range(len(chart)).map(i => (i + 0.5) * width / len(chart))
+                let ys = temps.map(t => 19 + (high - t) / max(1, high - low) * 16)
+                if len(chart) > 1 {
+                  path(range(len(chart)).map(i => [xs[i], ys[i]]), stroke: accent, width: 1.5)
+                }
+                for h, i in chart {
+                  let rainChance = h.rain
+                  circle(xs[i], ys[i], selectedHour == h.key ? 4 : 2, fill: selectedHour == h.key ? yellow : accent)
+                  text("${round(temps[i])}°", xs[i], ys[i] - 10, size: 10, align: center, color: foreground)
+                  if rainChance != null {
+                    text("${rainChance}%", xs[i], 48, size: 9, align: center, color: rainChance >= 30 ? accent : muted)
+                    rect(xs[i] - 8, 56, 16, 2, radius: 1, fill: surface)
+                    rect(xs[i] - 8, 56, 16 * rainChance / 100, 2, radius: 1, fill: accent)
                   }
                 }
-                Row {
-                  fill: width
-                  height: 62
-                  gap: 0
-                  for h, i in chart key h.key {
-                    Box {
-                      weight: 1
-                      height: 62
-                      drag: horizontal
-                      onPress: chartDrag = 0
-                      onDrag: {
-                        chartDrag = chartDrag + dx
-                        let slot = max(18, ((screenWidth ?? 360) - 40) / len(chart))
-                        let target = clamp(i + round(chartDrag / slot), 0, len(chart) - 1)
-                        selectedHour = chart[target].key
-                      }
-                      onTap: selectedHour = selectedHour == h.key ? null : h.key
+              }
+              Row {
+                fill: width
+                height: 62
+                gap: 0
+                for h, i in chart key h.key {
+                  Box {
+                    weight: 1
+                    height: 62
+                    drag: horizontal
+                    onPress: chartDrag = 0
+                    onDrag: {
+                      chartDrag = chartDrag + dx
+                      let slot = max(18, ((screenWidth ?? 360) - 40) / len(chart))
+                      let target = clamp(i + round(chartDrag / slot), 0, len(chart) - 1)
+                      selectedHour = chart[target].key
                     }
+                    onTap: selectedHour = selectedHour == h.key ? null : h.key
                   }
                 }
               }
             }
-            if hourDetail != null {
+          }
+          if hourDetail != null {
+            Column {
+              fill: width
+              padding: [6, 8]
+              gap: 4
+              radius: 6
+              background: surface
+              Text { text: "${hourDetail.hour}:00 · ${round(hourDetail.temp)} °C"; style: small; color: accent }
+              Text {
+                text: str.hourDetail(hourDetail.feels == null ? "—" : "${round(hourDetail.feels)} °C", hourDetail.rain == null ? "—" : "${hourDetail.rain}%", hourDetail.wind == null ? "—" : "${round(hourDetail.wind)} km/h")
+                fontSize: 10
+              }
+            }
+          }
+        }
+        if len(days) > 0 {
+          Rule { }
+          Row {
+            fill: width
+            align: center
+            gap: 6
+            Text { text: str.nextDays(len(days)); weight: 1; style: label; color: accent }
+            Text { text: str.tapDay; fontSize: 9; color: muted }
+          }
+          for day in days key day.date {
+            let dayCode = day.code
+            let maximum = day.max
+            let minimum = day.min
+            let probability = day.rain
+            let dayStamp = parseTime("${day.date}T12:00", null, zone)
+            Row {
+              gap: 6
+              align: center
+              radius: 6
+              background: selectedDay == day.date ? surface : transparent
+              onTap: selectedDay = selectedDay == day.date ? null : day.date
+              Column {
+                width: 88
+                gap: 1
+                Text { text: fmtTime(dayStamp, "EEE d MMM", zone); fontSize: 11 }
+                Text { text: get(labels, "${dayCode}") ?? "—"; fontSize: 9; color: muted; maxLines: 2 }
+              }
+              Text { text: weatherIcon(get(icons, "${dayCode}", 122), false); font: icon; fontSize: 17; width: 20; align: center; color: yellow }
+              Text { text: probability == null ? "—" : "${probability}%"; fontSize: 10; width: 27; align: end; color: accent }
+              Text { text: minimum == null ? "—" : "${round(minimum)}°"; fontSize: 10; width: 24; align: end; color: muted }
+              Canvas {
+                weight: 1
+                height: 12
+                rect(0, 4, width, 4, radius: 2, fill: surface)
+                if minimum != null && maximum != null {
+                  let span = max(1, dailyHigh - dailyLow)
+                  let start = (minimum - dailyLow) / span
+                  let size = (maximum - minimum) / span
+                  rect(start * width, 4, max(2, size * width), 4, radius: 2, fill: yellow)
+                }
+              }
+              Text { text: maximum == null ? "—" : "${round(maximum)}°"; fontSize: 10; width: 23 }
+            }
+            if selectedDay == day.date && len(dayHours) > 0 {
               Column {
                 fill: width
-                padding: [6, 8]
-                gap: 4
-                radius: 6
+                padding: [4, 6, 2, 6]
+                gap: 1
                 background: surface
-                Text { text: "${hourDetail.hour}:00 · ${round(hourDetail.temp)} °C"; style: small; color: accent }
-                Text {
-                  text: str.hourDetail(hourDetail.feels == null ? "—" : "${round(hourDetail.feels)} °C", hourDetail.rain == null ? "—" : "${hourDetail.rain}%", hourDetail.wind == null ? "—" : "${round(hourDetail.wind)} km/h")
-                  fontSize: 10
-                }
-              }
-            }
-          }
-          if len(days) > 0 {
-            Rule { }
-            Row {
-              fill: width
-              align: center
-              gap: 6
-              Text { text: str.nextDays(len(days)); weight: 1; style: label; color: accent }
-              Text { text: str.tapDay; fontSize: 9; color: muted }
-            }
-            for day in days key day.date {
-              let dayCode = day.code
-              let maximum = day.max
-              let minimum = day.min
-              let probability = day.rain
-              let dayStamp = parseTime("${day.date}T12:00", null, zone)
-              Row {
-                gap: 6
-                align: center
                 radius: 6
-                background: selectedDay == day.date ? surface : transparent
-                onTap: selectedDay = selectedDay == day.date ? null : day.date
-                Column {
-                  width: 88
-                  gap: 1
-                  Text { text: fmtTime(dayStamp, "EEE d MMM", zone); fontSize: 11 }
-                  Text { text: get(labels, "${dayCode}") ?? "—"; fontSize: 9; color: muted; maxLines: 2 }
-                }
-                Text { text: weatherIcon(get(icons, "${dayCode}", 122), false); font: icon; fontSize: 17; width: 20; align: center; color: yellow }
-                Text { text: probability == null ? "—" : "${probability}%"; fontSize: 10; width: 27; align: end; color: accent }
-                Text { text: minimum == null ? "—" : "${round(minimum)}°"; fontSize: 10; width: 24; align: end; color: muted }
+                Text { text: str.chartLegend; fontSize: 8; color: muted }
                 Canvas {
-                  weight: 1
-                  height: 12
-                  rect(0, 4, width, 4, radius: 2, fill: surface)
-                  if minimum != null && maximum != null {
-                    let span = max(1, dailyHigh - dailyLow)
-                    let start = (minimum - dailyLow) / span
-                    let size = (maximum - minimum) / span
-                    rect(start * width, 4, max(2, size * width), 4, radius: 2, fill: yellow)
-                  }
-                }
-                Text { text: maximum == null ? "—" : "${round(maximum)}°"; fontSize: 10; width: 23 }
-              }
-              if selectedDay == day.date && len(dayHours) > 0 {
-                Column {
                   fill: width
-                  padding: [4, 6, 2, 6]
-                  gap: 1
-                  background: surface
-                  radius: 6
-                  Text { text: str.chartLegend; fontSize: 8; color: muted }
-                  Canvas {
-                    fill: width
-                    height: 48
-                    let temps = dayHours.map(i => hourly.temperature_2m[i])
-                    let low = min(temps.filter(t => t != null))
-                    let high = max(temps.filter(t => t != null))
-                    let slot = width / len(dayHours)
-                    let xs = range(len(dayHours)).map(i => (i + 0.5) * slot)
-                    let ys = temps.map(t => t == null ? null : 17 - (t - low) / max(1, high - low) * 13)
-                    line(0, 33, width, 33, stroke: alpha(muted, 0.25), width: 1)
-                    for h, i in dayHours {
-                      let rainChance = hourly.precipitation_probability[h]
-                      if i > 0 && ys[i - 1] != null && ys[i] != null {
-                        line(xs[i - 1], ys[i - 1], xs[i], ys[i], stroke: yellow, width: 1.25)
-                      }
-                      if rainChance != null && rainChance > 0 {
-                        let bar = max(1, rainChance * 0.12)
-                        rect(xs[i] - slot * 0.3, 33 - bar, slot * 0.6, bar, fill: alpha(accent, 0.75))
-                      }
-                      let hour = sub(hourly.time[h], 11, 13)
-                      if contains(["00", "06", "12", "18"], hour) {
-                        text(hour + " h", clamp(xs[i], 11, max(11, width - 11)), 42, size: 8, align: center, color: muted)
-                      }
+                  height: 48
+                  let temps = dayHours.map(i => hourly.temperature_2m[i])
+                  let low = min(temps.filter(t => t != null))
+                  let high = max(temps.filter(t => t != null))
+                  let slot = width / len(dayHours)
+                  let xs = range(len(dayHours)).map(i => (i + 0.5) * slot)
+                  let ys = temps.map(t => t == null ? null : 17 - (t - low) / max(1, high - low) * 13)
+                  line(0, 33, width, 33, stroke: alpha(muted, 0.25), width: 1)
+                  for h, i in dayHours {
+                    let rainChance = hourly.precipitation_probability[h]
+                    if i > 0 && ys[i - 1] != null && ys[i] != null {
+                      line(xs[i - 1], ys[i - 1], xs[i], ys[i], stroke: yellow, width: 1.25)
+                    }
+                    if rainChance != null && rainChance > 0 {
+                      let bar = max(1, rainChance * 0.12)
+                      rect(xs[i] - slot * 0.3, 33 - bar, slot * 0.6, bar, fill: alpha(accent, 0.75))
+                    }
+                    let hour = sub(hourly.time[h], 11, 13)
+                    if contains(["00", "06", "12", "18"], hour) {
+                      text(hour + " h", clamp(xs[i], 11, max(11, width - 11)), 42, size: 8, align: center, color: muted)
                     }
                   }
                 }
@@ -1166,7 +1344,11 @@ widget "Weather companion" {
           }
         }
       }
-      Text { text: str.attribution; fontSize: 9; color: muted }
+      Text {
+        text: len(placeMatches) > 0 ? "${str.attribution} · ${str.locationCredit}" : str.attribution
+        fontSize: 9
+        color: muted
+      }
     }
   }
 }
