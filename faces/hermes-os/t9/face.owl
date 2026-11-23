@@ -294,7 +294,7 @@ face "t9" {
   let ink = night ? mix(foreground, accent, 0.2) : background
   // The LCD is glass, as 2.0 had it: the wallpaper blurred behind it shows through the screen's colour, a little denser
   // than the user's tile glass so it stays readable over a bright wallpaper.
-  let lcdA = clamp(num(tileOpacity, 0.46) - 0.02, 0.4, 0.8)
+  let lcdA = clamp(num(tileOpacity, 0.46) - 0.24, 0.18, 0.6)
   let inkLvl = !night ? 1 : bl >= 1 ? 1 : bl > 0 ? 0.9 : 0.8
   let faint = alpha(ink, 0.55)
   // The backlight's own light: a whiter light of the screen's hue (the accent's glow on the night screen).
