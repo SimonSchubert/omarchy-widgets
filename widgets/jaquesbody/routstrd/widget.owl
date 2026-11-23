@@ -1,0 +1,579 @@
+// routstrd — the routstr daemon at a glance: the mark in green while it runs,
+// amber when this phone can't reach it, red when it is down; a tap opens the
+// wallet, a switch for the daemon, the last 30 days, the monitor's breakdowns,
+// the logs and a Lightning top-up. Data and control go through one command,
+// routstr-ctl: reads over the SSH tunnel this phone keeps to the desktop,
+// start/stop/restart and the journal over SSH, where routstrd listens on its
+// own loopback only. The file carries no address, user or token, so the same
+// file runs on both devices.
+widget "routstrd" {
+  meta {
+    owl: 16
+    description: "Control, monitor and top up your routstr usage. The tile is red, amber or green with your connection status, with every routstrd monitor metric, detailed logs and Lightning payment by QR or invoice."
+    version: "1.2"
+    license: "MIT"
+    category: "dev"
+  }
+
+  page: 1
+  order: 5
+  size: 1x1
+  minSize: 1x1
+  padding: 8
+
+  // the wrapper reads the daemon through the tunnel with curl + jq, and falls
+  // back to ssh; the desktop script uses the same curl + jq there
+  requires { pacman: ["openssh", "coreutils", "curl", "jq", "qrencode"] }
+
+  strings {
+    en {
+      title: "routstrd"
+      running: "Running"
+      starting: "Starting…"
+      stopping: "Stopping…"
+      failed: "Failed"
+      stopped: "Stopped"
+      offline: "Offline"
+      unknown: "Unknown"
+      balance: "Balance"
+      spend: "30d spend"
+      spent: "Spent"
+      requests: "Requests"
+      avg: "Avg / request"
+      monitor: "Monitor"
+      restart: "Restart"
+      logs: "Logs"
+      topup: "Top up"
+      sats: "sats"
+      copy: "Copy"
+      scan: "Scan with a Lightning wallet"
+      cancel: "Cancel"
+      awaiting: "Awaiting payment…"
+      paid: "Paid — balance will refresh"
+      all: "All"
+      h24: "24h"
+      d7: "7d"
+      d30: "30d"
+      overview: "Overview"
+      history: "History"
+      models: "Models"
+      providers: "Providers"
+      clients: "Clients"
+      recent: "Recent"
+      tokens: "Tokens"
+      avgTokens: "Avg tokens / req"
+      promptComp: "Prompt / completion"
+      noData: "Nothing in this window"
+      unavailable: "—"
+    }
+  }
+
+  // the routstr mark, from routstr.com/icon.svg, with the stylesheet removed so
+  // Image's tint is the only colour it has
+  asset logo = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjI2MiAyODAgNTI2IDQ2NyI+PHBhdGggZmlsbD0iY3VycmVudENvbG9yIiBkPSJNNjM5LjEgMjgxLjdjLTQuNCAyLjItNy4xIDYuNy03LjEgMTIuMSAwIDUuMSAyLjIgOS4zIDYgMTEuNiAyLjQgMS40IDYuOCAxLjYgMzEuOSAxLjYgMTkuMSAwIDI5LjEuMyAyOS4xIDEgMCAyLjItMjAuNiAyMy4zLTEwMy4yIDEwNS43LTczLjYgNzMuNS04NS44IDg1LjMtODkuMyA4Ni4yLTIuNC43LTE1LjggMS4xLTMzLjkgMS4xaC0zMGwtNDcuMy00Ny4zLTQ3LjMtNDcuMiAyLTYuM2MyLjUtNy44IDIuNi0xOS43LjQtMjcuMy0uOS0zLTIuOS03LjctNC41LTEwLjYtMy4zLTUuOC0xMi4yLTE0LjQtMTgtMTcuNC01LjMtMi43LTE0LjQtNC45LTIwLjItNC45LTguMSAwLTE4LjEgMi44LTI0LjQgNi45LTcuMyA0LjctMTIuNCAxMC40LTE2LjEgMTcuOC01LjIgMTAuNC02LjUgMjEtMy43IDMxLjggNC4zIDE2LjQgMTguNiAyOS40IDM2IDMyLjYgNy4yIDEuMyAxNC45LjYgMjMtMi4ybDYtMi4xIDQ0LjUgNDQuNmMyNC41IDI0LjYgNDQuNiA0NSA0NC43IDQ1LjRzLTE5LjIgMjAuNC00MyA0NC41bC00My4yIDQzLjgtNS41LTIuNWMtNy45LTMuNi0xOC4yLTUtMjYuMi0zLjYtOC45IDEuNi0xNy45IDYuMi0yNC4yIDEyLjQtMTEuMSAxMC44LTE1LjggMjctMTIuNSA0Mi44IDMuOCAxOCAxOS4zIDMyLjggMzcuNyAzNiA5LjEgMS41IDE3LjEuMSAyNi45LTQuNyAxMy02LjQgMjIuMS0xOS40IDI0LjQtMzQuOC45LTYuMi44LTguOS0uNC0xNC45LS44LTQtMS44LTgtMi4yLTguOS0uNC0xLjIgMTItMTQuMyA0Ni42LTQ5LjNsNDcuMS00Ny42aDMxLjRjMTkuMiAwIDMzLjQtLjQgMzYuNi0xLjEgMTMuNC0yLjggOC44IDEuMyAxMTIuNi0xMDIuM2w5Ni4yLTk2LjEuMSA0LjVjMCAyLjUgMCAxNC4yLS4xIDI2LjEtLjEgMjQgLjMgMjYuNSA1LjkgMzEuMiAyLjUgMi4xIDQuMyAyLjcgNy44IDIuNyA1LjcgMCAxMC41LTIuOCAxMi43LTcuNCAxLjQtMyAxLjYtOS4zIDEuNi01MC4xIDAtNDAuMy0uMi00Ny0xLjYtNDkuNi0zLTUuOC0zLjctNS45LTU2LjEtNS45LTQyLjUgMC00OC4yLjItNTEuMiAxLjdtNzcuMyAxNzIuMmMtMy4yIDEuOS02LjQgNy40LTYuNCAxMC45IDAgNC41IDIuNyA4LjMgMTUuMiAyMSA3LjkgOCAxMi43IDEzLjcgMTIuMiAxNC4ycy0yNS44IDEtNTguOSAxLjJsLTU4IC4zLTYgMi40Yy01LjUgMi4yLTguOSA1LjMtMzguOSAzNS0xOC4xIDE3LjktMzYuNCAzNi42LTQwLjggNDEuNi00LjMgNC45LTkgMTEuMi0xMC4zIDEzLjktMy41IDYuOS0zLjQgMTMuOC4zIDIwLjUgMS45IDMuNSAxMi42IDE1LjEgMzUuMSAzNy43IDMxLjIgMzEuNSAzMi4zIDMyLjcgMzEuNiAzNS44LS4zIDEuNy0uOSA2LTEuMiA5LjYtLjYgNy43IDEuNCAxNy42IDUuMyAyNS4yIDMuOSA3LjcgMTIgMTUuMiAyMS4xIDE5LjYgNy42IDMuNiA4LjEgMy43IDE5LjMgMy43IDEwLjkgMCAxMS45LS4yIDE4LjMtMy4yIDkuNS00LjUgMTcuOC0xMi43IDIyLjUtMjIuMiAzLjYtNy4zIDMuNy03LjcgMy43LTE5cy0uMS0xMS44LTMuNy0xOS40Yy02LjgtMTQuMS0xOC44LTIzLjItMzQuNS0yNS45LTguOC0xLjUtMTcuOS0uMS0yNi43IDRsLTYuMyAzLTI5LjctMjkuN0M1NjMuMyA2MTcuOCA1NTAgNjA0IDU1MCA2MDMuNWMwLS42IDE2LjEtMTcuMSAzNS44LTM2LjcgMjQuMS0yNC4yIDM2LjktMzYuMiAzOS40LTM3LjMgMy4yLTEuMyAxMS42LTEuNSA1OC44LTEuNSAzMC4yIDAgNTUgLjMgNTUgLjggMCAuNC01LjIgNS45LTExLjYgMTIuMnMtMTIuOSAxMy41LTE0LjUgMTUuOWMtMS42IDIuNS0yLjkgNS45LTIuOSA3LjUgMCA5LjggMTEuMyAxNi43IDE5LjggMTIuMiAxLjUtLjggMTQuNS0xMy4zIDI5LTI3LjggMTkuNy0xOS44IDI2LjYtMjcuNCAyNy42LTMwLjIgMi43LTcuOCAyLjEtOC42LTI2LjYtMzcuMy0xNC41LTE0LjYtMjcuNS0yNy4xLTI5LTI3LjktMy44LTItMTAuNy0xLjgtMTQuNC41Ii8+PC9zdmc+"
+
+  // one command, whichever device this file runs on
+  source st = cmd("routstr-ctl status") every 20s json timeout 15s
+
+  let loading = st == null
+  let svc = loading ? "" : (st.service ?? "unknown")
+  let bal = loading ? null : (st.balance ?? -1)
+  let spent = loading ? null : (st.spent ?? -1)
+  let reqs = loading ? null : (st.requests ?? -1)
+  let avg = loading ? null : (st.avg ?? 0)
+
+  // the status colours are fixed, not the theme's: hackerman names its red green,
+  // so a theme red would paint Failed the same as Running. Green means the daemon
+  // answers, red that it is down, amber that this phone can't reach it at all.
+  let up = svc == "active" || svc == "activating" || svc == "reloading"
+  let reach = svc == "unreachable" || svc == "unknown" || svc == ""
+  let dotColor = loading || reach ? "#fbbf24" : up ? "#4ade80" : "#f87171"
+  let stateText = loading ? "…" : svc == "active" ? str.running : (svc == "activating" || svc == "reloading") ? str.starting : svc == "deactivating" ? str.stopping : svc == "failed" ? str.failed : svc == "inactive" ? str.stopped : svc == "unreachable" ? str.offline : str.unknown
+
+  // null is still loading, a negative number is the desktop saying "no answer"
+  let balFull = bal == null ? "…" : bal < 0 ? str.unavailable : fmtNum(bal)
+  let spentText = spent == null ? "…" : spent < 0 ? str.unavailable : fmtNum(round(spent))
+  let reqsText = reqs == null ? "…" : reqs < 0 ? str.unavailable : fmtNum(reqs)
+  let avgText = avg == null ? "…" : avg < 0 ? str.unavailable : fmtNum(avg, 2)
+
+  // ---- what the screen shows -------------------------------------------
+  state view = ""          // "", "monitor" or "logs"
+  state win = "today"      // all, today (24h), 7d, 30d
+
+  // the monitor's summary, cut down to what a phone draws, read only while
+  // its view is open; "echo '{}'" is an empty answer that costs no work
+  source u = cmd(view == "monitor" ? "routstr-ctl usage ${sh(win)}" : "echo '{}'") every 30s json timeout 25s
+
+  // the journal, over SSH, so one read per half minute and only while open
+  source lg = cmd(view == "logs" ? "routstr-ctl logs 120" : "true") every 30s timeout 25s
+
+  let loaded = u != null && u.w != null
+  let uErr = u == null ? "" : (u.error ?? "")
+  let mReqs = u == null ? 0 : (u.t.r ?? 0)
+  let mSpent = u == null ? 0 : (u.t.s ?? 0)
+  let mTok = u == null ? 0 : (u.t.tok ?? 0)
+  let mAvg = mReqs > 0 ? mSpent / mReqs : 0
+  let mAvgTok = mReqs > 0 ? mTok / mReqs : 0
+  let mPC = (u == null ? 0 : (u.t.ct ?? 0)) > 0 ? (u.t.pt ?? 0) / (u.t.ct ?? 0) : 0
+  let models = u == null ? [] : (u.m ?? [])
+  let provs = u == null ? [] : (u.p ?? [])
+  let clients = u == null ? [] : (u.c ?? [])
+  let recent = u == null ? [] : (u.rec ?? [])
+  let pts = u == null ? [] : (u.tl.p ?? [])
+  let sparks = pts.map(p => p.s)
+  let yMax = len(sparks) == 0 ? 0 : last(sort(sparks))
+  // the axis labels follow the window the daemon actually answered for, so
+  // a stale reply can never be labelled as the window just tapped
+  let nPts = len(pts)
+  // a whole-history reply comes in weeks, so months would repeat: name the
+  // days unless the span really crosses into another month
+  let sameMonth = nPts == 0 || fmtTime(pts[0].t / 1000, "M") == fmtTime(pts[nPts - 1].t / 1000, "M")
+  let xpat = u == null ? "d/M" : u.w == "today" ? "HH" : u.w == "all" && !sameMonth ? "MMM" : "d/M"
+  let x1 = nPts == 0 ? "" : fmtTime(pts[0].t / 1000, xpat)
+  let x2 = nPts == 0 ? "" : fmtTime(pts[floor((nPts - 1) / 2)].t / 1000, xpat)
+  let x3 = nPts == 0 ? "" : fmtTime(pts[nPts - 1].t / 1000, xpat)
+
+  // the screen's three columns of buttons, so the amount box is exactly as
+  // wide as Monitor and Restart side by side, and Top up as wide as Logs
+  let colW = ((screenWidth ?? 400) - 40) / 3
+
+  // ---- top-up ----------------------------------------------------------
+  state amount = "2100" persist
+  state invRaw = ""
+  state quoteId = ""
+  state paid = false
+
+  let inv = invRaw == "" ? null : parseJson(invRaw)
+  let invoice = inv == null ? "" : (inv.invoice ?? "")
+  let qr = inv == null ? "" : (inv.qr ?? "")
+  let invErr = inv == null ? "" : (inv.error ?? "")
+  let shortInvoice = len(invoice) > 96 ? sub(invoice, 0, 96) + "…" : invoice
+
+  // while an invoice is open, ask the desktop about it; with none, the command
+  // does nothing, so the source stays quiet
+  source qs = cmd(quoteId == "" ? "echo '{}'" : "routstr-ctl quote ${sh(quoteId)}") every 5s json timeout 12s
+  let qState = qs == null ? "" : (qs.state ?? "")
+  let qErr = qs == null ? "" : (qs.error ?? "")
+
+  on invRaw first { let q = parseJson(value); quoteId = q == null ? "" : (q.operationId ?? "") }
+
+  on qs {
+    if value != null && (value.state ?? "") == "finalized" {
+      paid = true
+      quoteId = ""
+      invRaw = ""
+      refresh()
+    }
+  }
+
+  onTap: screen()
+
+  component Line(cap, val) {
+    Row {
+      gap: 8
+      Text { text: cap; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: val; style: body; maxLines: 1 }
+    }
+  }
+
+  // ---- the tile: at 1x1, just the mark, coloured by whether routstrd answers ----
+  Column {
+    Image { src: logo; tint: dotColor; fit: contain; fill: true; label: stateText }
+  }
+
+  // ---- the screen's parts ----------------------------------------------
+
+  // an on/off switch for routstrd: the track takes the state's colour and
+  // the knob slides over; a tap starts it or stops it
+  component Toggle(lit) {
+    Box {
+      width: 46
+      height: 26
+      radius: 13
+      background: lit ? accent : surface
+      border: 1
+      borderColor: lit ? accent : muted
+      align: center
+      onTap: { haptic(); run(lit ? "routstr-ctl stop" : "routstr-ctl start") }
+      Box {
+        width: 20
+        height: 20
+        radius: 10
+        offset: [lit ? 10 : -10, 0]
+        background: lit ? background : muted
+      }
+    }
+  }
+
+  // one figure of the window, a label over its value, on the soft green
+  component Stat(name, val) {
+    Column {
+      gap: 2
+      padding: [10, 8]
+      background: alpha(green, 0.07)
+      border: 1
+      borderColor: alpha(green, 0.45)
+      radius: 8 * corners
+      Text { text: name; style: label; color: muted; maxLines: 1 }
+      Text { text: val; style: body; maxLines: 1 }
+    }
+  }
+
+  component Head(t) {
+    Text { text: t; style: label; color: "#ffffff"; letterSpacing: 1; maxLines: 1 }
+  }
+
+  // one line of the monitor: a name with its cost at the far end, the rest
+  // of its figures under it, and an optional second line of detail
+  component MonRow(name, sub, val, extra = "") {
+    Column {
+      gap: 1
+      Row {
+        gap: 8
+        Text { text: name; style: body; weight: 1; maxLines: 1 }
+        Text { text: val; style: body; align: end; maxLines: 1 }
+      }
+      Text { text: sub; style: small; color: muted; maxLines: 1 }
+      if extra != "" {
+        Text { text: extra; style: label; color: muted; maxLines: 1 }
+      }
+    }
+  }
+
+  // the amount and Top up, with an invoice under them while one is open. It
+  // comes after whatever the body shows, so opening Monitor drops it to the
+  // bottom of the screen instead of hiding it
+  component TopUp() {
+    Column {
+      gap: 8
+
+      Row {
+        gap: 6
+        align: center
+        // the field wears the buttons' frame: Input draws none of its own;
+        // two thirds of the row, as Monitor and Restart are above it
+        Box {
+          width: 2 * colW + 6
+          align: center
+          border: 1
+          borderColor: accent
+          radius: 8 * corners
+          padding: [12, 0]
+          // Input draws its text from its own left edge and has no alignment,
+          // so the field is as wide as what it holds and centred in the frame:
+          // the caret then sits on the digits, where the text is. One 13sp mono
+          // character advances 7.8 dp, and "sats" is four of them
+          Input {
+            width: max(len(amount), 4) * 7.8 + 2
+            text: amount
+            placeholder: str.sats
+            underline: false
+            onChange: amount = value
+            onSubmit: { invRaw = run("routstr-ctl topup ${sh(amount)}"); paid = false }
+          }
+        }
+        Button {
+          text: str.topup
+          width: colW
+          onTap: { haptic(); invRaw = run("routstr-ctl topup ${sh(amount)}"); paid = false }
+        }
+      }
+
+      if invRaw != "" && invErr != "" {
+        Text { text: invErr; style: small; color: red; maxLines: 2 }
+      }
+
+      if invRaw != "" && invErr == "" {
+        if qr != "" {
+          Column {
+            gap: 4
+            Box {
+              align: center
+              fill: width
+              padding: 10
+              background: "#ffffff"
+              radius: 8 * corners
+              Image { src: qr; width: 220; height: 220; fit: contain; label: str.topup }
+            }
+            Text { text: str.scan; style: small; color: muted; align: center; fill: width; maxLines: 1 }
+          }
+        }
+        Row {
+          gap: 8
+          align: top
+          Text { text: shortInvoice; style: small; font: mono; weight: 1; maxLines: 3 }
+          Button { text: str.copy; onTap: { haptic(); copy(invoice) } }
+        }
+        if quoteId != "" {
+          Text {
+            text: qErr != "" ? qErr : (qState == "finalized" ? str.paid : str.awaiting)
+            style: small
+            color: qErr != "" ? red : qState == "finalized" ? accent : muted
+          }
+        }
+        // cancel sits under copy, at the same end
+        Row {
+          fill: width
+          justify: end
+          Button {
+            text: str.cancel
+            onTap: { haptic(); invRaw = ""; quoteId = ""; paid = false }
+          }
+        }
+      }
+
+      if paid {
+        Text { text: str.paid; style: small; color: accent }
+      }
+    }
+  }
+
+  // ---- the screen ------------------------------------------------------
+  screen {
+    title: str.title
+
+    Column {
+      scroll: true
+      padding: 14
+      gap: 12
+
+      // the daemon's state with a switch for it, then this window's figures
+      Row {
+        gap: 10
+        align: center
+        Text { text: "●"; style: title; color: dotColor }
+        Text { text: stateText; style: body; weight: 1; maxLines: 1 }
+        Toggle { lit: up }
+      }
+
+      if !loading && (st.error ?? "") != "" {
+        Text { text: st.error; style: small; color: red; maxLines: 2 }
+      }
+
+      Grid {
+        columns: 2
+        gap: 8
+        Stat { name: upper(str.balance); val: "${balFull} sat" }
+        Stat { name: upper(str.spend); val: "${spentText} sat" }
+        Stat { name: upper(str.requests); val: reqsText }
+        Stat { name: upper(str.avg); val: "${avgText} sat" }
+      }
+
+      Row {
+        gap: 6
+        Button {
+          text: str.monitor
+          weight: 1
+          background: view == "monitor" ? alpha(accent, 0.15) : background
+          onTap: { haptic(); view = view == "monitor" ? "" : "monitor" }
+        }
+        Button {
+          text: str.restart
+          weight: 1
+          onTap: { haptic(); run("routstr-ctl restart") }
+        }
+        Button {
+          text: str.logs
+          weight: 1
+          background: view == "logs" ? alpha(accent, 0.15) : background
+          onTap: { haptic(); view = view == "logs" ? "" : "logs" }
+        }
+      }
+
+      if view == "monitor" {
+        Column {
+          gap: 10
+
+          // routstrd monitor's [W]: all, the last day, week or month
+          Row {
+            gap: 6
+            Button { text: str.all; weight: 1; background: win == "all" ? alpha(accent, 0.15) : background; onTap: win = "all" }
+            Button { text: str.h24; weight: 1; background: win == "today" ? alpha(accent, 0.15) : background; onTap: win = "today" }
+            Button { text: str.d7; weight: 1; background: win == "7d" ? alpha(accent, 0.15) : background; onTap: win = "7d" }
+            Button { text: str.d30; weight: 1; background: win == "30d" ? alpha(accent, 0.15) : background; onTap: win = "30d" }
+          }
+
+          if uErr != "" {
+            Text { text: uErr; style: small; color: red; maxLines: 2 }
+          } else if !loaded {
+            Text { text: "…"; style: small; color: muted }
+          } else {
+            Column {
+              gap: 12
+
+              Column {
+                gap: 6
+                padding: [12, 10]
+                background: alpha(green, 0.07)
+                border: 1
+                borderColor: alpha(green, 0.45)
+                radius: 8 * corners
+                Head { t: upper(str.overview) }
+                Line { cap: upper(str.balance); val: "${balFull} sat" }
+                Line { cap: upper(str.spent); val: "${fmtNum(round(mSpent))} sat" }
+                Line { cap: upper(str.requests); val: fmtNum(mReqs) }
+                Line { cap: upper(str.tokens); val: fmtNum(mTok, {compact: true}) }
+                Line { cap: upper(str.avg); val: "${fmtNum(mAvg, 2)} sat" }
+                Line { cap: upper(str.avgTokens); val: fmtNum(round(mAvgTok)) }
+                Line { cap: upper(str.promptComp); val: "${fmtNum(mPC, 2)} : 1" }
+              }
+
+              Column {
+                gap: 6
+                padding: [12, 10]
+                background: alpha(green, 0.07)
+                border: 1
+                borderColor: alpha(green, 0.45)
+                radius: 8 * corners
+                Head { t: upper(str.history) }
+                Text { text: "${fmtNum(round(mSpent))} sat · ${fmtNum(mReqs)} requests"; style: small; color: muted }
+                if len(sparks) == 0 {
+                  Text { text: str.noData; style: small; color: muted }
+                } else {
+                  Column {
+                    gap: 2
+                    // the plot runs the card's full width and the scale sits
+                    // inside it, at the card's own left edge, where the title
+                    // starts; the figures get their room above and below
+                    Canvas {
+                      height: 110
+                      fill: width
+                      let n = len(sparks)
+                      let top = 15
+                      let base = height - 11
+                      let plotH = base - top
+                      let xy = range(n).map(i => [n <= 1 ? 0 : i * width / (n - 1), base - (yMax > 0 ? sparks[i] / yMax * plotH : 0)])
+                      line(0, base, width, base, stroke: alpha(muted, 0.25), width: 1)
+                      if n > 1 {
+                        path([[0, base]] + xy + [[width, base]], closed: true, fill: alpha(accent, 0.16))
+                        path(xy, stroke: accent, width: 1.6, cap: round)
+                      }
+                      text(fmtNum(round(yMax)), 0, top - 7, size: 9, align: start, color: muted)
+                      text(fmtNum(round(yMax / 2)), 0, top + plotH / 2, size: 9, align: start, color: muted)
+                      text("0", 0, base + 6, size: 9, align: start, color: muted)
+                    }
+                    Row {
+                      fill: width
+                      justify: spaceBetween
+                      Text { text: x1; style: label; color: muted; maxLines: 1 }
+                      Text { text: x2; style: label; color: muted; maxLines: 1 }
+                      Text { text: x3; style: label; color: muted; maxLines: 1 }
+                    }
+                  }
+                }
+              }
+
+              Column {
+                gap: 6
+                padding: [12, 10]
+                background: alpha(green, 0.07)
+                border: 1
+                borderColor: alpha(green, 0.45)
+                radius: 8 * corners
+                Head { t: upper(str.models) }
+                if len(models) == 0 {
+                  Text { text: str.noData; style: small; color: muted }
+                } else {
+                  for m, i in models.take(5) key i {
+                    MonRow {
+                      name: m.i
+                      sub: "${fmtNum(m.r)} reqs · ${fmtNum(m.t, {compact: true})} tok · ${fmtNum(m.s / max(m.r, 1), 2)} sat/req"
+                      val: "${fmtNum(round(m.s))} sat"
+                    }
+                  }
+                }
+              }
+
+              Column {
+                gap: 6
+                padding: [12, 10]
+                background: alpha(green, 0.07)
+                border: 1
+                borderColor: alpha(green, 0.45)
+                radius: 8 * corners
+                Head { t: upper(str.providers) }
+                if len(provs) == 0 {
+                  Text { text: str.noData; style: small; color: muted }
+                } else {
+                  for p, i in provs.take(5) key i {
+                    MonRow {
+                      name: p.u
+                      sub: "${fmtNum(p.r)} reqs · ${fmtNum(p.t, {compact: true})} tok · ${fmtNum(p.s / max(p.r, 1), 2)} sat/req"
+                      val: "${fmtNum(round(p.s))} sat"
+                    }
+                  }
+                }
+              }
+
+              Column {
+                gap: 6
+                padding: [12, 10]
+                background: alpha(green, 0.07)
+                border: 1
+                borderColor: alpha(green, 0.45)
+                radius: 8 * corners
+                Head { t: upper(str.clients) }
+                if len(clients) == 0 {
+                  Text { text: str.noData; style: small; color: muted }
+                } else {
+                  for c, i in clients.take(5) key i {
+                    MonRow {
+                      name: c.c
+                      sub: "${fmtNum(c.r)} reqs · ${fmtNum(c.t, {compact: true})} tok · ${fmtNum(c.s / max(c.r, 1), 2)} sat/req"
+                      val: "${fmtNum(round(c.s))} sat"
+                      extra: join((c.m ?? []).take(3).map(x => x.i), " · ")
+                    }
+                  }
+                }
+              }
+
+              Column {
+                gap: 6
+                padding: [12, 10]
+                background: alpha(green, 0.07)
+                border: 1
+                borderColor: alpha(green, 0.45)
+                radius: 8 * corners
+                Head { t: upper(str.recent) }
+                if len(recent) == 0 {
+                  Text { text: str.noData; style: small; color: muted }
+                } else {
+                  for r, i in recent.take(5) key i {
+                    Row {
+                      gap: 8
+                      align: top
+                      Column {
+                        gap: 1
+                        weight: 1
+                        Text { text: r.m; style: small; maxLines: 1 }
+                        Text { text: "${fmtTime(r.t / 1000, "HH:mm")} · ${r.c} · ${fmtNum(r.tok, {compact: true})} tok"; style: label; color: muted; maxLines: 1 }
+                      }
+                      Text { text: "${fmtNum(r.s, 2)} sat"; style: small; align: end; maxLines: 1 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else if view == "logs" {
+        Column {
+          gap: 8
+          Head { t: upper(str.logs) }
+          if lg == "" {
+            Text { text: "…"; style: small; color: muted }
+          } else {
+            Column {
+              gap: 2
+              for l, i in lines(lg) key i {
+                Text { text: l; style: small; font: mono; maxLines: 4 }
+              }
+            }
+          }
+        }
+      }
+
+      TopUp { }
+    }
+  }
+}
