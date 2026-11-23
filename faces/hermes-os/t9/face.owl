@@ -294,7 +294,7 @@ face "t9" {
   let ink = night ? mix(foreground, accent, 0.2) : background
   // The LCD is glass, as 2.0 had it: the wallpaper blurred behind it shows through the screen's colour, a little denser
   // than the user's tile glass so it stays readable over a bright wallpaper.
-  let lcdA = clamp(num(tileOpacity, 0.46) + 0.2, 0.62, 0.92)
+  let lcdA = clamp(num(tileOpacity, 0.46) - 0.02, 0.4, 0.8)
   let inkLvl = !night ? 1 : bl >= 1 ? 1 : bl > 0 ? 0.9 : 0.8
   let faint = alpha(ink, 0.55)
   // The backlight's own light: a whiter light of the screen's hue (the accent's glow on the night screen).
@@ -471,7 +471,7 @@ face "t9" {
   let mSelC = len(mShown) == 0 ? 0 : clamp(mSel, 0, len(mShown) - 1)
   let mCur = len(mShown) == 0 ? null : mShown[mSelC]
   // The LCD's content height (for how big a cell can be), from the screen's own sums.
-  let lcdHt = H - num(screenTop, 0) - 28 - gapA - navH - gapB - 4 * kh - max(num(screenInset, 0) + 10, PW * 0.05)
+  let lcdHt = H - num(screenTop, 0) - 38 - gapA - navH - gapB - 4 * kh - max(num(screenInset, 0) + 10, PW * 0.05)
   let contH = lcdHt - 65
   // Cells: the grid's rows share what the title, the dots and the dock leave; names under the icons when there's room.
   let dDockH = hasIos ? 38 : 0
@@ -2845,9 +2845,10 @@ face "t9" {
         height: 34
         let s = 22
         let o0 = (34 - s) / 2
-        for o in ring2 { image(omarchyLogo, o0 + o[0], o0 + o[1], s, s, color: alpha(foreground, 0.05)) }
-        for o in ring1 { image(omarchyLogo, o0 + o[0], o0 + o[1], s, s, color: alpha(foreground, 0.12)) }
-        image(omarchyLogo, o0, o0, s, s, color: alpha(foreground, 0.95))
+        // White whatever the theme, as a maker's mark is printed.
+        for o in ring2 { image(omarchyLogo, o0 + o[0], o0 + o[1], s, s, color: alpha(#ffffff, 0.05)) }
+        for o in ring1 { image(omarchyLogo, o0 + o[0], o0 + o[1], s, s, color: alpha(#ffffff, 0.12)) }
+        image(omarchyLogo, o0, o0, s, s, color: alpha(#f4f4f4, 0.95))
       }
     }
   }
@@ -2883,7 +2884,7 @@ face "t9" {
         padding: [screenLeft, max(num(screenTop, 0) - 6, 0), screenRight, 0]
         // The logo just under the camera's cutout, with clear room between it and the LCD.
         Box { fill: width; height: 28; align: center; Brand { } }
-        Spacer { height: 6 }
+        Spacer { height: 16 }
         Box { fill: width; weight: 1; padding: [lcdM, 0]; Lcd { fill: true } }
         Spacer { height: gapA }
         Nav { }
