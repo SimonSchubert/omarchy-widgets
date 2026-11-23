@@ -1,0 +1,589 @@
+widget "carpentry" {
+  meta { owl: 23; description: "Pirate carpentry puzzle: place falling wooden shapes to patch the ship hull; full rows break and pieces fall with gravity"; version: "1.2"; license: "MIT"; category: "games" }
+  page: 1
+  order: 6
+  size: 3x3
+  minSize: 3x3
+  padding: 0
+
+  requires { pacman: ["jq", "grep", "coreutils"] }
+  // Linked to the sailing widget when it's on home; on its own otherwise (standalone: levels)
+  // The sailing widget, found by its declared name (whatever the file is called, a store install
+  // is market-<user>-<name>.owl): "home" is its file on home, "removed" one taken off home into
+  // .removed/, both "" when it isn't installed
+  source sailFind = cmd("cd ~/.config/omalauncher/widgets && printf '{\"home\": \"%s\", \"removed\": \"%s\"}' \"$(grep -l '^widget \"sailing\"' *.owl 2>/dev/null | head -1)\" \"$(grep -l '^widget \"sailing\"' .removed/*.owl 2>/dev/null | head -1 | sed 's|^.removed/||')\"") every 10s json
+  // Until the first check is in, count it as there, so nothing flips at start
+  let sailOwl = sailFind == null ? "40-sailing.owl" : (sailFind.home ?? "")
+  let hasSailing = sailOwl != ""
+  let sailRemoved = sailFind == null ? "" : (sailFind.removed ?? "")
+  // On its own, the header offers Sailing (from the store, or back from .removed/) until dismissed
+  state hideSailHint = false persist
+  let showSailHint = sailFind != null && !hasSailing && !hideSailHint
+  source highScore = cmd("jq -r '.highScore // 0' ~/.cache/carpentry-game.json 2>/dev/null || echo 0") every 1h
+  source modes = android.modes
+  source shipStatus = file("~/.cache/ship-status.json") json
+  let shipDamage = num(shipStatus.damage, 0.0)
+
+  background: #130d08
+
+  // Embedded audio assets (instant native playback, no path dependencies)
+  asset sndDrop = base64"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t3/4//9309u/o93LfztyAYQoYktCIEO0IgHTBPAfMBADweBbMISLcmBbMKaAcwIAHjDBbxNpkUgwyCXzJ1D+MLgN4yOBcjCKFgA29jEBEP/zgsRAOJvGNBWesAF7AwTABAwZjmAwaANAkCoDOoDEDCsDwDBYAwDBGNQAoFQoQDBCFsFAQjuAMAmCIBQWUCih0ROHCIi/Gg4GBkB4GAMAY4wsjO3apd3CwsOnE6EqOPX+p+FwAnQqCyBQA7CD/v/84Tgssg58g5AyuXN1/V9f/rNyCE4xcJg0N1IE+X//36//6luXy+boUy4gyCCCfvp39v///+qbjw9J4BoQPzH1GAQhjJmjPoDRojRoDPmAEaZGswwiM31c83M/X0/XU9V0//OCxCEnsWJEBdp4AeQ1M4HZKkcYUUY0QYUAgtCnBUBQSgXgCIA6AhAqhDiFHUzYfK5DjmNI0jSNJDUNVrLF1Z8rlarVarVarXsWvrWC9evXr18+fWt81gwnz58+jWO8KCgoJBRXhQKCgor/igoKFHf8YKChr/8KCgkF/+AoKCiv/oKChQ3/qCgoKUxBTUU0LjBVVVVVTEFNRTQuMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/84LEOwAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FNC4wVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zgsQ7AAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUU0LjBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//OCxDsAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTQuMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/84LEOwAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FNC4wVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zgsQ7AAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUU0LjBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//OCxDsAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU="
+  asset sndRotate = base64"//OAxAAAAAAAAAAAAEluZm8AAAAPAAAADQAAC2wAExMTExMTEycnJycnJycnOzs7Ozs7OztOTk5OTk5OYmJiYmJiYmJ2dnZ2dnZ2domJiYmJiYmdnZ2dnZ2dnbGxsbGxsbGxxMTExMTExNjY2NjY2NjY7Ozs7Ozs7Oz/////////AAAAOExBTUU0LjAgAAFuAAAAAC5PAAAUQCQELSIAAEAAAAtsyBuPbgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP/zgMQAJYwWvBNMQAAoA3bXr169evXmBgSBIEgmHlV4kA0AEAAAAA4Ih5yKHYKwAYAMAOC8PzEQxEREcsG4KwFwbh++7vbu73oibli55iIm7u9QkIiJ8u7veguLnv6JTu7u7/7u7vf/u7u6Ilf//Lu7uiIiVu4oKGIiIiX/oiILi4uLnu9/+7v/+iIiO7u7u9oiIlcI7u9/CO7u//f///6IhAoqU5TAAAI5VAYBbGsp8XddGEpntdVtitDYdkzRmAva6KxA5KQApCJ1A7RkQ0f/84LELDUTcr45mKAAsBTeLckEIMAJYFzwFToFiJHAOPkDQLos0i4Cw1ysGQQCjyzUOIFnAGgAbHimHMLo3zxiLhNBkT4/DaTF0MyLMHJIqMgoVgW5ToJHRSQ4VzI2MRplwuk4LiGOGSNiZyw72SVmRt8uE0OaThBiZJ0qEyaoGJdmV////NjYWaLhQTHSQ4ZYko6hmiNJFNfU////+QIixeLqjZFMnDAixFkSBG5eWalIgxt6qkBGwAAAOpG442BAKA3Fxd8/wEMDWC2AgA3iRv/zgsQbMRHKdj+b4AJFJnkSSNh1ZwoebU2nONoYkD7gGeM6igpqb3lQ0G1uGRBqPWdNgCIgDQJ+RCegcVpvF/DAJOAyp7MDQWMDBm40cwkaTS40Jg644XBQGIzFjFYMXqi+MgKLlYTbxuIkAbBgUKmQh8RBKsIwELA5Q0RCcxUB2afWdaOigXAQ9ndXcJmLRIQgpH6N7azuZk1KspKLuq1+re/K1///wzLdgEFWAp//z3///39KarrtgAAG5tttttttttcKegDEgqUquuI10MKb//OCxBoyW8KWX5igAC8FckgFg3IYj2qBxFYxIGHJBsY4DFoD1g+Ew/IR+JwMkzJEyEBA3wLTQvsJ8CwkmkywkVUComgKGF+K6MYK3WpdZdNXZabkPGQGbHcO0lxmka0a6KbsmnuQEmiBEqQwpEXIoaV9VSldms1mkmThOk8VSKk0USZKBNnS5Uqr/t7vd98nz5aK5PF02JoonCkZkwYG5cXr1/6v+3/zxseLpeRLpkdMTAvpmhfNjU+Xi6ZVN4W4hTOSkTUsLYSogo9JcXAvxCn/84LEFCxijYwBz2ABCjdISpxCRMVQN4NUP5djdAkB4SoyqJJZKwjJABgPKwlAiOpeBI9Oj65yYqYDpatW1y1trCYntDoyeZMbnJ7Q6MnmTGNl3mlz2rbTMzMzONPfWtcexcu9la7i7mnvZW1xd2fta9lq16ZmZ7a1m1v12WXesutq3wVEFRX/C+MFPFbhDQVg4KxFQkRwKwM//+KbCbJgqIbFxNCioubIbFVMQU1FNC4wVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zgsQmAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUU0LjBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//OCxDsAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTQuMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/84LEOwAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FNC4wVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zgsQ7AAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUU0LjBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//OCxDsAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTQuMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/84LEOwAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FNC4wVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zgsQ7AAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUU0LjBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//OCxDsAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU="
+  asset sndLineClear = base64"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"
+  asset sndBigClear = base64"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VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FNC4wVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zgsQ7AAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUU0LjBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//OCxDsAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTQuMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/84LEOwAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FNC4wVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zgsQ7AAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+  asset sndGameOver = base64"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ZoiUM5Wk6W6rzqKzM3IZgaEoXzce60rVK7o1rdV6DLrWTDw8DM3Jc4XDQ6Uy+ZVupaT2qeve1W+yugaGiJutSFTrebspJN0FotqWtGgq6n1JUklKRTR/SVY0M3LVMaLTNzA0KCz5fUaFxZ8ASC0SC0WjUXDUaiMMA/O3YYFA/+dRQNCDIMf8W4NElSpf3+F9QvuIUJopjm8EaAKAr45JFP/zgsT/MoQWFBOfaAAQtwoAsLIMGxjlEmK1HT4AmECAMgB5DC5LCziHEkMb8QTFCCcBQAzoj8Y8Y0ZETcOocQrpR/iAwWUCICPQbxiEIkwYkEBidKSi8dWXUG/4kgZbEERAMQUEAg9QVuI1D5yGCah8Bk6R01RUXjJMumKH/9EqE25XJg0Jwpm5fOFQwMSfSVRWySnXZV1//+tI0UxuLAkYOBEUdUxBTUU0LjBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//OCxPkzGzKyX5mJI1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTQuMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/84LEOwAAA0gBwAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ=="
+
+  // Game state
+  state score = 0 persist
+  state lines = 0 persist
+  state combo = 1
+  state banner = ""
+  state bannerTimer = 0.0
+  state soundOn = true persist
+  state gameOver = false
+  // Seconds left of the "hull sunk" penalty: no moves until it reaches 0
+  state sunkLock = 0.0
+
+  // Board: 6 columns x 7 rows (42 cells, 0 = empty hull recess, 1..5 = wooden blocks)
+  state board = [
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0
+  ]
+
+  // Active falling piece state
+  state pieceType = 0
+  state pieceRot = 0
+  state pieceCol = 2
+  state pieceWood = 1
+  state timer = 1.0
+  state timerRunning = false
+  state isDropping = false
+  state dropProgress = 0.0
+
+  // Sawdust and wood chip particles on line clear
+  state particles = []
+
+  fps: modes.saver ? (isDropping || len(particles) > 0 || timerRunning || sunkLock > 0 ? 30 : 0) : (isDropping || len(particles) > 0 || timerRunning || sunkLock > 0 ? 60 : 5)
+
+  // Polyomino pieces in 4 rotations (dx, dy offsets)
+  let allPieces = [
+    // 0: 3-plank
+    [
+      [[0,0],[1,0],[2,0]],
+      [[0,0],[0,1],[0,2]],
+      [[0,0],[1,0],[2,0]],
+      [[0,0],[0,1],[0,2]]
+    ],
+    // 1: 2x2 Square Block
+    [
+      [[0,0],[1,0],[0,1],[1,1]],
+      [[0,0],[1,0],[0,1],[1,1]],
+      [[0,0],[1,0],[0,1],[1,1]],
+      [[0,0],[1,0],[0,1],[1,1]]
+    ],
+    // 2: T-plank
+    [
+      [[1,0],[0,1],[1,1],[2,1]],
+      [[0,0],[0,1],[1,1],[0,2]],
+      [[0,0],[1,0],[2,0],[1,1]],
+      [[1,0],[0,1],[1,1],[1,2]]
+    ],
+    // 3: 1x2 Plank (Domino)
+    [
+      [[0,0],[1,0]],
+      [[0,0],[0,1]],
+      [[0,0],[1,0]],
+      [[0,0],[0,1]]
+    ],
+    // 4: S-plank
+    [
+      [[1,0],[2,0],[0,1],[1,1]],
+      [[0,0],[0,1],[1,1],[1,2]],
+      [[1,0],[2,0],[0,1],[1,1]],
+      [[0,0],[0,1],[1,1],[1,2]]
+    ],
+    // 5: 3-block Corner
+    [
+      [[0,0],[1,0],[0,1]],
+      [[0,0],[1,0],[1,1]],
+      [[1,0],[0,1],[1,1]],
+      [[0,0],[0,1],[1,1]]
+    ]
+  ]
+
+  let blocks = allPieces[pieceType][pieceRot]
+  let pWidth = max(blocks.map(b => b[0])) + 1
+  let pHeight = max(blocks.map(b => b[1])) + 1
+  let col = clamp(pieceCol, 0, 6 - pWidth)
+
+  // Reachable landing row from top (Tetris gravity collision)
+  let validSteps = range(7).filter(r => all(range(r + 1), step => all(blocks, b => (step + b[1] < 7) && board[(step + b[1]) * 6 + (col + b[0])] == 0)))
+  let landingRow = last(validSteps) ?? -1
+
+  // Layout sizing
+  // Board between two rotate buttons at least 22dp wide; header above
+  let availW = (tileWidth ?? 190) - 12 - 2 * (22 + 4)
+  let availH = (tileHeight ?? 200) - 12 - 20 - 3 - 4
+  let cellSize = clamp(floor(min(availW / 6, availH / 7)), 16, 40)
+  let bSize = cellSize * 6
+  let bHeight = cellSize * 7
+
+  // Wood pixel art color palettes
+  // 0: Hull recess, 1: Golden Teak, 2: Dark Mahogany, 3: Warm Cedar, 4: Blonde Pine, 5: Bilge Ironwood
+  let woodFills = [alpha(#1c130c, 0.4), #d97706, #991b1b, #c2410c, #ca8a04, #4b5563]
+  let woodBorders = [alpha(#2a1b10, 0.5), #78350f, #450a0a, #7c2d12, #713f12, #1f2937]
+  let woodGrains = [#160e09, #b45309, #7f1d1d, #9a3412, #a16207, #374151]
+  let woodLights = [#3d2717, #f59e0b, #dc2626, #ea580c, #eab308, #6b7280]
+  let woodNails = [#0d0805, #f8fafc, #f8fafc, #f8fafc, #f8fafc, #fbbf24]
+
+  // Game update loop
+  every frame {
+    // A board from the 6x6 version: keep its pieces at the bottom, add an empty row on top
+    if len(board) != 42 {
+      board = range(42).map(k => k < 42 - len(board) ? 0 : (board[k - (42 - len(board))] ?? 0))
+    }
+
+    // Hull-sunk penalty countdown
+    if sunkLock > 0 {
+      sunkLock = max(0.0, sunkLock - dt)
+    }
+
+    // Banner timeout
+    if bannerTimer > 0 {
+      bannerTimer = bannerTimer - dt
+      if bannerTimer <= 0 {
+        banner = ""
+      }
+    }
+
+    // Timer countdown after player taps location
+    if timerRunning && !isDropping && !gameOver {
+      timer = timer - dt
+      if timer <= 0 {
+        timer = 0
+        timerRunning = false
+        isDropping = true
+        dropProgress = 0.0
+      }
+    }
+
+    // Drop animation down into the hull
+    if isDropping && !gameOver {
+      dropProgress = dropProgress + dt * 7.0
+      if dropProgress >= 1.0 {
+        dropProgress = 1.0
+        isDropping = false
+
+        let lRow = landingRow
+        if lRow < 0 {
+          // Hull overflow: pieces sink down 3 rows, leaving only the top two rows at the bottom
+          let topOccupied = range(7).filter(r => any(range(6), c => board[r * 6 + c] > 0))
+          let r0 = topOccupied[0] ?? 0
+          let r1 = topOccupied[1] ?? (r0 + 1 < 7 ? r0 + 1 : 6)
+          board = range(42).map(k => floor(k / 6) == 5 ? (r0 < 7 ? board[r0 * 6 + (k % 6)] : 0) : (floor(k / 6) == 6 ? (r1 < 7 ? board[r1 * 6 + (k % 6)] : 0) : 0))
+          banner = "HULL SUNK!"
+          bannerTimer = 2.0
+          sunkLock = 2.0
+          combo = 1
+          if soundOn && screenWidth != null { sound(sndGameOver) }
+          haptic("strong")
+          run("mkdir -p ~/.cache && echo '{\"highScore\": ${int(max(highScore, score))}}' > ~/.cache/carpentry-game.json")
+
+          // Water splash particles from sinking hull
+          let sinkParts = flatten(range(6).map(c => [
+            {x: 2 + c * cellSize + cellSize / 2, y: 2 + 6 * cellSize, vx: -1.2 + (c * 0.4), vy: -2.4, c: #38bdf8, size: 2.5, life: 0.6, maxLife: 0.6},
+            {x: 2 + c * cellSize + cellSize / 2, y: 2 + 6 * cellSize, vx: 1.0 - (c * 0.3), vy: -1.8, c: #fde047, size: 2.0, life: 0.5, maxLife: 0.5}
+          ]))
+          particles = particles + sinkParts
+
+          // Spawn next piece with random rotation
+          pieceType = random(6)
+          pieceRot = random(4)
+          pieceCol = 2
+          pieceWood = random(1, 5)
+          timer = 1.0
+          timerRunning = false
+        } else {
+          // Place piece blocks on the board
+          let placedBoard = reduce(blocks, (curB, pt) => set(curB, (lRow + pt[1]) * 6 + (col + pt[0]), pieceWood), board)
+
+          // Check full rows (all 6 cells filled); columns never clear
+          let fRows = range(7).filter(r => all(range(6), cIdx => placedBoard[r * 6 + cIdx] > 0))
+          let numCleared = len(fRows)
+
+          if numCleared > 0 {
+            // Gravity: pieces above broken rows fall down!
+            let survivingRows = range(7).filter(r => !contains(fRows, r))
+            let numClearedRows = len(fRows)
+
+            let gravBoard = range(42).map(k => floor(k / 6) < numClearedRows ? 0 : placedBoard[survivingRows[floor(k / 6) - numClearedRows] * 6 + (k % 6)])
+
+            // Check if the falling pieces form a cascade clear!
+            let cRows = range(7).filter(r => all(range(6), cIdx => gravBoard[r * 6 + cIdx] > 0))
+            if len(cRows) > 0 {
+              let cSurv = range(7).filter(r => !contains(cRows, r))
+              let cNum = len(cRows)
+              board = range(42).map(k => floor(k / 6) < cNum ? 0 : gravBoard[cSurv[floor(k / 6) - cNum] * 6 + (k % 6)])
+              let pts = (numCleared == 1 ? 100 : numCleared == 2 ? 300 : numCleared == 3 ? 600 : 1000) + cNum * 200
+              let earned = pts * combo
+              score = score + earned
+              lines = lines + numCleared + cNum
+              combo = combo + 2
+
+              let repairPct = (numCleared == 1 ? 14.0 : numCleared == 2 ? 28.0 : 45.0) + cNum * 12.0 + (combo - 1) * 3.0
+              if shipDamage > 0 {
+                let newDmg = max(0.0, shipDamage - repairPct)
+                let curW = num(shipStatus.water, 0.0)
+                run("mkdir -p ~/.cache && echo '{\"damage\": ${round(newDmg, 1)}, \"water\": ${round(curW, 1)}, \"waterRate\": ${round(num(shipStatus.waterRate, 0.0), 3)}}' > ~/.cache/ship-status.json; owl-send ${sh(sailOwl)} set damage ${round(newDmg, 1)} 2>/dev/null || true")
+                let repAmt = min(shipDamage, repairPct)
+                banner = "CASCADE REPAIR -${round(repAmt)}%! +${earned}"
+              } else {
+                banner = "CASCADE CLEAR! +${earned}"
+              }
+              bannerTimer = 2.4
+              if soundOn && screenWidth != null { sound(sndBigClear) }
+              haptic("strong")
+            } else {
+              board = gravBoard
+              let pts = numCleared == 1 ? 100 : numCleared == 2 ? 300 : numCleared == 3 ? 600 : 1000
+              let earned = pts * combo
+              score = score + earned
+              lines = lines + numCleared
+              combo = combo + 1
+
+              let repairPct = (numCleared == 1 ? 8.0 : numCleared == 2 ? 18.0 : 32.0) + (combo - 1) * 3.0
+              if shipDamage > 0 {
+                let newDmg = max(0.0, shipDamage - repairPct)
+                let curW = num(shipStatus.water, 0.0)
+                run("mkdir -p ~/.cache && echo '{\"damage\": ${round(newDmg, 1)}, \"water\": ${round(curW, 1)}, \"waterRate\": ${round(num(shipStatus.waterRate, 0.0), 3)}}' > ~/.cache/ship-status.json; owl-send ${sh(sailOwl)} set damage ${round(newDmg, 1)} 2>/dev/null || true")
+                let repAmt = min(shipDamage, repairPct)
+                banner = "PATCHED -${round(repAmt)}%! +${earned}"
+              } else if numCleared >= 2 {
+                banner = "DOUBLE CLEAR! +${earned}"
+              } else {
+                banner = "ROW BREAK! +${earned}"
+              }
+              bannerTimer = 2.2
+
+              if soundOn && screenWidth != null { sound(numCleared >= 2 ? sndBigClear : sndLineClear) }
+              haptic("strong")
+            }
+
+            // Spawn sawdust and wood shavings particles from cleared cells
+            let clearedCells = range(42).filter(k => contains(fRows, floor(k / 6)))
+            let newParts = flatten(clearedCells.map(k => [
+              {x: 2 + (k % 6) * cellSize + cellSize / 2, y: 2 + floor(k / 6) * cellSize + cellSize / 2, vx: -1.4, vy: -1.8, c: #fde047, size: 2.5, life: 0.55, maxLife: 0.55},
+              {x: 2 + (k % 6) * cellSize + cellSize / 2, y: 2 + floor(k / 6) * cellSize + cellSize / 2, vx: 1.4, vy: -2.0, c: #d97706, size: 3.0, life: 0.55, maxLife: 0.55},
+              {x: 2 + (k % 6) * cellSize + cellSize / 2, y: 2 + floor(k / 6) * cellSize + cellSize / 2, vx: 0.2, vy: -1.2, c: #f8fafc, size: 1.5, life: 0.45, maxLife: 0.45}
+            ]))
+            particles = particles + newParts
+          } else {
+            board = placedBoard
+            combo = 1
+            haptic("medium")
+          }
+
+          // Spawn next piece with random rotation
+          pieceType = random(6)
+          pieceRot = random(4)
+          pieceCol = 2
+          pieceWood = random(1, 5)
+          timer = 1.0
+          timerRunning = false
+        }
+      }
+    }
+
+    // Update sawdust particles
+    if len(particles) > 0 {
+      particles = particles.map(p => {
+        x: p.x + p.vx * dt * 25,
+        y: p.y + p.vy * dt * 25 + 30 * dt * dt,
+        vx: p.vx * 0.96,
+        vy: p.vy + 2.5 * dt,
+        c: p.c,
+        size: p.size,
+        life: p.life - dt,
+        maxLife: p.maxLife
+      }).filter(p => p.life > 0)
+    }
+  }
+
+  Box {
+    fill: true
+    align: bottom
+
+    // Damage liquid/tint rising from bottom to top
+    if shipDamage > 0 {
+      Box {
+        fill: width
+        height: (tileHeight ?? 200) * clamp(shipDamage / 100.0, 0.0, 1.0)
+        background: linear(0, 0, 0, 1, [alpha(#ef4444, 0.5), alpha(#7f1d1d, 0.88)])
+      }
+    }
+
+    Column {
+      fill: true
+      padding: 6
+      gap: 3
+
+    // Header, the same in bilge, carpentry and gunnery: linked to the sailing widget it shows the
+    // game's name and what it does for the ship; on its own, its level and the bar to the next one
+    Row {
+      height: 20
+      fill: width
+      align: center
+      gap: 3
+      if hasSailing {
+        Text { text: "⚓ CARPENTRY"; bold: true; fontSize: 10; color: #f59e0b }
+        Spacer { weight: 1 }
+            if shipDamage > 0 {
+              Text { text: "DMG:${round(shipDamage)}%"; fontSize: 10; bold: true; color: #ef4444 }
+            } else {
+              Text { text: "HI:${int(max(highScore, score))}"; fontSize: 10; color: muted }
+            }
+      } else if showSailHint {
+        Text {
+          text: sailRemoved != "" ? "⛵ ADD SAILING" : "⛵ GET SAILING"
+          fontSize: 10
+          bold: true
+          color: #0d1329
+          background: #f59e0b
+          padding: [4, 1]
+          radius: 3
+          onTap: {
+            if sailRemoved != "" {
+              run("cd ~/.config/omalauncher/widgets && [ ! -e ${sh(sailRemoved)} ] && mv .removed/${sh(sailRemoved)} .")
+            } else {
+              launcher("store")
+            }
+          }
+        }
+        Spacer { weight: 1 }
+        Text { text: "✕"; fontSize: 10; bold: true; color: muted; background: #1e293b; padding: [4, 1]; radius: 3; onTap: hideSailHint = true }
+      } else {
+        Text { text: "LVL ${1 + floor(lines / 8)}"; bold: true; fontSize: 10; color: #f59e0b }
+        Progress { value: clamp(lines % 8, 0, 8); max: 8; color: #f59e0b; track: #1e130b; weight: 1; height: 6; radius: 3 }
+        Text { text: "${lines % 8}/${8}"; fontSize: 10; color: muted }
+      }
+      Text { text: "★${score}"; fontSize: 10; bold: true; color: #fbbf24 }
+      Text {
+        text: soundOn ? "♪" : "✕"
+        fontSize: 10
+        bold: true
+        color: soundOn ? #38bdf8 : muted
+        background: #1e130b
+        padding: [4, 1]
+        radius: 3
+        onTap: { soundOn = !soundOn; if soundOn { sound(sndRotate) } }
+      }
+      Text {
+        text: "↺"
+        fontSize: 11
+        bold: true
+        color: foreground
+        background: #1e130b
+        padding: [4, 0]
+        radius: 3
+        onTap: {
+            board = [
+              0,0,0,0,0,0,
+              0,0,0,0,0,0,
+              0,0,0,0,0,0,
+              0,0,0,0,0,0,
+              0,0,0,0,0,0,
+              0,0,0,0,0,0,
+              0,0,0,0,0,0
+            ]
+            score = 0
+            lines = 0
+            combo = 1
+            gameOver = false
+            banner = ""
+            pieceType = random(6)
+            pieceRot = random(4)
+            pieceCol = 2
+            pieceWood = 1
+            timer = 1.0
+            timerRunning = false
+            isDropping = false
+            sunkLock = 0.0
+            particles = []
+            if soundOn { sound(sndRotate) }
+        }
+      }
+    }
+
+    // 6x7 Ship Hull Carpentry Board, between two tall rotate buttons (left: counter-clockwise, right: clockwise)
+    Row {
+      fill: true
+      gap: 4
+      align: center
+      Box {
+        weight: 1
+        fill: height
+        align: center
+        background: #26160c
+        border: 1
+        borderColor: #4a2814
+        radius: 4
+        onTap: {
+          if !gameOver && !isDropping && sunkLock <= 0 {
+            pieceRot = (pieceRot + 3) % 4
+            if timerRunning { timer = 1.0 }
+            if soundOn { sound(sndRotate) }
+            haptic("light")
+          }
+        }
+        Text { text: "↺"; fontSize: 18; bold: true; color: #f59e0b }
+      }
+
+    Box {
+      fill: height
+      align: center
+
+      Canvas {
+        width: bSize + 4
+        height: bHeight + 4
+        let ox = 2
+        let oy = 2
+
+        // Outer ship hull frame
+        rect(ox - 2, oy - 2, bSize + 4, bHeight + 4, fill: alpha(#0d0a07, 0.75), stroke: #3d2314, width: 1.5, radius: 4 * corners)
+        rect(ox, oy, bSize, bHeight, fill: alpha(#130d08, 0.35))
+
+        // 6x7 Grid Cells (Hull slots & placed blocks)
+        for i in range(42) {
+          let r = floor(i / 6)
+          let c = i % 6
+          let cx = ox + c * cellSize
+          let cy = oy + r * cellSize
+          let val = board[i] ?? 0
+
+          rect(cx + 1, cy + 1, cellSize - 2, cellSize - 2, fill: woodFills[val], stroke: woodBorders[val], width: 1, radius: 2)
+
+          if val != 0 {
+            // Placed wooden block: bevel, wood grain lines, corner nails
+            line(cx + 2, cy + 2, cx + cellSize - 3, cy + 2, stroke: woodLights[val], width: 1)
+            line(cx + 2, cy + cellSize * 0.45, cx + cellSize - 3, cy + cellSize * 0.45, stroke: woodGrains[val], width: 1)
+            line(cx + 3, cy + cellSize * 0.75, cx + cellSize - 4, cy + cellSize * 0.75, stroke: woodGrains[val], width: 1)
+            rect(cx + 2.5, cy + 2.5, 1.5, 1.5, fill: woodNails[val])
+            rect(cx + cellSize - 4, cy + cellSize - 4, 1.5, 1.5, fill: woodNails[val])
+          }
+        }
+
+        // Ghost Piece: shows where the piece will land in the chosen column
+        if !isDropping && sunkLock <= 0 {
+          if landingRow >= 0 {
+            for b in blocks {
+              let gx = ox + (col + b[0]) * cellSize
+              let gy = oy + (landingRow + b[1]) * cellSize
+              rect(gx + 1, gy + 1, cellSize - 2, cellSize - 2, fill: alpha(woodFills[pieceWood], 0.28), stroke: #f59e0b, width: 1.5, radius: 2)
+              rect(gx + cellSize / 2 - 1, gy + cellSize / 2 - 1, 2, 2, fill: #f59e0b)
+            }
+          } else {
+            // Column full: warn with red ghost outline that piece overflows
+            for b in blocks {
+              let gx = ox + (col + b[0]) * cellSize
+              let gy = oy + b[1] * cellSize
+              rect(gx + 1, gy + 1, cellSize - 2, cellSize - 2, fill: alpha(#ef4444, 0.28), stroke: #ef4444, width: 1.5, radius: 2)
+            }
+          }
+        }
+
+        // Falling or Waiting Piece
+        let animY = isDropping ? lerp(0.0, max(landingRow, 0), dropProgress) : 0.0
+
+        if isDropping || timerRunning {
+          for b in blocks {
+            let fx = ox + (col + b[0]) * cellSize
+            let fy = oy + (animY + b[1]) * cellSize
+
+            rect(fx + 1, fy + 1, cellSize - 2, cellSize - 2, fill: woodFills[pieceWood], stroke: woodBorders[pieceWood], width: 1.5, radius: 2)
+            line(fx + 2, fy + 2, fx + cellSize - 3, fy + 2, stroke: woodLights[pieceWood], width: 1)
+            line(fx + 2, fy + cellSize * 0.45, fx + cellSize - 3, fy + cellSize * 0.45, stroke: woodGrains[pieceWood], width: 1)
+            line(fx + 3, fy + cellSize * 0.75, fx + cellSize - 4, fy + cellSize * 0.75, stroke: woodGrains[pieceWood], width: 1)
+            rect(fx + 2.5, fy + 2.5, 1.5, 1.5, fill: woodNails[pieceWood])
+            rect(fx + cellSize - 4, fy + cellSize - 4, 1.5, 1.5, fill: woodNails[pieceWood])
+          }
+        }
+
+        // 1-second Countdown gauge above selected column
+        if timerRunning && !isDropping {
+          let barX = ox + col * cellSize
+          let barW = pWidth * cellSize
+          let fillW = barW * clamp(timer / 1.0, 0.0, 1.0)
+          rect(barX + 1, oy + 1, barW - 2, 3, fill: #0b1120, radius: 1)
+          rect(barX + 1, oy + 1, fillW, 3, fill: #f59e0b, radius: 1)
+        }
+
+        // Flying sawdust and wood particles
+        for p in particles {
+          rect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size, fill: p.c)
+        }
+
+        // Clear Banner at the top of the board (Row Break, Column Clear, Cross Clear, Cascade, Hull Sunk)
+        if banner != "" {
+          rect(ox + 6, oy + 4, bSize - 12, 28, fill: alpha(#0b1120, 0.92), stroke: #f59e0b, width: 1.5, radius: 4)
+          text(banner, ox + bSize / 2, oy + 18, size: 10, bold: true, align: center, color: #fde047)
+        }
+
+        // Hull-sunk penalty: bar under the banner shrinks over 2 seconds
+        if sunkLock > 0 {
+          let lockW = bSize - 12
+          rect(ox + 6, oy + 36, lockW, 6, fill: alpha(#0b1120, 0.92), stroke: #7f1d1d, width: 1, radius: 3)
+          rect(ox + 6, oy + 36, lockW * clamp(sunkLock / 2.0, 0.0, 1.0), 6, fill: #ef4444, radius: 3)
+        }
+
+        // Tap handling on the board: choose column and drop after a second
+        onTap: {
+          if !isDropping && sunkLock <= 0 {
+            let fx = clamp((x - 2) / cellSize, 0.0, 5.99)
+            let targetC = clamp(round(fx - pWidth / 2.0), 0, 6 - pWidth)
+            if pieceCol == targetC && timerRunning {
+              // Tapped same column again: Drop immediately with tuc-tuc!
+              timer = 0
+              timerRunning = false
+              isDropping = true
+              dropProgress = 0.0
+              if soundOn { sound(sndDrop) }
+              haptic("medium")
+            } else {
+              // Choose location / place piece: tuc-tuc sound!
+              pieceCol = targetC
+              timer = 1.0
+              timerRunning = true
+              if soundOn { sound(sndDrop) }
+              haptic("medium")
+            }
+          }
+        }
+      }
+    }
+      Box {
+        weight: 1
+        fill: height
+        align: center
+        background: #26160c
+        border: 1
+        borderColor: #4a2814
+        radius: 4
+        onTap: {
+          if !gameOver && !isDropping && sunkLock <= 0 {
+            pieceRot = (pieceRot + 1) % 4
+            if timerRunning { timer = 1.0 }
+            if soundOn { sound(sndRotate) }
+            haptic("light")
+          }
+        }
+        Text { text: "↻"; fontSize: 18; bold: true; color: #f59e0b }
+      }
+    }
+  }
+}
+}
