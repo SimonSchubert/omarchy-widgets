@@ -28,7 +28,7 @@ widget "sailing" {
   // The companion widgets, found by their declared name (whatever the file is called, a store
   // install is market-<user>-<name>.owl): "home" is the file on home, "removed" one taken off
   // home into .removed/, both "" when it isn't installed
-  source mates = cmd("cd ~/.config/omalauncher/widgets && s=; printf '{'; for n in bilge carpentry gunnery; do h=$(grep -l '^widget \"'$n'\"' *.owl 2>/dev/null | head -1); r=$(grep -l '^widget \"'$n'\"' .removed/*.owl 2>/dev/null | head -1 | sed 's|^.removed/||'); printf '%s\"%s\": {\"home\": \"%s\", \"removed\": \"%s\"}' \"$s\" \"$n\" \"$h\" \"$r\"; s=,; done; printf '}'") every 10s json
+  source mates = cmd("cd ~/.config/omalauncher/widgets && s=; printf '{'; for n in bilge carpentry gunnery; do h=$(grep -l '^widget \"'$n'\"' *.owl 2>/dev/null | head -1); r=$(grep -l '^widget \"'$n'\"' .removed/*.owl 2>/dev/null | head -1 | sed 's|^.removed/||'); printf '%s\"%s\": {\"home\": \"%s\", \"removed\": \"%s\"}' \"$s\" \"$n\" \"$h\" \"$r\"; s=,; done; printf '}'") every 5m json
   // Until the first check is in, count them as there, so nothing flips at start
   let bilgeOwl = mates == null ? "30-bilge.owl" : (mates.bilge.home ?? "")
   let carpentryOwl = mates == null ? "32-carpentry.owl" : (mates.carpentry.home ?? "")
@@ -48,11 +48,10 @@ widget "sailing" {
   let missingMates = mates == null ? [] : MATES.filter(m => (mates[m.key].home ?? "") == "" && !contains(hiddenMates, m.key))
   let mate = len(missingMates) > 0 ? missingMates[0] : null
   let mateRemoved = mate != null ? (mates[mate.key].removed ?? "") : ""
-  // polled, not watched, so loads made while this page was off screen still count when it comes back
-  source gunFile = cmd("cat ~/.cache/gunnery.json 2>/dev/null || echo {}") every 2s json
+  source gunFile = file("~/.cache/gunnery.json") json
   state gunSeen = 0 persist
   // Bilge widget: it writes the total it has pumped; sailing owns the water and takes off what's new
-  source bilgeFile = cmd("cat ~/.cache/bilge-pumps.json 2>/dev/null || echo {}") every 1s json
+  source bilgeFile = file("~/.cache/bilge-pumps.json") json
   state bilgeSeen = -1.0 persist
   state lastSyncedGuns = ""
   state lastSyncedDamage = -1.0
@@ -736,6 +735,7 @@ widget "sailing" {
               onTap: {
                 if mateRemoved != "" {
                   run("cd ~/.config/omalauncher/widgets && [ ! -e ${sh(mateRemoved)} ] && mv .removed/${sh(mateRemoved)} .")
+                  refresh()
                 } else {
                   launcher("store")
                 }
