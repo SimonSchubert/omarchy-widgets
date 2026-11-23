@@ -93,8 +93,9 @@ face "t9" {
   state sSeed = 1
   state sNew = 0
   state sBest = 0 persist
-  // The screen's colour: the theme's yellow, accent, green or blue, or the night screen.
-  state scr = "yellow" persist
+  // The screen's colour: the theme screen (2.0's: the theme's background tinted by its accent, light ink), or a lit
+  // screen in the theme's yellow, accent, green or blue.
+  state scr = "theme" persist
 
   // ---- the t9's own screens: the drawer (Menu) and what it opens ----
   // The drawer's page and selection, the folder open in it ("" for none) and where it was opened from, a swipe.
@@ -284,13 +285,16 @@ face "t9" {
 
   // ---- the look, all from the Omarchy theme: the LCD lit in one of its colours (Go to › Screen picks which), the
   // theme's background as the ink, the body a shade darker than the background, keys raised off it ----
-  let scrs = ["yellow", "accent", "green", "blue", "night"]
+  let scrs = ["theme", "yellow", "accent", "green", "blue"]
   let tintC = scr == "accent" ? accent : scr == "green" ? green : scr == "blue" ? blue : yellow
-  // Night is the old dark screen: glass tinted by the accent, light ink.
-  let night = scr == "night"
+  // The theme screen is 2.0's glass: the theme's background tinted by its accent, with light ink.
+  let night = scr == "theme" || scr == "night"
   // Lit, dimmed and out: the screen sinks toward the background as the light goes, as an unlit LCD greys.
   let lcdC = night ? mix(background, accent, bl >= 1 ? 0.17 : bl > 0 ? 0.13 : 0.08) : bl >= 1 ? tintC : bl > 0 ? mix(tintC, background, 0.14) : mix(tintC, background, 0.3)
   let ink = night ? mix(foreground, accent, 0.2) : background
+  // The LCD is glass, as 2.0 had it: the wallpaper blurred behind it shows through the screen's colour, a little denser
+  // than the user's tile glass so it stays readable over a bright wallpaper.
+  let lcdA = clamp(num(tileOpacity, 0.46) + 0.2, 0.62, 0.92)
   let inkLvl = !night ? 1 : bl >= 1 ? 1 : bl > 0 ? 0.9 : 0.8
   let faint = alpha(ink, 0.55)
   // The backlight's own light: a whiter light of the screen's hue (the accent's glow on the night screen).
@@ -473,7 +477,7 @@ face "t9" {
   let dDockH = hasIos ? 38 : 0
   let dCellH = max(24, (contH - 26 - 12 - dDockH - 4) / dRows)
   let dLabels = dCellH >= 36
-  let dIcon = clamp(dCellH - (dLabels ? 14 : 4), 18, 46)
+  let dIcon = clamp(dCellH - (dLabels ? 19 : 4), 18, 46)
 
   // ---- Calendar: the picked day's month, a dot on each day with events, that day's agenda ----
   let todayNoon = parseTime(fmtTime(now, "yyyy-MM-dd") + " 12:00", "yyyy-MM-dd HH:mm")
@@ -765,7 +769,7 @@ face "t9" {
       return half4(float4(float3(body.rgb) + grain(px) * 0.012, 1.0));
     }
   """
-  // A 16x16 pixel icon from 16 rows of bits, the leftmost highest; cells inset 10%.
+  // A 16x16 pixel icon from 16 rows of bits, the leftmost highest, in solid pixels like the LCD's type.
   let pxCode = """
     uniform float bits[16];
     uniform half4 inkc;
@@ -778,53 +782,61 @@ face "t9" {
         if (float(i) == cell.y) { m = bits[i]; }
       }
       float on = mod(floor(m / exp2(15.0 - cell.x)), 2.0);
-      float2 f = g - cell;
-      float inside = step(0.1, f.x) * step(f.x, 0.9) * step(0.1, f.y) * step(f.y, 0.9);
       half4 c = on > 0.5 ? inkc : ghost;
-      return half4(c.rgb * c.a, c.a) * inside;
+      return half4(c.rgb * c.a, c.a);
     }
   """
-  // An app's icon as 16x16 LCD cells. Where the app has a one-colour icon, its silhouette (a glyph with gaps). Where it
-  // hasn't, the silhouette is just the icon's shape, a solid block: then its outline, and inside it whatever stands out
-  // from the icon's own background, which is its logo.
+  // An app's icon as 16x16 solid LCD pixels in the ink, drawn like the LCD's type: each pixel lit when most of its
+  // area is covered (nine samples), with nothing round it. Where the app has a one-colour icon, that glyph. Where it
+  // hasn't, the silhouette is only the icon's shape: then its outline, and inside it whatever stands out from the
+  // icon's own background, which is its logo. `ghost` colours the unlit pixels (clear here).
   let iconCode = """
     uniform shader img;
     uniform shader full;
     uniform half4 ink;
     uniform half4 ghost;
     uniform float span;
-    float2 at(float2 cell) {
-      return 0.5 + ((cell + 0.5) / 16.0 - 0.5) * span;
+    float2 at(float2 q) {
+      return 0.5 + (q - 0.5) * span;
     }
-    float inShape(float2 cell) {
+    float covM(float2 cell) {
+      float s = 0.0;
+      for (int j = 0; j < 3; j++) {
+        for (int i = 0; i < 3; i++) {
+          s += step(0.5, img.eval(at((cell + (float2(float(i), float(j)) + 0.5) / 3.0) / 16.0)).a);
+        }
+      }
+      return s / 9.0;
+    }
+    float inC(float2 cell) {
       if (cell.x < 0.0 || cell.x > 15.0 || cell.y < 0.0 || cell.y > 15.0) { return 0.0; }
-      return step(0.45, img.eval(at(cell)).a);
+      return step(0.5, covM(cell));
     }
     half4 main(float2 p) {
-      float2 g = p / size * 16.0;
-      float2 cell = floor(g);
-      // How much of the icon's middle the silhouette covers: a glyph leaves gaps, a plain shape doesn't.
+      float2 cell = floor(p / size * 16.0);
       float cov = 0.0;
       for (int j = 0; j < 6; j++) {
         for (int i = 0; i < 6; i++) {
-          cov += step(0.45, img.eval(0.5 + (float2(float(i), float(j)) / 5.0 - 0.5) * span * 0.6).a);
+          cov += step(0.5, img.eval(0.5 + (float2(float(i), float(j)) / 5.0 - 0.5) * span * 0.6).a);
         }
       }
       cov = cov / 36.0;
-      float on = inShape(cell);
+      float on = inC(cell);
       if (cov > 0.8) {
-        half4 c = full.eval(at(cell));
         float k = 0.38 * span;
         float3 bg = (float3(full.eval(float2(0.5, 0.5 - k)).rgb) + float3(full.eval(float2(0.5, 0.5 + k)).rgb) + float3(full.eval(float2(0.5 - k, 0.5)).rgb) + float3(full.eval(float2(0.5 + k, 0.5)).rgb)) * 0.25;
-        float3 cc = float3(c.rgb) / max(float(c.a), 0.01);
-        float diff = step(0.24, distance(cc, bg)) * step(0.45, float(c.a));
-        float edge = on * (1.0 - inShape(cell + float2(1.0, 0.0)) * inShape(cell - float2(1.0, 0.0)) * inShape(cell + float2(0.0, 1.0)) * inShape(cell - float2(0.0, 1.0)));
-        on = max(edge, on * diff);
+        float lg = 0.0;
+        for (int j = 0; j < 3; j++) {
+          for (int i = 0; i < 3; i++) {
+            half4 c = full.eval(at((cell + (float2(float(i), float(j)) + 0.5) / 3.0) / 16.0));
+            lg += step(0.28, distance(float3(c.rgb) / max(float(c.a), 0.01), bg)) * step(0.5, float(c.a));
+          }
+        }
+        float edge = on * (1.0 - inC(cell + float2(1.0, 0.0)) * inC(cell - float2(1.0, 0.0)) * inC(cell + float2(0.0, 1.0)) * inC(cell - float2(0.0, 1.0)));
+        on = max(edge, on * step(0.5, lg / 9.0));
       }
-      float2 f = fract(g);
-      float inside = step(0.1, f.x) * step(f.x, 0.9) * step(0.1, f.y) * step(f.y, 0.9);
       half4 col = on > 0.5 ? ink : ghost;
-      return half4(col.rgb * col.a, col.a) * inside;
+      return half4(col.rgb * col.a, col.a);
     }
   """
   // Album art as a 4x4 ordered dither in ink on the LCD.
@@ -1240,12 +1252,12 @@ face "t9" {
       }
       if cur.kind == "app" {
         if gpu {
-          Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { img: "mask:a:${cur.key}", full: "icon:a:${cur.key}", ink: ink, ghost: alpha(ink, 0.07), span: iconSpan }; code: iconCode }
+          Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { img: "mask:a:${cur.key}", full: "icon:a:${cur.key}", ink: ink, ghost: alpha(ink, 0), span: iconSpan }; code: iconCode }
         } else {
           Image { src: "mask:a:${cur.key}"; tint: ink; fill: true }
         }
       } else if gpu {
-        Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { bits: pxBits, inkc: ink, ghost: alpha(ink, 0.07) }; code: pxCode }
+        Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { bits: pxBits, inkc: ink, ghost: alpha(ink, 0) }; code: pxCode }
       } else {
         Canvas {
           fill: true
@@ -1498,7 +1510,7 @@ face "t9" {
             Image { src: m.art; fit: cover; fill: true; opacity: 0.85 }
           }
         } else if gpu {
-          Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { bits: noteBits, inkc: ink, ghost: alpha(ink, 0.07) }; code: pxCode }
+          Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { bits: noteBits, inkc: ink, ghost: alpha(ink, 0) }; code: pxCode }
         } else {
           Canvas {
             fill: true
@@ -1602,12 +1614,12 @@ face "t9" {
       size: sz
       if it.kind == "app" {
         if gpu {
-          Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { img: "mask:${it.key}", full: "icon:${it.key}", ink: on ? lcdC : ink, ghost: alpha(on ? lcdC : ink, 0.08), span: iconSpan }; code: iconCode }
+          Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { img: "mask:${it.key}", full: "icon:${it.key}", ink: on ? lcdC : ink, ghost: alpha(on ? lcdC : ink, 0), span: iconSpan }; code: iconCode }
         } else {
           Image { src: "mask:${it.key}"; tint: on ? lcdC : ink; fill: true }
         }
       } else if gpu {
-        Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { bits: it.kind == "folder" ? (t9Bits.find(b => b.k == "folder")).b : it.id == "player" ? musicBits : it.id == "snake" ? snakeBits : (t9Bits.find(b => b.k == it.id)).b, inkc: on ? lcdC : ink, ghost: alpha(on ? lcdC : ink, 0.08) }; code: pxCode }
+        Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { bits: it.kind == "folder" ? (t9Bits.find(b => b.k == "folder")).b : it.id == "player" ? musicBits : it.id == "snake" ? snakeBits : (t9Bits.find(b => b.k == it.id)).b, inkc: on ? lcdC : ink, ghost: alpha(on ? lcdC : ink, 0) }; code: pxCode }
       } else {
         Text { text: sub(it.name, 0, 1); font: lcdFont; fontSize: sz * 0.7; color: on ? lcdC : ink; align: center; fill: true }
       }
@@ -2092,7 +2104,8 @@ face "t9" {
       fill: true
       radius: 12
       clip: true
-      background: lcdC
+      frost: num(tileFrost, 0) > 0 ? tileFrost : 16
+      background: alpha(lcdC, min(1, lcdA + (bl >= 1 ? 0.06 : bl > 0 ? 0.03 : 0)))
       animate background: tween(450ms, "ease")
       // 1 · the light guide's slow wash: it warms up as the light comes on and is the afterglow as it goes.
       if gpu {
@@ -2108,7 +2121,7 @@ face "t9" {
         Shader { fill: true; fallback: alpha(background, 0); uniforms: { glow: glowC, bg: background }; code: guideCode }
       }
       // 3 · the pixel grid under the ink, and the bezel's recess shadow under its top edge.
-      Shader { fill: true; fallback: alpha(background, 0); uniforms: { gap: alpha(background, night ? 0.22 : 0.1), fg: foreground, wdp: lcdW }; code: gridCode }
+      Shader { fill: true; fallback: alpha(background, 0); uniforms: { gap: alpha(background, 0.22), fg: foreground, wdp: lcdW }; code: gridCode }
       if !gpu {
         Box { fill: width; height: 10; background: linear(0, 0, 0, 1, [alpha(background, 0.28), alpha(background, 0)]) }
       }
