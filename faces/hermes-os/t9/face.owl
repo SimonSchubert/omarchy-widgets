@@ -719,9 +719,9 @@ face "t9" {
     }
   """
   // A raised key as the video's: the body itself rising in a gradual slope into a rounded dome, in the same black, with
-  // no outline and no flat top. Its height comes from a superellipse the shape of the key (so it curves smoothly in
-  // every direction, with no creases): a parabolic dome, round all over, on a soft foot that starts a few dp outside
-  // the outline. Only light and shade show it, continuously across the key: the half facing the light (top, upper
+  // no outline and no flat top, in the shape of a pill (its ends half circles). Its height comes from the distance to
+  // the key's centre line (smooth everywhere, so no creases): a parabolic dome, round across, on a soft foot that
+  // starts a few dp outside the outline. Only light and shade show it, continuously across the key: the half facing the light (top, upper
   // left) lighter, the half facing away (bottom, right) darker, fading into the body all round. Drawn as light and
   // shade over the body, so the body's own black and grain run through it. Pressed, the dome flattens and darkens.
   let pillowCode = """
@@ -730,10 +730,13 @@ face "t9" {
     uniform float m;
     uniform float down;
     uniform half4 body;
+    // A pill: the distance from the key's centre line, half its height round, so its ends are half circles.
+    float pill(float2 p, float2 b, float rb) {
+      float2 q = float2(max(abs(p.x) - (b.x - b.y), 0.0), p.y);
+      return clamp(1.0 - length(q) / (b.y * rb), 0.0, 1.0);
+    }
     float dome(float2 p, float2 b, float rb, float hh) {
-      float2 q = max(abs(p) / b, float2(0.0001));
-      float r = pow(pow(q.x, 5.0) + pow(q.y, 5.0), 0.2);
-      float t = clamp(1.0 - r / rb, 0.0, 1.0);
+      float t = pill(p, b, rb);
       return hh * (1.0 - (1.0 - t) * (1.0 - t)) * smoothstep(0.0, 0.3, t);
     }
     half4 main(float2 px) {
@@ -750,7 +753,7 @@ face "t9" {
       float3 n = normalize(float3(-(hx - h0) / e, -(hy - h0) / e, 1.0));
       float3 L = normalize(float3(-0.35, -0.9, 1.0));
       float lit = dot(n, L) - L.z;
-      float inside = smoothstep(0.0, 0.3, clamp(1.0 - pow(pow(max(abs(p.x) / b.x, 0.0001), 5.0) + pow(max(abs(p.y) / b.y, 0.0001), 5.0), 0.2) / rb, 0.0, 1.0));
+      float inside = smoothstep(0.0, 0.3, pill(p, b, rb));
       float delta = (lit > 0.0 ? lit * 0.17 : lit * 0.08) - down * 0.012 * inside;
       float bb = max(float(body.r), 0.01);
       float a = delta > 0.0 ? clamp(delta / (1.0 - bb), 0.0, 1.0) : clamp(-delta / bb, 0.0, 1.0);
@@ -2149,7 +2152,7 @@ face "t9" {
       if gpu {
         Shader { fill: true; fallback: alpha(bodyC, 0); uniforms: { cap: [w, h], rad: h * 0.3, m: PM, down: on ? 1 : 0, body: bodyC }; code: pillowCode }
       } else {
-        Box { width: w; height: h; radius: h * 0.3; background: on ? alpha(#000000, 0.3) : linear(0, 0, 0, 1, [alpha(#ffffff, 0.035), alpha(#ffffff, 0), alpha(#000000, 0.3)]) }
+        Box { width: w; height: h; radius: h * 0.5; background: on ? alpha(#000000, 0.3) : linear(0, 0, 0, 1, [alpha(#ffffff, 0.035), alpha(#ffffff, 0), alpha(#000000, 0.3)]) }
       }
     }
   }
