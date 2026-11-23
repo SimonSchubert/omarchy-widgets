@@ -1,12 +1,28 @@
 widget "bilge" {
-  meta { owl: 23; description: "A 5x5 pixel match-3 puzzle game with buoyant pieces, chain cascades, and retro arcade sounds"; version: "1.3"; license: "MIT"; category: "games" }
+  meta { owl: 23; description: "A 5x5 pixel match-3 puzzle game with buoyant pieces, chain cascades, and retro arcade sounds"; version: "1.4"; license: "MIT"; category: "games" }
+  page: 1
+  order: 5
   size: 3x3
   minSize: 3x3
-  padding: 8
+  padding: 0
+  background: #0d1329
 
-  requires { pacman: ["jq"] }
+  requires { pacman: ["jq", "grep", "coreutils"] }
+  // Linked to the sailing widget when it's on home; on its own otherwise (standalone: levels)
+  // The sailing widget, found by its declared name (whatever the file is called, a store install
+  // is market-<user>-<name>.owl): "home" is its file on home, "removed" one taken off home into
+  // .removed/, both "" when it isn't installed
+  source sailFind = cmd("cd ~/.config/omalauncher/widgets && printf '{\"home\": \"%s\", \"removed\": \"%s\"}' \"$(grep -l '^widget \"sailing\"' *.owl 2>/dev/null | head -1)\" \"$(grep -l '^widget \"sailing\"' .removed/*.owl 2>/dev/null | head -1 | sed 's|^.removed/||')\"") every 10s json
+  // Until the first check is in, count it as there, so nothing flips at start
+  let sailOwl = sailFind == null ? "40-sailing.owl" : (sailFind.home ?? "")
+  let hasSailing = sailOwl != ""
+  let sailRemoved = sailFind == null ? "" : (sailFind.removed ?? "")
+  // On its own, the header offers Sailing (from the store, or back from .removed/) until dismissed
+  state hideSailHint = false persist
+  let showSailHint = sailFind != null && !hasSailing && !hideSailHint
   source highScore = cmd("jq -r '.highLevel // 1' ~/.cache/bilge-game.json 2>/dev/null || echo 1") every 1h
   source modes = android.modes
+  source shipStatus = file("~/.cache/ship-status.json") json
 
   state level = 1 persist
   state progress = 0 persist
@@ -19,6 +35,36 @@ widget "bilge" {
   state animProgress = 1.0
   state startRows = [0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4]
   state bubbles = []
+  state water = 0.0 persist
+  state syncCooldown = 0.0
+  // Total water pumped, ever: the sailing widget subtracts what's new from its own water
+  state pumped = 0.0 persist
+  let effectiveWater = clamp(water, 0.0, 100.0)
+  // The sailing widget's water speed (% a second): between its updates, water moves by it here
+  let waterRate = hasSailing && shipStatus != null ? num(shipStatus.waterRate, 0.0) : 0.0
+
+  on shipStatus first {
+    if shipStatus != null && shipStatus.water != null {
+      water = num(shipStatus.water, 0.0)
+    }
+  }
+  // The sailing widget owns the water level: always show what it wrote. Right after a pump,
+  // for a few seconds, don't let the file (not yet updated by sailing) raise it back up
+  on shipStatus {
+    if shipStatus != null && shipStatus.water != null {
+      let sw = num(shipStatus.water, 0.0)
+      water = syncCooldown > 0.0 ? min(water, sw) : sw
+    }
+  }
+
+  // Counted down by the clock, not by frames: with no frames drawn it never stalls
+
+  every 1s {
+    if syncCooldown > 0.0 {
+      syncCooldown = max(0.0, syncCooldown - 1.0)
+    }
+  }
+
   state board = [
     1, 1, 3, 3, 2,
     4, 1, 2, 0, 1,
@@ -27,7 +73,7 @@ widget "bilge" {
     3, 3, 1, 2, 1
   ]
 
-  fps: modes.saver ? (animating || len(bubbles) > 0 ? 30 : 0) : (animating || len(bubbles) > 0 ? 60 : 5)
+  fps: modes.saver ? (animating || len(bubbles) > 0 ? 30 : (waterRate != 0.0 ? 10 : 0)) : (animating || len(bubbles) > 0 ? 60 : (waterRate != 0.0 ? 30 : 5))
 
   let goal = level * 2 + 3
   let avail = min(tileWidth ?? 180, (tileHeight ?? 180) - 24)
@@ -58,6 +104,9 @@ widget "bilge" {
 
   // Animation and Chain Cascade Loop
   every frame {
+    if waterRate != 0.0 {
+      water = clamp(water + waterRate * dt, 0.0, 100.0)
+    }
     if animating {
       animProgress = animProgress + dt * 2.5
 
@@ -87,8 +136,17 @@ widget "bilge" {
 
         if len(chainM) > 0 {
           combo = combo + 1
-          banner = "CHAIN x${combo}!"
           score = score + len(chainM) * 15 * level * combo
+          let chainCleared = len(chainM)
+          let chainPump = max(5.0, round(chainCleared / 3.0 * 5.0, 1)) + (combo - 1) * 0.5
+          let curW = effectiveWater
+          let newW = max(0.0, curW - chainPump)
+          water = newW
+          syncCooldown = 3.0
+          pumped = pumped + (curW - newW)
+          run("mkdir -p ~/.cache && echo '{\"pumped\": ${round(pumped, 1)}}' > ~/.cache/bilge-pumps.json")
+
+          banner = "CHAIN PUMP x${combo}! -${round(chainPump, 1)}%"
           let nextProgress = progress + (len(chainM) >= 6 ? 2 : 1)
           if nextProgress >= goal {
             let curGoal = goal
@@ -151,23 +209,44 @@ widget "bilge" {
 
   Column {
     fill: true
+    padding: 6
     gap: 4
 
-    // Top status bar: Level badge, Progress Bar, Score, Sound toggle, and Reset/Shuffle button
+    // Header, the same in bilge, carpentry and gunnery: linked to the sailing widget it shows the
+    // game's name and what it does for the ship; on its own, its level and the bar to the next one
     Row {
+      height: 20
+      fill: width
       align: center
-      gap: 5
-      Text { text: "LVL ${level}"; bold: true; fontSize: 11; color: #38bdf8 }
-      Progress {
-        value: clamp(progress, 0, goal)
-        max: goal
-        color: #38bdf8
-        track: #1e293b
-        weight: 1
-        height: 7
-        radius: 3
+      gap: 3
+      if hasSailing {
+        Text { text: "💧 BILGE"; bold: true; fontSize: 10; color: #38bdf8 }
+        Spacer { weight: 1 }
+            Text { text: "WATER ${round(effectiveWater)}%"; fontSize: 10; bold: true; color: effectiveWater > 0 ? #38bdf8 : muted }
+      } else if showSailHint {
+        Text {
+          text: sailRemoved != "" ? "⛵ ADD SAILING" : "⛵ GET SAILING"
+          fontSize: 10
+          bold: true
+          color: #0d1329
+          background: #38bdf8
+          padding: [4, 1]
+          radius: 3
+          onTap: {
+            if sailRemoved != "" {
+              run("cd ~/.config/omalauncher/widgets && [ ! -e ${sh(sailRemoved)} ] && mv .removed/${sh(sailRemoved)} .")
+            } else {
+              launcher("store")
+            }
+          }
+        }
+        Spacer { weight: 1 }
+        Text { text: "✕"; fontSize: 10; bold: true; color: muted; background: #1e293b; padding: [4, 1]; radius: 3; onTap: hideSailHint = true }
+      } else {
+        Text { text: "LVL ${level}"; bold: true; fontSize: 10; color: #38bdf8 }
+        Progress { value: clamp(max(0, progress), 0, goal); max: goal; color: #38bdf8; track: #1e293b; weight: 1; height: 6; radius: 3 }
+        Text { text: "${max(0, progress)}/${goal}"; fontSize: 10; color: muted }
       }
-      Text { text: "${max(0, progress)}/${goal}"; fontSize: 10; color: muted }
       Text { text: "★${score}"; fontSize: 10; bold: true; color: #fbbf24 }
       Text {
         text: soundOn ? "♪" : "✕"
@@ -175,27 +254,27 @@ widget "bilge" {
         bold: true
         color: soundOn ? #38bdf8 : muted
         background: #1e293b
-        padding: [3, 2]
+        padding: [4, 1]
         radius: 3
         onTap: soundOn = !soundOn
       }
       Text {
         text: "↺"
-        fontSize: 12
+        fontSize: 11
         bold: true
         color: foreground
         background: #1e293b
-        padding: [4, 1]
+        padding: [4, 0]
         radius: 3
         onTap: {
-          board = [1, 1, 3, 3, 2, 4, 1, 2, 0, 1, 0, 2, 3, 2, 0, 1, 4, 2, 1, 3, 3, 3, 1, 2, 1]
-          selected = -1
-          banner = "SHUFFLED"
-          startRows = [0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4]
-          bubbles = []
-          animating = false
-          animProgress = 1.0
-          combo = 1
+            board = [1, 1, 3, 3, 2, 4, 1, 2, 0, 1, 0, 2, 3, 2, 0, 1, 4, 2, 1, 3, 3, 3, 1, 2, 1]
+            selected = -1
+            banner = "SHUFFLED"
+            startRows = [0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4]
+            bubbles = []
+            animating = false
+            animProgress = 1.0
+            combo = 1
         }
       }
     }
@@ -234,16 +313,34 @@ widget "bilge" {
             let cy = oy + animR * cellSize
             let val = board[i]
 
-            // Highlight selected cell
-            if selected == i && !animating {
-              rect(cx + 1, cy + 1, cellSize - 2, cellSize - 2, stroke: #fde047, width: 2, radius: 3)
-            }
-
             // Draw crisp pixel piece (fast GPU texture blit)
             let sx = cx + floor((cellSize - 22) / 2)
             let sy = cy + floor((cellSize - 22) / 2)
             image(pieceImgs[val], sx, sy, 22, 22)
           }
+        }
+
+        // Semi-transparent water covering the game field from bottom to top
+        if effectiveWater > 0 {
+          let waterFrac = clamp(effectiveWater / 100.0, 0.0, 1.0)
+          let wH = bSize * waterFrac
+          let wY = oy + bSize - wH
+
+          clip(ox, oy, bSize, bSize) {
+            // Semi-transparent ocean/bilge water over the submerged pieces
+            rect(ox, wY, bSize, wH, fill: linear(ox, wY, ox, oy + bSize, [alpha(#0284c7, 0.42), alpha(#0369a1, 0.72)]))
+
+            // Glowing waterline across the water surface
+            line(ox, wY, ox + bSize, wY, stroke: alpha(#38bdf8, 0.9), width: 1.5)
+            line(ox, wY + 1.5, ox + bSize, wY + 1.5, stroke: alpha(#7dd3fc, 0.45), width: 1)
+          }
+        }
+
+        // Highlight selected cell (drawn over water for clear visibility)
+        if selected >= 0 && !animating {
+          let sc = selected % 5
+          let sr = floor(selected / 5)
+          rect(ox + sc * cellSize + 1, oy + sr * cellSize + 1, cellSize - 2, cellSize - 2, stroke: #fde047, width: 2, radius: 3)
         }
 
         // Crisp pixel bubble particles floating upward (fast GPU texture blit)
@@ -302,6 +399,15 @@ widget "bilge" {
                     let nextProgress = progress + matchPoints
                     score = score + cleared * 10 * level
                     combo = 1
+
+                    // Base 3-match removes 5% water (larger matches scale proportionally)
+                    let pumpWater = max(5.0, round(cleared / 3.0 * 5.0, 1))
+                    let curW = effectiveWater
+                    let newW = max(0.0, curW - pumpWater)
+                    water = newW
+                    syncCooldown = 3.0
+                    pumped = pumped + (curW - newW)
+                    run("mkdir -p ~/.cache && echo '{\"pumped\": ${round(pumped, 1)}}' > ~/.cache/bilge-pumps.json")
                     
                     // Buoyancy: pieces rise from bottom to top!
                     let surv0 = [0, 5, 10, 15, 20].filter(j => !contains(m, j)).map(j => swapped[j])
@@ -344,13 +450,13 @@ widget "bilge" {
                       let curGoal = goal
                       level = level + 1
                       progress = max(0, nextProgress - curGoal)
-                      banner = "LEVEL UP!"
+                      banner = "LEVEL UP! -${round(pumpWater, 1)}%"
                       if soundOn { sound(sndLevelUp) }
                       haptic("strong")
                       run("mkdir -p ~/.cache && echo '{\"highLevel\": ${max(highScore, level + 1)}}' > ~/.cache/bilge-game.json")
                     } else {
                       progress = nextProgress
-                      banner = cleared >= 6 ? "SUPER MATCH!" : cleared >= 4 ? "BIG MATCH!" : "MATCH!"
+                      banner = cleared >= 6 ? "SUPER PUMP! -${round(pumpWater, 1)}%" : cleared >= 4 ? "BIG PUMP! -${round(pumpWater, 1)}%" : "PUMP -${round(pumpWater, 1)}%"
                       if soundOn {
                         if len(cM1) > 0 {
                           if len(cM2) > 0 {
