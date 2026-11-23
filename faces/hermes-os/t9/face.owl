@@ -1,19 +1,17 @@
 face "t9" {
-  // A dumb phone, reimagined in your own frosted glass: the keypad is the whole launcher. Tap keys and they spell,
-  // the old predictive way: 2-2-6 is CAMera, 8-6-7-2-4 is TORCH, any three digits or more can be dialled, and the
-  // pick shows beside the digits as an LCD pixel icon. Keys sink onto their edge as the thumb lands, tick as it lifts
-  // and play their real touch-tones. The LCD lights like hardware: LEDs under the glass snap on, the light guide warms
-  // to full, it dims eight seconds after the last touch and goes out four later with an afterglow. A round-dot matrix
-  // clock; a ring round the nav pad that blinks for what's new and traces the playing song; new messages that type
-  // themselves onto the LCD; and a player, opened from the song line, that draws the album cover in LCD dots.
-  // Hold a key after spelling something and it's on speed dial there; hold it from the idle screen to open it.
-  // Hold # for key tones off and on. *#06# says what phone this is. Theme colours throughout, so it follows the
-  // Omarchy theme, and the glass follows settings › style.
+  // The classic candybar, back on a modern phone: a black body with the Omarchy icon over an LCD lit in your theme's
+  // colours, raised rubber keys, a green and a red handset, a square nav key. The keypad is the whole launcher: tap
+  // keys and they spell the old predictive way (2-2-6 is CAMera, 8-6-7-2-4 is TORCH), any three digits or more can be
+  // dialled, and the pick shows as an LCD pixel icon. Keys play their real touch-tones. The LCD lights like hardware:
+  // full for eight seconds after the last touch, then dim, then out. Menu opens your apps on the LCD as pixel icons,
+  // with the t9's own screens a page to the left: a calendar, your coding agents' sessions and limits, tasks, the
+  // notifications, the phone's vitals and switches, music and Snake. Go to lists shortcuts. Hold a key after spelling
+  // something and it's on speed dial there; hold it from the idle screen to open it. Hold # for key tones off and on.
 
   meta {
-    owl: 23
-    description: "A dumb phone in frosted glass: the keypad is the launcher. T9 spells apps, dials, speed-dials; keys sink and play touch-tones, an LCD lights like hardware, with a dot-matrix clock"
-    version: "2.0"
+    owl: 24
+    description: "A classic candybar on a modern phone: raised rubber keys, an LCD in your theme. T9 spells apps and dials; Menu opens your apps, calendar, agents, limits, tasks, inbox and Snake on the LCD"
+    version: "3.0"
     license: "MIT"
     category: "productivity"
   }
@@ -29,6 +27,11 @@ face "t9" {
   source m = android.media
   source vol = android.volume
   source dev = android.device
+  // For the t9's own screens: the phone's calendar, the coding agents installed, its vitals and network counters.
+  source cal = android.calendar
+  source ag = android.agents
+  source sys = android.system every 30s
+  source net = android.network every 5s
 
   // Telephone-band sounds, 8 kHz: each key's DTMF pair, then the earcons (open, busy, nothing there, saved, *#06#).
   asset k1 = base64"UklGRsQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YaAFAAAAAAgALgBJABQAov9m/6z/CACd/zH+/vz7/eMByQbrCLAFTf5y98D17fkTACADeAF5/jv/TQVfDHANEgU49+XsRe3w92kFDg18C4YERv/M/9IDLQXE/9713+5g8XH96wuOE+oPfwSx+Rn2ufnY/pf/Tvsc9yv5xQJaDnMTZw1g/0LyEu4c9Ib+bAU/BRcBQ/8sA/AJrwykBtr5W+467Er1kQPSDXoOagev/0f9QgBHA+EA7PhQ8U/xKfuaCVwTHBI1B3v6DPRI9rL8dQCK/jX6z/mrAG4LLxK9DvgBrPPj7C/xTvzqBUgIZwRLACoBhgaKCkwHgfyX8B7sAvM7AaUN3RCICvIAg/u2/KQAIAG2+1X0L/Jp+fUGPxKNE/MJDPzf8hXz9vlrAFEBsP1a+zv/YAgUEDgPZwTB9aXssu6s+X8FrQrgBycC8f8vA68HDgfQ/lfz9uxW8ab+lwx1EpgN7wKh+nf5ef10APz9rPf282T4QgRUEBkUcAw1/qLyY/Dj9n3/aQNGAbT9oP52BU0Nww5pBkf4We3i7OT2PQQ/DDoLrwSc/zIAVwTiBYoAWfay7nXwHfzICiITUxBwBav6xPYF+ur+iv8Q+4f2P/jJAcsNsBNrDrgAUPNq7r7zxv2sBK8ErgDr/vYCFwpgDcMH+Prq7urrPvROAucMMA6rBy8AzP3FANsDgAFV+TDxffDk+W8I2xJ7EjUIl/vR9JH2ofw9ADj+r/kG+c3/4wpZEqwPUAPO9E/tz/Bx+wUFpgcPBB0AGQG0BiMLSwiO/TDx4+v/8ej/nwyEENcKmQEs/ED9HQGUAQX8OPR48Tv4ywWrEdoT9wpD/cHzY/PK+QgA4QAv/bP6gv7iBy8QDxC0Be/2KO1a7rz4dgTyCY8HHwILAG8DOAjqB8T/8fPP7GTwT/14CwgS7Q22A3H7EPre/b8AKP6M91jzVfckA7MPUhRwDX//ofO+8KT28f7XAsIAKv0P/g8FYQ2AD6IHePnw7Zjs6vUVA2gL6ArFBOH/jADXBJwGXQHq9pzume/L+pkJnxKkEE8GoPt091/6Dv+O/+H6+/VR98EAJg3UE10PDAJp9NfudfMW/fQDHgQ8AIT+rgIqCgMO4ggk/JHvs+tE8w4B8QvUDdgHnwBH/kUBdQQsAtP5JPG776H4OAdBEsASIwmt/J316Pai/BYA8v0v+Tv44v5CCmoSixCjBPz10+2H8KX6JgQBB6sD3//4ANIGsgtKCan+3/HB6w/xmf6NCxcQEQswAs38yf2dARcCZ/ww9NDwEPeWBP8QDhTpC3b+q/TC87H5tf99ALP8Cfq8/U8HMxDVEP0GKvjC7Rvu3fdyAzIJMQcFAhMAoAO4CMYIxACg9MHshO/8+08KhREqDmwEOPyr+kz+GAFn/n33xvJH9voB+w5xFF0OxQCp9CvxefZ2/k8CQACc/HH9lAReDS0Q2Ai2+p/uaOwC9fMBigqGCskEFgDZAFAFVwc8ApD3nu7Q7n75XwgFEtwQHAeO/Cj4xPpB/6T/w/p79WT2rf9qDN8TPBBbA4z1WO9E83j8RAONA8L/EP5UAisKmA79CVr9T/CX613y1P/0CmYN8Af9ALb+wAETBeQCZfow8QvvY/f1BZIR6xL+Cb79b/ZO97X8AAC7/bj4cPfs/YwJYxJWEfEFNvd27mjw9vlHA0QGMAOU/78Apga9C9EJ0f9v8xXtY/GL/XgJ+w3wCV4Cvf2Q/s0BMwJv/Yr2g/Mn+IwCLgzUDjgJvf/R+AP40fum/xgAsf0J/DT+wwPaCFcJQwS3/IL3kff5+xIBhwO6ArcABABVAR0DHgOPAOP8pfpv+6z+JgLDA/0C/QBy/zL/zv84ANT/8v5x/uP+EwAyAYsBBQEeAHj/XP+i//D/DAD//+//9f8KABcAEgAGAP////8="
@@ -48,6 +51,9 @@ face "t9" {
   asset sNope = base64"UklGRkQNAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSANAAAAAAQAHwBjANcAdAEoAtICSQNjA/kC8AFAAPP9Lvsq+DH1mvK48NvvO/D58RL1Yfmh/m0EUArKD14UohdGGR8ZKheZE7gO3AhpAsz7d/XW70rrIOiO5q/mgujm66HwZPbL/GgDzAmIDzoUkxdYGWwZzReXFAEQWgoBBGT99PYe8UfswejI5n/m6ufx6mDv6/Q0+88BSwg5DjQT5hYRGY8ZWRiBFTsRzQuWBf/+efh08lfteekc52jma+cS6i/ufvOi+TMAwQbcDBoSIxaxGJkZzBhWFmISNA0kB5oABvrY83ruR+qI52zmBOdI6RHtHfIX+Jj+MQVxC+4QSRU4GIkZJRkUF3cTjg6sCDUCmftI9a/vLOsO6Inmt+aW6AbsyvCU9v78mwP7CbEPWhSnF18ZZhm6F3kU2Q8rCs4DMf3D9vTwJuyr6MDmhOb85w7rh+8a9Wf7AgJ7CGQOVhP9FhsZjBlJGGUVFBGfC2MFy/5I+EnyNO1g6RDnauZ55yzqVe6r89T5ZwDzBggNPhI8Fr8YmRm/GDwWPhIIDfMGZwDU+avzVe4s6nnnauYQ52DpNO1J8kj4y/5jBZ8LFBFlFUkYjBkbGf0WVhNkDnsIAgJn+xr1h+8O6/znhObA5qvoJuz08MP2Mf3OAysK2Q95FLoXZhlfGacXWhSxD/sJmwP+/JT2yvAG7Jbot+aJ5g7oLOuv70j1mfs1AqwIjg53ExQXJRmJGTgYSRXuEHELMQWY/hf4HfIR7UjpBOds5ojnR+p67tjzBvqaACQHNA1iElYWzBiZGbEYIxYaEtwMwQYzAKL5fvMv7hLqa+do5hzneelX7XTyefj//pYFzQs7EYEVWRiPGREZ5hY0EzkOSwjPATT76/Rg7/Hq6ud/5sjmwehH7B7x9PZk/QEEWgoBEJcUzRdsGVgZkxc6FIgPzAloA8v8ZPah8Obrguiv5o7mIOhK69bvd/XM+2kC3Ai4DpkTKhcvGYUZJxgsFccQQwv/BGX+5vfy8e7sMen55m7mmOdj6qDuBfQ4+s4AVgdgDYYSbxbYGJkZoxgJFvURrwyQBgAAcPlR8wvu9+ld52fmKOeR6XrtoPKq+DL/yAX7C2ARnRVoGJIZBxnPFhITDg4aCJsBAfu99Dnv1OrZ53vm0ebW6GfsSPEk95f9NASJCioQthTgF3IZURl+FxoUXw+cCTUDmPw09njwxutt6KjmlOYz6Gnr/++m9f/7nAIMCeIOuRM/FzgZgRkWGA8VoBAVC8wEMf6198fxzOwa6e/mcean53/qxe4z9Gr6AQGHB4wNqRKHFuQYmBmVGO4V0RGCDF4Gzf8/+STz5u3d6U/nZ+Y056rpnu3M8tz4Zv/6BSgMhhG5FXgYlBn8GLgW7xLjDekHaAHP+o/0Eu+36sjnd+bb5uzoiexy8VT3y/1nBLgKURDUFPIXdxlJGWoX+hM2D2wJAgNm/Av2YfDJ65To9uYJ58noEuyp8Dj2XfyqArEICg5bEl0V5BbaFksVWBI/Dk4J3wNV/hL5bfS08B/u0ezX7CLukvDw8/f3W/zMAPsEogiJC4UNgA53DncNoQsgCSsG/ALQ/978Vvpd+A33cPaD9jj3dfgX+vr79v3j/6IBFQMrBNoEHwUBBY8E2gP5AgICCwEmAGP/zf5n/jL+K/5K/oX+0f4j/3T/uv/y/xkAMAA3ADQAKQAcABAABgABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAB8AYwDXAHQBKALSAkkDYwP5AvABQADz/S77Kvgx9ZryuPDb7zvw+fES9WH5of5tBFAKyg9eFKIXRhkfGSoXmRO4DtwIaQLM+3f11u9K6yDojuav5oLo5uuh8GT2y/xoA8wJiA86FJMXWBlsGc0XlxQBEFoKAQRk/fT2HvFH7MHoyOZ/5urn8epg7+v0NPvPAUsIOQ40E+YWERmPGVkYgRU7Ec0LlgX//nn4dPJX7XnpHOdo5mvnEuov7n7zovkzAMEG3AwaEiMWsRiZGcwYVhZiEjQNJAeaAAb62PN67kfqiOds5gTnSOkR7R3yF/iY/jEFcQvuEEkVOBiJGSUZFBd3E44OrAg1Apn7SPWv7yzrDuiJ5rfmlugG7MrwlPb+/JsD+wmxD1oUpxdfGWYZuhd5FNkPKwrOAzH9w/b08Cbsq+jA5oTm/OcO64fvGvVn+wICewhkDlYT/RYbGYwZSRhlFRQRnwtjBcv+SPhJ8jTtYOkQ52rmeecs6lXuq/PU+WcA8wYIDT4SPBa/GJkZvxg8Fj4SCA3zBmcA1Pmr81XuLOp552rmEOdg6TTtSfJI+Mv+YwWfCxQRZRVJGIwZGxn9FlYTZA57CAICZ/sa9YfvDuv854TmwOar6Cbs9PDD9jH9zgMrCtkPeRS6F2YZXxmnF1oUsQ/7CZsD/vyU9srwBuyW6LfmieYO6Czrr+9I9Zn7NQKsCI4OdxMUFyUZiRk4GEkV7hBxCzEFmP4X+B3yEe1I6QTnbOaI50fqeu7Y8wb6mgAkBzQNYhJWFswYmRmxGCMWGhLcDMEGMwCi+X7zL+4S6mvnaOYc53npV+108nn4//6WBc0LOxGBFVkYjxkRGeYWNBM5DksIzwE0++v0YO/x6urnf+bI5sHoR+we8fT2ZP0BBFoKARCXFM0XbBlYGZMXOhSID8wJaAPL/GT2ofDm64Lor+aO5iDoSuvW73f1zPtpAtwIuA6ZEyoXLxmFGScYLBXHEEML/wRl/ub38vHu7DHp+eZu5pjnY+qg7gX0OPrOAFYHYA2GEm8W2BiZGaMYCRb1Ea8MkAYAAHD5UfML7vfpXedn5ijnkel67aDyqvgy/8gF+wtgEZ0VaBiSGQcZzxYSEw4OGgibAQH7vfQ579Tq2ed75tHm1uhn7EjxJPeX/TQEiQoqELYU4BdyGVEZfhcaFF8PnAk1A5j8NPZ48Mbrbeio5pTmM+hp6//vpvX/+5wCDAniDrkTPxc4GYEZFhgPFaAQFQvMBDH+tffH8czsGunv5nHmp+d/6sXuM/Rq+gEBhweMDakShxbkGJgZlRjuFdERggxeBs3/P/kk8+bt3elP52fmNOeq6Z7tzPLc+Gb/+gUoDIYRuRV4GJQZ/Bi4Fu8S4w3pB2gBz/qP9BLvt+rI53fm2+bs6InscvFU98v9ZwS4ClEQ1BTyF3cZSRlqF/oTNg9sCQIDZvwL9mHwyeuU6PbmCefJ6BLsqfA49l38qgKxCAoOWxJdFeQW2hZLFVgSPw5OCd8DVf4S+W30tPAf7tHs1+wi7pLw8PP391v8zAD7BKIIiQuFDYAOdw53DaELIAkrBvwC0P/e/Fb6XfgN93D2g/Y493X4F/r6+/b94/+iARUDKwTaBB8FAQWPBNoD+QICAgsBJgBj/83+Z/4y/iv+Sv6F/tH+I/90/7r/8v8ZADAANwA0ACkAHAAQAAYAAQA="
   asset sSaved = base64"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"
   asset sSit = base64"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"
+  // The Omarchy icon, the square mark, where the old phone had its maker's name.
+  asset omarchyLogo = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNSAxNSIgd2lkdGg9IjE1IiBoZWlnaHQ9IjE1Ij48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMCAwSDE1VjEuMDNIMFpNMCAwLjk3SDEuMDJWMi4wM0gwWk02Ljk4IDAuOTdIOC4wMlYyLjAzSDYuOThaTTEzLjk4IDAuOTdIMTVWMi4wM0gxMy45OFpNMCAxLjk3SDEuMDJWMy4wM0gwWk0xLjk4IDEuOTdIOC4wMlYzLjAzSDEuOThaTTEwLjk4IDEuOTdIMTMuMDJWMy4wM0gxMC45OFpNMTMuOTggMS45N0gxNVYzLjAzSDEzLjk4Wk0wIDIuOTdIMS4wMlY0LjAzSDBaTTEuOTggMi45N0gzLjAyVjQuMDNIMS45OFpNMTEuOTggMi45N0gxMy4wMlY0LjAzSDExLjk4Wk0xMy45OCAyLjk3SDE1VjQuMDNIMTMuOThaTTAgMy45N0gxLjAyVjUuMDNIMFpNMS45OCAzLjk3SDMuMDJWNS4wM0gxLjk4Wk0xMS45OCAzLjk3SDEzLjAyVjUuMDNIMTEuOThaTTEzLjk4IDMuOTdIMTVWNS4wM0gxMy45OFpNMCA0Ljk3SDEuMDJWNi4wM0gwWk0xLjk4IDQuOTdIMy4wMlY2LjAzSDEuOThaTTExLjk4IDQuOTdIMTMuMDJWNi4wM0gxMS45OFpNMTMuOTggNC45N0gxNVY2LjAzSDEzLjk4Wk0wIDUuOTdIMS4wMlY3LjAzSDBaTTEuOTggNS45N0gzLjAyVjcuMDNIMS45OFpNMTEuOTggNS45N0gxMy4wMlY3LjAzSDExLjk4Wk0xMy45OCA1Ljk3SDE1VjcuMDNIMTMuOThaTTAgNi45N0gzLjAyVjguMDNIMFpNMTEuOTggNi45N0gxMy4wMlY4LjAzSDExLjk4Wk0xMy45OCA2Ljk3SDE1VjguMDNIMTMuOThaTTAgNy45N0gxLjAyVjkuMDNIMFpNMS45OCA3Ljk3SDMuMDJWOS4wM0gxLjk4Wk0xMS45OCA3Ljk3SDEzLjAyVjkuMDNIMTEuOThaTTEzLjk4IDcuOTdIMTVWOS4wM0gxMy45OFpNMCA4Ljk3SDEuMDJWMTAuMDNIMFpNMS45OCA4Ljk3SDMuMDJWMTAuMDNIMS45OFpNMTEuOTggOC45N0gxMy4wMlYxMC4wM0gxMS45OFpNMTMuOTggOC45N0gxNVYxMC4wM0gxMy45OFpNMCA5Ljk3SDEuMDJWMTEuMDNIMFpNMS45OCA5Ljk3SDMuMDJWMTEuMDNIMS45OFpNMTEuOTggOS45N0gxMy4wMlYxMS4wM0gxMS45OFpNMTMuOTggOS45N0gxNVYxMS4wM0gxMy45OFpNMCAxMC45N0gxLjAyVjEyLjAzSDBaTTEuOTggMTAuOTdIMy4wMlYxMi4wM0gxLjk4Wk0xMS45OCAxMC45N0gxMy4wMlYxMi4wM0gxMS45OFpNMTMuOTggMTAuOTdIMTVWMTIuMDNIMTMuOThaTTAgMTEuOTdIMS4wMlYxMy4wM0gwWk0xLjk4IDExLjk3SDEzLjAyVjEzLjAzSDEuOThaTTEzLjk4IDExLjk3SDE1VjEzLjAzSDEzLjk4Wk0wIDEyLjk3SDEuMDJWMTQuMDNIMFpNNi45OCAxMi45N0g4LjAyVjE0LjAzSDYuOThaTTEzLjk4IDEyLjk3SDE1VjE0LjAzSDEzLjk4Wk0wIDEzLjk3SDguMDJWMTVIMFpNOC45OCAxMy45N0gxNVYxNUg4Ljk4WiIvPjwvc3ZnPg=="
+
   // What's typed, the result picked, seconds left of the backlight, of a message and of the volume bar.
   state q = ""
   state sel = 0
@@ -57,13 +63,15 @@ face "t9" {
   state volN = 0
   // Speed dial: a key's digit to what it opens.
   state speed = {} persist
-  // Key tones and earcons on; the time of the last touch, so only newer notifications light the ring.
+  // Key tones and earcons on; the time of the last touch, so only newer notifications light the LED.
   state tones = true persist
   state seenAt = 0 persist
-  // The control under the finger, the nav pad's pressed zone, and the LCD's screen ("" or "player").
+  // The control under the finger, the nav key's pressed zone, and the LCD's screen ("", "goto", "player", "snake").
   state down = ""
   state navZ = ""
   state view = ""
+  // The Go to list's selection.
+  state gsel = 0
   // A line typing itself in: which, when it started (frame time) and seconds left.
   state revealK = ""
   state revealAt = 0
@@ -73,53 +81,235 @@ face "t9" {
   state goN = 0
   // A held key whose speed dial would be replaced: held again while the question shows, it is.
   state armK = ""
+  // Snake: the body head first, the way it goes and the way asked for next, the food, the score, a new-game counter.
+  state snake = []
+  state sDir = [1, 0]
+  state sNext = [1, 0]
+  state food = [14, 6]
+  state sPlay = false
+  state sDead = false
+  state sScore = 0
+  state sAcc = 0
+  state sSeed = 1
+  state sNew = 0
+  state sBest = 0 persist
+  // The screen's colour: the theme's yellow, accent, green or blue, or the night screen.
+  state scr = "yellow" persist
+
+  // ---- the t9's own screens: the drawer (Menu) and what it opens ----
+  // The drawer's page and selection, the folder open in it ("" for none) and where it was opened from, a swipe.
+  state mPage = 0
+  state mSel = 0
+  state mFolder = ""
+  state mBack = {p: 0, s: 0}
+  state mDrag = 0
+  // A list screen's selection, and the calendar's picked day (noon, Unix seconds; 0 is today).
+  state lSel = 0
+  state calDay = 0
+  // Typing the old way (multi-tap): what for ("task"; "" when not typing), the text, the
+  // key pressed last and when (pressed again within a second it changes that letter), the case (abc, Abc, ABC, 123),
+  // and a counter the OK keys bump.
+  state tx = ""
+  state txt = ""
+  state txKey = ""
+  state txAt = 0
+  state txCase = 1
+  state txGo = 0
+  // Tasks as last written, until the file shows them; a task action for the trigger that writes it.
+  state tasksPend = null
+  state tAct = {n: 0, op: "", id: ""}
+  // Network speed, from the counters' change.
+  state netDown = 0
+  state netUp = 0
+  // Writes to Linux files without run() (which would make home's only page wait for Linux): each write is a state
+  // with a one-time number; its source below runs when that changes and does the write once.
+  state wSeq = 0
+  state wTasks = {n: "", j: ""}
+
+  // ---- from Linux: all optional, so the t9 runs without Linux (these stay empty until it's up). The commands that
+  // reach out fetch only while their screen is open and show the last copy otherwise ----
+  // An iOS 26 drawer's arrangement, if one has saved a copy there; your tasks (Tide keeps them in the same file).
+  source arr = file("~/.local/share/iphone-drawer/arrangement.json") json optional
+  source tf = file("~/.local/share/tide/tasks.json") optional
+  // The phone's calendar for 45 days (Android's own source gives 14).
+  source calX = cmd("v=${sh(view)}\n" + """
+    c=~/.cache/t9/calendar.json
+    mkdir -p ~/.cache/t9
+    if [ "$v" = cal ]; then omalauncher calendar 45 > "$c.new" 2>/dev/null && [ -s "$c.new" ] && mv "$c.new" "$c"; rm -f "$c.new"; fi
+    cat "$c" 2>/dev/null || echo '[]'
+  """) every 10m json timeout 20s optional
+  // Claude Code's running sessions (a live process each).
+  source cs = cmd("v=${sh(view)}\n" + """
+    c=~/.cache/t9/sessions.json
+    mkdir -p ~/.cache/t9
+    if [ "$v" = agents ]; then
+      {
+        sep=""
+        printf '['
+        for f in ~/.claude/sessions/*.json; do
+          [ -e "$f" ] || continue
+          p=${f##*/}; p=${p%.json}
+          case $p in ''|*[!0-9]*) continue ;; esac
+          [ -r /proc/$p/stat ] || continue
+          st=$(sed 's/.*) //' /proc/$p/stat | cut -d' ' -f20)
+          if grep -q '"procStart"' "$f"; then grep -q "\"procStart\" *: *\"$st\"" "$f" || continue; fi
+          printf '%s' "$sep"; tr -d '\n' < "$f"; sep=,
+        done
+        printf ']\n'
+      } > "$c.new" && mv "$c.new" "$c"
+    fi
+    cat "$c" 2>/dev/null || echo '[]'
+  """) every 15s json optional
+  // Claude Code's recent conversations, with the titles Claude gave them.
+  source ch = cmd("v=${sh(view)}\n" + """
+    c=~/.cache/t9/history.json
+    mkdir -p ~/.cache/t9
+    if [ "$v" = agents ]; then
+      {
+        sep=""
+        printf '['
+        for f in $(ls -t ~/.claude/projects/*/*.jsonl 2>/dev/null | head -8); do
+          id=${f##*/}; id=${id%.jsonl}
+          w=$(grep -m1 -o '"cwd":"\([^"\\]\|\\.\)*"' "$f" | sed 's/^"cwd"://')
+          t=$(tail -c 300000 "$f" | grep -o '"aiTitle":"\([^"\\]\|\\.\)*"' | tail -1 | sed 's/^"aiTitle"://')
+          [ -n "$t" ] || t=$(grep -m1 -o '"aiTitle":"\([^"\\]\|\\.\)*"' "$f" | sed 's/^"aiTitle"://')
+          printf '%s{"id":"%s","cwd":%s,"title":%s,"mtime":%s}' "$sep" "$id" "${w:-null}" "${t:-null}" "$(stat -c %Y "$f")"
+          sep=,
+        done
+        printf ']\n'
+      } > "$c.new" && mv "$c.new" "$c"
+    fi
+    cat "$c" 2>/dev/null || echo '[]'
+  """) every 60s json timeout 20s optional
+  // Codex's recent sessions, and how many are running.
+  source xs = cmd("v=${sh(view)}\n" + """
+    c=~/.cache/t9/codex.json
+    mkdir -p ~/.cache/t9
+    if [ "$v" = agents ]; then
+      n=$(pgrep -x codex 2>/dev/null | wc -l)
+      ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl 2>/dev/null | head -4 | while read -r f; do
+        jq -cs --arg m "$(stat -c %Y "$f")" '
+          (map(select(.type == "session_meta"))[0].payload) as $s |
+          {id: $s.id, cwd: $s.cwd,
+           title: ([.[] | select(.type == "event_msg" and .payload.type == "user_message") | .payload.message][0] // null),
+           mtime: ($m | tonumber)}' "$f" 2>/dev/null
+      done | jq -cs --argjson n "$n" '{running: $n, sessions: .}' > "$c.new" 2>/dev/null && mv "$c.new" "$c"
+      rm -f "$c.new"
+    fi
+    cat "$c" 2>/dev/null || echo '{}'
+  """) every 60s json timeout 20s optional
+  // Claude's usage limits, as the Claude app shows them.
+  source cl = cmd("v=${sh(view)}\n" + """
+    c=~/.cache/tide-claude-usage.json
+    mkdir -p ~/.cache
+    j=$(tr -d '\n' 2>/dev/null < ~/.claude/.credentials.json)
+    t=$(printf '%s' "$j" | grep -o '"accessToken" *: *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    p=$(printf '%s' "$j" | grep -o '"subscriptionType" *: *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    r=$(printf '%s' "$j" | grep -o '"rateLimitTier" *: *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    if [ -n "$t" ] && [ "$v" = limits ]; then
+      code=$(printf 'Authorization: Bearer %s\n' "$t" | curl -s -m 15 -o "$c.new" -w '%{http_code}' -H @- -H 'anthropic-beta: oauth-2025-04-20' https://api.anthropic.com/api/oauth/usage)
+      [ "$code" = 200 ] && mv "$c.new" "$c"
+      rm -f "$c.new"
+    fi
+    if [ -s "$c" ]; then printf '{"at":%s,"plan":"%s","tier":"%s","login":%s,"u":' "$(stat -c %Y "$c")" "$p" "$r" "$([ -n "$t" ] && echo true || echo false)"; cat "$c"; printf '}\n'; else printf '{"error":"no data","login":%s}\n' "$([ -n "$t" ] && echo true || echo false)"; fi
+  """) every 10m json timeout 30s optional
+  // ChatGPT's limits, which Codex uses.
+  source gu = cmd("v=${sh(view)}\n" + """
+    c=~/.cache/tide-codex-usage.json
+    mkdir -p ~/.cache
+    a=$(tr -d '\n' 2>/dev/null < ~/.codex/auth.json)
+    t=$(printf '%s' "$a" | grep -o '"access_token" *: *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    u=$(printf '%s' "$a" | grep -o '"account_id" *: *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    code=""
+    if [ -n "$t" ] && [ "$v" = limits ]; then
+      code=$(printf 'Authorization: Bearer %s\nChatGPT-Account-Id: %s\n' "$t" "$u" | curl -s -m 15 -A 'omarchy-widgets/t9' -o "$c.new" -w '%{http_code}' -H @- -H 'Accept: application/json' https://chatgpt.com/backend-api/wham/usage)
+      [ "$code" = 200 ] && [ "$(head -c 1 "$c.new")" = "{" ] && mv "$c.new" "$c"
+      rm -f "$c.new"
+    fi
+    l=$([ -n "$t" ] && echo true || echo false)
+    if [ -s "$c" ]; then printf '{"at":%s,"login":%s,"code":"%s","u":' "$(stat -c %Y "$c")" "$l" "$code"; cat "$c"; printf '}\n'; else printf '{"error":"no data","login":%s,"code":"%s"}\n' "$l" "$code"; fi
+  """) every 15m json timeout 30s optional
+  // The writers. Each runs once per number: a marker file per number keeps a repeat (its interval, a restart) from
+  // writing again. Tasks are written whole.
+  source wt = cmd("n=${sh(wTasks.n)}; j=${sh(wTasks.j)}; case $n in '') exit 0;; esac; m=~/.cache/t9/w/t$n; if [ ! -e $m ]; then mkdir -p ~/.cache/t9/w ~/.local/share/tide && touch $m && printf '%s' \"$j\" > ~/.local/share/tide/tasks.json.t9 && mv ~/.local/share/tide/tasks.json.t9 ~/.local/share/tide/tasks.json; fi; echo $n") every 24h optional
 
   statusBar: false
   edge: true
   padding: 0
-  // A tap that no key, line or row takes (the LCD glass, the gaps, the margins) still lights the LCD.
+  // A tap that no key, line or row takes (the LCD, the gaps, the margins) still lights the LCD.
   onTap: lit = LIT
-  // Only seen between the glass parts (frost paints the wallpaper under each one), or everywhere with frost off.
-  background: linear(0, 0, 0, 1, [alpha(background, 0.08), alpha(background, 0.16), alpha(background, 0.34)])
+  // The phone's body: the theme's background, a shade darker.
+  background: bodyC
 
-  let lcdFont = "https://raw.githubusercontent.com/google/fonts/main/ofl/vt323/VT323-Regular.ttf"
+  let lcdFont = "https://raw.githubusercontent.com/google/fonts/main/ofl/jersey10/Jersey10-Regular.ttf"
   let inter = "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf"
 
   // ---- sizes ----
   let W = tileWidth ?? 412
   let H = tileHeight ?? 915
   let wide = W > H
-  let kh = clamp((H - 420) / 7.2, 46, 70)
-  let navH = clamp(kh * 1.6, 84, 112)
+  // ---- the keys, measured on the video's straightened frame, in parts of the phone's width PW: three columns 30%
+  // apart, every key on its column's centre line (soft key, call or end, then the keypad); keys 22.5% wide and 84% of
+  // a row tall (about 1.55 to 1), corners 30% of their height; rows 16.8% apart; the nav ring a square 24% wide in
+  // the middle column. SC scales all of it; 1 is the video's size, which the keys look right at ----
+  let PW = wide ? min(W * 0.42, 380) : W - num(screenLeft, 0) - num(screenRight, 0)
+  let SC = 1
+  let colP = PW * 0.3 * SC
+  let kpPad = (PW - 3 * colP) / 2
+  // Tightened from the video's 16.8% rows so the LCD runs further down: rows 14.8% apart, keys 86% of a row.
+  let keyW = PW * 0.215 * SC
+  let rowP = min(PW * 0.148 * SC, (H - 230) / 4.4)
+  let keyH = min(PW * 0.14 * SC, rowP * 0.86)
+  let kh = rowP
+  let navH = clamp(PW * 0.235 * SC, 84, 116)
+  let ringS = min(PW * 0.215 * SC, navH * 0.95)
+  let softKH = keyH * 0.78
+  // The gaps above and below the nav block.
+  let gapA = PW * 0.022
+  let gapB = PW * 0.02
+  let softBH = navH * 0.44
   let rowsN = H > 800 ? 5 : 4
-  let bigT = clamp(((wide ? W * 0.5 : W) - 70) / 2.6, 70, 150)
-  // The LCD's width in dp, for its pixel grid.
-  let lcdW = wide ? W - 48 - num(screenLeft, 0) - num(screenRight, 0) - min(W * 0.42, 380) : W - 28 - num(screenLeft, 0) - num(screenRight, 0)
-  // The user's tile glass, a key's edge depth (and travel), its corner, the soft-key and call/end slots.
-  let glassA = num(tileOpacity, 0.46)
-  // The LCD is a display, not a window: denser smoked glass than the keys, so it reads over a bright wallpaper.
-  let lcdA = clamp(glassA + 0.2, 0.62, 0.92)
-  let kd = 3
-  let kr = 14 * corners
-  // The digit fits its cap on short screens and in landscape.
-  let digitFs = min(30, (kh - kd - 12) / 1.21)
-  let softH = (navH - 10) / 2.3
-  let callH = navH - 10 - softH
+  let gRows = H > 800 ? 6 : 5
+  // The LCD's width in dp.
+  let lcdM = wide ? 14 : PW * 0.03
+  let lcdW = wide ? W - 48 - num(screenLeft, 0) - num(screenRight, 0) - min(W * 0.42, 380) : PW - 2 * lcdM
+  let digitFs = clamp(PW * 0.047 * SC, 15, 22)
   let artS = clamp(min(lcdW - 32, H * 0.2), 96, 200)
+  let iconSpan = 0.8
 
   // ---- the backlight: seconds of light a touch gives (8 full, then 4 dim), and a wake (2 full, 4 dim) ----
   let LIT = 12
   let WAKE = 6
   let bl = lit > 4 ? 1 : lit > 0 ? 0.35 : 0
-  let inkLvl = bl >= 1 ? 1 : bl > 0 ? 0.9 : 0.8
 
-  // ---- the look: an LCD tinted by the theme's accent, ink a touch of it too, one light colour ----
-  let ink = mix(foreground, accent, 0.2)
-  let faint = alpha(ink, 0.5)
-  let glowC = mix(accent, foreground, 0.15)
-  let plateC = mix(background, accent, 0.08)
-  let lcdSolid = mix(background, accent, 0.12)
-  let edgeC = alpha(foreground, 0.16)
+  // ---- the look, all from the Omarchy theme: the LCD lit in one of its colours (Go to › Screen picks which), the
+  // theme's background as the ink, the body a shade darker than the background, keys raised off it ----
+  let scrs = ["yellow", "accent", "green", "blue", "night"]
+  let tintC = scr == "accent" ? accent : scr == "green" ? green : scr == "blue" ? blue : yellow
+  // Night is the old dark screen: glass tinted by the accent, light ink.
+  let night = scr == "night"
+  // Lit, dimmed and out: the screen sinks toward the background as the light goes, as an unlit LCD greys.
+  let lcdC = night ? mix(background, accent, bl >= 1 ? 0.17 : bl > 0 ? 0.13 : 0.08) : bl >= 1 ? tintC : bl > 0 ? mix(tintC, background, 0.14) : mix(tintC, background, 0.3)
+  let ink = night ? mix(foreground, accent, 0.2) : background
+  let inkLvl = !night ? 1 : bl >= 1 ? 1 : bl > 0 ? 0.9 : 0.8
+  let faint = alpha(ink, 0.55)
+  // The backlight's own light: a whiter light of the screen's hue (the accent's glow on the night screen).
+  let glowC = night ? mix(accent, foreground, 0.15) : mix(tintC, #ffffff, 0.6)
+  let keyGlow = night ? glowC : tintC
+  // The body: black, as the video's. Keys are a shade darker, ringed by a darker crevice, with a faint light on
+  // their top edge: on a slightly lifted black, so the crevice and the shade can show.
+  let bodyC = #0a0a0a
+  let keyLvl = bl >= 1 ? 1 : bl > 0 ? 0.88 : 0.72
+  // What's printed on the body and its keys glows: the print, then a faint ring of copies round it (two radii),
+  // brighter and tinted by the screen's light while the backlight is on.
+  let whiteC = mix(#ffffff, foreground, 0.15)
+  let printC = bl > 0 ? mix(whiteC, keyGlow, 0.15) : alpha(whiteC, 0.92)
+  let haloC = bl > 0 ? mix(whiteC, keyGlow, 0.5) : whiteC
+  let haloLvl = bl >= 1 ? 1 : bl > 0 ? 0.8 : 0.5
+  let ring1 = [[1, 0], [0.7, 0.7], [0, 1], [-0.7, 0.7], [-1, 0], [-0.7, -0.7], [0, -1], [0.7, -0.7]]
+  let ring2 = [[2.2, 0], [1.56, 1.56], [0, 2.2], [-1.56, 1.56], [-2.2, 0], [-1.56, -1.56], [0, -2.2], [1.56, -1.56]]
+  // The margin round a raised key that its shadow may fall in.
+  let PM = 8
 
   // ---- T9: every app's words as the digits that spell them ----
   let t9 = {a: "2", b: "2", c: "2", d: "3", e: "3", f: "3", g: "4", h: "4", i: "4", j: "5", k: "5", l: "5", m: "6", n: "6", o: "6", p: "7", q: "7", r: "7", s: "7", t: "8", u: "8", v: "8", w: "9", x: "9", y: "9", z: "9"}
@@ -130,6 +320,7 @@ face "t9" {
     {kind: "cmd", id: "bluetooth", name: "Bluetooth"},
     {kind: "cmd", id: "music", name: "Music"},
     {kind: "cmd", id: "next", name: "Next track"},
+    {kind: "cmd", id: "snake", name: "Snake"},
     {kind: "cmd", id: "settings", name: "Settings"},
     {kind: "cmd", id: "menu", name: "Menu"}
   ]
@@ -191,6 +382,9 @@ face "t9" {
   // ---- the phone, as a dumb phone would tell it ----
   let phoneApp = (apps ?? []).find(a => a.profile == null && contains(["com.google.android.dialer", "com.samsung.android.dialer", "com.android.dialer", "org.fossify.phone"], a.package))
   let msgApp = (apps ?? []).find(a => a.profile == null && contains(["com.google.android.apps.messaging", "com.samsung.android.messaging", "com.android.mms", "com.android.messaging", "org.fossify.messages"], a.package))
+  let camApp = (apps ?? []).find(a => a.profile == null && contains(["com.google.android.GoogleCamera", "com.sec.android.app.camera", "com.android.camera", "com.android.camera2", "com.oneplus.camera", "com.motorola.camera3", "com.motorola.camera2", "com.oplus.camera", "com.huawei.camera", "com.nothing.camera", "app.grapheneos.camera", "org.fossify.camera"], a.package))
+  let webApp = (apps ?? []).find(a => a.profile == null && contains(["com.android.chrome", "com.sec.android.app.sbrowser", "org.mozilla.firefox", "com.brave.browser", "com.vivaldi.browser", "com.duckduckgo.mobile.android", "com.microsoft.emmx", "com.opera.browser", "com.kiwibrowser.browser", "app.vanadium.browser", "org.mozilla.fennec_fdroid", "org.mozilla.focus"], a.package))
+  let setApp = (apps ?? []).find(a => a.profile == null && a.package == "com.android.settings")
   let items = n.available ? n.items : []
   let missed = phoneApp == null ? 0 : len(items.filter(i => i.package == phoneApp.package))
   let unread = msgApp == null ? 0 : len(items.filter(i => i.package == msgApp.package))
@@ -199,11 +393,11 @@ face "t9" {
     missed > 0 ? {k: "call", t: missed == 1 ? "1 missed call" : "${missed} missed calls"} : null,
     unread > 0 ? {k: "sms", t: unread == 1 ? "1 message" : "${unread} messages"} : null,
     len(rest) > 0 ? {k: "note", t: len(rest) == 1 ? "1 notification" : "${len(rest)} notifications"} : null,
-    alarm.set ? {k: "bell", t: "alarm " + lower(fmtTime(alarm.time, "EEE HH:mm"))} : null
+    alarm.set ? {k: "bell", t: "Alarm " + fmtTime(alarm.time, "EEE HH:mm")} : null
   ].filter(x => x != null)
   let song = m.available && m.title != null ? [m.title, m.artist].filter(x => x != null && x != "").join(" - ") : null
   // android.media is pushed every second while playing (its position): what changes per track goes through lets,
-  // so only the ring, the blocks and the times follow the second.
+  // so only the blocks and the times follow the second.
   let mPlaying = m.playing == true
   let mArt = m.art
   let mTitle = m.title
@@ -213,18 +407,197 @@ face "t9" {
   // The player's own name, from the apps list; some apps only give their package.
   let mediaApp = mPkg == null ? null : ((apps ?? []).find(a => a.package == mPkg)).name ?? (mAppName != null && !contains(mAppName, ".") ? mAppName : null)
   let songBy = [mArtist, mediaApp].filter(x => x != null && x != "").join(" · ")
+  // The song line's ink, here and not on the line: a node's own lets are for its children, and its handlers misread.
+  let songCol = down == "song" ? lcdC : mPlaying ? ink : faint
   // Null until the notifications and the apps have loaded, so loading never looks like something arriving.
   let counts = n == null || n.available != true || apps == null || len(apps) == 0 ? null : [missed, unread, len(rest)]
   let charged = bat == null || bat.charging == null ? null : bat.charging == true && num(bat.level, 0) >= 100
   // Plugged in, charging or held below full: bat.charging alone flips while the cable stays in.
   let plugged = bat == null || bat.status == null ? null : bat.status != "on battery"
 
-  // ---- the ring's LED: notifications newer than the last touch; red for a call, accent for a message ----
+  // ---- Go to: the shortcuts list the left soft key opens ----
+  let gotoItems = [
+    webApp == null ? null : {kind: "app", key: webApp.key, name: "Internet"},
+    camApp == null ? null : {kind: "app", key: camApp.key, name: "Camera"},
+    {kind: "cmd", id: "snake", name: "Snake"},
+    {kind: "cmd", id: "torch", name: "Torch"},
+    {kind: "cmd", id: "quiet", name: "Quiet"},
+    {kind: "cmd", id: "music", name: "Music"},
+    {kind: "cmd", id: "wifi", name: "Wifi"},
+    {kind: "cmd", id: "bluetooth", name: "Bluetooth"},
+    {kind: "cmd", id: "screen", name: "Screen"},
+    {kind: "cmd", id: "style", name: "Customize"}
+  ].filter(x => x != null)
+  let gAt = clamp(gsel, 0, len(gotoItems) - 1)
+  let gFrom = max(0, gAt - gRows + 1)
+  let gShown = gotoItems.drop(gFrom).take(gRows)
+  let gSelI = gAt - gFrom
+  let gCur = gotoItems[gAt]
+
+  // ---- the drawer (Menu), as an iOS 26 drawer: one page per iOS page, its apps and folders in the same order and
+  // places (4 across, 6 down), the dock along the bottom of each; the t9's own screens on a page to the left of the
+  // first, where iOS keeps its Today View. From the drawer's saved copy; A to Z while Linux is off ----
+  let t9Apps = [
+    {kind: "t9", id: "cal", name: "Calendar"}, {kind: "t9", id: "agents", name: "Agents"},
+    {kind: "t9", id: "limits", name: "Limits"}, {kind: "t9", id: "tasks", name: "Tasks"},
+    {kind: "t9", id: "inbox", name: "Inbox"}, {kind: "t9", id: "vitals", name: "Vitals"},
+    {kind: "t9", id: "switches", name: "Switches"},
+    {kind: "t9", id: "player", name: "Music"}, {kind: "t9", id: "snake", name: "Snake"}
+  ]
+  let arrNames = groupBy(arr.apps ?? [], a => a.key)
+  let apNames = groupBy((apps ?? []).map(a => {key: "a:" + a.key, name: a.name}), a => a.key)
+  let dRows = clamp(num(arr.rows ?? arr.layout.rows, 6), 4, 6)
+  let dPer = 4 * dRows
+  let iosPages = (arr.pages ?? arr.layout.pages ?? []).map(pg => pg.map(it => it.apps != null ? {kind: "folder", id: "${it.id ?? it.name}", name: it.name ?? "Folder", apps: it.apps} : {kind: "app", key: it, name: get(arrNames, it, [])[0].name ?? get(apNames, it, [])[0].name ?? "?"}))
+  let hasIos = len(iosPages) > 0
+  let dockItems = hasIos ? (arr.dock ?? arr.layout.dock ?? []).map(k => {kind: "app", key: k, name: get(arrNames, k, [])[0].name ?? get(apNames, k, [])[0].name ?? "?"}) : []
+  let azItems = (apps ?? []).filter(a => a.profile == null).sortBy(a => lower(a.name ?? "")).map(a => {kind: "app", key: "a:" + a.key, name: a.name})
+  let allPages = [t9Apps] + (hasIos ? iosPages : chunk(azItems, dPer))
+  // The page Menu opens on: your first iOS page (the t9's own screens are one to the left).
+  let homePg = hasIos ? 1 : 0
+  let mFold = mFolder == "" ? null : flatten(iosPages).find(it => it.kind == "folder" && it.id == mFolder)
+  let mPagesL = mFold == null ? allPages : chunk(mFold.apps.map(k => {kind: "app", key: k, name: get(arrNames, k, [])[0].name ?? get(apNames, k, [])[0].name ?? "?"}), dPer)
+  let mPages = max(1, len(mPagesL))
+  let mPg = clamp(mPage, 0, mPages - 1)
+  let mGrid = mPagesL[mPg] ?? []
+  let mN = len(mGrid)
+  let mDock = mFold == null && mPg > 0 ? dockItems : []
+  let mShown = mGrid + mDock
+  let mPer = dPer
+  let mSelC = len(mShown) == 0 ? 0 : clamp(mSel, 0, len(mShown) - 1)
+  let mCur = len(mShown) == 0 ? null : mShown[mSelC]
+  // The LCD's content height (for how big a cell can be), from the screen's own sums.
+  let lcdHt = H - num(screenTop, 0) - 28 - gapA - navH - gapB - 4 * kh - max(num(screenInset, 0) + 10, PW * 0.05)
+  let contH = lcdHt - 65
+  // Cells: the grid's rows share what the title, the dots and the dock leave; names under the icons when there's room.
+  let dDockH = hasIos ? 38 : 0
+  let dCellH = max(24, (contH - 26 - 12 - dDockH - 4) / dRows)
+  let dLabels = dCellH >= 36
+  let dIcon = clamp(dCellH - (dLabels ? 14 : 4), 18, 46)
+
+  // ---- Calendar: the picked day's month, a dot on each day with events, that day's agenda ----
+  let todayNoon = parseTime(fmtTime(now, "yyyy-MM-dd") + " 12:00", "yyyy-MM-dd HH:mm")
+  let selNoon = calDay == 0 ? todayNoon : calDay
+  let m1 = parseTime(fmtTime(selNoon, "yyyy-MM") + "-01 12:00", "yyyy-MM-dd HH:mm")
+  let mNext = parseTime(fmtTime(m1 + 32 * 86400, "yyyy-MM") + "-01 12:00", "yyyy-MM-dd HH:mm")
+  let dim = round((mNext - m1) / 86400)
+  let wd1 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(fmtTime(m1, "EEE", null, "en"))
+  let calWeeks = ceil((wd1 + dim) / 7)
+  let calEvents = len(calX ?? []) > len(cal.events ?? []) ? calX : (cal.events ?? [])
+  let calCells = range(calWeeks * 7).map(i => {d: i - wd1 + 1, t: m1 + (i - wd1) * 86400, k: fmtTime(m1 + (i - wd1) * 86400, "yyyy-MM-dd")})
+  let calDots = calCells.map(c => c.d >= 1 && c.d <= dim && any(calEvents, e => e.start < c.t + 43200 && e.end > c.t - 43200))
+  let todayKey = fmtTime(now, "yyyy-MM-dd")
+  let selKey = fmtTime(selNoon, "yyyy-MM-dd")
+  let dayEvents = calEvents.filter(e => e.start < selNoon + 43200 && e.end > selNoon - 43200).sortBy(e => (e.allDay ? 0 : 1) * 10000000000 + e.start)
+  let calCellH = clamp((contH - 150) / calWeeks, 20, 34)
+  let calNeedsOk = cal.granted != true && len(calX ?? []) == 0
+
+  // ---- Agents: Claude Code's running sessions, then the newest of Claude's and Codex's to pick up again, then
+  // something new ----
+  let sess = (cs ?? []).filter(s => s != null && s.sessionId != null).sortBy(s => s.status == "idle" ? 1 : 0)
+  let hist = (ch ?? []).filter(h => h != null && h.id != null)
+  let past = hist.filter(h => !any(sess, s => s.sessionId == h.id))
+  let xsess = (xs.sessions ?? []).filter(x => x != null && x.id != null)
+  let agRows = flatten([
+    sess.map(s => {k: "run", id: s.sessionId, hot: s.status != "idle", name: (hist.find(h => h.id == s.sessionId)).title ?? s.name ?? "Claude Code", cwd: s.cwd ?? "", note: s.status == "idle" ? "idle" : "${s.status ?? "busy"}"}),
+    (past.map(h => {k: "claude", id: h.id, hot: false, name: h.title ?? "Claude Code session", cwd: h.cwd ?? "", last: num(h.mtime, 0)}) + xsess.map(x => {k: "codex", id: x.id, hot: false, name: trim(first(lines(x.title ?? "")) ?? "") == "" ? "Codex session" : trim(first(lines(x.title))), cwd: x.cwd ?? "", last: num(x.mtime, 0)})).sortBy(r => -r.last).take(8).map(r => merge(r, {note: r.last == 0 ? "" : fmtAgo(min(r.last, now), now) + " ago"})),
+    [{k: "new", id: "claude", name: "New Claude Code", cwd: "", note: "in ~"}, {k: "new", id: "codex", name: "New Codex", cwd: "", note: "in ~"}, {k: "new", id: "shell", name: "Terminal", cwd: "", note: "in ~"}]
+  ]).map(r => merge(r, {dir: r.cwd == "" ? "." : r.cwd, place: r.cwd == "" || match(r.cwd, "^(/root|/home/[^/]+)/?$") != null ? "~" : last(split(r.cwd, "/"))}))
+  let agRunN = len(sess) + num(xs.running, 0)
+  let agTitle = !linux ? "Agents · Linux is off" : len(sess) == 0 ? "Agents" : "Agents · ${agRunN} running"
+
+  // ---- Limits: Claude's and ChatGPT's (what Codex uses) ----
+  let cuU = cl.u
+  let cuL = cuU.limits ?? []
+  let cuWeek = cuU.seven_day.utilization ?? (cuL.find(l => l.kind == "weekly_all")).percent
+  let cuFiveL = cuL.find(l => l.kind == "session")
+  let cuHasFive = cuFiveL != null || cuU.five_hour != null
+  let cuFive = cuHasFive ? (cuU.five_hour.utilization ?? cuFiveL.percent) : null
+  let cuFiveAt = parseTime(cuU.five_hour.resets_at ?? cuFiveL.resets_at ?? "")
+  let cuWeekAt = parseTime(cuU.seven_day.resets_at ?? (cuL.find(l => l.kind == "weekly_all")).resets_at ?? "")
+  let cuPlan = (cl.plan ?? "") == "" ? null : contains(cl.tier ?? "", "20x") ? "Ultra" : capitalize(cl.plan)
+  let cuErr = !linux ? "Linux is off" : cl == null ? "…" : cl.login == false ? "not signed in" : cl.error != null ? "no data yet" : (cuU.seven_day == null && len(cuL) == 0 ? "offline" : null)
+  let gxU = gu.u
+  let gxRl = gxU.rate_limit
+  let gxErr = !linux ? "Linux is off" : gu == null ? "…" : gu.login == false ? "not signed in" : gu.code == "401" ? "login expired" : gu.error != null ? (gu.code == "000" ? "offline" : "no data yet") : gxRl == null ? "offline" : null
+  let gxPlan = gxU.plan_type == null ? null : capitalize(gxU.plan_type)
+  let gx1 = gxRl.primary_window
+  let gx2 = gxRl.secondary_window
+  let gx1Reset = gx1.reset_at ?? (gx1.reset_after_seconds == null ? null : gu.at + gx1.reset_after_seconds)
+  let gx2Reset = gx2.reset_at ?? (gx2.reset_after_seconds == null ? null : gu.at + gx2.reset_after_seconds)
+  let gx1s = num(gx1.limit_window_seconds, 18000)
+  let gx2s = num(gx2.limit_window_seconds, 604800)
+  let gx1Name = gx1s < 86400 ? "${round(gx1s / 3600)} hours" : gx1s <= 691200 ? "This week" : gx1s <= 2851200 ? "This month" : "${round(gx1s / 86400)} days"
+  let gx2Name = gx2s < 86400 ? "${round(gx2s / 3600)} hours" : gx2s <= 691200 ? "This week" : gx2s <= 2851200 ? "This month" : "${round(gx2s / 86400)} days"
+  let limCl = flatten([
+    cuWeek != null ? [{t: "This week", p: cuWeek, v: cuWeekAt == null ? "" : "resets " + fmtTime(round(cuWeekAt / 60) * 60, "EEE h:mm a")}] : [],
+    cuHasFive ? [{t: "5 hours", p: cuFive ?? 0, v: cuFiveAt == null ? "" : "resets in " + fmtDuration(max(0, cuFiveAt - now))}] : []
+  ])
+  let limGx = flatten([
+    gx1 != null ? [{t: gx1Name, p: gx1.used_percent ?? 0, v: gx1Reset == null ? "" : "resets " + fmtTime(round(gx1Reset / 60) * 60, gx1Reset - now < 86400 ? "h:mm a" : "MMM d")}] : [],
+    gx2 != null ? [{t: gx2Name, p: gx2.used_percent ?? 0, v: gx2Reset == null ? "" : "resets " + fmtTime(round(gx2Reset / 60) * 60, "EEE h:mm a")}] : []
+  ])
+
+  // ---- Tasks: what's to do, then what's done, then a row that clears the done ones ----
+  let tasksF = tf == null || tf == "" ? null : parseJson(tf)
+  let tasks = tasksPend ?? tasksF ?? []
+  let tTodo = tasks.filter(x => !x.done)
+  let tDone = tasks.filter(x => x.done)
+  let taskRows = tTodo + tDone + (len(tDone) > 0 ? [{id: "clear", t: "Clear ${len(tDone)} done", clear: true, done: false}] : [])
+
+  // ---- Vitals and switches ----
+  let memT = sys.memory.total
+  let memA = sys.memory.available
+  let stT = sys.storage.total
+  let stF = sys.storage.free
+  let vitRows = [
+    {t: "Battery", v: bat == null ? "…" : "${bat.level}%" + (bat.charging == true ? " charging" : "") + " · ${round(num(bat.temp, 0) * 9 / 5 + 32)}°F", p: num(bat.level, 0)},
+    {t: "Memory", v: memT == null ? "…" : "${fmtBytes(memA)} free of ${fmtBytes(memT)}", p: memT == null ? null : 100 - memA / memT * 100},
+    {t: "Storage", v: stT == null ? "…" : "${fmtBytes(stF)} free of ${fmtBytes(stT)}", p: stT == null ? null : 100 - stF / stT * 100},
+    {t: "Network", v: "In ${fmtBytes(netDown)}/s · Out ${fmtBytes(netUp)}/s", p: null},
+    {t: "Up for", v: sys.uptime == null ? "…" : fmtDuration(sys.uptime), p: null},
+    {t: "Phone", v: "${dev.model ?? ""} · Android ${dev.android ?? "…"}", p: null}
+  ]
+  let swRows = [
+    {id: "torch", t: "Torch", v: modes.torch == true ? "On" : "Off"},
+    {id: "quiet", t: "Quiet", v: modes.dnd ? "On" : "Off"},
+    {id: "wifi", t: "Wi-Fi", v: ">"}, {id: "bluetooth", t: "Bluetooth", v: ">"},
+    {id: "data", t: "Mobile data", v: ">"}, {id: "airplane", t: "Airplane mode", v: ">"},
+    {id: "location", t: "Location", v: ">"}, {id: "sound", t: "Sound", v: ">"},
+    {id: "display", t: "Display", v: ">"}, {id: "battery", t: "Battery", v: ">"},
+    {id: "files", t: "Files", v: ">"}, {id: "agentsL", t: "Agents", v: ">"},
+    {id: "style", t: "Style", v: ">"}, {id: "store", t: "Widget store", v: ">"},
+    {id: "lsettings", t: "Launcher settings", v: ">"}
+  ]
+
+
+  // ---- the list screens' shared selection ----
+  let listViews = ["agents", "tasks", "inbox", "switches", "vitals"]
+  let lRows = view == "agents" ? agRows : view == "tasks" ? taskRows : view == "inbox" ? items : view == "switches" ? swRows : view == "vitals" ? vitRows : []
+  let lN = len(lRows)
+  let lSelC = lN == 0 ? 0 : clamp(lSel, 0, lN - 1)
+  let lCur = lN == 0 ? null : lRows[lSelC]
+  let lTall = view == "agents" || view == "inbox"
+  let lVis = max(2, floor((contH - 30) / (lTall ? 46 : 34)))
+  let lFrom = max(0, lSelC - lVis + 1)
+  let lShown = lRows.drop(lFrom).take(lVis)
+  let lSelI = lSelC - lFrom
+
+  // ---- typing the old way ----
+  let mtMap = {"1": ".,?!1'-@", "2": "abc2", "3": "def3", "4": "ghi4", "5": "jkl5", "6": "mno6", "7": "pqrs7", "8": "tuv8", "9": "wxyz9", "0": " 0", "*": "*+-/()$%&#"}
+  let txTitle = tx == "task" ? "New task" : ""
+
+  // ---- Snake: a 20 x 16 field (13 on short screens) that wraps at the edges; it speeds up as it eats ----
+  let SW = 20
+  let SH = H > 800 ? 16 : 13
+  let sStep = max(0.075, 0.16 - sScore * 0.003)
+  let sState = sDead ? "over" : sPlay ? "play" : len(snake) > 0 ? "pause" : "start"
+  let sScoreS = sub("0000${sScore}", len("${sScore}"), len("${sScore}") + 4)
+
+  // ---- the notification LED, the dot over Menu: newer than the last touch; it blinks ----
   let fresh = items.filter(i => num(i.time, 0) > seenAt)
   let freshCall = phoneApp != null && any(fresh, i => i.package == phoneApp.package)
-  let freshMsg = msgApp != null && any(fresh, i => i.package == msgApp.package)
-  let ledC = freshCall ? red : freshMsg ? accent : len(fresh) > 0 ? blue : null
-  let ledOn = ledC != null && (revealK != "" || modes.saver == true || sec % 4 == 0)
+  let ledOn = len(fresh) > 0 && (revealK != "" || modes.saver == true || sec % 4 == 0)
   let callT = freshCall ? num(first(fresh.filter(i => i.package == phoneApp.package)).time, 0) : 0
   let wob = callT > 0 && sec - callT < 120 && sec % 4 == 0
 
@@ -232,33 +605,11 @@ face "t9" {
   let soundOk = m.playing != true && modes.ringer == "normal" && modes.dnd != true && (vol.output == null || vol.output.type == "speaker")
   let voice = tones && soundOk
 
-  // ---- what the soft keys and the nav centre do now, as the LCD labels them ----
-  let softL = view == "player" ? "Prev" : "Menu"
-  let softM = view == "player" ? (m.playing == true ? "Pause" : "Play") : info ? "Close" : typing ? (cur != null ? "Select" : "") : modes.dnd ? "Loud" : "Quiet"
-  let softR = view == "player" ? "Next" : typing ? "Clear" : modes.torch == true ? "Dark" : "Light"
-  let callMix = bl > 0 ? (typing && cur != null ? 0.45 : 0.38) : 0.25
-  let endMix = bl > 0 ? (typing ? 0.42 : 0.36) : 0.25
-
-  // ---- the clock as a 5x7 round-dot matrix: digit, gap, digit, gap, colon, gap, digit, gap, digit ----
-  let dm = [
-    ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
-    ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
-    ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
-    ["11111", "00010", "00100", "00010", "00001", "10001", "01110"],
-    ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
-    ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
-    ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
-    ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
-    ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
-    ["01110", "10001", "10001", "01111", "00001", "00010", "01100"]
-  ]
-  let hm = fmtTime(now, "HHmm")
-  let dg = range(4).map(i => dm[num(sub(hm, i, i + 1), 0)])
-  let dotRows = range(7).map(r => dg[0][r] + "0" + dg[1][r] + "000" + dg[2][r] + "0" + dg[3][r])
-  // The same rows as numbers for the GPU: columns 0-12 and 13-24 as bits, the leftmost highest.
-  let dotBits = dotRows.map(s => [reduce(range(13), (acc, i) => acc * 2 + (sub(s, i, i + 1) == "1" ? 1 : 0), 0), reduce(range(12), (acc, i) => acc * 2 + (sub(s, 13 + i, 14 + i) == "1" ? 1 : 0), 0)])
-  // Shaders need Android 13; older phones draw the same with Canvas calls.
-  let gpu = num(dev.sdk, 33) >= 33
+  // ---- what the soft keys and the nav key's centre do now, as the LCD labels them ----
+  let inHub = contains(["menu", "cal", "agents", "limits", "tasks", "inbox", "vitals", "switches"], view)
+  let softL = tx != "" ? "Save" : view == "player" ? "Prev" : view == "cal" ? "Today" : view == "agents" ? "New" : view == "tasks" ? "Add" : view == "inbox" ? (lCur != null && lCur.clearable == true ? "Clear" : "") : inHub ? "" : view == "" && !typing ? "Go to" : ""
+  let softM = tx != "" ? "OK" : view == "player" ? (m.playing == true ? "Pause" : "Play") : view == "snake" ? (sState == "play" ? "Pause" : sState == "pause" ? "Go on" : "Start") : view == "goto" ? "Select" : view == "menu" || view == "cal" || view == "agents" ? "Open" : view == "limits" ? "Usage" : view == "tasks" ? (lCur == null ? "" : lCur.clear == true ? "Clear" : lCur.done == true ? "Undo" : "Done") : view == "inbox" ? (lN > 0 ? "Open" : "") : view == "switches" ? "Select" : view == "vitals" ? "" : info ? "Close" : typing ? (cur != null ? "Select" : "") : "Menu"
+  let softR = tx != "" ? (txt == "" ? "Back" : "Clear") : view == "player" ? "Next" : view == "snake" || view == "goto" ? "Exit" : inHub ? "Back" : typing ? "Delete" : "Setting"
 
   // Pixel icons, one letter per LCD pixel.
   let sprites = {
@@ -266,9 +617,10 @@ face "t9" {
     sms: ["xxxxxxxxx", "xx.....xx", "x.x...x.x", "x..x.x..x", "x...x...x", "xxxxxxxxx"],
     note: [".xxxxxxx.", "x.......x", "x.x.x.x.x", "x.......x", ".xxxxxxx.", ".xx......"],
     bell: ["...x...", "..xxx..", ".xxxxx.", ".xxxxx.", "xxxxxxx", "...x..."],
-    song: ["..xxxxx", "..x...x", "..x...x", "xxx.xxx", "xxx.xxx", "......."],
-    handset: ["...xxxxxxx...", ".xxxxxxxxxxx.", "xxxx.....xxxx", "xxx.......xxx", ".x.........x."]
+    song: ["..xxxxx", "..x...x", "..x...x", "xxx.xxx", "xxx.xxx", "......."]
   }
+  let antenna = ["x.x.x", ".xxx.", "..x..", "..x..", "..x.."]
+  let bolt = ["..x", ".x.", "xxx", ".x.", "x.."]
   let sunArt = ["...x...", ".x...x.", "..xxx..", "x.xxx.x", "..xxx..", ".x...x.", "...x..."]
   let moonArt = ["..xxx..", ".xx....", "xx.....", "xx.....", "xx.....", ".xx....", "..xxx.."]
   let muteArt = ["...x.....", "..xx.x..x", "xxxx..xx.", "xxxx..xx.", "..xx.x..x", "...x....."]
@@ -280,18 +632,36 @@ face "t9" {
     bluetooth: [".......x........", ".......xx.......", ".......x.x......", "...x...x..x.....", "....x..x...x....", ".....x.x..x.....", "......xx.x......", ".......xx.......", ".......xx.......", "......xx.x......", ".....x.x..x.....", "....x..x...x....", "...x...x..x.....", ".......x.x......", ".......xx.......", ".......x........"],
     music: ["................", ".....xxxxxxxxxx.", ".....xxxxxxxxxx.", ".....x........x.", ".....x........x.", ".....x........x.", ".....x........x.", ".....x........x.", ".....x........x.", ".....x.....xxxx.", "..xxxx....xxxxx.", ".xxxxx....xxxxx.", ".xxxxx.....xxx..", "..xxx...........", "................", "................"],
     next: ["................", "................", "................", ".x.....x.....xx.", ".xx....xx....xx.", ".xxx...xxx...xx.", ".xxxx..xxxx..xx.", ".xxxxx.xxxxx.xx.", ".xxxxx.xxxxx.xx.", ".xxxx..xxxx..xx.", ".xxx...xxx...xx.", ".xx....xx....xx.", ".x.....x.....xx.", "................", "................", "................"],
+    snake: ["................", "................", "..........xxxx..", "..........x.xx..", "..........xxxx..", "..........xx....", "..........xx....", "..xxxxxxxxxx....", "..xxxxxxxxxx....", "..xx............", "..xx............", "..xxxxxxxx...xx.", "..xxxxxxxx...xx.", "................", "................", "................"],
     settings: ["......xxxx......", "..xx..xxxx..xx..", ".xxxxxxxxxxxxxx.", ".xxxxxxxxxxxxxx.", "..xxxx....xxxx..", "..xxx......xxx..", "xxxx........xxxx", "xxxx........xxxx", "xxxx........xxxx", "xxxx........xxxx", "..xxx......xxx..", "..xxxx....xxxx..", ".xxxxxxxxxxxxxx.", ".xxxxxxxxxxxxxx.", "..xx..xxxx..xx..", "......xxxx......"],
     menu: ["xxxx..xxxx..xxxx", "xxxx..xxxx..xxxx", "xxxx..xxxx..xxxx", "xxxx..xxxx..xxxx", "................", "................", "xxxx..xxxx..xxxx", "xxxx..xxxx..xxxx", "xxxx..xxxx..xxxx", "xxxx..xxxx..xxxx", "................", "................", "xxxx..xxxx..xxxx", "xxxx..xxxx..xxxx", "xxxx..xxxx..xxxx", "xxxx..xxxx..xxxx"],
     call: ["................", "..xxx...........", ".xxxxx..........", ".xxxxx..........", ".xxxx...........", "..xxx...........", "..xxx...........", "...xxx..........", "....xxx.........", ".....xxx..xxx...", "......xxxxxxxx..", ".......xxxxxxxx.", "........xxxxxxx.", "..........xxxx..", "................", "................"]
   }
 
+  // The t9's own screens and a folder, as 16x16 LCD icons for the drawer.
+  let px16b = {
+    cal: ["...x......x.....", ".xxxxxxxxxxxxxx.", ".xxxxxxxxxxxxxx.", ".x............x.", ".x.x.x.x.x.x..x.", ".x............x.", ".x.x.x.x.x.x..x.", ".x............x.", ".x.x.x.xxx.x..x.", ".x.....xxx....x.", ".x.x.x.xxx.x..x.", ".x............x.", ".xxxxxxxxxxxxxx.", "................", "................", "................"],
+    agents: ["................", ".xxxxxxxxxxxxxx.", ".xxxxxxxxxxxxxx.", ".x............x.", ".x.x..........x.", ".x..x.........x.", ".x...x........x.", ".x..x.........x.", ".x.x..xxxxx...x.", ".x............x.", ".x............x.", ".xxxxxxxxxxxxxx.", "................", "................", "................", "................"],
+    limits: ["................", "................", ".....xxxxxx.....", "...xx......xx...", "..x..........x..", ".x............x.", ".x.......x....x.", "x.......x......x", "x......x.......x", "x.....xx.......x", "x.....xx.......x", "x..............x", ".xxxxxxxxxxxxxx.", "................", "................", "................"],
+    tasks: ["................", ".xxx............", ".x.x..xxxxxxxxx.", ".xxx............", "................", ".xxx............", ".xxx..xxxxxxxxx.", ".xxx............", "................", ".xxx............", ".x.x..xxxxxxxxx.", ".xxx............", "................", "................", "................", "................"],
+    inbox: ["................", "................", "................", "xxxxxxxxxxxxxxxx", "xx............xx", "x.x..........x.x", "x..x........x..x", "x...x......x...x", "x....x....x....x", "x.....xxxx.....x", "x..............x", "x..............x", "xxxxxxxxxxxxxxxx", "................", "................", "................"],
+    vitals: ["................", "................", "................", ".....x..........", ".....x..........", "....x.x.........", "....x.x.....x...", "....x.x....x.x..", "xxxx...x...x.xxx", ".......x..x.....", "........x.x.....", "........x.x.....", ".........x......", "................", "................", "................"],
+    switches: ["................", "................", "...xxxxxxxxxx...", "..x.......xxxx..", ".x.......xxxxxx.", ".x.......xxxxxx.", "..x.......xxxx..", "...xxxxxxxxxx...", "................", "...xxxxxxxxxx...", "..xxxx.......x..", ".xxxxxx.......x.", ".xxxxxx.......x.", "..xxxx.......x..", "...xxxxxxxxxx...", "................"],
+    folder: ["................", "................", "..xxxxx.........", ".x.....x........", ".xxxxxxxxxxxxxx.", ".x............x.", ".x............x.", ".x............x.", ".x............x.", ".x............x.", ".x............x.", ".xxxxxxxxxxxxxx.", "................", "................", "................", "................"]
+  }
+  let t9Bits = ["cal", "agents", "limits", "tasks", "inbox", "vitals", "switches", "folder"].map(k => {k: k, b: get(px16b, k, []).map(r => reduce(range(16), (acc, i) => acc * 2 + (sub(r, i, i + 1) == "x" ? 1 : 0), 0))})
+  let musicBits = px16.music.map(r => reduce(range(16), (acc, i) => acc * 2 + (sub(r, i, i + 1) == "x" ? 1 : 0), 0))
+  let snakeBits = px16.snake.map(r => reduce(range(16), (acc, i) => acc * 2 + (sub(r, i, i + 1) == "x" ? 1 : 0), 0))
+
   // A command's or a call's icon, and the player's note, as 16 rows of bits for the GPU.
   let pxArt = cur == null || cur.kind == "app" ? null : get(px16, cur.kind == "call" ? "call" : cur.id, px16.menu)
   let pxBits = pxArt == null ? [] : pxArt.map(r => reduce(range(16), (acc, i) => acc * 2 + (sub(r, i, i + 1) == "x" ? 1 : 0), 0))
   let noteBits = px16.music.map(r => reduce(range(16), (acc, i) => acc * 2 + (sub(r, i, i + 1) == "x" ? 1 : 0), 0))
+  // Shaders need Android 13; older phones draw the same with Canvas calls.
+  let gpu = num(dev.sdk, 33) >= 33
 
   // Each key: its digit, its letters and its touch-tone.
-  let pad = [{d: "1", l: "o_o", t: k1}, {d: "2", l: "abc", t: k2}, {d: "3", l: "def", t: k3}, {d: "4", l: "ghi", t: k4}, {d: "5", l: "jkl", t: k5}, {d: "6", l: "mno", t: k6}, {d: "7", l: "pqrs", t: k7}, {d: "8", l: "tuv", t: k8}, {d: "9", l: "wxyz", t: k9}, {d: "*", l: " ", t: kStar}, {d: "0", l: "+", t: k0}, {d: "#", l: " ", t: kHash}]
+  let pad = [{d: "1", l: "", t: k1}, {d: "2", l: "abc", t: k2}, {d: "3", l: "def", t: k3}, {d: "4", l: "ghi", t: k4}, {d: "5", l: "jkl", t: k5}, {d: "6", l: "mno", t: k6}, {d: "7", l: "pqrs", t: k7}, {d: "8", l: "tuv", t: k8}, {d: "9", l: "wxyz", t: k9}, {d: "*", l: "", t: kStar, ic: "lock"}, {d: "0", l: "", t: k0, ic: "mic"}, {d: "#", l: "", t: kHash}]
 
   // ---- shaders: none reads time, so each runs again only when its uniforms change ----
   // Three LEDs under the LCD's bottom edge, through a light guide: brightest along the bottom, darker corners.
@@ -304,10 +674,10 @@ face "t9" {
       float a = 0.05 * exp(-(1.0 - uv.y) * 6.0);
       for (int i = 0; i < 3; i++) {
         float2 d = float2((uv.x - 0.2 - 0.3 * float(i)) * ar, uv.y - 1.04);
-        a += 0.09 * exp(-dot(d, d) * 30.0);
+        a += 0.11 * exp(-dot(d, d) * 30.0);
       }
       float vx = uv.x * 2.0 - 1.0;
-      a = min(a * (1.0 - 0.3 * vx * vx), 0.2);
+      a = min(a * (1.0 - 0.3 * vx * vx), 0.24);
       // Light on a dark theme is the glow colour; on a light one, the light background is.
       half3 c = dot(float3(glow.rgb), float3(0.333)) > dot(float3(bg.rgb), float3(0.333)) ? glow.rgb : bg.rgb;
       return half4(c * a, a);
@@ -333,77 +703,66 @@ face "t9" {
       return half4(dk * o, o);
     }
   """
-  // The clock's dots: lit ones in ink, the rest faintly there.
-  let dotsCode = """
-    uniform float2 bits[7];
-    uniform half4 inkc;
-    uniform float ghostA;
-    float bitAt(float2 cell) {
-      if (cell.x < 0.0 || cell.x > 24.0 || cell.y < 0.0 || cell.y > 6.0) { return 0.0; }
-      float2 m = float2(0.0, 0.0);
-      for (int i = 0; i < 7; i++) {
-        if (float(i) == cell.y) { m = bits[i]; }
-      }
-      float word = cell.x < 13.0 ? m.x : m.y;
-      float b = cell.x < 13.0 ? 12.0 - cell.x : 24.0 - cell.x;
-      return mod(floor(word / exp2(b)), 2.0);
-    }
-    half4 main(float2 p) {
-      float pw = min(size.x / 25.0, size.y / 7.0);
-      float2 o = (size - float2(25.0, 7.0) * pw) * 0.5;
-      float2 g = (p - o) / pw;
-      float2 cell = floor(g);
-      if (cell.x < 0.0 || cell.x > 24.0 || cell.y < 0.0 || cell.y > 6.0) { return half4(0.0); }
-      float r = length(g - cell - 0.5);
-      float aa = 0.75 / pw;
-      float inside = 1.0 - smoothstep(0.38 - aa, 0.38 + aa, r);
-      float a = inside * inkc.a * (bitAt(cell) > 0.5 ? 1.0 : ghostA);
-      return half4(inkc.rgb * a, a);
-    }
-  """
-  // A soft glow round the clock's lit dots (on dark themes: on a light one it would be a smudge).
-  let haloCode = """
-    uniform float2 bits[7];
-    uniform half4 glowc;
-    uniform half4 bg;
-    float bitAt(float2 cell) {
-      if (cell.x < 0.0 || cell.x > 24.0 || cell.y < 0.0 || cell.y > 6.0) { return 0.0; }
-      float2 m = float2(0.0, 0.0);
-      for (int i = 0; i < 7; i++) {
-        if (float(i) == cell.y) { m = bits[i]; }
-      }
-      float word = cell.x < 13.0 ? m.x : m.y;
-      float b = cell.x < 13.0 ? 12.0 - cell.x : 24.0 - cell.x;
-      return mod(floor(word / exp2(b)), 2.0);
-    }
-    half4 main(float2 p) {
-      float pw = min(size.x / 25.0, size.y / 7.0);
-      float2 o = (size - float2(25.0, 7.0) * pw) * 0.5;
-      float2 g = (p - o) / pw;
-      float2 cell = floor(g);
-      float h = 0.0;
-      for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-          float2 nc = cell + float2(float(dx), float(dy));
-          if (bitAt(nc) > 0.5) {
-            float2 d = g - (nc + 0.5);
-            h += exp(-dot(d, d) * 4.0);
-          }
-        }
-      }
-      float a = clamp(h * 0.2, 0.0, 0.35) * step(dot(float3(bg.rgb), float3(0.333)), dot(float3(glowc.rgb), float3(0.333)));
-      return half4(glowc.rgb * a, a);
-    }
-  """
   // The light guide's slow wash, rising toward the LEDs at the bottom.
   let washCode = """
     uniform half4 glow;
     uniform half4 bg;
     half4 main(float2 p) {
       float y = p.y / size.y;
-      float a = 0.12 * y * y;
+      float a = 0.16 * y * y;
       half3 c = dot(float3(glow.rgb), float3(0.333)) > dot(float3(bg.rgb), float3(0.333)) ? glow.rgb : bg.rgb;
       return half4(c * a, a);
+    }
+  """
+  // A raised key as the video's: the body itself rising in a gradual slope into a rounded dome, in the same black, with
+  // no outline and no flat top. Its height comes from a superellipse the shape of the key (so it curves smoothly in
+  // every direction, with no creases): a parabolic dome, round all over, on a soft foot that starts a few dp outside
+  // the outline. Only light and shade show it, continuously across the key: the half facing the light (top, upper
+  // left) lighter, the half facing away (bottom, right) darker, fading into the body all round. Drawn as light and
+  // shade over the body, so the body's own black and grain run through it. Pressed, the dome flattens and darkens.
+  let pillowCode = """
+    uniform float2 cap;
+    uniform float rad;
+    uniform float m;
+    uniform float down;
+    uniform half4 body;
+    float dome(float2 p, float2 b, float rb, float hh) {
+      float2 q = max(abs(p) / b, float2(0.0001));
+      float r = pow(pow(q.x, 5.0) + pow(q.y, 5.0), 0.2);
+      float t = clamp(1.0 - r / rb, 0.0, 1.0);
+      return hh * (1.0 - (1.0 - t) * (1.0 - t)) * smoothstep(0.0, 0.3, t);
+    }
+    half4 main(float2 px) {
+      float k = size.x / (cap.x + 2.0 * m);
+      float2 p = (px - size * 0.5) / k;
+      float2 b = cap * 0.5;
+      // The foot starts this far outside the outline, as a part of the key's half height.
+      float rb = 1.0 + min(m - 1.0, 4.0) / b.y;
+      float hh = mix(5.5, 2.0, down);
+      float e = 0.1;
+      float h0 = dome(p, b, rb, hh);
+      float hx = dome(p + float2(e, 0.0), b, rb, hh);
+      float hy = dome(p + float2(0.0, e), b, rb, hh);
+      float3 n = normalize(float3(-(hx - h0) / e, -(hy - h0) / e, 1.0));
+      float3 L = normalize(float3(-0.35, -0.9, 1.0));
+      float lit = dot(n, L) - L.z;
+      float inside = smoothstep(0.0, 0.3, clamp(1.0 - pow(pow(max(abs(p.x) / b.x, 0.0001), 5.0) + pow(max(abs(p.y) / b.y, 0.0001), 5.0), 0.2) / rb, 0.0, 1.0));
+      float delta = (lit > 0.0 ? lit * 0.17 : lit * 0.08) - down * 0.012 * inside;
+      float bb = max(float(body.r), 0.01);
+      float a = delta > 0.0 ? clamp(delta / (1.0 - bb), 0.0, 1.0) : clamp(-delta / bb, 0.0, 1.0);
+      return delta > 0.0 ? half4(a, a, a, a) : half4(0.0, 0.0, 0.0, a);
+    }
+  """
+  // The body's matte grain under everything.
+  let grainCode = """
+    uniform half4 body;
+    float grain(float2 px) {
+      float2 q = fract(floor(px) * float2(0.1031, 0.1030));
+      q += dot(q, q.yx + 33.33);
+      return fract((q.x + q.y) * q.x) - 0.5;
+    }
+    half4 main(float2 px) {
+      return half4(float4(float3(body.rgb) + grain(px) * 0.012, 1.0));
     }
   """
   // A 16x16 pixel icon from 16 rows of bits, the leftmost highest; cells inset 10%.
@@ -425,7 +784,50 @@ face "t9" {
       return half4(c.rgb * c.a, c.a) * inside;
     }
   """
-  // Album art as a 4x4 ordered dither in ink, for light and dark themes alike.
+  // An app's icon as 16x16 LCD cells. Where the app has a one-colour icon, its silhouette (a glyph with gaps). Where it
+  // hasn't, the silhouette is just the icon's shape, a solid block: then its outline, and inside it whatever stands out
+  // from the icon's own background, which is its logo.
+  let iconCode = """
+    uniform shader img;
+    uniform shader full;
+    uniform half4 ink;
+    uniform half4 ghost;
+    uniform float span;
+    float2 at(float2 cell) {
+      return 0.5 + ((cell + 0.5) / 16.0 - 0.5) * span;
+    }
+    float inShape(float2 cell) {
+      if (cell.x < 0.0 || cell.x > 15.0 || cell.y < 0.0 || cell.y > 15.0) { return 0.0; }
+      return step(0.45, img.eval(at(cell)).a);
+    }
+    half4 main(float2 p) {
+      float2 g = p / size * 16.0;
+      float2 cell = floor(g);
+      // How much of the icon's middle the silhouette covers: a glyph leaves gaps, a plain shape doesn't.
+      float cov = 0.0;
+      for (int j = 0; j < 6; j++) {
+        for (int i = 0; i < 6; i++) {
+          cov += step(0.45, img.eval(0.5 + (float2(float(i), float(j)) / 5.0 - 0.5) * span * 0.6).a);
+        }
+      }
+      cov = cov / 36.0;
+      float on = inShape(cell);
+      if (cov > 0.8) {
+        half4 c = full.eval(at(cell));
+        float k = 0.38 * span;
+        float3 bg = (float3(full.eval(float2(0.5, 0.5 - k)).rgb) + float3(full.eval(float2(0.5, 0.5 + k)).rgb) + float3(full.eval(float2(0.5 - k, 0.5)).rgb) + float3(full.eval(float2(0.5 + k, 0.5)).rgb)) * 0.25;
+        float3 cc = float3(c.rgb) / max(float(c.a), 0.01);
+        float diff = step(0.24, distance(cc, bg)) * step(0.45, float(c.a));
+        float edge = on * (1.0 - inShape(cell + float2(1.0, 0.0)) * inShape(cell - float2(1.0, 0.0)) * inShape(cell + float2(0.0, 1.0)) * inShape(cell - float2(0.0, 1.0)));
+        on = max(edge, on * diff);
+      }
+      float2 f = fract(g);
+      float inside = step(0.1, f.x) * step(f.x, 0.9) * step(0.1, f.y) * step(f.y, 0.9);
+      half4 col = on > 0.5 ? ink : ghost;
+      return half4(col.rgb * col.a, col.a) * inside;
+    }
+  """
+  // Album art as a 4x4 ordered dither in ink on the LCD.
   let coverCode = """
     uniform shader art;
     uniform half4 ink;
@@ -447,8 +849,6 @@ face "t9" {
       }
       half3 s = art.eval((g + 0.5) / cells).rgb;
       float span = max(hi - lo, 0.2);
-      // Dark covers start the window at their darkest sample, pale ones end it at their lightest: a flat cover keeps
-      // its brightness.
       float base = mix(lo, hi - span, smoothstep(0.3, 0.7, lo));
       float l = clamp((dot(float3(s), float3(0.299, 0.587, 0.114)) - base) / span, 0.0, 1.0);
       float2 o = mod(g, 2.0);
@@ -463,11 +863,11 @@ face "t9" {
     }
   """
 
-  fps: revealK != "" && revealN > 1 ? (modes.saver ? 15 : 30) : typing ? 2 : mPlaying ? (modes.saver ? 4 : 8) : 1
+  fps: view == "snake" && sPlay ? (modes.saver ? 20 : 30) : revealK != "" && revealN > 1 ? (modes.saver ? 15 : 30) : typing ? 2 : mPlaying ? (modes.saver ? 4 : 8) : 1
 
   // ---- triggers ----
   // One clock for every countdown. A jump means home is back (the screen was off or an app was in front): the light
-  // wakes, and after more than 30 seconds away the LCD goes back to its idle screen.
+  // wakes, a game pauses, and after more than 30 seconds away the LCD goes back to its idle screen.
   on sec {
     if value - old > 4 {
       lit = WAKE
@@ -475,13 +875,20 @@ face "t9" {
       volN = 0
       down = ""
       navZ = ""
+      sPlay = false
       if value - old > 30 {
         q = ""
         sel = 0
         view = ""
+        tx = ""
+        mFolder = ""
       }
     } else {
-      if lit > 0 { lit = lit - 1 }
+      if view == "snake" && sPlay {
+        lit = LIT
+      } else if lit > 0 {
+        lit = lit - 1
+      }
       if flashN > 0 { flashN = flashN - 1 }
       if volN > 0 { volN = volN - 1 }
       if revealN > 0 {
@@ -505,44 +912,99 @@ face "t9" {
     }
   }
   on plugged {
-    flash = !value ? "unplugged" : bat.charging == true ? "charging" : "plugged in"
+    flash = !value ? "Unplugged" : bat.charging == true ? "Charging" : "Plugged in"
     flashN = 3
     lit = max(lit, WAKE)
   }
   on charged {
     if value {
-      flash = "battery full"
+      flash = "Battery full"
       flashN = 4
     }
   }
   when view == "player" && song == null { view = "" }
-  // Every commit (green, Select, the picked row, the pixel icon, a held speed dial) ends up here.
+  // Network speed from the counters' change over the time between readings.
+  on net { if old != null && value.rx >= old.rx && value.uptime > old.uptime { netDown = (value.rx - old.rx) / (value.uptime - old.uptime); netUp = (value.tx - old.tx) / (value.uptime - old.uptime) } }
+  // Once the tasks file shows what was written, it's the one to read again.
+  on tf { if tasksPend != null && tasksF == tasksPend { tasksPend = null } }
+  // A task ticked, cleared or deleted: written whole.
+  on tAct {
+    let next = value.op == "clear" ? tTodo : value.op == "delete" ? tasks.filter(x => "${x.id}" != value.id) : tasks.map(x => "${x.id}" == value.id ? merge(x, {done: !x.done}) : x)
+    tasksPend = next
+    wSeq = wSeq + 1
+    wTasks = {n: "${sec}-${wSeq}", j: toJson(next)}
+  }
+  // OK while typing: a new task is written; an amount, then who it was paid to, then what for, is queued.
+  on txGo {
+    if tx == "task" {
+      if trim(txt) != "" {
+        let next = flatten([[{id: sec * 1000 + wSeq % 1000, t: trim(txt), done: false}], tasks])
+        tasksPend = next
+        wSeq = wSeq + 1
+        wTasks = {n: "${sec}-${wSeq}", j: toJson(next)}
+        flash = "Task added"
+        flashN = 2
+      }
+      tx = ""
+      txt = ""
+    }
+  }
+  // Every commit (green, Select, the picked row, the pixel icon, Go to, a held speed dial) ends up here.
   on go {
     let c = value.c
     if c != null {
-      if c.kind == "app" { androidApp(c.key) } else if c.kind == "call" { url("tel:${enc(c.num)}") } else if c.id == "torch" { torch(modes.torch == true ? 0 : 100) } else if c.id == "quiet" { dnd("toggle") } else if c.id == "wifi" { settings("wifi") } else if c.id == "bluetooth" { settings("bluetooth") } else if c.id == "music" { media("toggle") } else if c.id == "next" { media("next") } else if c.id == "settings" { launcher("settings") } else if c.id == "menu" { launcher("drawer") }
+      if c.kind == "app" { androidApp(c.key) } else if c.kind == "call" { url("tel:${enc(c.num)}") } else if c.id == "torch" { torch(modes.torch == true ? 0 : 100) } else if c.id == "quiet" { dnd("toggle") } else if c.id == "wifi" { settings("wifi") } else if c.id == "bluetooth" { settings("bluetooth") } else if c.id == "music" { media("toggle") } else if c.id == "next" { media("next") } else if c.id == "settings" { launcher("settings") } else if c.id == "menu" { launcher("drawer") } else if c.id == "style" { launcher("style") } else if c.id == "screen" {
+        // The next of the theme's colours for the LCD; Go to stays open to press again.
+        let si = range(len(scrs)).find(i => scrs[i] == scr) ?? 0
+        scr = scrs[(si + 1) % len(scrs)]
+        view = "goto"
+        lit = LIT
+      } else if c.id == "snake" {
+        view = "snake"
+        sPlay = false
+      }
     }
   }
-
-  // ---- glass ----
-  // A glass cap on a solid edge kd lower. Whatever is drawn over a cap moves with it: give that node the same
-  // offset and spring.
-  component Cap(pressed, ht, tint, glass, rad, rim) {
-    Box {
-      fill: width
-      height: ht
-      Box { fill: width; height: ht - kd; offset: [0, kd]; radius: rad; background: rim }
-      Box {
-        fill: width
-        height: ht - kd
-        offset: [0, pressed ? kd : 0]
-        animate offset: spring(0.62, 1600)
-        radius: rad
-        frost: tileFrost ?? 0
-        border: 1
-        borderColor: alpha(foreground, 0.07)
-        background: alpha(tint, pressed ? min(1, glass + 0.42) : glass)
-        animate background: tween(120ms, "out")
+  // A new game of Snake: four long in the middle, heading right, the food ahead.
+  on sNew {
+    sSeed = floor(hash(sSeed, sec, time) * 1000000)
+    snake = [[7, 6], [6, 6], [5, 6], [4, 6]]
+    sDir = [1, 0]
+    sNext = [1, 0]
+    food = [14, 6]
+    sScore = 0
+    sAcc = 0
+    sDead = false
+    sPlay = true
+  }
+  // Snake moves one cell a step; it dies on its own tail, and eating grows it, scores and lays new food.
+  every frame {
+    if view == "snake" && sPlay && !sDead && len(snake) > 0 {
+      sAcc = sAcc + dt
+      if sAcc >= sStep {
+        sAcc = min(sAcc - sStep, sStep)
+        let d = sNext[0] + sDir[0] == 0 && sNext[1] + sDir[1] == 0 ? sDir : sNext
+        sDir = d
+        let hx = (snake[0][0] + d[0] + SW) % SW
+        let hy = (snake[0][1] + d[1] + SH) % SH
+        let eat = hx == food[0] && hy == food[1]
+        let body = eat ? snake : snake.take(len(snake) - 1)
+        if any(body, s => s[0] == hx && s[1] == hy) {
+          sDead = true
+          sPlay = false
+          if sScore > sBest { sBest = sScore }
+          haptic("strong")
+          if voice { sound(sBusy) }
+        } else {
+          snake = [[hx, hy]] + body
+          if eat {
+            sScore = sScore + 1
+            haptic("light")
+            let free = range(SW * SH).filter(i => !any(snake, s => s[0] + s[1] * SW == i))
+            let f = free[floor(hash(sSeed, sScore, hx, hy) * len(free))]
+            food = [f % SW, floor(f / SW)]
+          }
+        }
       }
     }
   }
@@ -551,43 +1013,45 @@ face "t9" {
   component Status() {
     Row {
       fill: width
-      height: 22
+      height: 20
       gap: 8
       align: center
+      padding: [12, 0]
+      // An antenna and four bars, as the old phones drew it.
       Canvas {
-        width: 24
-        height: 16
+        width: 26
+        height: 12
+        sprite(antenna, 0, 1, 2, fill: ink)
         for i in range(4) {
-          rect(i * 6, 16 - (i + 1) * 4, 4, (i + 1) * 4, fill: i < num(sim.signal, 0) ? ink : alpha(ink, 0.18))
+          rect(12 + i * 3.5, 12 - (i + 1) * 3, 2.2, (i + 1) * 3, fill: i < num(sim.signal, 0) ? ink : alpha(ink, 0.2))
         }
       }
-      Text { text: upper(sim.carrier ?? (sim.available ? "no sim" : "no service")); font: lcdFont; fontSize: 19; color: ink; maxLines: 1; weight: 1 }
-      // Away from the big clock, the time sits here.
+      Spacer { weight: 1 }
+      // Away from the idle screen, the time sits here.
       if typing || view != "" {
-        Text { text: fmtTime(now, "HH:mm"); font: lcdFont; fontSize: 19; color: ink; maxLines: 1 }
+        Text { text: fmtTime(now, "HH:mm"); font: lcdFont; fontSize: 20; color: ink; maxLines: 1 }
       }
       if modes.dnd {
-        Text { text: " QUIET "; font: lcdFont; fontSize: 16; color: lcdSolid; background: ink; radius: 3 * corners; maxLines: 1 }
+        Text { text: "Quiet"; font: lcdFont; fontSize: 17; color: lcdC; background: ink; radius: 2; padding: [5, 0]; maxLines: 1 }
       }
       if modes.torch == true {
-        Text { text: " LIGHT "; font: lcdFont; fontSize: 16; color: lcdSolid; background: ink; radius: 3 * corners; maxLines: 1 }
+        Text { text: "Light"; font: lcdFont; fontSize: 17; color: lcdC; background: ink; radius: 2; padding: [5, 0]; maxLines: 1 }
       }
       if !tones {
         Canvas { width: 18; height: 12; sprite(muteArt, 0, 0, 2, fill: ink) }
       }
-      Text { text: bat == null ? "" : "${bat.charging ? "+" : ""}${bat.level}"; font: lcdFont; fontSize: 19; color: ink; maxLines: 1 }
-      // Bars climb from the level to full once a second while charging; the outline blinks under 15% unplugged.
+      // The battery with its level inside; a bolt while charging, and the outline blinks under 15% unplugged.
+      if bat != null && bat.charging == true {
+        Canvas { width: 6; height: 10; sprite(bolt, 0, 0, 2, fill: ink) }
+      }
       Canvas {
-        width: 28
-        height: 14
+        width: 34
+        height: 16
         let lv = num(bat.level, 0)
-        let base = floor(lv / 25)
-        rect(0.75, 0.75, 23.5, 12.5, stroke: lv < 15 && bat.charging != true && modes.saver != true && sec % 2 == 1 ? alpha(ink, 0.3) : ink, width: 1.5)
-        rect(24.5, 4, 3, 6, fill: ink)
-        let filled = bat.charging == true && base < 4 ? base + sec % (5 - base) : ceil(lv / 25)
-        for i in range(4) {
-          rect(3 + i * 5, 3, 4, 8, fill: i < filled ? ink : alpha(ink, 0.15))
-        }
+        let low = lv < 15 && bat.charging != true && modes.saver != true && sec % 2 == 1
+        rect(0.75, 0.75, 29.5, 14.5, radius: 2.5, stroke: low ? alpha(ink, 0.3) : ink, width: 1.5)
+        rect(30.5, 5, 2.5, 6, fill: ink)
+        text(bat == null ? "" : "${lv}", 15.25, 8.5, size: 13, font: lcdFont, color: ink, align: "center")
       }
     }
   }
@@ -597,19 +1061,28 @@ face "t9" {
     Row {
       weight: 1
       justify: place
-      Text { text: t; font: lcdFont; fontSize: 23; maxLines: 1; padding: [4, 0]; radius: 2 * corners; color: held ? lcdSolid : ink; background: held ? ink : alpha(ink, 0); animate color: tween(80ms, "out"); animate background: tween(80ms, "out") }
+      Text { text: t; font: lcdFont; fontSize: 24; maxLines: 1; padding: [5, 0]; radius: 2; color: held ? lcdC : ink; background: held ? ink : alpha(ink, 0); animate background: tween(80ms, "out") }
     }
   }
 
   component Soft() {
-    Row {
+    Box {
       fill: width
-      height: 26
-      gap: 4
-      align: center
-      SoftLabel { t: softL; held: down == "softL"; place: "start" }
-      SoftLabel { t: softM; held: navZ == "mid" && softM != ""; place: "center" }
-      SoftLabel { t: softR; held: down == "softR"; place: "end" }
+      height: 30
+      Row {
+        fill: true
+        gap: 4
+        align: end
+        padding: [8, 0]
+        SoftLabel { t: softL; held: down == "softL" && softL != ""; place: "start" }
+        SoftLabel { t: softM; held: navZ == "mid" && softM != ""; place: "center" }
+        SoftLabel { t: softR; held: down == "softR"; place: "end" }
+      }
+      // The dot over Menu: the notification LED, blinking for what's new since the last touch.
+      Canvas {
+        fill: true
+        circle(width / 2, 2.5, ledOn ? 3 : 2, fill: ledOn ? ink : alpha(glowC, 0.85))
+      }
     }
   }
 
@@ -618,10 +1091,11 @@ face "t9" {
     if volN > 0 {
       Row {
         fill: width
-        height: 30
+        height: 28
         gap: 10
         align: center
-        Text { text: "VOL"; font: lcdFont; fontSize: 22; color: ink }
+        padding: [14, 0]
+        Text { text: "Volume"; font: lcdFont; fontSize: 22; color: ink }
         Canvas {
           weight: 1
           height: 14
@@ -631,69 +1105,47 @@ face "t9" {
         }
       }
     } else if flashN > 0 {
-      Text { text: upper(flash); font: lcdFont; fontSize: 22; color: lcdSolid; background: ink; align: center; maxLines: 1; padding: [6, 2]; radius: 3 * corners }
+      Row {
+        fill: width
+        justify: center
+        Text { text: flash; font: lcdFont; fontSize: 22; color: lcdC; background: ink; maxLines: 1; padding: [8, 1]; radius: 2 }
+      }
     }
   }
 
-  // The time in round dots; unlit cells stay faintly there. Only the colon changes between minutes.
-  component DotClock() {
-    Box {
+  // The rule across the LCD and the black tab hanging from it on the right, with the time in it.
+  component RuleTab() {
+    Canvas {
       fill: width
-      height: bigT * 0.56
-      if gpu {
-        // A soft glow round the lit dots, only while the light is on; fading it never runs the shader again.
-        Shader { fill: true; fallback: alpha(background, 0); opacity: bl >= 1 ? 1 : bl > 0 ? 0.4 : 0; animate opacity: tween(400ms, "out"); uniforms: { bits: dotBits, glowc: glowC, bg: background }; code: haloCode }
-        Shader { fill: true; fallback: alpha(background, 0); uniforms: { bits: dotBits, inkc: ink, ghostA: 0.07 }; code: dotsCode }
-      } else {
-        Canvas {
-          fill: true
-          let p = min(width / 25, height / 7)
-          let x0 = (width - p * 25) / 2
-          let y0 = (height - p * 7) / 2
-          for r in range(7) {
-            for c in range(25) {
-              circle(x0 + (c + 0.5) * p, y0 + (r + 0.5) * p, p * 0.38, fill: sub(dotRows[r], c, c + 1) == "1" ? ink : alpha(ink, 0.07))
-            }
-          }
-        }
-      }
-      // The colon, the face's one heartbeat at rest: it dims and comes back once a second.
-      Canvas {
-        fill: true
-        opacity: modes.saver == true || sec % 2 == 0 ? 1 : 0.3
-        let p = min(width / 25, height / 7)
-        let x0 = (width - p * 25) / 2
-        let y0 = (height - p * 7) / 2
-        circle(x0 + 12.5 * p, y0 + 2.5 * p, p * 0.38, fill: ink)
-        circle(x0 + 12.5 * p, y0 + 4.5 * p, p * 0.38, fill: ink)
-      }
+      height: 44
+      let tx = width * 0.5
+      line(0, 1, width, 1, stroke: ink, width: 2)
+      path([[tx, 0], [width, 0], [width, height], [tx + height * 0.9, height]], closed: true, fill: ink)
+      // The colon, the face's heartbeat at rest: it dims and comes back once a second.
+      text([fmtTime(now, "HH"), {text: ":", color: modes.saver == true || sec % 2 == 0 ? lcdC : alpha(lcdC, 0.3)}, fmtTime(now, "mm")], width - 16, height / 2 + 1, size: 36, font: lcdFont, color: lcdC, align: "end")
     }
   }
 
   component Idle() {
-    Box {
-    fill: true
     Column {
       fill: true
       gap: 0
       Spacer { weight: 1 }
-      DotClock { }
-      Spacer { height: bigT * 0.1 }
-      Text { text: upper(fmtTime(now, "EEE d MMM")); font: lcdFont; fontSize: 24; letterSpacing: 4; color: faint; align: center; maxLines: 1 }
-      Spacer { weight: 1 }
-      Spacer { height: 6 }
+      Text { text: fmtTime(now, "EEE, d MMM"); font: lcdFont; fontSize: 30; color: ink; align: center; maxLines: 1 }
+      Spacer { height: 18 }
       for it in lines key it.k {
         Row {
           fill: width
-          height: 28
+          height: 27
           gap: 10
           align: center
-          radius: 3 * corners
+          padding: [16, 0]
           ripple: false
           background: down == "l:" + it.k ? ink : alpha(ink, 0)
           animate background: tween(80ms, "out")
           onPress: down = "l:" + it.k
-          onRelease: { if down == "l:" + it.k { down = "" } }
+          // Not it.k: a tap that opens the notification can take the line away before the finger lifts.
+          onRelease: { if startsWith(down, "l:") { down = "" } }
           onLongPress: lit = LIT
           onTap: {
             lit = LIT
@@ -704,36 +1156,36 @@ face "t9" {
             } else if it.k == "sms" {
               if msgApp != null { androidApp(msgApp.key) }
             } else if it.k == "note" {
-              notification("open", rest[0].key)
+              if len(rest) > 0 { notification("open", rest[0].key) }
             } else if it.k == "bell" {
               androidApp(alarm.app)
             }
           }
-          Canvas { width: 22; height: 14; sprite(get(sprites, it.k), 2, 1, 2, fill: down == "l:" + it.k ? lcdSolid : ink) }
+          Canvas { width: 22; height: 14; sprite(get(sprites, it.k), 2, 1, 2, fill: down == "l:" + it.k ? lcdC : ink) }
           // A line that just arrived types itself in behind a cursor, then holds.
           if revealK == it.k && revealN > 1 {
             Box {
               weight: 1
-              height: 28
+              height: 27
               Canvas {
                 fill: true
-                let s = upper(it.t)
+                let s = it.t
                 let nc = clamp(floor((time - revealAt) * 32), 0, len(s))
-                text(sub(s, 0, nc) + (nc < len(s) ? "_" : ""), 0, height / 2, size: 22, font: lcdFont, color: down == "l:" + it.k ? lcdSolid : ink)
+                text(sub(s, 0, nc) + (nc < len(s) ? "_" : ""), 0, height / 2, size: 23, font: lcdFont, color: down == "l:" + it.k ? lcdC : ink)
               }
             }
           } else {
-            Text { text: upper(it.t); font: lcdFont; fontSize: 22; color: down == "l:" + it.k ? lcdSolid : ink; maxLines: 1; weight: 1 }
+            Text { text: it.t; font: lcdFont; fontSize: 23; color: down == "l:" + it.k ? lcdC : ink; maxLines: 1; weight: 1 }
           }
         }
       }
       if song != null {
         Row {
           fill: width
-          height: 28
+          height: 27
           gap: 10
           align: center
-          radius: 3 * corners
+          padding: [16, 0]
           ripple: false
           background: down == "song" ? ink : alpha(ink, 0)
           animate background: tween(80ms, "out")
@@ -741,41 +1193,29 @@ face "t9" {
           onRelease: { if down == "song" { down = "" } }
           onLongPress: lit = LIT
           onTap: { lit = LIT; haptic("medium"); view = "player" }
-          let s = upper(song)
-          let col = down == "song" ? lcdSolid : mPlaying ? ink : alpha(ink, 0.75)
-          Canvas { width: 22; height: 14; sprite(get(sprites, "song"), 4, 1, 2, fill: down == "song" ? lcdSolid : ink) }
-          // A long title scrolls like a ticker, in whole 4 dp pixel steps, only while it plays and the light is on;
-          // at rest it sits still, so nothing animates.
-          if mPlaying && bl > 0 && len(s) * 10 > lcdW - 64 {
+          Canvas { width: 22; height: 14; sprite(get(sprites, "song"), 4, 1, 2, fill: down == "song" ? lcdC : ink) }
+          // A long title scrolls like a ticker, in whole 2 dp steps, only while it plays and the light is on.
+          if mPlaying && bl > 0 && len(song) * 9 > lcdW - 70 {
             Canvas {
               weight: 1
               height: 24
-              let tw = len(s) * 10 + 48
-              let x = -floor(((time * 32) % tw) / 4) * 4
+              let tw = len(song) * 9 + 48
+              let x = -floor(((time * 32) % tw) / 2) * 2
               clip(0, 0, width, height) {
-                text(s, x, height / 2, size: 22, font: lcdFont, color: col)
-                text(s, x + tw, height / 2, size: 22, font: lcdFont, color: col)
+                text(song, x, height / 2, size: 23, font: lcdFont, color: songCol)
+                text(song, x + tw, height / 2, size: 23, font: lcdFont, color: songCol)
               }
             }
           } else {
-            Text { text: s; font: lcdFont; fontSize: 22; color: col; maxLines: 1; weight: 1 }
+            Text { text: song; font: lcdFont; fontSize: 23; color: songCol; maxLines: 1; weight: 1 }
           }
         }
       }
-      if len(lines) == 0 && song == null {
-        Text { text: "NOTHING NEW"; font: lcdFont; fontSize: 22; color: faint; align: center }
-      }
-      Spacer { height: 6 }
-    }
-    // A banner or the volume floats just above the lines: the clock never moves, and on a short screen it covers the
-    // date for its few seconds instead of being cut. It takes no taps.
-    Column {
-      fill: true
-      gap: 0
-      Spacer { weight: 1 }
-      Banner { }
-      Spacer { height: 12 + (len(lines) == 0 && song == null ? 26 : 28 * (len(lines) + (song != null ? 1 : 0))) }
-    }
+      Spacer { weight: 1.3 }
+      // Messages and the volume show just above the rule, in a slot that keeps the rest still.
+      Box { fill: width; height: 30; align: center; Banner { } }
+      Spacer { height: 4 }
+      RuleTab { }
     }
   }
 
@@ -799,17 +1239,13 @@ face "t9" {
         sel = 0
       }
       if cur.kind == "app" {
-        // The app's initial on an LCD badge: its own silhouette needs owl 24, which the store doesn't take yet.
         if gpu {
-          Shader { fill: true; fallback: alpha(background, 0); uniforms: { bits: range(16).map(i => 0), inkc: ink, ghost: alpha(ink, 0.06) }; code: pxCode }
-        }
-        Box {
-          fill: true
-          align: center
-          Text { text: upper(sub(cur.name, 0, 1)); font: lcdFont; fontSize: 46; color: ink; maxLines: 1; align: center }
+          Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { img: "mask:a:${cur.key}", full: "icon:a:${cur.key}", ink: ink, ghost: alpha(ink, 0.07), span: iconSpan }; code: iconCode }
+        } else {
+          Image { src: "mask:a:${cur.key}"; tint: ink; fill: true }
         }
       } else if gpu {
-        Shader { fill: true; fallback: alpha(background, 0); uniforms: { bits: pxBits, inkc: ink, ghost: alpha(ink, 0.06) }; code: pxCode }
+        Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { bits: pxBits, inkc: ink, ghost: alpha(ink, 0.07) }; code: pxCode }
       } else {
         Canvas {
           fill: true
@@ -817,7 +1253,7 @@ face "t9" {
           let cs = width / 16
           for r in range(16) {
             for c in range(16) {
-              rect(c * cs + cs * 0.1, r * cs + cs * 0.1, cs * 0.8, cs * 0.8, fill: sub(art[r], c, c + 1) == "x" ? ink : alpha(ink, 0.06))
+              rect(c * cs + cs * 0.1, r * cs + cs * 0.1, cs * 0.8, cs * 0.8, fill: sub(art[r], c, c + 1) == "x" ? ink : alpha(ink, 0.07))
             }
           }
         }
@@ -825,72 +1261,40 @@ face "t9" {
     }
   }
 
+  // Typing: the matches as a Go to list with an inverted bar, the digits big at the bottom right.
   component Typing() {
     Column {
       fill: true
-      gap: 3
-      Row {
-        fill: width
-        height: 60
-        gap: 0
-        align: center
-        if cur != null && len(q) <= 8 {
-          PixelIcon { }
-        }
-        Spacer { weight: 1 }
-        Text { text: q; font: lcdFont; fontSize: len(q) > 12 ? 36 : 56; color: ink; maxLines: 1 }
-        Canvas {
-          width: 14
-          height: 44
-          // It blinks while the light is on; at rest it stays, so nothing animates.
-          if bl == 0 || floor(time * 2) % 2 == 0 { rect(5, 4, 6, 36, fill: ink) }
-        }
-      }
-      Spacer { height: 4 }
-      // Dialling abroad: the time where the call would ring; faint and a moon while they're asleep.
-      for z in zoneShow key z.city {
-        Row {
-          fill: width
-          height: 30
-          gap: 10
-          align: center
-          let hr = num(fmtTime(now, "H", z.z), 12)
-          let night = hr >= 22 || hr < 7
-          Canvas { width: 14; height: 14; sprite(hr >= 7 && hr < 19 ? sunArt : moonArt, 0, 0, 2, fill: night ? faint : ink) }
-          Text { text: upper(z.city); font: lcdFont; fontSize: 22; color: ink; maxLines: 1; weight: 1 }
-          Text { text: upper(fmtTime(now, "EEE HH:mm", z.z)); font: lcdFont; fontSize: 22; color: night ? faint : ink; maxLines: 1 }
-        }
-      }
+      gap: 0
+      padding: [0, 6, 0, 0]
       if info {
         Column {
           fill: width
           gap: 0
-          Text { text: "PHONE"; font: lcdFont; fontSize: 18; color: faint }
-          Text { text: upper("${dev.maker ?? ""} ${dev.model ?? ""}"); font: lcdFont; fontSize: 26; color: ink; maxLines: 1 }
-          Text { text: "ANDROID ${dev.android ?? "…"} · SDK ${dev.sdk ?? "…"}"; font: lcdFont; fontSize: 22; color: ink; maxLines: 1 }
-          Text { text: upper(dev.soc ?? ""); font: lcdFont; fontSize: 22; color: ink; maxLines: 1 }
-          Text { text: bat == null ? "" : "BATTERY ${round(num(bat.temp, 0) * 9 / 5 + 32)}°F · ${upper(bat.health ?? "ok")}"; font: lcdFont; fontSize: 22; color: ink; maxLines: 1 }
-          Text { text: "HOLD # · KEY TONES ${tones ? (soundOk ? "ON" : "ON · SILENT NOW") : "OFF"}"; font: lcdFont; fontSize: 18; color: faint; maxLines: 1 }
+          padding: [14, 0]
+          Text { text: "Phone"; font: lcdFont; fontSize: 20; color: faint }
+          Text { text: "${dev.maker ?? ""} ${dev.model ?? ""}"; font: lcdFont; fontSize: 28; color: ink; maxLines: 1 }
+          Text { text: "Android ${dev.android ?? "…"} · SDK ${dev.sdk ?? "…"}"; font: lcdFont; fontSize: 23; color: ink; maxLines: 1 }
+          Text { text: dev.soc ?? ""; font: lcdFont; fontSize: 23; color: ink; maxLines: 1 }
+          Text { text: bat == null ? "" : "Battery ${round(num(bat.temp, 0) * 9 / 5 + 32)}°F · ${bat.health ?? "ok"}"; font: lcdFont; fontSize: 23; color: ink; maxLines: 1 }
+          Text { text: "Hold # · key tones ${tones ? (soundOk ? "on" : "on, silent now") : "off"}"; font: lcdFont; fontSize: 20; color: faint; maxLines: 1 }
         }
-      } else if len(cands) == 0 {
-        if len(zoneShow) == 0 {
-          Text { text: "NO MATCH"; font: lcdFont; fontSize: 24; color: faint }
-        }
-      } else {
-        // The selection is one bar that glides between the rows (32 high, 3 apart).
+      } else if len(cands) > 0 {
+        // The selection is one bar that glides between the rows (31 high, 3 apart).
         Box {
           fill: width
-          Box { fill: width; height: 32; radius: 3 * corners; background: ink; offset: [0, selI * 35]; animate offset: spring(0.8, 900) }
+          padding: [6, 0]
+          Box { fill: width; height: 31; radius: 2; background: ink; offset: [0, selI * 34]; animate offset: spring(0.8, 900) }
           Column {
             fill: width
             gap: 3
             for c, i in shown key "${c.kind}${c.key ?? c.id ?? c.num}" {
               Row {
                 fill: width
-                height: 32
+                height: 31
                 gap: 8
                 align: center
-                padding: [6, 0]
+                padding: [8, 0]
                 ripple: false
                 onLongPress: lit = LIT
                 onTap: {
@@ -907,31 +1311,171 @@ face "t9" {
                     sel = from + i
                   }
                 }
+                // The letters the digits spell stand out; the rest of the name is fainter.
                 Text {
-                  spans: c.kind == "call" ? ["Call ", {text: c.num, color: i == selI ? background : accent}] : c.wi == null ? [c.name] : [sub(c.name, 0, c.off), {text: sub(c.name, c.off, min(c.off + len(q), len(c.name))), color: i == selI ? background : accent}, sub(c.name, min(c.off + len(q), len(c.name)), len(c.name))]
+                  spans: c.kind == "call" ? ["Call ", {text: c.num, color: i == selI ? lcdC : ink}] : c.wi == null ? [c.name] : [sub(c.name, 0, c.off), {text: sub(c.name, c.off, min(c.off + len(q), len(c.name))), color: i == selI ? lcdC : ink}, sub(c.name, min(c.off + len(q), len(c.name)), len(c.name))]
                   font: lcdFont
-                  fontSize: 27
-                  color: i == selI ? alpha(lcdSolid, 0.6) : ink
-                  animate color: tween(90ms, "out")
+                  fontSize: 26
+                  color: i == selI ? alpha(lcdC, 0.62) : faint
                   maxLines: 1
                   weight: 1
                 }
                 Text {
-                  text: upper(c.kind == "app" ? (c.work ?? "") : c.kind == "call" ? "dial" : c.id == "torch" ? (modes.torch == true ? "on" : "off") : c.id == "quiet" ? (modes.dnd ? "on" : "off") : c.id == "music" ? (mPlaying ? "pause" : "play") : "cmd")
+                  text: c.kind == "app" ? (c.work ?? "") : c.kind == "call" ? "dial" : c.id == "torch" ? (modes.torch == true ? "on" : "off") : c.id == "quiet" ? (modes.dnd ? "on" : "off") : c.id == "music" ? (mPlaying ? "pause" : "play") : ""
                   font: lcdFont
-                  fontSize: 18
-                  color: i == selI ? lcdSolid : faint
-                  animate color: tween(90ms, "out")
+                  fontSize: 20
+                  color: i == selI ? lcdC : faint
                   maxLines: 1
                 }
               }
             }
           }
         }
+      } else if len(zoneShow) == 0 {
+        Text { text: "No match"; font: lcdFont; fontSize: 24; color: faint; padding: [14, 0] }
       }
       Spacer { weight: 1 }
-      Banner { }
-      Spacer { height: 4 }
+      // Dialling abroad: the time where the call would ring; faint and a moon while they're asleep.
+      for z in zoneShow key z.city {
+        Row {
+          fill: width
+          height: 28
+          gap: 10
+          align: center
+          padding: [14, 0]
+          let hr = num(fmtTime(now, "H", z.z), 12)
+          let night = hr >= 22 || hr < 7
+          Canvas { width: 14; height: 14; sprite(hr >= 7 && hr < 19 ? sunArt : moonArt, 0, 0, 2, fill: night ? faint : ink) }
+          Text { text: z.city; font: lcdFont; fontSize: 23; color: ink; maxLines: 1; weight: 1 }
+          Text { text: fmtTime(now, "EEE HH:mm", z.z); font: lcdFont; fontSize: 23; color: night ? faint : ink; maxLines: 1 }
+        }
+      }
+      Box { fill: width; height: 30; align: center; Banner { } }
+      Row {
+        fill: width
+        height: 64
+        gap: 0
+        align: center
+        padding: [12, 0, 10, 0]
+        if cur != null && len(q) <= 8 {
+          PixelIcon { }
+        }
+        Spacer { weight: 1 }
+        Text { text: q; font: lcdFont; fontSize: len(q) > 12 ? 40 : 64; color: ink; maxLines: 1 }
+        Canvas {
+          width: 12
+          height: 46
+          // It blinks while the light is on; at rest it stays, so nothing animates.
+          if bl == 0 || floor(time * 2) % 2 == 0 { rect(4, 6, 5, 36, fill: ink) }
+        }
+      }
+    }
+  }
+
+  // Go to: shortcuts in a list, the selection inverted; up and down move it, the centre or a tap opens.
+  component GoTo() {
+    Column {
+      fill: true
+      gap: 0
+      Text { text: "Go to"; font: lcdFont; fontSize: 22; color: ink; align: center; maxLines: 1 }
+      Spacer { height: 6 }
+      Box {
+        fill: width
+        padding: [6, 0]
+        Box { fill: width; height: 32; radius: 2; background: ink; offset: [0, gSelI * 35]; animate offset: spring(0.8, 900) }
+        Column {
+          fill: width
+          gap: 3
+          for g, i in gShown key g.name {
+            Row {
+              fill: width
+              height: 32
+              gap: 8
+              align: center
+              padding: [8, 0]
+              ripple: false
+              onLongPress: lit = LIT
+              onTap: {
+                lit = LIT
+                if i == gSelI {
+                  haptic("strong")
+                  if voice { sound(sConnect) }
+                  view = ""
+                  goN = goN + 1
+                  go = {n: goN, c: g, t: sec}
+                } else {
+                  haptic("light")
+                  gsel = gFrom + i
+                }
+              }
+              Text { text: g.name; font: lcdFont; fontSize: 27; color: i == gSelI ? lcdC : ink; maxLines: 1; weight: 1 }
+              Text {
+                text: g.id == "torch" ? (modes.torch == true ? "on" : "off") : g.id == "quiet" ? (modes.dnd ? "on" : "off") : g.id == "music" ? (mPlaying ? "pause" : "play") : g.id == "snake" && sBest > 0 ? "best ${sBest}" : g.id == "screen" ? scr : ""
+                font: lcdFont
+                fontSize: 20
+                color: i == gSelI ? lcdC : faint
+                maxLines: 1
+              }
+            }
+          }
+        }
+      }
+      Spacer { weight: 1 }
+      // A scroll mark when the list runs past the screen.
+      if len(gotoItems) > gRows {
+        Canvas {
+          fill: width
+          height: 8
+          let n2 = len(gotoItems)
+          for i in range(n2) {
+            rect(width / 2 - n2 * 4 + i * 8 + 1, 2, 5, 4, fill: i == gAt ? ink : alpha(ink, 0.22))
+          }
+        }
+      }
+      Box { fill: width; height: 30; align: center; Banner { } }
+    }
+  }
+
+  // Snake, on the LCD: the score and the best above a walled field; 2 4 6 8 steer, 5 or the centre pauses.
+  component Snake() {
+    Column {
+      fill: true
+      gap: 4
+      padding: [12, 2, 12, 4]
+      Row {
+        fill: width
+        height: 22
+        align: center
+        Text { text: sScoreS; font: lcdFont; fontSize: 24; color: ink; weight: 1; maxLines: 1 }
+        Text { text: "Best ${sBest}"; font: lcdFont; fontSize: 20; color: faint; maxLines: 1 }
+      }
+      Canvas {
+        weight: 1
+        fill: width
+        let cs = floor(min((width - 8) / SW, (height - 8) / SH))
+        let fw = cs * SW
+        let fh = cs * SH
+        let x0 = floor((width - fw) / 2)
+        let y0 = floor((height - fh) / 2)
+        rect(x0 - 3, y0 - 3, fw + 6, fh + 6, stroke: ink, width: 2)
+        for s in snake {
+          rect(x0 + s[0] * cs + 1, y0 + s[1] * cs + 1, cs - 2, cs - 2, fill: ink)
+        }
+        let fx = x0 + food[0] * cs
+        let fy = y0 + food[1] * cs
+        if sState != "start" {
+          path([[fx + cs / 2, fy + 1], [fx + cs - 1, fy + cs / 2], [fx + cs / 2, fy + cs - 1], [fx + 1, fy + cs / 2]], closed: true, fill: ink)
+        }
+        if sState != "play" {
+          let msg = sState == "over" ? "Game over" : sState == "pause" ? "Paused" : "Snake"
+          let hint = sState == "over" ? "Score ${sScore} · 5 plays again" : sState == "pause" ? "5 goes on" : "2 4 6 8 steer · 5 starts"
+          // A small box near the top, so a paused snake still shows where it is.
+          rect(x0 + fw * 0.15, y0 + cs, fw * 0.7, 54, fill: lcdC)
+          rect(x0 + fw * 0.15, y0 + cs, fw * 0.7, 54, stroke: ink, width: 2)
+          text(msg, x0 + fw / 2, y0 + cs + 18, size: 26, font: lcdFont, color: ink, align: "center")
+          text(hint, x0 + fw / 2, y0 + cs + 40, size: 18, font: lcdFont, color: ink, align: "center")
+        }
+      }
     }
   }
 
@@ -941,19 +1485,20 @@ face "t9" {
       fill: true
       gap: 0
       align: center
+      padding: [14, 0]
       Spacer { weight: 1 }
       Box {
         size: artS
-        radius: 3 * corners
+        radius: 2
         clip: true
         if m.art != null {
           if gpu {
-            Shader { fill: true; fallback: alpha(plateC, 0.85); uniforms: { art: mArt, ink: ink, plate: alpha(plateC, 0.85), bg: background, cells: floor(artS / 3) }; code: coverCode }
+            Shader { fill: true; fallback: lcdC; uniforms: { art: mArt, ink: ink, plate: lcdC, bg: lcdC, cells: floor(artS / 3) }; code: coverCode }
           } else {
             Image { src: m.art; fit: cover; fill: true; opacity: 0.85 }
           }
         } else if gpu {
-          Shader { fill: true; fallback: alpha(background, 0); uniforms: { bits: noteBits, inkc: ink, ghost: alpha(ink, 0.06) }; code: pxCode }
+          Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { bits: noteBits, inkc: ink, ghost: alpha(ink, 0.07) }; code: pxCode }
         } else {
           Canvas {
             fill: true
@@ -961,7 +1506,7 @@ face "t9" {
             let cs = width / 16
             for r in range(16) {
               for c in range(16) {
-                rect(c * cs + cs * 0.1, r * cs + cs * 0.1, cs * 0.8, cs * 0.8, fill: sub(art[r], c, c + 1) == "x" ? ink : alpha(ink, 0.06))
+                rect(c * cs + cs * 0.1, r * cs + cs * 0.1, cs * 0.8, cs * 0.8, fill: sub(art[r], c, c + 1) == "x" ? ink : alpha(ink, 0.07))
               }
             }
           }
@@ -972,23 +1517,23 @@ face "t9" {
         fill: width
         height: 28
         align: center
-        let s = upper(mTitle ?? "")
+        let s = mTitle ?? ""
         // A long title scrolls only while it plays and the light is on.
-        if mPlaying && bl > 0 && len(s) * 10 > lcdW - 32 {
+        if mPlaying && bl > 0 && len(s) * 9 > lcdW - 32 {
           Canvas {
             fill: true
-            let tw = len(s) * 10 + 48
-            let x = -floor(((time * 32) % tw) / 4) * 4
+            let tw = len(s) * 9 + 48
+            let x = -floor(((time * 32) % tw) / 2) * 2
             clip(0, 0, width, height) {
-              text(s, x, height / 2, size: 22, font: lcdFont, color: ink)
-              text(s, x + tw, height / 2, size: 22, font: lcdFont, color: ink)
+              text(s, x, height / 2, size: 24, font: lcdFont, color: ink)
+              text(s, x + tw, height / 2, size: 24, font: lcdFont, color: ink)
             }
           }
         } else {
-          Text { text: s; font: lcdFont; fontSize: 22; color: ink; maxLines: 1; align: center }
+          Text { text: s; font: lcdFont; fontSize: 24; color: ink; maxLines: 1; align: center }
         }
       }
-      Text { text: upper(songBy); font: lcdFont; fontSize: 18; color: faint; maxLines: 1; align: center }
+      Text { text: songBy; font: lcdFont; fontSize: 20; color: faint; maxLines: 1; align: center }
       Spacer { weight: 1 }
       Canvas {
         fill: width
@@ -1002,29 +1547,558 @@ face "t9" {
       Row {
         fill: width
         gap: 8
-        Text { text: fmtTime(num(m.position, 0), num(m.duration, 0) >= 3600 ? "H:mm:ss" : "m:ss", "UTC"); font: lcdFont; fontSize: 20; color: ink; maxLines: 1; weight: 1 }
-        Text { text: num(m.duration, 0) > 0 ? fmtTime(m.duration, m.duration >= 3600 ? "H:mm:ss" : "m:ss", "UTC") : ""; font: lcdFont; fontSize: 20; color: faint; maxLines: 1 }
+        Text { text: fmtTime(num(m.position, 0), num(m.duration, 0) >= 3600 ? "H:mm:ss" : "m:ss", "UTC"); font: lcdFont; fontSize: 21; color: ink; maxLines: 1; weight: 1 }
+        Text { text: num(m.duration, 0) > 0 ? fmtTime(m.duration, m.duration >= 3600 ? "H:mm:ss" : "m:ss", "UTC") : ""; font: lcdFont; fontSize: 21; color: faint; maxLines: 1 }
       }
       Box { fill: width; height: 30; align: center; Banner { } }
+    }
+  }
+
+  // ---- the t9's own screens, drawn on the LCD ----
+  component Title(tt) {
+    Text { text: tt; font: lcdFont; fontSize: 22; color: ink; align: center; maxLines: 1 }
+  }
+
+  // A list row, inverted while it's the selection: a line with a value at its end, or that and a fainter line.
+  component Row1(a, v, sel, dim) {
+    Row {
+      fill: true
+      gap: 8
+      align: center
+      padding: [8, 0]
+      radius: 2
+      background: sel ? ink : alpha(ink, 0)
+      Text { text: a; font: lcdFont; fontSize: 24; color: sel ? lcdC : dim ? faint : ink; maxLines: 1; weight: 1 }
+      if v != "" {
+        Text { text: v; font: lcdFont; fontSize: 20; color: sel ? lcdC : faint; maxLines: 1 }
+      }
+    }
+  }
+  component Row2(a, b, v, sel) {
+    Column {
+      fill: true
+      gap: 0
+      padding: [8, 2]
+      radius: 2
+      background: sel ? ink : alpha(ink, 0)
+      Row {
+        fill: width
+        gap: 8
+        align: center
+        Text { text: a; font: lcdFont; fontSize: 23; color: sel ? lcdC : ink; maxLines: 1; weight: 1 }
+        if v != "" {
+          Text { text: v; font: lcdFont; fontSize: 18; color: sel ? lcdC : faint; maxLines: 1 }
+        }
+      }
+      Text { text: b; font: lcdFont; fontSize: 18; color: sel ? alpha(lcdC, 0.8) : faint; maxLines: 1 }
+    }
+  }
+
+  // The drawer (Menu): your iOS pages on the LCD, icons 4 across in LCD pixels with their names when there's room, the
+  // dock under a dotted line, the selected one inverted and named in full on top; pages swipe sideways and show as
+  // dots (the t9's own page as a square). Tap one to open it.
+  component DIcon(it, on, sz) {
+    Box {
+      size: sz
+      if it.kind == "app" {
+        if gpu {
+          Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { img: "mask:${it.key}", full: "icon:${it.key}", ink: on ? lcdC : ink, ghost: alpha(on ? lcdC : ink, 0.08), span: iconSpan }; code: iconCode }
+        } else {
+          Image { src: "mask:${it.key}"; tint: on ? lcdC : ink; fill: true }
+        }
+      } else if gpu {
+        Shader { fill: true; fallback: alpha(lcdC, 0); uniforms: { bits: it.kind == "folder" ? (t9Bits.find(b => b.k == "folder")).b : it.id == "player" ? musicBits : it.id == "snake" ? snakeBits : (t9Bits.find(b => b.k == it.id)).b, inkc: on ? lcdC : ink, ghost: alpha(on ? lcdC : ink, 0.08) }; code: pxCode }
+      } else {
+        Text { text: sub(it.name, 0, 1); font: lcdFont; fontSize: sz * 0.7; color: on ? lcdC : ink; align: center; fill: true }
+      }
+    }
+  }
+
+  component Drawer() {
+    Column {
+      fill: true
+      gap: 0
+      padding: [6, 0, 6, 0]
+      Title { tt: (mFold == null ? "" : mFold.name + " > ") + (mCur.name ?? "") }
       Spacer { height: 4 }
+      Box {
+        fill: width
+        weight: 1
+        onDrag: mDrag = mDrag + dx
+        onDragEnd: {
+          lit = LIT
+          if mDrag < -40 && mPg < mPages - 1 {
+            haptic("light")
+            mPage = mPg + 1
+            mSel = 0
+          } else if mDrag > 40 && mPg > 0 {
+            haptic("light")
+            mPage = mPg - 1
+            mSel = 0
+          }
+          mDrag = 0
+        }
+        Column {
+          fill: true
+          gap: 0
+          Grid {
+            columns: 4
+            gap: 0
+            fill: width
+            for it, i in mGrid key "${mPg}-${i}" {
+              Box {
+                fill: width
+                height: dCellH
+                align: center
+                ripple: false
+                onTap: {
+                  lit = LIT
+                  mSel = i
+                  if it.kind == "folder" {
+                    haptic("medium")
+                    mBack = {p: mPg, s: i}
+                    mFolder = it.id
+                    mPage = 0
+                    mSel = 0
+                  } else if it.kind == "t9" {
+                    haptic("medium")
+                    if it.id == "player" && song == null {
+                      flash = "Nothing playing"
+                      flashN = 2
+                    } else {
+                      view = it.id
+                      lSel = 0
+                      calDay = 0
+                      sPlay = false
+                    }
+                  } else {
+                    haptic("strong")
+                    if voice { sound(sConnect) }
+                    open(it.key)
+                  }
+                }
+                onLongPress: lit = LIT
+                Column {
+                  fill: width
+                  height: dCellH - 2
+                  gap: 0
+                  align: center
+                  justify: center
+                  padding: [2, 1]
+                  radius: 3
+                  background: i == mSelC ? ink : alpha(ink, 0)
+                  DIcon { it: it; on: i == mSelC; sz: dIcon }
+                  if dLabels {
+                    Text { text: it.name; font: lcdFont; fontSize: 13; color: i == mSelC ? lcdC : ink; align: center; maxLines: 1; fill: width }
+                  }
+                }
+              }
+            }
+          }
+          Spacer { weight: 1 }
+          // The dock, as iOS keeps it under every page.
+          if len(mDock) > 0 {
+            Canvas {
+              fill: width
+              height: 4
+              for d in range(floor(width / 6)) {
+                rect(d * 6 + 1, 1, 3, 2, fill: alpha(ink, 0.35))
+              }
+            }
+            Row {
+              fill: width
+              height: dDockH - 4
+              gap: 0
+              for it, j in mDock key "dock-${j}" {
+                Box {
+                  weight: 1
+                  fill: height
+                  align: center
+                  ripple: false
+                  onTap: {
+                    lit = LIT
+                    mSel = mN + j
+                    haptic("strong")
+                    if voice { sound(sConnect) }
+                    open(it.key)
+                  }
+                  onLongPress: lit = LIT
+                  Box {
+                    width: dDockH
+                    height: dDockH - 6
+                    radius: 3
+                    align: center
+                    background: mN + j == mSelC ? ink : alpha(ink, 0)
+                    DIcon { it: it; on: mN + j == mSelC; sz: dDockH - 10 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      // Which page, as dots; the t9's own page is a square.
+      Canvas {
+        fill: width
+        height: 10
+        for i in range(mPages) {
+          if mFold == null && i == 0 {
+            rect(width / 2 + (i - (mPages - 1) / 2) * 11 - (i == mPg ? 3 : 2), 5 - (i == mPg ? 3 : 2), i == mPg ? 6 : 4, i == mPg ? 6 : 4, fill: i == mPg ? ink : alpha(ink, 0.3))
+          } else {
+            circle(width / 2 + (i - (mPages - 1) / 2) * 11, 5, i == mPg ? 3 : 2, fill: i == mPg ? ink : alpha(ink, 0.3))
+          }
+        }
+      }
+    }
+  }
+
+  // The calendar: the picked day's month (today inverted, the picked day boxed, a dot under days with events), and
+  // that day's agenda. The nav key moves a day (left, right) or a week (up, down); tap a day to pick it.
+  component Cal() {
+    Column {
+      fill: true
+      gap: 0
+      padding: [8, 0, 8, 0]
+      Title { tt: fmtTime(selNoon, "MMMM yyyy") }
+      Row {
+        fill: width
+        height: 18
+        for w, i in ["S", "M", "T", "W", "T", "F", "S"] key i {
+          Text { text: w; font: lcdFont; fontSize: 17; color: faint; align: center; weight: 1 }
+        }
+      }
+      Grid {
+        columns: 7
+        gap: 0
+        fill: width
+        for c, i in calCells key c.k {
+          Box {
+            fill: width
+            height: calCellH
+            align: center
+            ripple: false
+            onTap: {
+              lit = LIT
+              if c.d >= 1 && c.d <= dim {
+                haptic("light")
+                calDay = c.t
+              }
+            }
+            onLongPress: lit = LIT
+            if c.d >= 1 && c.d <= dim {
+              Box {
+                width: 34
+                height: calCellH - 3
+                radius: 2
+                align: center
+                background: c.k == todayKey ? ink : alpha(ink, 0)
+                border: c.k == selKey ? 2 : 0
+                borderColor: c.k == todayKey ? lcdC : ink
+                Text { text: "${c.d}"; font: lcdFont; fontSize: 20; color: c.k == todayKey ? lcdC : ink; align: center }
+              }
+              if calDots[i] {
+                Canvas { fill: true; circle(width / 2, height - 3, 1.8, fill: c.k == todayKey ? lcdC : ink) }
+              }
+            }
+          }
+        }
+      }
+      Spacer { height: 4 }
+      if calNeedsOk {
+        Box {
+          fill: width
+          height: 30
+          ripple: false
+          onTap: { lit = LIT; calendar("request") }
+          onLongPress: lit = LIT
+          Row1 { a: "Allow the calendar"; v: ">"; sel: true; dim: false }
+        }
+      } else {
+        Text { text: fmtTime(selNoon, "EEEE d MMMM") + (len(dayEvents) == 0 ? " · nothing on" : ""); font: lcdFont; fontSize: 18; color: faint; maxLines: 1; padding: [8, 0] }
+        for e in dayEvents.take(3) key e.id {
+          Box {
+            fill: width
+            height: 27
+            ripple: false
+            onTap: { lit = LIT; haptic("medium"); calendar("open", e) }
+            onLongPress: lit = LIT
+            Row1 { a: e.title; v: e.allDay ? "all day" : fmtTime(e.start, "h:mm a"); sel: false; dim: false }
+          }
+        }
+        if len(dayEvents) > 3 {
+          Text { text: "+${len(dayEvents) - 3} more"; font: lcdFont; fontSize: 17; color: faint; padding: [8, 0] }
+        }
+      }
+    }
+  }
+
+  // Agents: Claude Code running (* busy, o idle), sessions to pick up again, something new. Open runs it in a terminal.
+  component Agents() {
+    Column {
+      fill: true
+      gap: 2
+      padding: [6, 0, 6, 0]
+      Title { tt: agTitle }
+      for r, i in lShown key "${r.k}${r.id}" {
+        Box {
+          fill: width
+          height: 44
+          ripple: false
+          onTap: {
+            lit = LIT
+            if i == lSelI {
+              haptic("strong")
+              if r.k == "new" {
+                if r.id == "claude" { terminal("cd ~ && claude", "claude") } else if r.id == "codex" { terminal("cd ~ && codex", "codex") } else { terminal("cd ~ && exec bash -l", "shell") }
+              } else if r.k == "codex" {
+                terminal("cd ${sh(r.dir)} && codex resume ${sh(r.id)}", "codex")
+              } else if r.k == "run" {
+                terminal("cd ${sh(r.dir)} && exec bash -l", "shell")
+              } else {
+                terminal("cd ${sh(r.dir)} && claude --resume ${sh(r.id)}", "claude")
+              }
+            } else {
+              haptic("light")
+              lSel = lFrom + i
+            }
+          }
+          onLongPress: lit = LIT
+          Row2 { a: (r.k == "run" ? (r.hot ? "* " : "o ") : "") + r.name; b: (r.k == "codex" ? "Codex · " : r.k == "new" ? "" : "Claude Code · ") + r.place; v: r.note; sel: i == lSelI }
+        }
+      }
+    }
+  }
+
+  // Limits: each service's heading (the selected one inverted; Usage opens its page), then each window as blocks.
+  component Limits() {
+    Column {
+      fill: true
+      gap: 2
+      padding: [8, 0, 8, 0]
+      Title { tt: "Limits" }
+      for s, si in [{nm: "Claude" + (cuPlan == null ? "" : " · " + cuPlan), e: cuErr ?? (cl.at == null ? "" : fmtAgo(min(cl.at, now), now) + " ago"), rows: limCl}, {nm: "Codex" + (gxPlan == null ? "" : " · " + gxPlan), e: gxErr ?? (gu.at == null ? "" : fmtAgo(min(gu.at, now), now) + " ago"), rows: limGx}] key si {
+        Column {
+          fill: width
+          gap: 0
+          Box {
+            fill: width
+            height: 30
+            ripple: false
+            onTap: {
+              lit = LIT
+              if lSel == si {
+                haptic("strong")
+                url(si == 0 ? "https://claude.ai/settings/usage" : "https://chatgpt.com/codex/settings/usage")
+              } else {
+                haptic("light")
+                lSel = si
+              }
+            }
+            onLongPress: lit = LIT
+            Row1 { a: s.nm; v: s.e; sel: lSel == si; dim: false }
+          }
+          for w, wi in s.rows key wi {
+            Column {
+              fill: width
+              gap: 1
+              padding: [8, 2]
+              Row {
+                fill: width
+                Text { text: w.t; font: lcdFont; fontSize: 20; color: ink; weight: 1; maxLines: 1 }
+                Text { text: "${round(w.p)}%"; font: lcdFont; fontSize: 20; color: ink; maxLines: 1 }
+              }
+              Canvas {
+                fill: width
+                height: 9
+                for b in range(20) {
+                  rect(b * width / 20, 0, width / 20 - 2, height, fill: b < round(clamp(w.p, 0, 100) / 5) ? ink : alpha(ink, 0.15))
+                }
+              }
+              Text { text: w.v; font: lcdFont; fontSize: 16; color: faint; maxLines: 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Tasks: [ ] to do, [x] done; Done ticks the selected one, Add types a new one, holding one deletes it.
+  component Tasks() {
+    Column {
+      fill: true
+      gap: 2
+      padding: [6, 0, 6, 0]
+      Title { tt: len(tTodo) > 0 ? "Tasks · ${len(tTodo)} to do" : "Tasks" }
+      if lN == 0 {
+        Text { text: linux ? "Nothing to do" : "Linux is off"; font: lcdFont; fontSize: 22; color: faint; align: center; padding: [0, 16] }
+      }
+      for r, i in lShown key "${r.id}" {
+        Box {
+          fill: width
+          height: 32
+          ripple: false
+          onTap: {
+            lit = LIT
+            if i == lSelI {
+              haptic("medium")
+              tAct = {n: tAct.n + 1, op: r.clear == true ? "clear" : "toggle", id: "${r.id}"}
+            } else {
+              haptic("light")
+              lSel = lFrom + i
+            }
+          }
+          onLongPress: {
+            lit = LIT
+            if r.clear != true {
+              haptic("strong")
+              tAct = {n: tAct.n + 1, op: "delete", id: "${r.id}"}
+              flash = "Task deleted"
+              flashN = 2
+            }
+          }
+          Row1 { a: r.clear == true ? r.t : (r.done ? "[x] " : "[ ] ") + r.t; v: ""; sel: i == lSelI; dim: r.done == true }
+        }
+      }
+    }
+  }
+
+  // Inbox: every notification, newest first; Open opens it, Clear clears it, holding one snoozes it for an hour.
+  component Inbox() {
+    Column {
+      fill: true
+      gap: 2
+      padding: [6, 0, 6, 0]
+      Title { tt: lN == 0 ? "Inbox" : "Inbox · ${lN}" }
+      if lN == 0 {
+        Text { text: n.available ? "Nothing new" : "Allow notification access"; font: lcdFont; fontSize: 22; color: faint; align: center; padding: [0, 16] }
+      }
+      for r, i in lShown key r.key {
+        Box {
+          fill: width
+          height: 44
+          ripple: false
+          onTap: {
+            lit = LIT
+            if i == lSelI {
+              haptic("strong")
+              notification("open", r.key)
+            } else {
+              haptic("light")
+              lSel = lFrom + i
+            }
+          }
+          onLongPress: {
+            lit = LIT
+            haptic("medium")
+            notification("snooze", r.key, 3600)
+            flash = "Snoozed for an hour"
+            flashN = 2
+          }
+          Row2 { a: (r.app ?? "") + (r.title == null || r.title == "" ? "" : ": " + r.title); b: r.text ?? ""; v: r.time == null ? "" : fmtAgo(min(r.time, now), now); sel: i == lSelI }
+        }
+      }
+    }
+  }
+
+  // Vitals: the phone's battery, memory, storage, network and uptime.
+  component Vitals() {
+    Column {
+      fill: true
+      gap: 3
+      padding: [10, 0, 10, 0]
+      Title { tt: "Vitals" }
+      for r, i in vitRows key r.t {
+        Column {
+          fill: width
+          gap: 1
+          Row {
+            fill: width
+            gap: 8
+            align: center
+            Text { text: r.t; font: lcdFont; fontSize: 19; color: faint; maxLines: 1 }
+            Text { text: r.v; font: lcdFont; fontSize: 21; color: ink; maxLines: 1; weight: 1; align: end }
+          }
+          if r.p != null {
+            Canvas {
+              fill: width
+              height: 7
+              for b in range(25) {
+                rect(b * width / 25, 0, width / 25 - 2, height, fill: b < round(clamp(r.p, 0, 100) / 4) ? ink : alpha(ink, 0.15))
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Switches: the phone's switches and settings panels, and the launcher's own screens.
+  component Switches() {
+    Column {
+      fill: true
+      gap: 2
+      padding: [6, 0, 6, 0]
+      Title { tt: "Switches" }
+      for r, i in lShown key r.id {
+        Box {
+          fill: width
+          height: 32
+          ripple: false
+          onTap: {
+            lit = LIT
+            if i == lSelI {
+              haptic("medium")
+              if r.id == "torch" { torch(modes.torch == true ? 0 : 100) } else if r.id == "quiet" { dnd("toggle") } else if r.id == "files" { if linux { open("l:omarchy-files") } else { launcher("linux") } } else if r.id == "agentsL" { launcher("agents") } else if r.id == "style" { launcher("style") } else if r.id == "store" { launcher("store") } else if r.id == "lsettings" { launcher("settings") } else { settings(r.id) }
+            } else {
+              haptic("light")
+              lSel = lFrom + i
+            }
+          }
+          onLongPress: lit = LIT
+          Row1 { a: r.t; v: r.v; sel: i == lSelI; dim: false }
+        }
+      }
+    }
+  }
+
+  // Typing the old way: press a key once for its first letter, again within a second for the next; # changes case,
+  // 0 is a space, hold a key for its digit.
+  component Entry() {
+    Column {
+      fill: true
+      gap: 4
+      padding: [12, 2, 12, 4]
+      Title { tt: txTitle }
+        Box {
+          fill: width
+          weight: 1
+          padding: [8, 6]
+          radius: 2
+          background: alpha(ink, 0.07)
+          Text { text: txt + "_"; font: lcdFont; fontSize: 26; color: ink; maxLines: 5 }
+        }
+        Row {
+          fill: width
+          align: center
+          Text { text: ["abc", "Abc", "ABC", "123"][txCase]; font: lcdFont; fontSize: 18; color: lcdC; background: ink; padding: [5, 0]; radius: 2; maxLines: 1 }
+          Spacer { weight: 1 }
+          Text { text: "# changes case"; font: lcdFont; fontSize: 17; color: faint; maxLines: 1 }
+        }
     }
   }
 
   component Lcd() {
     Box {
       fill: true
-      radius: 6 + 14 * corners
+      radius: 12
       clip: true
-      frost: tileFrost ?? 0
-      border: 1
-      borderColor: alpha(foreground, 0.10)
-      background: alpha(bl > 0 ? mix(background, accent, 0.13) : plateC, min(1, lcdA + (bl >= 1 ? 0.06 : bl > 0 ? 0.03 : 0)))
+      background: lcdC
       animate background: tween(450ms, "ease")
       // 1 · the light guide's slow wash: it warms up as the light comes on and is the afterglow as it goes.
       if gpu {
         Shader { fill: true; fallback: alpha(background, 0); opacity: bl; animate opacity: tween(1600ms, "out"); uniforms: { glow: glowC, bg: background }; code: washCode }
       } else {
-        Box { fill: true; opacity: bl; animate opacity: tween(1600ms, "out"); background: linear(0, 0, 0, 1, [alpha(glowC, 0), alpha(glowC, 0.03), alpha(glowC, 0.12)]) }
+        Box { fill: true; opacity: bl; animate opacity: tween(1600ms, "out"); background: linear(0, 0, 0, 1, [alpha(glowC, 0), alpha(glowC, 0.04), alpha(glowC, 0.16)]) }
       }
       // 2 · three LEDs under the bottom edge: they snap on and off.
       Box {
@@ -1034,40 +2108,79 @@ face "t9" {
         Shader { fill: true; fallback: alpha(background, 0); uniforms: { glow: glowC, bg: background }; code: guideCode }
       }
       // 3 · the pixel grid under the ink, and the bezel's recess shadow under its top edge.
-      Shader { fill: true; fallback: alpha(background, 0); uniforms: { gap: alpha(background, 0.22), fg: foreground, wdp: lcdW }; code: gridCode }
+      Shader { fill: true; fallback: alpha(background, 0); uniforms: { gap: alpha(background, night ? 0.22 : 0.1), fg: foreground, wdp: lcdW }; code: gridCode }
       if !gpu {
         Box { fill: width; height: 10; background: linear(0, 0, 0, 1, [alpha(background, 0.28), alpha(background, 0)]) }
       }
-      // 4 · the bezel's lit chamfer.
-      Box { fill: width; height: 1; background: linear(0, 0, 1, 0, [alpha(foreground, 0), alpha(foreground, 0.22), alpha(foreground, 0)]) }
-      // 5 · the ink, which sits back while the light is off.
+      // 4 · the ink, which sits back while the light is off on the night screen.
       Column {
         fill: true
         gap: 0
-        padding: [16, 12, 16, 10]
+        padding: [0, 9, 0, 6]
         opacity: inkLvl
         animate opacity: tween(220ms, "out")
         Status { }
-        if view == "player" { Player { weight: 1; fill: width } } else if typing { Typing { weight: 1; fill: width } } else { Idle { weight: 1; fill: width } }
+        if tx != "" { Entry { weight: 1; fill: width } } else if view == "player" { Player { weight: 1; fill: width } } else if view == "snake" { Snake { weight: 1; fill: width } } else if view == "goto" { GoTo { weight: 1; fill: width } } else if view == "menu" { Drawer { weight: 1; fill: width } } else if view == "cal" { Cal { weight: 1; fill: width } } else if view == "agents" { Agents { weight: 1; fill: width } } else if view == "limits" { Limits { weight: 1; fill: width } } else if view == "tasks" { Tasks { weight: 1; fill: width } } else if view == "inbox" { Inbox { weight: 1; fill: width } } else if view == "vitals" { Vitals { weight: 1; fill: width } } else if view == "switches" { Switches { weight: 1; fill: width } } else if typing { Typing { weight: 1; fill: width } } else { Idle { weight: 1; fill: width } }
         Soft { }
       }
     }
   }
 
-  // ---- the keys ----
+  // ---- the body: soft rounded keys raised off it ----
+  // A raised key, drawn by the pillow shader with room round it for its shadow; centred where it's placed.
+  component Pillow(on, w, h) {
+    Box {
+      width: w + 2 * PM
+      height: h + 2 * PM
+      align: center
+      if gpu {
+        Shader { fill: true; fallback: alpha(bodyC, 0); uniforms: { cap: [w, h], rad: h * 0.3, m: PM, down: on ? 1 : 0, body: bodyC }; code: pillowCode }
+      } else {
+        Box { width: w; height: h; radius: h * 0.3; background: on ? alpha(#000000, 0.3) : linear(0, 0, 0, 1, [alpha(#ffffff, 0.035), alpha(#ffffff, 0), alpha(#000000, 0.3)]) }
+      }
+    }
+  }
+
+  // A handset, as the old keys had it printed: a curve and its two ends, glowing.
+  component Handset(c, ring) {
+    Canvas {
+      width: 60
+      height: 40
+      for g in [[11, 0.035], [7.5, 0.05], [4.5, 0.08], [2, 0.12], [0, 1]] {
+        arc(30, 30, 18, -66, 132, stroke: alpha(c, g[1]), width: 4.4 + g[0], cap: round)
+        line(13.6, 22.7, 11.2, 29.2, stroke: alpha(c, g[1]), width: 6.4 + g[0], cap: round)
+        line(46.4, 22.7, 48.8, 29.2, stroke: alpha(c, g[1]), width: 6.4 + g[0], cap: round)
+        if ring { circle(30, 27.5, 4.6, stroke: alpha(c, g[1]), width: 2.2 + g[0] * 0.6) }
+      }
+    }
+  }
+
+  // A soft key's dash, glowing: a soft light round it, fading out, and the dash.
+  component Dash() {
+    Box {
+      width: 64
+      height: 18
+      align: center
+      Box { width: 64; height: 18; opacity: haloLvl; background: radial(0.5, 0.5, 0.5, [alpha(haloC, 0.18), alpha(haloC, 0.06), alpha(haloC, 0)]) }
+      Box { width: 46; height: 4; radius: 2; background: printC }
+    }
+  }
+
   component Nav() {
     Row {
       fill: width
       height: navH
-      gap: 12
+      gap: 0
       align: center
+      padding: [kpPad, 0]
       Column {
-        weight: 1
-        gap: 10
-        // Left soft key: the app drawer (Prev in the player; held, ten seconds back).
+        width: colP
+        fill: height
+        gap: 0
+        // Left soft key: Go to (Prev in the player; held, ten seconds back).
         Box {
           fill: width
-          height: softH
+          height: softBH
           align: center
           ripple: false
           onPress: down = "softL"
@@ -1075,39 +2188,54 @@ face "t9" {
           onTap: {
             lit = LIT
             haptic("medium")
-            if view == "player" { media("previous") } else { launcher("drawer") }
+            if tx != "" {
+              txGo = txGo + 1
+            } else if view == "player" {
+              media("previous")
+            } else if view == "cal" {
+              calDay = 0
+            } else if view == "agents" {
+              terminal("cd ~ && claude", "claude")
+            } else if view == "tasks" {
+              tx = "task"
+              txt = ""
+              txKey = ""
+              txCase = 1
+            } else if view == "inbox" {
+              if lCur != null && lCur.clearable == true { notification("dismiss", lCur.key) }
+            } else if view == "" && !typing {
+              view = "goto"
+              gsel = 0
+            }
           }
           onLongPress: {
             lit = LIT
-            if view == "player" {
+            if tx != "" {
+              txGo = txGo + 1
+            } else if view == "inbox" {
+              notification("clear")
+              flash = "Cleared"
+              flashN = 2
+            } else if view == "player" {
               if m.canSeek == true {
                 media("seek", max(0, num(m.position, 0) - 10))
               } else {
-                flash = "can't seek"
+                flash = "Can't seek"
                 flashN = 2
               }
-            } else {
-              launcher("drawer")
+            } else if view == "" && !typing {
+              view = "goto"
+              gsel = 0
             }
           }
-          Box {
-            fill: width
-            height: 28 + kd
-            Cap { pressed: down == "softL"; ht: 28 + kd; tint: background; glass: glassA; rad: 14 * corners; rim: edgeC }
-            Box {
-              fill: width
-              height: 28
-              align: center
-              offset: [0, down == "softL" ? kd : 0]
-              animate offset: spring(0.62, 1600)
-              Box { width: 40; height: 5; radius: 2.5; background: down == "softL" || bl > 0 ? glowC : alpha(foreground, 0.9); border: 1; borderColor: alpha(background, 0.35); animate background: tween(200ms, "out") }
-            }
-          }
+          Pillow { on: down == "softL"; w: keyW; h: softKH }
+          Box { width: 64; height: 18; offset: [0, down == "softL" ? 1.5 : 0]; animate offset: spring(0.62, 1600); Dash { } }
         }
         // Call: what's picked, or the phone app; the player's own screen in the player.
         Box {
           fill: width
-          height: callH
+          weight: 1
+          align: center
           ripple: false
           onPress: down = "call"
           onRelease: { if down == "call" { down = "" } }
@@ -1116,6 +2244,14 @@ face "t9" {
             if view == "player" {
               haptic("strong")
               media("open")
+            } else if view == "snake" {
+              haptic("light")
+            } else if view == "goto" {
+              haptic("strong")
+              if voice { sound(sConnect) }
+              view = ""
+              goN = goN + 1
+              go = {n: goN, c: gCur, t: sec}
             } else if info {
               haptic("medium")
               q = ""
@@ -1146,6 +2282,13 @@ face "t9" {
             lit = LIT
             if view == "player" {
               media("open")
+            } else if view == "goto" {
+              if voice { sound(sConnect) }
+              view = ""
+              goN = goN + 1
+              go = {n: goN, c: gCur, t: sec}
+            } else if view == "snake" {
+              lit = LIT
             } else if info {
               q = ""
               sel = 0
@@ -1160,39 +2303,165 @@ face "t9" {
                 if voice { sound(sNope) }
               }
             } else if sec >= num(go.t, 0) && sec - num(go.t, 0) < 2 {
-              // A second press right after opening something: the new app is on its way, so nothing more.
               lit = LIT
             } else {
               if voice { sound(sConnect) }
               if phoneApp != null { androidApp(phoneApp.key) } else { url("tel:") }
             }
           }
-          Cap { pressed: down == "call"; ht: callH; tint: mix(background, green, callMix); glass: glassA; rad: 30 * corners; rim: alpha(green, 0.35) }
+          Pillow { on: down == "call"; w: keyW; h: keyH }
+          // It rocks like a ringing phone for two minutes after a missed call.
           Box {
-            fill: width
-            height: callH - kd
-            align: center
-            offset: [0, down == "call" ? kd : 0]
+            width: 60
+            height: 40
+            offset: [0, down == "call" ? 1.5 : 0]
             animate offset: spring(0.62, 1600)
-            // It rocks like a ringing phone for two minutes after a missed call.
-            Canvas { width: 40; height: 16; rotation: wob ? 14 : 0; animate rotation: spring(0.15, 700); sprite(get(sprites, "handset"), 1, 1, 3, fill: alpha(background, 0.55)); sprite(get(sprites, "handset"), 0, 0, 3, fill: green) }
+            rotation: wob ? 14 : 0
+            animate rotation: spring(0.15, 700)
+            opacity: 0.6 + 0.4 * keyLvl
+            Handset { c: #74dc23; ring: false }
           }
         }
       }
-      // The navigation pad: up, select, down. Its ring is the one indicator: the LED and the song's progress.
+      // The navigation key: up, select, down, in one rounded square.
       Box {
-        width: navH
+        width: colP
         height: navH
+        align: center
         ripple: false
-        scale: navZ != "" ? 0.97 : 1
-        animate scale: spring(0.6, 1400)
-        onPress: navZ = y < navH * 0.34 ? "up" : y > navH * 0.66 ? "down" : "mid"
+        onPress: navZ = abs(x - colP / 2) > abs(y - navH / 2) ? (abs(x - colP / 2) < ringS * 0.22 ? "mid" : x < colP / 2 ? "left" : "right") : (abs(y - navH / 2) < ringS * 0.22 ? "mid" : y < navH / 2 ? "up" : "down")
         onRelease: navZ = ""
         onLongPress: lit = LIT
         onTap: {
           lit = LIT
-          let zone = y < navH * 0.34 ? "up" : y > navH * 0.66 ? "down" : "mid"
-          if zone == "mid" {
+          let zone = abs(x - colP / 2) > abs(y - navH / 2) ? (abs(x - colP / 2) < ringS * 0.22 ? "mid" : x < colP / 2 ? "left" : "right") : (abs(y - navH / 2) < ringS * 0.22 ? "mid" : y < navH / 2 ? "up" : "down")
+          if tx != "" {
+            if zone == "mid" {
+              haptic("medium")
+              txGo = txGo + 1
+            } else {
+              haptic("light")
+            }
+          } else if view == "menu" {
+            if zone == "mid" {
+              if mCur != null {
+                if mCur.kind == "folder" {
+                  haptic("medium")
+                  mBack = {p: mPg, s: mSelC}
+                  mFolder = mCur.id
+                  mPage = 0
+                  mSel = 0
+                } else if mCur.kind == "t9" {
+                  haptic("medium")
+                  if mCur.id == "player" && song == null {
+                    flash = "Nothing playing"
+                    flashN = 2
+                  } else {
+                    view = mCur.id
+                    lSel = 0
+                    calDay = 0
+                    sPlay = false
+                  }
+                } else {
+                  haptic("strong")
+                  if voice { sound(sConnect) }
+                  open(mCur.key)
+                }
+              }
+            } else {
+              haptic("light")
+              if zone == "left" {
+                if mSelC > 0 { mSel = mSelC - 1 } else if mPg > 0 { mPage = mPg - 1; mSel = 999 }
+              } else if zone == "right" {
+                if mSelC < len(mShown) - 1 { mSel = mSelC + 1 } else if mPg < mPages - 1 { mPage = mPg + 1; mSel = 0 }
+              } else if zone == "up" {
+                if mSelC >= mN && mN > 0 {
+                  let lr = floor((mN - 1) / 4) * 4
+                  mSel = lr + (mSelC - mN) <= mN - 1 ? lr + (mSelC - mN) : max(0, lr + (mSelC - mN) - 4)
+                } else if mSelC >= 4 {
+                  mSel = mSelC - 4
+                }
+              } else {
+                if mSelC + 4 < mN {
+                  mSel = mSelC + 4
+                } else if mSelC < mN && len(mDock) > 0 {
+                  mSel = mN + min(mSelC % 4, len(mDock) - 1)
+                }
+              }
+            }
+          } else if view == "cal" {
+            if zone == "mid" {
+              haptic("strong")
+              if calNeedsOk { calendar("request") } else if len(dayEvents) > 0 { calendar("open", dayEvents[0]) } else { calendar("open") }
+            } else {
+              haptic("light")
+              calDay = selNoon + (zone == "left" ? -86400 : zone == "right" ? 86400 : zone == "up" ? -604800 : 604800)
+            }
+          } else if view == "limits" {
+            if zone == "mid" {
+              haptic("strong")
+              url(lSel == 1 ? "https://chatgpt.com/codex/settings/usage" : "https://claude.ai/settings/usage")
+            } else {
+              haptic("light")
+              lSel = zone == "up" || zone == "left" ? 0 : 1
+            }
+          } else if contains(listViews, view) {
+            if zone == "mid" {
+              if lCur != null {
+                if view == "agents" {
+                  haptic("strong")
+                  if lCur.k == "new" {
+                    if lCur.id == "claude" { terminal("cd ~ && claude", "claude") } else if lCur.id == "codex" { terminal("cd ~ && codex", "codex") } else { terminal("cd ~ && exec bash -l", "shell") }
+                  } else if lCur.k == "codex" {
+                    terminal("cd ${sh(lCur.dir)} && codex resume ${sh(lCur.id)}", "codex")
+                  } else if lCur.k == "run" {
+                    terminal("cd ${sh(lCur.dir)} && exec bash -l", "shell")
+                  } else {
+                    terminal("cd ${sh(lCur.dir)} && claude --resume ${sh(lCur.id)}", "claude")
+                  }
+                } else if view == "tasks" {
+                  haptic("medium")
+                  tAct = {n: tAct.n + 1, op: lCur.clear == true ? "clear" : "toggle", id: "${lCur.id}"}
+                } else if view == "inbox" {
+                  haptic("strong")
+                  notification("open", lCur.key)
+                } else if view == "switches" {
+                  haptic("medium")
+                  if lCur.id == "torch" { torch(modes.torch == true ? 0 : 100) } else if lCur.id == "quiet" { dnd("toggle") } else if lCur.id == "files" { if linux { open("l:omarchy-files") } else { launcher("linux") } } else if lCur.id == "agentsL" { launcher("agents") } else if lCur.id == "style" { launcher("style") } else if lCur.id == "store" { launcher("store") } else if lCur.id == "lsettings" { launcher("settings") } else { settings(lCur.id) }
+                }
+              }
+            } else if zone == "up" {
+              haptic(lSelC <= 0 ? "medium" : "light")
+              lSel = max(0, lSelC - 1)
+            } else if zone == "down" {
+              haptic(lSelC >= lN - 1 ? "medium" : "light")
+              lSel = min(max(0, lN - 1), lSelC + 1)
+            } else {
+              haptic("medium")
+            }
+          } else if view == "snake" {
+            if zone == "mid" {
+              haptic("medium")
+              if sState == "play" { sPlay = false } else if sState == "pause" { sPlay = true } else { sNew = sNew + 1 }
+            } else if sState == "play" {
+              haptic("light")
+              sNext = zone == "up" ? [0, -1] : zone == "down" ? [0, 1] : zone == "left" ? [-1, 0] : [1, 0]
+            }
+          } else if view == "goto" {
+            if zone == "mid" {
+              haptic("strong")
+              if voice { sound(sConnect) }
+              view = ""
+              goN = goN + 1
+              go = {n: goN, c: gCur, t: sec}
+            } else if zone == "up" {
+              haptic(gAt <= 0 ? "medium" : "light")
+              gsel = max(0, gAt - 1)
+            } else {
+              haptic(gAt >= len(gotoItems) - 1 ? "medium" : "light")
+              gsel = min(len(gotoItems) - 1, gAt + 1)
+            }
+          } else if zone == "mid" {
             if view == "player" {
               haptic("medium")
               media("toggle")
@@ -1213,11 +2482,14 @@ face "t9" {
                 if voice { sound(sNope) }
               }
             } else if sec >= num(go.t, 0) && sec - num(go.t, 0) < 2 {
-              // A second press right after opening something doesn't switch Do Not Disturb by accident.
+              // A second press right after opening something doesn't open the menu over it.
               haptic("medium")
             } else {
               haptic("medium")
-              dnd("toggle")
+              view = "menu"
+              mPage = homePg
+              mSel = 0
+              mFolder = ""
             }
           } else if info {
             haptic("medium")
@@ -1232,96 +2504,104 @@ face "t9" {
           } else {
             let lv = num(vol.level, 50)
             haptic((zone == "up" && lv >= 100) || (zone == "down" && lv <= 0) ? "medium" : "light")
-            if zone == "up" { volume("up") } else { volume("down") }
+            if zone == "up" { volume("up") } else if zone == "down" { volume("down") }
             volN = 2
           }
         }
-        Box { fill: true; radius: navH / 2; frost: tileFrost ?? 0; background: alpha(background, glassA); border: 1; borderColor: alpha(foreground, 0.08) }
+        // A rounded square ringed in white on the body, as the video's: not a raised key, but its ring glows.
         Canvas {
-          fill: true
-          let r = width / 2
-          let rr = r - 1.5
-          circle(r, r, rr, stroke: alpha(foreground, 0.16), width: 1.5)
-          if m.playing == true && num(m.duration, 0) > 0 {
-            arc(r, r, rr, 0, 360 * clamp(num(m.position, 0) / m.duration, 0, 1), stroke: alpha(foreground, 0.4), width: 1.5, cap: round)
-          }
-          if ledOn {
-            arc(r, r, rr - 2.5, -9, 18, stroke: alpha(ledC, 0.28), width: 5, cap: round)
-            arc(r, r, rr - 2.5, -6, 12, stroke: ledC, width: 3, cap: round)
-          }
-          circle(r, r, r * 0.3, fill: navZ == "mid" ? alpha(glowC, 0.7) : bl > 0 ? alpha(glowC, 0.45) : alpha(foreground, 0.22))
-          circle(r, r, r * 0.3, stroke: alpha(background, 0.3), width: 1)
-          // The arrows on a dark keyline, so they read on bright glass too.
-          let up = [[r - 7, r * 0.42], [r + 7, r * 0.42], [r, r * 0.42 - 8]]
-          let dn = [[r - 7, r * 1.58], [r + 7, r * 1.58], [r, r * 1.58 + 8]]
-          path(up, closed: true, stroke: alpha(background, 0.45), width: 3)
-          path(dn, closed: true, stroke: alpha(background, 0.45), width: 3)
-          path(up, closed: true, fill: navZ == "up" ? glowC : foreground)
-          path(dn, closed: true, fill: navZ == "down" ? glowC : foreground)
+          width: ringS + 16
+          height: ringS + 16
+          scale: navZ != "" ? 0.97 : 1
+          animate scale: spring(0.6, 1400)
+          let r = ringS * 0.25
+          if navZ != "" { rect(10, 10, ringS - 4, ringS - 4, radius: r - 2, fill: alpha(#ffffff, 0.06)) }
+          rect(8, 8, ringS, ringS, radius: r, stroke: alpha(haloC, 0.05 * haloLvl), width: 12)
+          rect(8, 8, ringS, ringS, radius: r, stroke: alpha(haloC, 0.12 * haloLvl), width: 7.5)
+          rect(8, 8, ringS, ringS, radius: r, stroke: printC, width: 4)
         }
       }
       Column {
-        weight: 1
-        gap: 10
-        // Right soft key: back a letter while typing (held, clear), the torch when idle (held, dimmed); Next in the player.
+        width: colP
+        fill: height
+        gap: 0
+        // Right soft key: Setting when idle (held, the torch), Delete while typing (held, clear), Exit, Next.
         Box {
           fill: width
-          height: softH
+          height: softBH
           align: center
           ripple: false
           onPress: down = "softR"
           onRelease: { if down == "softR" { down = "" } }
           onTap: {
             lit = LIT
-            if view == "player" {
+            if tx != "" {
+              haptic("light")
+              if txt == "" { tx = "" } else { txt = sub(txt, 0, len(txt) - 1); txKey = "" }
+            } else if view == "menu" {
+              haptic("medium")
+              if mFolder != "" {
+                mFolder = ""
+                mPage = mBack.p
+                mSel = mBack.s
+              } else {
+                view = ""
+              }
+            } else if inHub {
+              haptic("medium")
+              view = "menu"
+            } else if view == "player" {
               haptic("medium")
               media("next")
+            } else if view == "snake" || view == "goto" {
+              haptic("medium")
+              view = ""
+              sPlay = false
             } else if typing {
               haptic("light")
               q = sub(q, 0, len(q) - 1)
               sel = 0
             } else {
               haptic("medium")
-              // At full, by name: a toggle would keep the last level, the dim one after a hold.
-              torch(modes.torch == true ? 0 : 100)
+              if setApp != null { androidApp(setApp.key) } else { launcher("settings") }
             }
           }
           onLongPress: {
             lit = LIT
-            if view == "player" {
+            if tx != "" {
+              txt = ""
+              txKey = ""
+            } else if inHub {
+              view = ""
+              mFolder = ""
+            } else if view == "player" {
               if m.canSeek == true {
                 media("seek", num(m.position, 0) + 10)
               } else {
-                flash = "can't seek"
+                flash = "Can't seek"
                 flashN = 2
               }
+            } else if view == "snake" || view == "goto" {
+              view = ""
+              sPlay = false
             } else if typing {
               q = ""
               sel = 0
             } else {
-              torch(25)
-              flash = modes.torchLevel == null ? "light" : "light 25%"
-              flashN = 3
+              // At full, by name: a toggle would keep the last level.
+              torch(modes.torch == true ? 0 : 100)
+              flash = modes.torch == true ? "Light off" : "Light on"
+              flashN = 2
             }
           }
-          Box {
-            fill: width
-            height: 28 + kd
-            Cap { pressed: down == "softR"; ht: 28 + kd; tint: background; glass: glassA; rad: 14 * corners; rim: edgeC }
-            Box {
-              fill: width
-              height: 28
-              align: center
-              offset: [0, down == "softR" ? kd : 0]
-              animate offset: spring(0.62, 1600)
-              Box { width: 40; height: 5; radius: 2.5; background: down == "softR" || bl > 0 ? glowC : alpha(foreground, 0.9); border: 1; borderColor: alpha(background, 0.35); animate background: tween(200ms, "out") }
-            }
-          }
+          Pillow { on: down == "softR"; w: keyW; h: softKH }
+          Box { width: 64; height: 18; offset: [0, down == "softR" ? 1.5 : 0]; animate offset: spring(0.62, 1600); Dash { } }
         }
         // End: hang up, which clears, goes back to the idle screen and puts the light out.
         Box {
           fill: width
-          height: callH
+          weight: 1
+          align: center
           ripple: false
           onPress: down = "end"
           onRelease: { if down == "end" { down = "" } }
@@ -1335,6 +2615,9 @@ face "t9" {
             q = ""
             sel = 0
             view = ""
+            tx = ""
+            mFolder = ""
+            sPlay = false
             lit = 0
             flashN = 0
             volN = 0
@@ -1347,6 +2630,9 @@ face "t9" {
             q = ""
             sel = 0
             view = ""
+            tx = ""
+            mFolder = ""
+            sPlay = false
             lit = 0
             flashN = 0
             volN = 0
@@ -1354,15 +2640,8 @@ face "t9" {
             revealK = ""
             seenAt = sec
           }
-          Cap { pressed: down == "end"; ht: callH; tint: mix(background, red, endMix); glass: glassA; rad: 30 * corners; rim: alpha(red, 0.35) }
-          Box {
-            fill: width
-            height: callH - kd
-            align: center
-            offset: [0, down == "end" ? kd : 0]
-            animate offset: spring(0.62, 1600)
-            Canvas { width: 40; height: 16; rotate(180, 20, 8) { sprite(get(sprites, "handset"), 0, 0, 3, fill: alpha(background, 0.55)); sprite(get(sprites, "handset"), 1, 1, 3, fill: red) } }
-          }
+          Pillow { on: down == "end"; w: keyW; h: keyH }
+          Box { width: 60; height: 40; offset: [0, down == "end" ? 1.5 : 0]; animate offset: spring(0.62, 1600); opacity: 0.6 + 0.4 * keyLvl; Handset { c: #d4274d; ring: true } }
         }
       }
     }
@@ -1371,33 +2650,74 @@ face "t9" {
   component Keypad() {
     Grid {
       columns: 3
-      gap: 6
+      gap: 0
       fill: width
+      padding: [kpPad, 0]
       for k, i in pad key k.d {
         Box {
           fill: width
           height: kh
+          align: center
           ripple: false
           onPress: down = k.d
-          onRelease: { if down == k.d { down = "" } }
+          // Only state here: the launcher runs onRelease without its node's names (k would fail and the key would
+          // stay down).
+          onRelease: down = ""
           onTap: {
             haptic("light")
             lit = LIT
-            if voice { sound((q + k.d) == "*#06#" ? sSit : k.t) }
-            view = ""
-            if len(q) < 24 { q = q + k.d }
-            sel = 0
+            if tx != "" {
+              if voice { sound(k.t) }
+              if k.d == "#" {
+                txCase = (txCase + 1) % 4
+                txKey = ""
+              } else {
+                let mts = txCase == 3 ? (k.d == "*" ? get(mtMap, "*", "") : k.d) : get(mtMap, k.d, "")
+                let again = k.d == txKey && sec - txAt <= 1 && txCase != 3 && len(txt) > 0
+                let lastC = lower(sub(txt, len(txt) - 1, len(txt)))
+                let at0 = again ? ((range(len(mts)).find(j => sub(mts, j, j + 1) == lastC) ?? -1) + 1) % len(mts) : 0
+                let ch1 = sub(mts, at0, at0 + 1)
+                let base = again ? sub(txt, 0, len(txt) - 1) : txt
+                let capNow = txCase == 2 || (txCase == 1 && (trim(base) == "" || endsWith(trim(base), ".") || endsWith(trim(base), "?") || endsWith(trim(base), "!")))
+                if len(base) < 60 { txt = base + (capNow ? upper(ch1) : ch1) }
+                txKey = k.d
+                txAt = sec
+              }
+            } else if view == "snake" {
+              // The old way to play: 2 up, 8 down, 4 left, 6 right, 5 to pause and go on.
+              if k.d == "5" {
+                if sState == "play" { sPlay = false } else if sState == "pause" { sPlay = true } else { sNew = sNew + 1 }
+              } else if contains(["2", "4", "6", "8"], k.d) {
+                if sState == "play" {
+                  sNext = k.d == "2" ? [0, -1] : k.d == "8" ? [0, 1] : k.d == "4" ? [-1, 0] : [1, 0]
+                } else if sState != "pause" {
+                  sNew = sNew + 1
+                }
+              }
+            } else {
+              if voice { sound((q + k.d) == "*#06#" ? sSit : k.t) }
+              view = ""
+              if len(q) < 24 { q = q + k.d }
+              sel = 0
+            }
           }
           onLongPress: {
             lit = LIT
-            if k.d == "0" {
+            if tx != "" {
+              if len(txt) < 60 && contains("0123456789", k.d) {
+                txt = txt + k.d
+                txKey = ""
+              }
+            } else if view == "snake" {
+              lit = LIT
+            } else if k.d == "0" {
               view = ""
               q = q + "+"
               sel = 0
             } else if k.d == "#" {
               let turnOn = !tones
               tones = turnOn
-              flash = !turnOn ? "key tones off" : soundOk ? "key tones on" : "key tones on · silent now"
+              flash = !turnOn ? "Key tones off" : soundOk ? "Key tones on" : "Key tones on, silent now"
               flashN = 3
               if turnOn && soundOk { sound(kHash) }
             } else if k.d == "*" {
@@ -1414,10 +2734,10 @@ face "t9" {
               go = {n: goN, c: get(speed, k.d, null), t: sec}
             } else if typing && cur != null {
               let had = get(speed, k.d, null)
-              if had != null && had.name != cur.name && !(armK == k.d && flashN > 0 && startsWith(flash, "replace ")) {
+              if had != null && had.name != cur.name && !(armK == k.d && flashN > 0 && startsWith(flash, "Replace ")) {
                 // Something else is on this key: ask before replacing it.
                 armK = k.d
-                flash = "replace ${had.name}? hold ${k.d} again"
+                flash = "Replace ${had.name}? Hold ${k.d} again"
                 flashN = 3
               } else {
                 armK = ""
@@ -1433,35 +2753,88 @@ face "t9" {
               goN = goN + 1
               go = {n: goN, c: get(speed, k.d, null), t: sec}
             } else {
-              flash = "spell a name, hold ${k.d}"
+              flash = "Spell a name, hold ${k.d}"
               flashN = 3
             }
           }
-          Cap { pressed: down == k.d; ht: kh; tint: bl > 0 ? mix(background, glowC, 0.08) : background; glass: glassA; rad: kr; rim: edgeC }
-          Column {
-            fill: width
-            height: kh - kd
-            offset: [0, down == k.d ? kd : 0]
+          Pillow { on: down == k.d; w: keyW; h: keyH }
+          // The legend, the digit and its letters small on one baseline (letters first on the right column): a ring
+          // of faint copies for its glow, which brightens with the backlight row by row from the top, then the print.
+          Canvas {
+            width: keyW
+            height: keyH
+            offset: [0, down == k.d ? 1.5 : 0]
             animate offset: spring(0.62, 1600)
-            gap: 0
-            align: center
-            justify: center
-            // The legends light row by row from the top as the backlight comes on.
-            Text { text: k.d; font: inter; fontSize: digitFs; fontWeight: 300; align: center; offset: [0, k.d == "*" ? 0.16 * digitFs : 0]; color: bl > 0 ? mix(foreground, glowC, 0.45) : foreground; animate color: tween(0.15 + floor(i / 3) * 0.15, "in") }
-            Text { text: upper(k.l); font: inter; fontSize: 9; fontWeight: 500; letterSpacing: 2.5; align: center; color: bl > 0 ? alpha(glowC, 0.9) : alpha(foreground, 0.72); animate color: tween(0.15 + floor(i / 3) * 0.15, "in") }
+            opacity: haloLvl
+            animate opacity: tween(0.15 + floor(i / 3) * 0.15, "in")
+            let lt = {text: k.l, fontSize: digitFs * 0.42, fontWeight: 700, letterSpacing: 0.2}
+            let sp = k.l == "" ? [k.d] : i % 3 == 2 ? [lt, k.d] : [k.d, lt]
+            let ic = k.ic ?? ""
+            let dw = ic == "" ? 0 : digitFs * (k.d == "*" ? 0.5 : 0.62)
+            let gw = ic == "" ? 0 : dw + digitFs * (k.d == "*" ? 0.5 : 0.2) + digitFs * 0.56
+            let tx = ic == "" ? width / 2 : width / 2 - gw / 2 + dw / 2
+            let cy = height / 2 + (k.d == "*" ? digitFs * 0.16 : 0)
+            for o in ring2 { text(sp, tx + o[0], cy + o[1], size: digitFs, font: inter, fontWeight: 700, color: alpha(haloC, 0.035), align: "center") }
+            for o in ring1 { text(sp, tx + o[0], cy + o[1], size: digitFs, font: inter, fontWeight: 700, color: alpha(haloC, 0.08), align: "center") }
+          }
+          Canvas {
+            width: keyW
+            height: keyH
+            offset: [0, down == k.d ? 1.5 : 0]
+            animate offset: spring(0.62, 1600)
+            let lt = {text: k.l, fontSize: digitFs * 0.42, fontWeight: 700, letterSpacing: 0.2}
+            let sp = k.l == "" ? [k.d] : i % 3 == 2 ? [lt, k.d] : [k.d, lt]
+            let ic = k.ic ?? ""
+            let dw = ic == "" ? 0 : digitFs * (k.d == "*" ? 0.5 : 0.62)
+            let gw = ic == "" ? 0 : dw + digitFs * (k.d == "*" ? 0.5 : 0.2) + digitFs * 0.56
+            let tx = ic == "" ? width / 2 : width / 2 - gw / 2 + dw / 2
+            let s = digitFs / 15
+            // The lock and the microphone, drawn small after the star and the zero.
+            let ix = width / 2 + gw / 2 - digitFs * 0.28
+            let iy = height / 2
+            text(sp, tx, height / 2 + (k.d == "*" ? digitFs * 0.16 : 0), size: digitFs, font: inter, fontWeight: 700, color: printC, align: "center")
+            if ic == "lock" {
+              arc(ix, iy - 1.6 * s, 2.7 * s, -90, 180, stroke: printC, width: 1.6 * s)
+              line(ix - 2.7 * s, iy - 1.6 * s, ix - 2.7 * s, iy, stroke: printC, width: 1.6 * s)
+              line(ix + 2.7 * s, iy - 1.6 * s, ix + 2.7 * s, iy, stroke: printC, width: 1.6 * s)
+              rect(ix - 4 * s, iy - 0.4 * s, 8 * s, 7 * s, radius: 1.4 * s, fill: printC)
+            } else if ic == "mic" {
+              rect(ix - 2.2 * s, iy - 6 * s, 4.4 * s, 8 * s, radius: 2.2 * s, fill: printC)
+              arc(ix, iy - 0.5 * s, 3.8 * s, 90, 180, stroke: printC, width: 1.4 * s)
+              line(ix, iy + 3.3 * s, ix, iy + 5.6 * s, stroke: printC, width: 1.4 * s)
+              line(ix - 2.4 * s, iy + 5.8 * s, ix + 2.4 * s, iy + 5.8 * s, stroke: printC, width: 1.4 * s, cap: round)
+            }
           }
           // A light where a speed dial waits.
           if get(speed, k.d, null) != null {
             Canvas {
-              fill: width
-              height: kh - kd
-              offset: [0, down == k.d ? kd : 0]
+              width: keyW
+              height: keyH
+              offset: [0, down == k.d ? 1.5 : 0]
               animate offset: spring(0.62, 1600)
-              if bl > 0 { circle(width - 12, 12, 5.5, fill: alpha(glowC, 0.22)) }
-              circle(width - 12, 12, 2.5, fill: bl > 0 ? glowC : alpha(accent, 0.55))
+              if bl > 0 { circle(width - 11, height / 2, 4.5, fill: alpha(keyGlow, 0.22)) }
+              circle(width - 11, height / 2, 2.2, fill: bl > 0 ? keyGlow : alpha(keyGlow, 0.55))
             }
           }
         }
+      }
+    }
+  }
+
+  // The Omarchy icon, printed on the body above the LCD, glowing.
+  component Brand() {
+    Box {
+      width: 34
+      height: 34
+      align: center
+      Canvas {
+        width: 34
+        height: 34
+        let s = 22
+        let o0 = (34 - s) / 2
+        for o in ring2 { image(omarchyLogo, o0 + o[0], o0 + o[1], s, s, color: alpha(foreground, 0.05)) }
+        for o in ring1 { image(omarchyLogo, o0 + o[0], o0 + o[1], s, s, color: alpha(foreground, 0.12)) }
+        image(omarchyLogo, o0, o0, s, s, color: alpha(foreground, 0.95))
       }
     }
   }
@@ -1470,8 +2843,14 @@ face "t9" {
     Row {
       fill: true
       gap: 20
-      padding: [14 + screenLeft, screenTop + 10, 14 + screenRight, 10 + screenInset]
-      Lcd { weight: 1; fill: height }
+      padding: [14 + screenLeft, screenTop + 6, 14 + screenRight, 10 + screenInset]
+      Column {
+        weight: 1
+        fill: height
+        gap: 0
+        Box { fill: width; height: 40; align: center; Brand { } }
+        Lcd { weight: 1; fill: width }
+      }
       Column {
         width: min(W * 0.42, 380)
         fill: height
@@ -1482,16 +2861,23 @@ face "t9" {
       }
     }
   } else {
-    Column {
+    Box {
       fill: true
-      gap: 0
-      padding: [14 + screenLeft, screenTop + 10, 14 + screenRight, 0]
-      Lcd { weight: 1; fill: width }
-      Spacer { height: 14 }
-      Nav { }
-      Spacer { height: 12 }
-      Keypad { }
-      Spacer { height: screenInset + 10 }
+      if gpu { Shader { fill: true; fallback: bodyC; uniforms: { body: bodyC }; code: grainCode } }
+      Column {
+        fill: true
+        gap: 0
+        padding: [screenLeft, max(num(screenTop, 0) - 6, 0), screenRight, 0]
+        // The logo just under the camera's cutout, with clear room between it and the LCD.
+        Box { fill: width; height: 28; align: center; Brand { } }
+        Spacer { height: 6 }
+        Box { fill: width; weight: 1; padding: [lcdM, 0]; Lcd { fill: true } }
+        Spacer { height: gapA }
+        Nav { }
+        Spacer { height: gapB }
+        Keypad { }
+        Spacer { height: max(num(screenInset, 0) + 10, PW * 0.05) }
+      }
     }
   }
 }
