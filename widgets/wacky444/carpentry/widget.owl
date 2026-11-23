@@ -11,7 +11,7 @@ widget "carpentry" {
   // The sailing widget, found by its declared name (whatever the file is called, a store install
   // is market-<user>-<name>.owl): "home" is its file on home, "removed" one taken off home into
   // .removed/, both "" when it isn't installed
-  source sailFind = cmd("cd ~/.config/omalauncher/widgets && printf '{\"home\": \"%s\", \"removed\": \"%s\"}' \"$(grep -l '^widget \"sailing\"' *.owl 2>/dev/null | head -1)\" \"$(grep -l '^widget \"sailing\"' .removed/*.owl 2>/dev/null | head -1 | sed 's|^.removed/||')\"") every 10s json
+  source sailFind = cmd("cd ~/.config/omalauncher/widgets && printf '{\"home\": \"%s\", \"removed\": \"%s\"}' \"$(grep -l '^widget \"sailing\"' *.owl 2>/dev/null | head -1)\" \"$(grep -l '^widget \"sailing\"' .removed/*.owl 2>/dev/null | head -1 | sed 's|^.removed/||')\"") every 5m json
   // Until the first check is in, count it as there, so nothing flips at start
   let sailOwl = sailFind == null ? "40-sailing.owl" : (sailFind.home ?? "")
   let hasSailing = sailOwl != ""
@@ -359,6 +359,7 @@ widget "carpentry" {
           onTap: {
             if sailRemoved != "" {
               run("cd ~/.config/omalauncher/widgets && [ ! -e ${sh(sailRemoved)} ] && mv .removed/${sh(sailRemoved)} .")
+              refresh()
             } else {
               launcher("store")
             }
