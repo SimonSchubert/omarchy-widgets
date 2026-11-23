@@ -300,16 +300,19 @@ face "t9" {
   // The backlight's own light: a whiter light of the screen's hue (the accent's glow on the night screen).
   let glowC = night ? mix(accent, foreground, 0.15) : mix(tintC, #ffffff, 0.6)
   let keyGlow = night ? glowC : tintC
-  // The body: black, as the video's. Keys are a shade darker, ringed by a darker crevice, with a faint light on
-  // their top edge: on a slightly lifted black, so the crevice and the shade can show.
-  let bodyC = #0a0a0a
+  // The body: true black, the screen\'s pixels off; the keys show by the light on their upper slopes.
+  let bodyC = #000000
   let keyLvl = bl >= 1 ? 1 : bl > 0 ? 0.88 : 0.72
   // What's printed on the body and its keys glows: the print, then a faint ring of copies round it (two radii),
   // brighter and tinted by the screen's light while the backlight is on.
   let whiteC = mix(#ffffff, foreground, 0.15)
-  let printC = bl > 0 ? mix(whiteC, keyGlow, 0.15) : alpha(whiteC, 0.92)
-  let haloC = bl > 0 ? mix(whiteC, keyGlow, 0.5) : whiteC
-  let haloLvl = bl >= 1 ? 1 : bl > 0 ? 0.8 : 0.5
+  // The print itself stays one brightness; only its glow changes, so nothing jumps.
+  let printC = alpha(whiteC, 0.94)
+  let haloC = mix(whiteC, keyGlow, 0.4)
+  // The glow round the print: faint at rest, full while the light is on, half while it's dimmed. Every glowing thing
+  // (the legends and their icons, the dashes, the handsets, the ring) fades to it the same way.
+  let glowLvl = bl >= 1 ? 1 : bl > 0 ? 0.5 : 0.15
+  let haloLvl = glowLvl
   let ring1 = [[1, 0], [0.7, 0.7], [0, 1], [-0.7, 0.7], [-1, 0], [-0.7, -0.7], [0, -1], [0.7, -0.7]]
   let ring2 = [[2.2, 0], [1.56, 1.56], [0, 2.2], [-1.56, 1.56], [-2.2, 0], [-1.56, -1.56], [0, -2.2], [1.56, -1.56]]
   // The margin round a raised key that its shadow may fall in.
@@ -745,7 +748,7 @@ face "t9" {
       float2 b = cap * 0.5;
       // The foot starts this far outside the outline, as a part of the key's half height.
       float rb = 1.0 + min(m - 1.0, 4.0) / b.y;
-      float hh = mix(5.5, 2.0, down);
+      float hh = mix(3.6, 1.4, down);
       float e = 0.1;
       float h0 = dome(p, b, rb, hh);
       float hx = dome(p + float2(e, 0.0), b, rb, hh);
@@ -754,7 +757,7 @@ face "t9" {
       float3 L = normalize(float3(-0.35, -0.9, 1.0));
       float lit = dot(n, L) - L.z;
       float inside = smoothstep(0.0, 0.3, pill(p, b, rb));
-      float delta = (lit > 0.0 ? lit * 0.17 : lit * 0.08) - down * 0.012 * inside;
+      float delta = (lit > 0.0 ? lit * 0.24 : lit * 0.08) - down * 0.012 * inside;
       float bb = max(float(body.r), 0.01);
       float a = delta > 0.0 ? clamp(delta / (1.0 - bb), 0.0, 1.0) : clamp(-delta / bb, 0.0, 1.0);
       return delta > 0.0 ? half4(a, a, a, a) : half4(0.0, 0.0, 0.0, a);
@@ -2159,14 +2162,26 @@ face "t9" {
 
   // A handset, as the old keys had it printed: a curve and its two ends, glowing.
   component Handset(c, ring) {
-    Canvas {
+    Box {
       width: 60
       height: 40
-      for g in [[11, 0.035], [7.5, 0.05], [4.5, 0.08], [2, 0.12], [0, 1]] {
-        arc(30, 30, 18, -66, 132, stroke: alpha(c, g[1]), width: 4.4 + g[0], cap: round)
-        line(13.6, 22.7, 11.2, 29.2, stroke: alpha(c, g[1]), width: 6.4 + g[0], cap: round)
-        line(46.4, 22.7, 48.8, 29.2, stroke: alpha(c, g[1]), width: 6.4 + g[0], cap: round)
-        if ring { circle(30, 27.5, 4.6, stroke: alpha(c, g[1]), width: 2.2 + g[0] * 0.6) }
+      Canvas {
+        fill: true
+        opacity: glowLvl
+        animate opacity: tween(0.5, "ease")
+        for g in [[11, 0.05], [7.5, 0.07], [4.5, 0.1], [2, 0.14]] {
+          arc(30, 30, 18, -66, 132, stroke: alpha(c, g[1]), width: 4.4 + g[0], cap: round)
+          line(13.6, 22.7, 11.2, 29.2, stroke: alpha(c, g[1]), width: 6.4 + g[0], cap: round)
+          line(46.4, 22.7, 48.8, 29.2, stroke: alpha(c, g[1]), width: 6.4 + g[0], cap: round)
+          if ring { circle(30, 27.5, 4.6, stroke: alpha(c, g[1]), width: 2.2 + g[0] * 0.6) }
+        }
+      }
+      Canvas {
+        fill: true
+        arc(30, 30, 18, -66, 132, stroke: c, width: 4.4, cap: round)
+        line(13.6, 22.7, 11.2, 29.2, stroke: c, width: 6.4, cap: round)
+        line(46.4, 22.7, 48.8, 29.2, stroke: c, width: 6.4, cap: round)
+        if ring { circle(30, 27.5, 4.6, stroke: c, width: 2.2) }
       }
     }
   }
@@ -2177,7 +2192,7 @@ face "t9" {
       width: 64
       height: 18
       align: center
-      Box { width: 64; height: 18; opacity: haloLvl; background: radial(0.5, 0.5, 0.5, [alpha(haloC, 0.18), alpha(haloC, 0.06), alpha(haloC, 0)]) }
+      Box { width: 64; height: 18; opacity: glowLvl; animate opacity: tween(0.5, "ease"); background: radial(0.5, 0.5, 0.5, [alpha(haloC, 0.26), alpha(haloC, 0.08), alpha(haloC, 0)]) }
       Box { width: 46; height: 4; radius: 2; background: printC }
     }
   }
@@ -2334,7 +2349,6 @@ face "t9" {
             animate offset: spring(0.62, 1600)
             rotation: wob ? 14 : 0
             animate rotation: spring(0.15, 700)
-            opacity: 0.6 + 0.4 * keyLvl
             Handset { c: #74dc23; ring: false }
           }
         }
@@ -2532,9 +2546,18 @@ face "t9" {
           animate scale: spring(0.6, 1400)
           let r = ringS * 0.25
           if navZ != "" { rect(10, 10, ringS - 4, ringS - 4, radius: r - 2, fill: alpha(#ffffff, 0.06)) }
-          rect(8, 8, ringS, ringS, radius: r, stroke: alpha(haloC, 0.05 * haloLvl), width: 12)
-          rect(8, 8, ringS, ringS, radius: r, stroke: alpha(haloC, 0.12 * haloLvl), width: 7.5)
           rect(8, 8, ringS, ringS, radius: r, stroke: printC, width: 4)
+        }
+        Canvas {
+          width: ringS + 16
+          height: ringS + 16
+          scale: navZ != "" ? 0.97 : 1
+          animate scale: spring(0.6, 1400)
+          opacity: glowLvl
+          animate opacity: tween(0.5, "ease")
+          let r = ringS * 0.25
+          rect(8, 8, ringS, ringS, radius: r, stroke: alpha(haloC, 0.06), width: 12)
+          rect(8, 8, ringS, ringS, radius: r, stroke: alpha(haloC, 0.14), width: 7.5)
         }
       }
       Column {
@@ -2657,7 +2680,7 @@ face "t9" {
             seenAt = sec
           }
           Pillow { on: down == "end"; w: keyW; h: keyH }
-          Box { width: 60; height: 40; offset: [0, down == "end" ? 1.5 : 0]; animate offset: spring(0.62, 1600); opacity: 0.6 + 0.4 * keyLvl; Handset { c: #d4274d; ring: true } }
+          Box { width: 60; height: 40; offset: [0, down == "end" ? 1.5 : 0]; animate offset: spring(0.62, 1600); Handset { c: #d4274d; ring: true } }
         }
       }
     }
@@ -2781,8 +2804,8 @@ face "t9" {
             height: keyH
             offset: [0, down == k.d ? 1.5 : 0]
             animate offset: spring(0.62, 1600)
-            opacity: haloLvl
-            animate opacity: tween(0.15 + floor(i / 3) * 0.15, "in")
+            opacity: glowLvl
+            animate opacity: tween(0.45 + floor(i / 3) * 0.1, "ease")
             let lt = {text: k.l, fontSize: digitFs * 0.42, fontWeight: 700, letterSpacing: 0.2}
             let sp = k.l == "" ? [k.d] : i % 3 == 2 ? [lt, k.d] : [k.d, lt]
             let ic = k.ic ?? ""
@@ -2792,6 +2815,19 @@ face "t9" {
             let cy = height / 2 + (k.d == "*" ? digitFs * 0.16 : 0)
             for o in ring2 { text(sp, tx + o[0], cy + o[1], size: digitFs, font: inter, fontWeight: 700, color: alpha(haloC, 0.035), align: "center") }
             for o in ring1 { text(sp, tx + o[0], cy + o[1], size: digitFs, font: inter, fontWeight: 700, color: alpha(haloC, 0.08), align: "center") }
+            // The lock's and the microphone's glow: their shapes again, wider and faint.
+            let s = digitFs / 15
+            let ix = width / 2 + gw / 2 - digitFs * 0.28
+            let iy = height / 2
+            for g in [[4, 0.06], [2, 0.12]] {
+              if ic == "lock" {
+                arc(ix, iy - 1.6 * s, 2.7 * s, -90, 180, stroke: alpha(haloC, g[1]), width: 1.6 * s + g[0])
+                rect(ix - 4 * s - g[0] / 2, iy - 0.4 * s - g[0] / 2, 8 * s + g[0], 7 * s + g[0], radius: 1.4 * s + g[0] / 2, fill: alpha(haloC, g[1]))
+              } else if ic == "mic" {
+                rect(ix - 2.2 * s - g[0] / 2, iy - 6 * s - g[0] / 2, 4.4 * s + g[0], 8 * s + g[0], radius: 2.2 * s + g[0] / 2, fill: alpha(haloC, g[1]))
+                arc(ix, iy - 0.5 * s, 3.8 * s, 90, 180, stroke: alpha(haloC, g[1]), width: 1.4 * s + g[0])
+              }
+            }
           }
           Canvas {
             width: keyW
@@ -2880,7 +2916,6 @@ face "t9" {
   } else {
     Box {
       fill: true
-      if gpu { Shader { fill: true; fallback: bodyC; uniforms: { body: bodyC }; code: grainCode } }
       Column {
         fill: true
         gap: 0
