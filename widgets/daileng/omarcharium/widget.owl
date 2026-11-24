@@ -1,8 +1,9 @@
 widget "omarcharium" {
-  meta { owl: 5; description: "Omarcharium's terminal reef on your home screen: eight ASCII tropical species, kelp, coral and bubbles. Tap to immerse"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { owl: 19; description: "Omarcharium's terminal reef on your home screen: eight ASCII tropical species, kelp, coral and bubbles. Tap to immerse"; version: "1.0"; license: "MIT"; category: "fun" }
   size: 6x3
   minSize: 2x2
   padding: 0
+  fps: batterySave ? 10 : 30
 
   // A port of Omarcharium (github.com/DailenG/omarcharium), the Omarchy
   // screensaver plugin. A Canvas keeps nothing between frames, so every fish,
@@ -15,6 +16,15 @@ widget "omarcharium" {
   source cfg = file("~/.config/omarcharium/config.json") json optional
   state pal = "" persist
   state status = false persist
+  state trans = 0
+  state showKelp = true
+  state showCoral = true
+  state showFish = true
+  state showBubbles = true
+  state showRocks = true
+  state showSand = true
+  state batterySave = false
+  state settings = false
   state blowAt = -100
   state bx = 0
   state by = 0
@@ -98,9 +108,9 @@ widget "omarcharium" {
       let oy = (height - H * ch) / 2
       let floorY = H - 3
       // The plugin's 28 fish fill a 120x36 terminal; keep that density.
-      let nf = clamp(round(len(order) * W * H / 4320), 1, len(order))
+      let nf = clamp(round(len(order) * W * H / 4320 * (batterySave ? 0.25 : 1)), 1, len(order))
 
-      rect(0, 0, width, height, fill: env.bg)
+      rect(0, 0, width, height, fill: alpha(env.bg, 1 - trans / 100))
       clip(0, 0, width, height) {
         translate(0, oy) {
           // Surface ripples, drifting motes and shafts of light
@@ -126,18 +136,24 @@ widget "omarcharium" {
           for x in range(W) {
             let rv = 1.4 * sin(x * 0.09) + 0.7 * sin(x * 0.31)
             let y = floorY + floor(sign(rv) * floor(abs(rv)) / 2)
-            text(x % 4 ? "_" : ".", (x + 0.5) * cw, (y + 0.5) * ch, size: fs, align: center, color: env.sand)
-            text(".", (x + 0.5) * cw, (y + 1.5) * ch, size: fs, align: center, color: env.rock)
+            if showSand {
+              text(x % 4 ? "_" : ".", (x + 0.5) * cw, (y + 0.5) * ch, size: fs, align: center, color: env.sand)
+            }
+            if showRocks {
+              text(".", (x + 0.5) * cw, (y + 1.5) * ch, size: fs, align: center, color: env.rock)
+            }
           }
           // Kelp, swaying a cell either way
-          for k in range(max(1, round(floor(W / 7) * 0.5))) {
-            let ax = floor((k * W * 0.6180339887 + 5) % (W - 8)) + 4
-            let kh = clamp(round((4 + (k * 7 + (k % 3) * 5) % 8) * 0.875), 2, H - 5)
-            for seg in range(kh) {
-              let sw = round(sin(time * (0.65 + (k % 5) * 0.08) + seg * 0.48 + k * 1.3))
-              text(sw >= 0 ? "}" : "{", (ax + sw + 0.5) * cw, (floorY - seg + 0.5) * ch, size: fs, align: center, color: env.kelp)
+          if showKelp {
+            for k in range(max(1, round(floor(W / 7) * 0.5))) {
+              let ax = floor((k * W * 0.6180339887 + 5) % (W - 8)) + 4
+              let kh = clamp(round((4 + (k * 7 + (k % 3) * 5) % 8) * 0.875), 2, H - 5)
+              for seg in range(kh) {
+                let sw = round(sin(time * (0.65 + (k % 5) * 0.08) + seg * 0.48 + k * 1.3))
+                text(sw >= 0 ? "}" : "{", (ax + sw + 0.5) * cw, (floorY - seg + 0.5) * ch, size: fs, align: center, color: env.kelp)
+              }
+              text("Y", (ax + 0.5) * cw, (floorY + 1.5) * ch, size: fs, align: center, color: env.kelp)
             }
-            text("Y", (ax + 0.5) * cw, (floorY + 1.5) * ch, size: fs, align: center, color: env.kelp)
           }
           // Branching coral in the middle, a smaller one to the left, rocks
           let reefs = [
@@ -148,29 +164,35 @@ widget "omarcharium" {
             [W - 9, floorY, ["[___]"], env.rock]
           ]
           for rf in reefs {
-            for l, r in rf[2] {
-              for c in range(len(l)) {
-                if sub(l, c, c + 1) != " " {
-                  text(sub(l, c, c + 1), (rf[0] + c + 0.5) * cw, (rf[1] + r + 0.5) * ch, size: fs, align: center, color: rf[3])
+            let isCoral = rf[3] == env.coral
+            if (isCoral ? showCoral : showRocks) {
+              for l, r in rf[2] {
+                for c in range(len(l)) {
+                  if sub(l, c, c + 1) != " " {
+                    text(sub(l, c, c + 1), (rf[0] + c + 0.5) * cw, (rf[1] + r + 0.5) * ch, size: fs, align: center, color: rf[3])
+                  }
                 }
               }
             }
           }
 
           // Bubbles rising from the sand, wobbling as they go
-          for b in range(floor(W * H * 55 / 8500) + 4) {
-            let bs = abs(sin(b * 7.77 + 0.3) * 2741.1) % 1
-            let rise = 1.6 + 3.2 * abs(sin(b * 2.13) * 9127.3) % 1
-            let trip = H - 6
-            let t = time * rise + bs * trip
-            let lap = floor(t / trip)
-            let bxc = (abs(sin(b * 4.9 + lap * 1.7) * 6151.9) % 1) * (W - 4) + 2 + sin(time * 1.7 + b) * 0.8
-            let size = bs < 0.6 ? 0 : bs < 0.9 ? 1 : 2
-            text(size == 0 ? "." : size == 1 ? "o" : "O", (floor(bxc) + 0.5) * cw, (floor(H - 3 - (t - lap * trip)) + 0.5) * ch, size: fs, align: center, color: env.caustic)
+          if showBubbles {
+            for b in range(floor(W * H * 55 / 8500) + 4) {
+              let bs = abs(sin(b * 7.77 + 0.3) * 2741.1) % 1
+              let rise = 1.6 + 3.2 * abs(sin(b * 2.13) * 9127.3) % 1
+              let trip = H - 6
+              let t = time * rise + bs * trip
+              let lap = floor(t / trip)
+              let bxc = (abs(sin(b * 4.9 + lap * 1.7) * 6151.9) % 1) * (W - 4) + 2 + sin(time * 1.7 + b) * 0.8
+              let size = bs < 0.6 ? 0 : bs < 0.9 ? 1 : 2
+              text(size == 0 ? "." : size == 1 ? "o" : "O", (floor(bxc) + 0.5) * cw, (floor(H - 3 - (t - lap * trip)) + 0.5) * ch, size: fs, align: center, color: env.caustic)
+            }
           }
 
           // The fish. Each swims across, then comes back in at a new depth.
-          for f in fishes.take(nf) {
+          if showFish {
+            for f in fishes.take(nf) {
             let s = f[0]
             let span = W + 2 * spriteW[s] + 8
             let trav = f[3] * span + f[2] * time
@@ -186,6 +208,7 @@ widget "omarcharium" {
               text(v[2], (col + v[0] + 0.5) * cw, (row + v[1] + 0.5) * ch, size: fs, align: center, color: colors[v[3]])
             }
           }
+          }
         }
       }
     }
@@ -200,32 +223,63 @@ widget "omarcharium" {
     Column {
       gap: 0
       fill: true
-      background: env.bg
-      Box {
-        weight: 1
-        fill: width
-        Reef { fill: true }
-        // A tap releases a burst of bubbles where it lands. This canvas sits
-        // over the reef and draws the burst on its own clock.
-        Canvas {
-          fill: true
-          onTap: { blowAt = time; bx = x; by = y }
-          let fs = clamp(width / 38, 8, 11)
-          let cw = fs * 0.62
-          let ch = fs * 1.22
-          let since = time >= blowAt ? time - blowAt : 100
-          if since < 4 {
-            for q in range(9) {
-              let rise = (2 + (q * 5) % 7) * since * ch * 1.2
-              let wob = sin(since * 3 + q) * 0.8 + (q - 4) * 0.6 * min(since, 1)
-              let gy = by - rise
-              if gy > ch * 2 {
-                text(q % 3 == 0 ? "O" : q % 3 == 1 ? "o" : ".", (floor(bx / cw + wob) + 0.5) * cw, (floor(gy / ch) + 0.5) * ch, size: fs, align: center, color: alpha(env.caustic, clamp(1.6 - since / 2.5, 0, 1)))
+      background: alpha(env.bg, 1 - trans / 100)
+      if settings {
+        Column {
+          scroll: true
+          padding: [12, 12]
+          gap: 8
+          Text { text: "settings"; style: title; color: env.text }
+          Row { gap: 8
+            Text { text: "background transparency"; width: 150 }
+            Slider { value: trans; min: 0; max: 100; weight: 1; onChange: trans = value }
+          }
+          Text { text: "${trans}% of the current theme background"; style: small; color: env.dim; align: center }
+          Row { gap: 8
+            Button { text: showKelp ? "✓ kelp" : "kelp"; onTap: showKelp = !showKelp }
+            Button { text: showCoral ? "✓ coral" : "coral"; onTap: showCoral = !showCoral }
+          }
+          Row { gap: 8
+            Button { text: showFish ? "✓ fish" : "fish"; onTap: showFish = !showFish }
+            Button { text: showBubbles ? "✓ bubbles" : "bubbles"; onTap: showBubbles = !showBubbles }
+          }
+          Row { gap: 8
+            Button { text: showRocks ? "✓ rocks" : "rocks"; onTap: showRocks = !showRocks }
+            Button { text: showSand ? "✓ sand" : "sand"; onTap: showSand = !showSand }
+          }
+          Row { gap: 8
+            Button { text: batterySave ? "✓ battery save" : "battery save"; onTap: batterySave = !batterySave; width: 120 }
+            Text { text: batterySave ? "lower framerate, fewer fish" : ""; style: small; color: env.dim; weight: 1; align: center }
+          }
+          Button { text: "✕ close"; onTap: settings = false }
+        }
+      } else {
+        Box {
+          weight: 1
+          fill: width
+          Reef { fill: true }
+          // A tap releases a burst of bubbles where it lands. This canvas sits
+          // over the reef and draws the burst on its own clock.
+          Canvas {
+            fill: true
+            onTap: { blowAt = time; bx = x; by = y }
+            let fs = clamp(width / 38, 8, 11)
+            let cw = fs * 0.62
+            let ch = fs * 1.22
+            let since = time >= blowAt ? time - blowAt : 100
+            if since < 4 {
+              for q in range(9) {
+                let rise = (2 + (q * 5) % 7) * since * ch * 1.2
+                let wob = sin(since * 3 + q) * 0.8 + (q - 4) * 0.6 * min(since, 1)
+                let gy = by - rise
+                if gy > ch * 2 {
+                  text(q % 3 == 0 ? "O" : q % 3 == 1 ? "o" : ".", (floor(bx / cw + wob) + 0.5) * cw, (floor(gy / ch) + 0.5) * ch, size: fs, align: center, color: alpha(env.caustic, clamp(1.6 - since / 2.5, 0, 1)))
+                }
               }
             }
-          }
-          if status {
-            text(" OMARCHARIUM // PELAGIC TERMINAL ENVIRONMENT ", 8, ch * 0.6, size: fs, color: env.text)
+            if status {
+              text(" OMARCHARIUM // PELAGIC TERMINAL ENVIRONMENT ", 8, ch * 0.6, size: fs, color: env.text)
+            }
           }
         }
       }
@@ -234,6 +288,7 @@ widget "omarcharium" {
         gap: 8
         Button { text: "palette: ${palName}"; color: env.caustic; weight: 1; onTap: pal = palettes[(palettes.indexOf(palName) + 1) % len(palettes)] }
         Button { text: status ? "status on" : "status off"; color: env.dim; width: 120; onTap: status = !status }
+        Button { text: settings ? "✕ close" : "⚙ settings"; color: env.dim; width: 120; onTap: settings = !settings }
       }
       Text {
         text: "BIOMASS ${pad(len(order), 2, "0")} // ${upper(palName)}  ·  tap the water for bubbles"
