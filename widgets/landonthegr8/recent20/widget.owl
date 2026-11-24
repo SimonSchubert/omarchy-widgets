@@ -1,0 +1,325 @@
+widget "recent20" {
+  // Twenty recent apps on a twenty-sided ball you roll with your finger: tap the facet turned toward you to open
+  // that app. One app a facet, newest first. The tile rolls and opens; "..." in the corner opens the full-screen ball,
+  // where a long-press on the facet in front gives that app's menu (a long-press on the tile belongs to home, which
+  // uses it to move and resize tiles). Grown out of the faceted-ball recent strip in strip.owl next to this file.
+  page: 1
+  order: 9
+  size: 3x3
+  minSize: 2x2
+  // The ball goes right up to the tile's frame; nothing else is in here with it.
+  padding: 4
+  // Home holds still while a finger is on the ball, so a roll can't turn the page or swipe up. `onTouch` keeps the
+  // moves to itself too; this is the belt to that's braces.
+  lock: held
+  // Still and untouched, the ball needs no frames: nothing moves, nothing redraws, and it costs no battery.
+  fps: resting && len(fingers) == 0 ? 4 : 60
+
+  meta { description: "Recent apps on a faceted ball you roll with your finger, tapping the facet turned toward you to open that app"; version: "1.0"; license: "MIT"; category: "system"; owl: 24 }
+  // This widget runs no shell commands, so it needs no packages: requires { pacman: [...] } would be empty.
+
+  // The long-press menu's entries, by appAction's words, in the phone's language where it has a set.
+  strings {
+    en { pin: "add to home"; info: "app info"; uninstall: "uninstall"; remove: "remove"; edit: "edit"; voice: "edit by voice"; share: "share" }
+    id { pin: "tambah ke layar utama"; info: "info aplikasi"; uninstall: "uninstal"; remove: "hapus"; edit: "edit"; voice: "edit dengan suara"; share: "bagikan" }
+    es { pin: "agregar a inicio"; info: "info de la app"; uninstall: "desinstalar"; remove: "quitar"; edit: "editar"; voice: "editar por voz"; share: "compartir" }
+    pt { pin: "adicionar à tela inicial"; info: "informações do app"; uninstall: "desinstalar"; remove: "remover"; edit: "editar"; voice: "editar por voz"; share: "compartilhar" }
+    de { pin: "zum startbildschirm hinzufügen"; info: "app-info"; uninstall: "deinstallieren"; remove: "entfernen"; edit: "bearbeiten"; voice: "per sprache bearbeiten"; share: "teilen" }
+    zh { pin: "添加到主屏幕"; info: "应用信息"; uninstall: "卸载"; remove: "移除"; edit: "编辑"; voice: "语音编辑"; share: "分享" }
+    ru { pin: "добавить на главный экран"; info: "о приложении"; uninstall: "удалить"; remove: "убрать"; edit: "изменить"; voice: "изменить голосом"; share: "поделиться" }
+    ja { pin: "ホームに追加"; info: "アプリ情報"; uninstall: "アンインストール"; remove: "削除"; edit: "編集"; voice: "音声で編集"; share: "共有" }
+    uk { pin: "додати на головний екран"; info: "про додаток"; uninstall: "видалити"; remove: "прибрати"; edit: "змінити"; voice: "змінити голосом"; share: "поділитися" }
+    fr { pin: "ajouter à l’accueil"; info: "infos sur l’appli"; uninstall: "désinstaller"; remove: "retirer"; edit: "modifier"; voice: "modifier à la voix"; share: "partager" }
+    tr { pin: "ana ekrana ekle"; info: "uygulama bilgileri"; uninstall: "yüklemeyi kaldır"; remove: "kaldır"; edit: "düzenle"; voice: "sesle düzenle"; share: "paylaş" }
+    it { pin: "aggiungi alla schermata home"; info: "informazioni app"; uninstall: "disinstalla"; remove: "rimuovi"; edit: "modifica"; voice: "modifica con la voce"; share: "condividi" }
+    vi { pin: "thêm vào màn hình chính"; info: "thông tin ứng dụng"; uninstall: "gỡ cài đặt"; remove: "gỡ"; edit: "chỉnh sửa"; voice: "chỉnh sửa bằng giọng nói"; share: "chia sẻ" }
+  }
+
+  // The recent apps, last opened first. The drawer is read only for the words of an app's long-press menu, which
+  // android.recent doesn't carry.
+  source r = android.recent
+  source d = android.drawer
+
+  // How the ball is turned, and how fast it's still rolling after the finger let go. It starts on the angles that
+  // put a facet dead-on square (the facet already nearest the front, turned 20.9052 degrees round), so it's facing
+  // you flat from the very first frame rather than waiting to be rolled once.
+  state yaw = 20.9052
+  state pitch = 0
+  state vyaw = 0
+  state vpitch = 0
+  state held = false
+  // Coasting, then settling square onto a facet, then still: at rest nothing is written, so nothing redraws.
+  state snapping = false
+  // Starts out of rest, so the first frame settles it square onto a facet instead of sitting at an angle.
+  state resting = false
+  state snapYaw = 0
+  state snapPitch = 0
+  // The fingers on the ball, and where the first of them was last frame: a tile can't use onDrag, since the home
+  // screen takes a drag over a tile to turn the page, so the roll is worked out from the touches themselves.
+  state fingers = []
+  state fx = 0
+  state fy = 0
+  state down = false
+  // Whether this touch has travelled far enough to be a roll rather than a tap.
+  state rolled = false
+  // The app whose long-press menu is open, by key, and the shortcuts it offers: null while they load.
+  state menu = ""
+  state menuShortcuts = null
+
+  // An icosahedron: twelve corners from the golden ratio, twenty triangular facets, one per app.
+  let PHI = (1 + sqrt(5)) / 2
+  let iv = map([[-1, PHI, 0], [1, PHI, 0], [-1, 0 - PHI, 0], [1, 0 - PHI, 0],
+                [0, -1, PHI], [0, 1, PHI], [0, -1, 0 - PHI], [0, 1, 0 - PHI],
+                [PHI, 0, -1], [PHI, 0, 1], [0 - PHI, 0, -1], [0 - PHI, 0, 1]], v => norm(v))
+  let ifaces = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+                [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+                [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+                [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]]
+  let ball = mesh(iv, ifaces)
+  let quad = plane(1)
+  // The way each facet faces: the middle of its three corners, one unit out.
+  let dirs = map(ifaces, f => norm([iv[f[0]][0] + iv[f[1]][0] + iv[f[2]][0],
+                                    iv[f[0]][1] + iv[f[1]][1] + iv[f[2]][1],
+                                    iv[f[0]][2] + iv[f[1]][2] + iv[f[2]][2]]))
+
+  // Close enough that the ball nearly fills the tile, with room over its top facet for the name.
+  let camZ = 2.46
+  let cam = {eye: [0, 0, camZ], look: [0, 0, 0], fov: 50}
+  // A facet of an icosahedron sits 0.7947 out, so it's turned toward an eye straight out on z once its normal's
+  // z passes that over the eye's distance: facing the camera at all isn't enough (see the edge pass below).
+  let facing = 0.7947 / camZ
+  let apps = take(r ?? [], len(dirs))
+  let n = len(apps)
+  // The ball's twelve corners and twenty facet directions, turned as it is now: worked out once here and read by
+  // the facets, the name and the edge pass, rather than turned again for each.
+  let rv = map(iv, v => turn(v, [pitch, yaw, 0]))
+  let fnorm = map(dirs, d => turn(d, [pitch, yaw, 0]))
+  // The facet turned toward you is the one reaching furthest toward the camera.
+  let order = sortBy(map(range(0, n), i => {i: i, z: fnorm[i][2]}), o => 0 - o.z)
+  let front = n > 0 ? first(order).i : 0 - 1
+  let frontApp = front >= 0 ? apps[front] : null
+  // The words of the front app's long-press menu, which only the drawer carries.
+  let frontActions = frontApp == null ? [] : (((d == null ? [] : (d.apps ?? [])).find(a => a.key == frontApp.key) ?? {actions: []}).actions ?? [])
+  // Where the ball has to come to rest for the facet nearest the front to face you squarely. Turning a facet's
+  // direction d onto [0, 0, 1] needs pitch = atan2(dy, dz) and yaw = atan2(-dx, hypot(dy, dz)); the nearest whole
+  // turn is added in the handler, so it settles the short way round rather than unwinding everything it just spun.
+  let fd = n > 0 ? dirs[front] : [0, 0, 1]
+  let restPitch = deg(atan2(fd[1], fd[2]))
+  let restYaw = deg(atan2(0 - fd[0], sqrt(fd[1] * fd[1] + fd[2] * fd[2])))
+  // The front facet's three corners, turned as the ball is now: the app's name runs along one of their edges.
+  let fc = n > 0 ? map(ifaces[front], k => rv[k]) : []
+  // An icosahedron's facets sit 0.7947 of the way out; the icons float just above them.
+  let rr = 0.83
+  // The ball fills the tile, whichever cells the user gives it, and the whole screen behind it.
+  let tile = min(tileWidth ?? 160, tileHeight ?? 160) - 2
+  let big = min(screenWidth ?? 320, (screenHeight ?? 420) - 40)
+
+  // The roll: `onTouch` only writes down the fingers, and the turning is worked out here, where `dt` makes the
+  // speed the same at any frame rate. Let go, the ball coasts on, slows, and then settles square onto the facet
+  // nearest the front, so it always comes to rest with one plane facing you flat.
+  every frame {
+    if len(fingers) > 0 {
+      let t = first(fingers)
+      if !down {
+        down = true
+        held = true
+        resting = false
+        snapping = false
+        vyaw = 0
+        vpitch = 0
+        rolled = false
+        fx = t.x
+        fy = t.y
+      } else {
+        let ddx = t.x - fx
+        let ddy = t.y - fy
+        if ddx != 0 || ddy != 0 {
+          yaw = yaw + ddx * 0.62
+          pitch = pitch + ddy * 0.62
+          // Kept for the flick it's let go with, in degrees a second.
+          vyaw = ddx * 0.62 / max(dt, 0.004)
+          vpitch = ddy * 0.62 / max(dt, 0.004)
+          fx = t.x
+          fy = t.y
+        } else {
+          // A finger that has stopped on the ball lets it go still, rather than flinging it on what it did before.
+          vyaw = vyaw * 0.4
+          vpitch = vpitch * 0.4
+        }
+        if abs(t.x - t.startX) > 9 || abs(t.y - t.startY) > 9 { rolled = true }
+      }
+    } else if down {
+      // Lifted: a finger that never travelled was a tap on the facet turned toward you.
+      down = false
+      held = false
+      resting = false
+      if !rolled {
+        vyaw = 0
+        vpitch = 0
+        if frontApp != null { open(frontApp.key) }
+      }
+    } else if !resting {
+      if snapping {
+        yaw = yaw + (snapYaw - yaw) * min(1, dt * 13)
+        pitch = pitch + (snapPitch - pitch) * min(1, dt * 13)
+        if abs(snapYaw - yaw) < 0.2 && abs(snapPitch - pitch) < 0.2 {
+          yaw = snapYaw
+          pitch = snapPitch
+          snapping = false
+          resting = true
+        }
+      } else {
+        yaw = yaw + vyaw * dt
+        pitch = pitch + vpitch * dt
+        vyaw = vyaw * pow(0.3, dt)
+        vpitch = vpitch * pow(0.3, dt)
+        // Slow enough to settle: aim the facet that's nearest the front squarely at you, the short way round.
+        if abs(vyaw) < 40 && abs(vpitch) < 40 {
+          vyaw = 0
+          vpitch = 0
+          snapYaw = restYaw + 360 * round((yaw - restYaw) / 360)
+          snapPitch = restPitch + 360 * round((pitch - restPitch) / 360)
+          snapping = true
+        }
+      }
+    }
+  }
+
+  // `size` is how big to draw it; `menus` is whether a long-press opens the app's menu, which only the screen can
+  // do: on a tile, long-press belongs to the home screen, which moves and resizes tiles with it.
+  component Ball(size, menus = false) {
+    Box {
+      size: size
+      align: center
+      Canvas {
+        width: size
+        height: size
+        // Every finger on the ball, kept for `every frame` to roll it by. A node with onTouch keeps the moves, so
+        // the home screen doesn't take them to turn the page.
+        onTouch: fingers = touches
+        onLongPress: {
+          if menus && frontApp != null {
+            haptic()
+            menuShortcuts = null
+            menu = frontApp.key
+            menuShortcuts = shortcuts(frontApp.key)
+          }
+        }
+        // Black and white only, whatever icon pack is on and whatever theme the launcher wears: the apps are drawn as
+        // their silhouettes, white on the facet turned toward you and grey on the rest. The colors are written out
+        // rather than taken from the theme, so a theme change never puts a color back on the ball.
+        scene(cam, light: [0.3, 0.9, 0.55], ambient: 0.3) {
+          // The body, shaded facet by facet so every edge of the solid shows.
+          model(ball, turn: [pitch, yaw, 0], color: #e2e2e2, smooth: false)
+          for i in range(0, n) {
+            let rd = fnorm[i]
+            let a = apps[i]
+            // Lay the silhouette flat on its facet: tip it out to where the facet faces.
+            let tip = deg(acos(clamp(rd[1], -1, 1)))
+            let spin = deg(atan2(rd[0], rd[2]))
+            // ambient: 1 leaves the silhouette unlit, so it stays the exact grey it's given on every facet.
+            model(quad, at: [rd[0] * rr, rd[1] * rr, rd[2] * rr],
+                  turn: [tip, spin, 0], scale: i == front ? 0.42 : 0.355, ambient: 1,
+                  color: i == front ? #ffffff : alpha(#ffffff, 0.45), image: "mask:${a.key}")
+          }
+        }
+        // Definition without color: every facet you can see gets its three edges stroked, so the solid reads as cut
+        // planes rather than a smooth shaded lump. `project` puts each corner on the canvas and the triangle is
+        // stroked through them. A facet faces you when dot(n, eye - n * inradius) > 0, which for an eye straight out
+        // on z comes down to nz > inradius / eye z, which is `facing` up top: facing the camera alone isn't enough,
+        // and testing nz > 0 instead draws the grazing facets' far edges straight across the body.
+        for i in range(0, len(ifaces)) {
+          if fnorm[i][2] > facing {
+            let q0 = project(rv[ifaces[i][0]], cam, width, height)
+            let q1 = project(rv[ifaces[i][1]], cam, width, height)
+            let q2 = project(rv[ifaces[i][2]], cam, width, height)
+            if q0 != null && q1 != null && q2 != null {
+              path([[q0.x, q0.y], [q1.x, q1.y], [q2.x, q2.y]], closed: true, stroke: alpha(#ffffff, 0.42), width: 1)
+            }
+          }
+        }
+        // The app's name lying on the facet it's on: along the lowest of that facet's three edges, turned to the
+        // edge's angle and nudged in toward the middle of the triangle so it sits on the plane, not on the wire.
+        // `project` says where a corner of the solid lands on the canvas, which is what lets flat text follow it.
+        // Drawn only once the ball is settling or still, so names don't flicker past while it's spinning.
+        if frontApp != null && (resting || snapping) && len(fc) == 3 {
+          let p0 = project(fc[0], cam, width, height)
+          let p1 = project(fc[1], cam, width, height)
+          let p2 = project(fc[2], cam, width, height)
+          if p0 != null && p1 != null && p2 != null {
+            // Of the three edges, the one running most level on screen, so the name reads flat whether the facet
+            // points up or down: its rise over its length, smallest wins.
+            let g01 = abs(p1.y - p0.y) / max(0.001, dist([p0.x, p0.y], [p1.x, p1.y]))
+            let g12 = abs(p2.y - p1.y) / max(0.001, dist([p1.x, p1.y], [p2.x, p2.y]))
+            let g02 = abs(p2.y - p0.y) / max(0.001, dist([p0.x, p0.y], [p2.x, p2.y]))
+            let lowA = g01 <= g12 && g01 <= g02
+            let lowB = !lowA && g12 <= g02
+            let ex = lowA ? p1.x - p0.x : (lowB ? p2.x - p1.x : p2.x - p0.x)
+            let ey = lowA ? p1.y - p0.y : (lowB ? p2.y - p1.y : p2.y - p0.y)
+            let mx = lowA ? (p0.x + p1.x) / 2 : (lowB ? (p1.x + p2.x) / 2 : (p0.x + p2.x) / 2)
+            let my = lowA ? (p0.y + p1.y) / 2 : (lowB ? (p1.y + p2.y) / 2 : (p0.y + p2.y) / 2)
+            let gx = (p0.x + p1.x + p2.x) / 3
+            let gy = (p0.y + p1.y + p2.y) / 3
+            let raw = deg(atan2(ey, ex))
+            rotate(raw > 90 ? raw - 180 : (raw < -90 ? raw + 180 : raw), mx + (gx - mx) * 0.20, my + (gy - my) * 0.20) {
+              text(frontApp.name, mx + (gx - mx) * 0.20, my + (gy - my) * 0.20, size: max(7, round(size * 0.041)), align: center, color: #141414)
+            }
+          }
+        }
+      }
+      Popup {
+        visible: menus && menu != "" && frontApp != null && menu == frontApp.key && menuShortcuts != null
+        position: above
+        onDismiss: menu = ""
+        width: 200
+        gap: 0
+        // The app's shortcuts first, as stock launchers list them: tap to open, + to put one on home.
+        for sc in menuShortcuts key sc.key {
+          Row {
+            fill: width
+            align: center
+            gap: 10
+            padding: [12, 6]
+            onTap: { menu = ""; open(sc.key) }
+            Image { src: sc.icon; size: 24; tint: #ffffff; label: sc.name }
+            Text { text: sc.name; weight: 1; maxLines: 1 }
+            Text { text: "[+]"; color: #ffffff; onTap: { menu = ""; appAction("pin", sc.key) } }
+          }
+        }
+        Spacer { visible: len(menuShortcuts) > 0; height: 1; fill: width; background: border }
+        for w in frontActions {
+          Text { text: get(str, w, w); fontSize: 15; fill: width; padding: [12, 12]; onTap: { menu = ""; appAction(w, frontApp.key) } }
+        }
+      }
+    }
+  }
+
+  // The tile: the ball, with the full-screen view a tap away in the corner.
+  Box {
+    fill: true
+    align: center
+    Ball { size: tile }
+    // A long-press on a tile belongs to the home screen, which moves and resizes tiles with it, so the app menu
+    // lives in the full-screen ball instead and this corner is the way in.
+    Box {
+      fill: true
+      align: top
+      Row {
+        fill: width
+        justify: end
+        Text { text: "···"; style: small; color: muted; padding: [6, 0]; onTap: screen() }
+      }
+    }
+  }
+
+  // The same ball, as big as the screen gives, where a long-press on the facet in front opens that app's menu.
+  screen {
+    title: "recent apps"
+    Column {
+      fill: true
+      align: center
+      justify: center
+      Ball { size: big; menus: true }
+    }
+  }
+}
