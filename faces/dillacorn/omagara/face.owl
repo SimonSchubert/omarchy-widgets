@@ -1,5 +1,5 @@
 face "Omagara" {
-  meta { owl: 21; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.9.3"; license: "MIT"; category: "home" }
+  meta { owl: 25; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.9.3"; license: "MIT"; category: "home" }
   // Omalauncher OWL time animations are capped at 60 FPS, regardless of display Hz.
   // Keep the highest supported rate; reduce work rather than reducing responsiveness.
   fps: 60
@@ -335,7 +335,7 @@ face "Omagara" {
     {key: "grouping", name: "Group by application"},
     {key: "actions", name: "Show action buttons"},
     {key: "mediaPlayer", name: "Compact media player"},
-    {key: "musicShortcuts", name: "Music shortcuts on audio connection"},
+    {key: "musicShortcuts", name: "Audio shortcuts on connection"},
     {key: "noticeAutoPosition", name: "Auto-expand below visible header"},
     {section: "Search", key: "calculator", name: "Calculator in Search"},
     {key: "searchContacts", name: "Search contacts (unavailable)"},
@@ -396,6 +396,9 @@ face "Omagara" {
   let hasMedia = cfg.mediaPlayer && playback != null && playback.available != false && trim(playback.title ?? "") != ""
   let mediaNeedsAccess = cfg.mediaPlayer && playback != null && playback.available == false
   let audioConnected = audio != null && contains(["bluetooth", "wired", "usb", "dock"], audio.output.type ?? "")
+  let bluetoothOutput = audio != null && audio.output.type == "bluetooth"
+  let bluetoothLabel = (audio.output.name ?? "Bluetooth") + (audio.output.battery != null ? " · " + str(round(audio.output.battery)) + "%" : "")
+  let bluetoothBatteryVisible = bluetoothOutput && (cfg.mediaPlayer || cfg.musicShortcuts) && (audio.output.granted == false || audio.output.battery != null)
   // Only the explicit chevron changes expansion; media play/pause never does.
   let showMusicApps = cfg.musicShortcuts && audioConnected && len(selectedMusicApps) > 0
   let groups = groupBy(apps, a => contains(fullAlphabet, upper(sub(trim(a.name), 0, 1))) ? upper(sub(trim(a.name), 0, 1)) : "#")
@@ -529,7 +532,7 @@ face "Omagara" {
   // in MIXED when every visible shade has been manually turned off.
   let visibleShadeToggles = quickShadeToggles.filter(item =>
     item.key == "shadeHeader" ? len(headerRows) > 0 :
-    item.key == "shadeMediaCard" ? (hasMedia || showMusicApps) :
+    item.key == "shadeMediaCard" ? (hasMedia || showMusicApps || bluetoothBatteryVisible) :
     item.key == "shadeNoticeCards" ? cfg.notifications && len(noticeRows) > 0 :
     item.key == "shadeNoticeLabels" ? cfg.notifications && len(regularNoticeItems) > 0 :
     item.key == "shadeAppLabels" ? any(pinnedRows, pins => len(pins) == 1) :
@@ -2774,7 +2777,7 @@ face "Omagara" {
       }
       // Native compact player and selected app shortcuts share one surface.
       // A manual chevron controls shortcuts, independent of playback state.
-      if hasMedia || showMusicApps {
+      if hasMedia || showMusicApps || bluetoothBatteryVisible {
         Column {
           fill: width
           gap: 2
@@ -2827,7 +2830,7 @@ face "Omagara" {
                       maxLines: musicAreaSize >= 40 ? 2 : 1
                       color: secondaryText
                     }
-                    if audioConnected {
+                    if audioConnected && !bluetoothOutput {
                       Text { text: audio.output.name ?? audio.output.type ?? "Connected"; font: chosenFont; fontSize: 11; maxLines: 1; color: secondaryText }
                     }
                   }
@@ -2860,9 +2863,11 @@ face "Omagara" {
             // With Bluetooth connected but no media session, shortcuts remain launchable.
             Row {
               fill: width
-              height: musicAreaExpanded ? 72 + round(musicAreaSize * 0.65) : 40
+              height: bluetoothOutput ? 40 : musicAreaExpanded ? 72 + round(musicAreaSize * 0.65) : 40
               align: center
-              if musicAreaExpanded {
+              if bluetoothOutput {
+                Text { text: bluetoothLabel; font: chosenFont; fontSize: musicAreaExpanded ? 15 : 12; color: accent; weight: 1; maxLines: 1 }
+              } else if musicAreaExpanded {
                 Column {
                   weight: 1
                   gap: 4
@@ -2873,17 +2878,27 @@ face "Omagara" {
               } else {
                 Text { text: "Music · " + (audio.output.name ?? audio.output.type ?? "Connected"); font: chosenFont; fontSize: 12; color: secondaryText; weight: 1; maxLines: 1 }
               }
-              Box {
-                width: 36
-                height: musicAreaExpanded ? 48 : 40
-                align: center
-                onTap: musicAppsExpanded = !musicAppsExpanded
-                Text { text: musicAppsExpanded ? "▴" : "▾"; font: chosenFont; fontSize: 19; color: accent; align: center }
+              if showMusicApps {
+                Box {
+                  width: 36
+                  height: bluetoothOutput ? 40 : musicAreaExpanded ? 48 : 40
+                  align: center
+                  onTap: musicAppsExpanded = !musicAppsExpanded
+                  Text { text: musicAppsExpanded ? "▴" : "▾"; font: chosenFont; fontSize: 19; color: accent; align: center }
+                }
               }
             }
           }
+          if hasMedia && bluetoothOutput {
+            Text { text: bluetoothLabel; fill: width; font: chosenFont; fontSize: 12; color: secondaryText; maxLines: 1 }
+          }
+          if bluetoothBatteryVisible {
+            if audio.output.granted == false {
+              Text { text: "Allow Bluetooth battery access"; fill: width; padding: [0, 6]; font: chosenFont; fontSize: 12; color: accent; onTap: volume("request") }
+
+            }
+          }
           if showMusicApps && musicAppsExpanded {
-            Text { text: "Music apps"; font: chosenFont; fontSize: 11; color: secondaryText }
             Flow {
               fill: width
               gap: 6
@@ -4886,13 +4901,13 @@ face "Omagara" {
                 Button { text: "Reset clock gap"; onTap: headerSpacing = 0 }
                 Button { text: "Reset alerts gap"; onTap: noticeSpacing = 0 }
               }
-              Text { text: "Music / Bluetooth preview"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 10, 0, 2] }
+              Text { text: "Media / audio preview"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 10, 0, 2] }
               Text { text: "Compact is the default. Drag ↕ Art size in Edit Home layout to enlarge compact artwork slightly without switching modes. Expand preview separately for the large media or Bluetooth view. The shortcuts arrow is independent."; font: chosenFont; fontSize: 12; color: secondaryText }
               Flow {
                 fill: width
                 gap: 8
                 Button { text: musicAreaExpanded ? "✓ Expanded preview" : "Expand preview"; onTap: musicAreaExpanded = !musicAreaExpanded }
-                Button { text: "Reset music size"; onTap: musicAreaSize = 0 }
+                Button { text: "Reset media size"; onTap: musicAreaSize = 0 }
               }
               Text { text: "Default home"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
               Text { text: "Choose which Omalauncher page opens when you press Home."; font: chosenFont; fontSize: 14 }
@@ -5049,10 +5064,10 @@ face "Omagara" {
               Button { text: "Manage folders (" + str(len(customFolders)) + ")"; onTap: { folderDraft = ""; screenMode = "folderList" } }
               Text { text: "Folders appear below the last app section with miniature app icons. A single folder shortcut above the cog jumps to them. Tap a folder for a floating app list; hold a folder row to edit."; font: chosenFont; fontSize: 12; color: secondaryText }
               for pref in preferenceRows.filter(p => p.key == "musicShortcuts") { SettingToggle { pref: pref } }
-              Text { text: "The music-app arrow expands shortcuts only. Media/Bluetooth preview size is separate in Home settings and Home layout editing; neither follows playback pause."; font: chosenFont; fontSize: 12; color: secondaryText }
-              Text { text: "Alphabet visibility / music shortcuts"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
-              Text { text: "Hidden apps are removed only from the A–Z worm. They remain available in normal Search. Select up to five music shortcuts."; font: chosenFont; fontSize: 12; color: secondaryText }
-              Text { text: str(len(hiddenAppKeys)) + " hidden · " + str(len(musicAppKeys)) + " music apps"; font: chosenFont; fontSize: 13; color: secondaryText }
+              Text { text: "The audio shortcut arrow expands shortcuts only. Media/Bluetooth preview size is separate in Home settings and Home layout editing; neither follows playback pause."; font: chosenFont; fontSize: 12; color: secondaryText }
+              Text { text: "Alphabet visibility / audio shortcuts"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
+              Text { text: "Hidden apps are removed only from the A–Z worm. They remain available in normal Search. Select up to five audio shortcuts."; font: chosenFont; fontSize: 12; color: secondaryText }
+              Text { text: str(len(hiddenAppKeys)) + " hidden · " + str(len(musicAppKeys)) + " audio shortcuts"; font: chosenFont; fontSize: 13; color: secondaryText }
               Input { text: appPickerQuery; placeholder: "Find an installed app…"; onChange: appPickerQuery = value }
               for a in (installed ?? []).filter(a => contains(hiddenAppKeys, a.key) || contains(musicAppKeys, a.key)).sortBy(a => lower(a.name)) key a.key {
                 Column {
@@ -5068,7 +5083,7 @@ face "Omagara" {
                       Button { text: "Unhide"; onTap: hiddenAppKeys = hiddenAppKeys.filter(k => k != a.key) }
                     }
                     if contains(musicAppKeys, a.key) {
-                      Button { text: "Remove music"; onTap: musicAppKeys = musicAppKeys.filter(k => k != a.key) }
+                      Button { text: "Remove shortcut"; onTap: musicAppKeys = musicAppKeys.filter(k => k != a.key) }
                     }
                   }
                 }
@@ -5084,7 +5099,7 @@ face "Omagara" {
                     fill: width
                     gap: 6
                     Button { text: contains(hiddenAppKeys, a.key) ? "Unhide" : "Hide"; onTap: hiddenAppKeys = contains(hiddenAppKeys, a.key) ? hiddenAppKeys.filter(k => k != a.key) : hiddenAppKeys + [a.key] }
-                    Button { text: contains(musicAppKeys, a.key) ? "Remove music" : "Music shortcut"; onTap: musicAppKeys = contains(musicAppKeys, a.key) ? musicAppKeys.filter(k => k != a.key) : len(musicAppKeys) < 5 ? musicAppKeys + [a.key] : musicAppKeys }
+                    Button { text: contains(musicAppKeys, a.key) ? "Remove shortcut" : "Audio shortcut"; onTap: musicAppKeys = contains(musicAppKeys, a.key) ? musicAppKeys.filter(k => k != a.key) : len(musicAppKeys) < 5 ? musicAppKeys + [a.key] : musicAppKeys }
                   }
                 }
               }
