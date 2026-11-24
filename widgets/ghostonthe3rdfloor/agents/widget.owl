@@ -1,0 +1,517 @@
+widget "agents" {
+  meta {
+    owl: 12
+    description: "Monitors installed coding agents, their running status, active models, and available quota/usage."
+    version: "1.2.0"
+    license: "MIT"
+    category: "dev"
+  }
+
+  page: 5
+  order: 2
+  size: 3x4
+  minSize: 3x2
+
+  requires { pacman: ["python", "procps-ng"] }
+
+  // Coding agents discovered by the launcher
+  source ag = android.agents
+
+  // Running once a minute, this only looks at timestamps: an agent's usage is
+  // read again when that agent has written something since the last read, and
+  // otherwise every 2 hours. What it read is kept in ~/.cache/omalauncher, so
+  // the tile still shows every agent in between without asking again.
+  source stats = cmd("""
+python3 -c "
+import os, json, sqlite3, datetime, subprocess
+
+home = os.path.expanduser('~')
+now = int(datetime.datetime.now().timestamp())
+today = int(datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+month = int(datetime.datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp())
+
+def mtime(*paths):
+    return max([int(os.path.getmtime(p)) for p in paths if os.path.exists(p)] or [0])
+
+def newest_in(d):
+    try:
+        return max([int(os.path.getmtime(os.path.join(d, f))) for f in os.listdir(d)
+                    if os.path.isfile(os.path.join(d, f))] or [0])
+    except Exception:
+        return 0
+
+# pgrep -f matches the text of this very command, so skip ourselves and the
+# shell that started us; otherwise every agent looks like it is running.
+def running(pat):
+    try:
+        out = subprocess.run(['pgrep', '-f', pat], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.split()
+    except Exception:
+        return False
+    skip = [os.getpid(), os.getppid()]
+    for pid in out:
+        p = int(pid)
+        if p in skip:
+            continue
+        try:
+            with open('/proc/%d/cmdline' % p, 'rb') as f:
+                cmd = f.read().decode('utf-8', 'ignore')
+        except Exception:
+            continue
+        if 'python3' in cmd or 'pgrep' in cmd:
+            continue
+        return True
+    return False
+
+g = os.path.join(home, '.gemini/antigravity-cli')
+oc = os.path.join(home, '.local/share/opencode')
+cp = os.path.join(home, '.copilot')
+hm = os.path.join(home, '.hermes')
+kl = os.path.join(home, '.local/share/kilo')
+
+# what each agent writes when it is used: its own database, logs and sessions
+watch = {
+    'agy': ([os.path.join(g, 'history.jsonl')], []),
+    'opencode': ([os.path.join(oc, 'opencode.db'), os.path.join(oc, 'opencode.db-wal')], [os.path.join(oc, 'log')]),
+    'copilot': ([os.path.join(cp, 'session-store.db'), os.path.join(cp, 'session-store.db-wal')], [os.path.join(cp, 'logs')]),
+    'hermes': ([os.path.join(hm, 'state.db'), os.path.join(hm, 'state.db-wal')], [os.path.join(hm, 'state')]),
+    'kilo': ([os.path.join(kl, 'kilo.db'), os.path.join(kl, 'kilo.db-wal')], [os.path.join(kl, 'log')]),
+}
+
+def fingerprint(bin):
+    files, dirs = watch[bin]
+    return max([mtime(*files)] + [newest_in(d) for d in dirs])
+
+# Antigravity: its Gemini quota lives on Google's side, behind the CLI's
+# OAuth client. The widget holds no credential of its own, so it shows the
+# agent without usage instead of asking Google.
+def q_agy():
+    rec = {'bin': 'agy', 'name': 'Antigravity', 'model': None, 'used': None, 'cap': None,
+           'unit': 'steps', 'quota_desc': 'Quota is counted by Google, not here'}
+    return rec, False
+
+# OpenCode: free requests a day, counted locally
+def q_opencode():
+    rec = {'bin': 'opencode', 'name': 'OpenCode', 'model': 'big-pickle', 'used': 0, 'cap': 460,
+           'unit': 'reqs', 'quota_desc': 'Daily free quota (460 reqs/day)'}
+    ok = False
+    db = os.path.join(oc, 'opencode.db')
+    if os.path.exists(db):
+        conn = sqlite3.connect('file:' + db + '?mode=ro', uri=True)
+        c = conn.cursor()
+        c.execute('SELECT count(*) FROM session_message WHERE type=\"assistant\" AND time_created/1000 >= ?', (today,))
+        rec['used'] = c.fetchone()[0] or 0
+        c.execute('SELECT coalesce(json_extract(data, \"$.model.id\"), json_extract(data, \"$.modelID\")) FROM session_message WHERE type=\"assistant\" ORDER BY time_created DESC LIMIT 1')
+        row = c.fetchone()
+        if row and row[0]:
+            rec['model'] = str(row[0]).split('/')[-1].replace('-free', '')
+        conn.close()
+        ok = True
+    return rec, ok
+
+# Copilot: the CLI keeps a local count; the plan's own quota isn't exposed
+def q_copilot():
+    rec = {'bin': 'copilot', 'name': 'Copilot', 'model': 'gpt-6-luna', 'used': None, 'cap': None,
+           'unit': 'requests', 'quota_desc': 'No local usage data'}
+    ok = False
+    db = os.path.join(cp, 'session-store.db')
+    if os.path.exists(db):
+        conn = sqlite3.connect('file:' + db + '?mode=ro', uri=True)
+        c = conn.cursor()
+        c.execute('SELECT count(*) FROM assistant_usage_events WHERE CAST(strftime(\"%s\", created_at) AS INTEGER) >= ?', (month,))
+        rec['used'] = c.fetchone()[0] or 0
+        c.execute('SELECT model FROM assistant_usage_events ORDER BY id DESC LIMIT 1')
+        row = c.fetchone()
+        if row and row[0]:
+            rec['model'] = str(row[0]).split('/')[-1]
+        conn.close()
+        rec['quota_desc'] = 'Plan quota unavailable; counted locally'
+        ok = True
+    return rec, ok
+
+# Hermes: calls an hour against its rate limit
+def q_hermes():
+    rec = {'bin': 'hermes', 'name': 'Hermes', 'model': 'qwen4-max', 'used': 0, 'cap': 2100,
+           'unit': 'calls', 'quota_desc': 'Hourly rate limit (2,100 calls/hr)'}
+    ok = False
+    db = os.path.join(hm, 'state.db')
+    if os.path.exists(db):
+        conn = sqlite3.connect('file:' + db + '?mode=ro', uri=True)
+        c = conn.cursor()
+        c.execute('SELECT coalesce(sum(api_call_count), 0) FROM session_model_usage WHERE last_seen >= ?', (now - 3600,))
+        rec['used'] = c.fetchone()[0] or 0
+        c.execute('SELECT model FROM session_model_usage ORDER BY last_seen DESC LIMIT 1')
+        row = c.fetchone()
+        if row and row[0]:
+            rec['model'] = str(row[0]).split('/')[-1].replace(':free', '')
+        conn.close()
+        ok = True
+    auth = os.path.join(hm, 'auth.json')
+    if os.path.exists(auth):
+        with open(auth) as f:
+            cap = json.load(f).get('providers', {}).get('nous', {}).get('rate_limit_rph') or 2100
+        rec['cap'] = cap
+        rec['quota_desc'] = 'Hourly rate limit ({:,} calls/hr)'.format(cap)
+    return rec, ok
+
+# Kilo: free sessions a day, counted locally
+def q_kilo():
+    rec = {'bin': 'kilo', 'name': 'Kilo', 'model': 'kilo-auto/free', 'used': 0, 'cap': 100,
+           'unit': 'sess', 'quota_desc': 'Daily free quota (100 sessions)'}
+    ok = False
+    db = os.path.join(kl, 'kilo.db')
+    if os.path.exists(db):
+        conn = sqlite3.connect('file:' + db + '?mode=ro', uri=True)
+        c = conn.cursor()
+        today_ms = today * 1000
+        c.execute('SELECT count(*) FROM session WHERE time_created >= ?', (today_ms,))
+        rec['used'] = c.fetchone()[0] or 0
+        c.execute('SELECT json_extract(model, \"$.id\") FROM session WHERE model IS NOT NULL ORDER BY time_updated DESC LIMIT 1')
+        row = c.fetchone()
+        if row and row[0]:
+            # 'kilo-auto/free' is the whole name: the part after the slash is the tier
+            rec['model'] = str(row[0]).strip()
+        conn.close()
+        ok = True
+    return rec, ok
+
+order = ['agy', 'opencode', 'copilot', 'hermes', 'kilo']
+queries = {'agy': q_agy, 'opencode': q_opencode, 'copilot': q_copilot, 'hermes': q_hermes, 'kilo': q_kilo}
+procs = {'agy': 'antigravity|agy', 'opencode': 'opencode', 'copilot': 'copilot', 'hermes': 'hermes', 'kilo': 'kilo'}
+
+cache_file = os.path.join(home, '.cache/omalauncher/agents-usage.json')
+try:
+    with open(cache_file) as f:
+        cache = json.load(f)
+except Exception:
+    cache = {}
+
+IDLE = 2 * 3600      # read again after this long even without activity
+RETRY = 30 * 60      # try a failed read again after this long
+out = []
+changed = False
+for bin in order:
+    sig = fingerprint(bin)
+    entry = cache.get(bin) or {}
+    ago = now - (entry.get('at') or 0)
+    fresh = entry.get('sig') == sig and ago < (IDLE if entry.get('ok') else RETRY)
+    if fresh:
+        rec = entry.get('rec') or {'bin': bin}
+    else:
+        try:
+            rec, ok = queries[bin]()
+        except Exception:
+            rec, ok = entry.get('rec') or {'bin': bin}, False
+        cache[bin] = {'sig': sig, 'at': now, 'ok': ok, 'rec': rec}
+        changed = True
+    item = dict(rec)
+    item['run'] = running(procs[bin])
+    out.append(item)
+
+if changed:
+    try:
+        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+        with open(cache_file + '.tmp', 'w') as f:
+            json.dump(cache, f)
+        os.replace(cache_file + '.tmp', cache_file)
+    except Exception:
+        pass
+
+print(json.dumps(out))
+"
+  """) every 1m json timeout 60s
+
+  onTap: screen()
+
+  // Which agents show is up to the launcher: whatever it finds installed.
+  // Usage is merged in by bin, so an agent this widget doesn't read yet still
+  // appears, with its name, icon and Open button, and says it isn't tracked.
+  let found = (ag.installed ?? []).map(a => merge(
+    find(stats ?? [], s => s.bin == a.bin) ?? {},
+    {bin: a.bin, name: a.name, icon: a.icon, key: a.key ?? ("l:" + a.bin), displayName: a.name}
+  ))
+
+  let agentsList = found.map(s => merge(s, {
+    running: s.run ?? false,
+    quota_known: s.cap != null,
+    usage_available: s.used != null,
+    left: s.cap != null && s.used != null ? max(0, s.cap - s.used) : null,
+    avail_pct: s.cap != null && s.used != null ? round(max(0, s.cap - s.used) / max(1, s.cap) * 100) : null,
+    used_pct: s.cap != null && s.used != null ? round(s.used / max(1, s.cap) * 100) : null,
+    quota_desc: s.quota_desc ?? "No usage data for this agent"
+  }))
+
+  let activeCount = count(agentsList, a => a.running)
+  let isWide = (tileWidth ?? 180) > 300
+  let isShort = (tileHeight ?? 240) < 220
+  let cornerRad = 8 * (corners ?? 1)
+
+  Column {
+    fill: true
+    gap: 4
+
+    // Header
+    Row {
+      align: center
+      fill: width
+      gap: 6
+      padding: [2, 0]
+      Text { text: "CODING AGENTS"; style: label; color: muted; weight: 1 }
+      if activeCount > 0 {
+        Row {
+          align: center
+          gap: 4
+          Text { text: "●"; color: green; fontSize: 9 }
+          Text { text: "${activeCount} active"; fontSize: 11; color: green }
+        }
+      }
+      Text { text: "↗"; color: muted; fontSize: 11 }
+    }
+
+    // Agent items
+    if isWide {
+      Grid {
+        columns: 2
+        gap: 6
+        weight: 1
+        lazy: true
+        for a in agentsList key a.bin {
+          Box {
+            fill: width
+            padding: [8, 5]
+            radius: cornerRad
+            background: alpha(surface, 0.65)
+            border: 1
+            borderColor: a.running ? alpha(accent, 0.35) : alpha(border, 0.4)
+
+            Column {
+              gap: 2
+              Row {
+                align: center
+                gap: 5
+                fill: width
+                if a.icon != null {
+                  Image { src: a.icon; size: 14 }
+                } else {
+                  Text { text: "●"; color: a.running ? green : muted; fontSize: 9 }
+                }
+                Text { text: a.displayName; bold: true; fontSize: 12; color: foreground; weight: 1; maxLines: 1 }
+                Text {
+                  text: a.quota_known ? "${a.avail_pct}%" : (a.usage_available ? "tracked" : "n/a")
+                  bold: a.quota_known
+                  fontSize: 11
+                  color: a.quota_known ? (a.avail_pct > 50 ? accent : (a.avail_pct > 20 ? yellow : red)) : muted
+                }
+              }
+              if a.quota_known {
+                Progress {
+                  value: a.avail_pct
+                  max: 100
+                  height: 3
+                  fill: width
+                  color: a.avail_pct > 50 ? accent : (a.avail_pct > 20 ? yellow : red)
+                  track: alpha(border, 0.3)
+                }
+              }
+              Row {
+                fill: width
+                Text { text: a.model ?? "not tracked"; style: small; color: muted; weight: 1; maxLines: 1 }
+                Text { text: a.quota_known ? "${a.left}/${a.cap}" : (a.usage_available ? "${a.used}/mo" : ""); style: small; color: muted; maxLines: 1 }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      Column {
+        gap: 4
+        weight: 1
+        scroll: true
+        for a in agentsList key a.bin {
+          Box {
+            fill: width
+            padding: [6, 4]
+            radius: cornerRad
+            background: alpha(surface, 0.65)
+            border: 1
+            borderColor: a.running ? alpha(accent, 0.35) : alpha(border, 0.4)
+
+            Column {
+              gap: 2
+              Row {
+                align: center
+                gap: 6
+                fill: width
+                if a.icon != null {
+                  Image { src: a.icon; size: 14 }
+                } else {
+                  Text { text: "●"; color: a.running ? green : muted; fontSize: 9 }
+                }
+                Text { text: a.displayName; bold: true; fontSize: 12; color: foreground; weight: 1; maxLines: 1 }
+                Text {
+                  text: a.quota_known ? "${a.avail_pct}%" : (a.usage_available ? "tracked" : "n/a")
+                  bold: a.quota_known
+                  fontSize: 11
+                  color: a.quota_known ? (a.avail_pct > 50 ? accent : (a.avail_pct > 20 ? yellow : red)) : muted
+                }
+              }
+              if a.quota_known {
+                Progress {
+                  value: a.avail_pct
+                  max: 100
+                  height: 3
+                  fill: width
+                  color: a.avail_pct > 50 ? accent : (a.avail_pct > 20 ? yellow : red)
+                  track: alpha(border, 0.3)
+                }
+              }
+              Row {
+                fill: width
+                Text { text: a.model ?? "not tracked"; style: small; color: muted; weight: 1; maxLines: 1 }
+                Text { text: a.quota_known ? "${a.left}/${a.cap}" : (a.usage_available ? "${a.used}/mo" : ""); style: small; color: muted; maxLines: 1 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "coding agents"
+
+    Column {
+      scroll: true
+      gap: 12
+      padding: [16, 16]
+      fill: width
+
+      // Header summary box
+      Box {
+        fill: width
+        padding: 14
+        radius: cornerRad
+        background: alpha(surface, 0.8)
+        border: 1
+        borderColor: alpha(accent, 0.3)
+
+        Column {
+          gap: 6
+          Row {
+            align: center
+            gap: 8
+            Text { text: "Agent Quota & Status"; style: title; color: foreground; weight: 1 }
+            if activeCount > 0 {
+              Text { text: "● ${activeCount} active"; color: green; bold: true }
+            }
+          }
+          Text {
+            text: ag.default != null ? "Default prompt agent: ${ag.default.name} (${ag.default.bin})" : "Manage agent quotas and run commands"
+            style: body
+            color: muted
+          }
+        }
+      }
+
+      // Detailed list of cards
+      for a in agentsList key a.bin {
+        Box {
+          fill: width
+          padding: 14
+          radius: cornerRad
+          background: alpha(surface, 0.7)
+          border: 1
+          borderColor: a.running ? alpha(accent, 0.5) : alpha(border, 0.5)
+
+          Column {
+            gap: 8
+
+            // Top row: Icon, Name, Running status badge, Open button
+            Row {
+              align: center
+              gap: 10
+              fill: width
+
+              if a.icon != null {
+                Image { src: a.icon; size: 28 }
+              } else {
+                Box {
+                  size: 28
+                  radius: 6
+                  background: alpha(accent, 0.15)
+                  align: center
+                  Text { text: upper(sub(a.displayName, 0, 1)); bold: true; color: accent }
+                }
+              }
+
+              Column {
+                gap: 1
+                weight: 1
+                Row {
+                  align: center
+                  gap: 6
+                  Text { text: a.displayName; style: title; color: foreground }
+                  if a.running {
+                    Text { text: "RUNNING"; fontSize: 9; bold: true; color: green }
+                  }
+                }
+                Row {
+                  gap: 4
+                  Text { text: "Model:"; style: small; color: muted }
+                  Text { text: a.model ?? "not tracked"; style: small; color: muted }
+                }
+              }
+
+              Button {
+                text: "Open"
+                color: accent
+                onTap: open(a.key)
+              }
+            }
+
+            // Quota metric bar and labels
+            Column {
+              gap: 4
+              if a.quota_known {
+                Row {
+                  fill: width
+                  Text { text: "Available Quota"; style: small; color: muted; weight: 1 }
+                  Text { text: "${a.avail_pct}% available"; bold: true; color: a.avail_pct > 50 ? accent : (a.avail_pct > 20 ? yellow : red) }
+                }
+                Progress {
+                  value: a.avail_pct
+                  max: 100
+                  height: 6
+                  fill: width
+                  color: a.avail_pct > 50 ? accent : (a.avail_pct > 20 ? yellow : red)
+                  track: alpha(border, 0.3)
+                }
+                Row {
+                  fill: width
+                  Text { text: a.quota_desc; style: small; color: muted; weight: 1 }
+                  Text { text: "${a.left} / ${a.cap} ${a.unit}"; style: small; color: foreground }
+                }
+              } else if a.usage_available {
+                Row {
+                  fill: width
+                  Text { text: "Tracked locally"; style: small; color: muted; weight: 1 }
+                  Text { text: "${a.used} requests this month"; style: small; color: foreground }
+                }
+                Text { text: a.quota_desc; style: small; color: muted }
+              } else {
+                Text { text: a.quota_desc; style: small; color: muted }
+              }
+            }
+          }
+        }
+      }
+
+      // Settings footer button
+      Button {
+        text: "Manage Coding Agents in Launcher"
+        color: muted
+        fill: width
+        onTap: launcher("agents")
+      }
+    }
+  }
+}
