@@ -1,4 +1,10 @@
-# Omagara v1.9.3
+# Omagara v1.9.4
+
+## v1.9.4 changes
+
+- **Bluetooth battery:** Show the connected Bluetooth audio device name and battery percentage together when the device reports a level. Tap **Allow Bluetooth battery access** to grant permission when needed. No extra polling or packages.
+- **Audio shortcuts:** Remove the redundant expanded shortcut heading and use audio shortcut labels in settings. Existing selected apps and saved preferences are preserved.
+- **Compatibility:** Uses OWL 25 (available in Omalauncher v1.10.0); the alphabet and scrolling behavior are unchanged.
 
 ## v1.9.3 changes
 
@@ -10,7 +16,7 @@
 
 
 
-Niagara-inspired OWL 21 home face for [Omalauncher](https://github.com/SimonSchubert/omalauncher). No additional packages required.
+Niagara-inspired OWL 25 home face for [Omalauncher](https://github.com/SimonSchubert/omalauncher). No additional packages required.
 
 ## Features
 
@@ -19,7 +25,7 @@ Niagara-inspired OWL 21 home face for [Omalauncher](https://github.com/SimonSchu
 - **Notifications:** Grouped cards, optional per-app hiding (Omagara only) and alert compression, optional timestamps, swipe feedback, expandable actions/replies, and native scrolling with the rest of the home page.
 - **Appearance:** Clock, date and event alignment with the notification column (or screen center), automatic centering when the home alphabet is hidden, adjustable text/shade colors, opacity, and corners.
 - **Settings:** Home, Clock, Apps, Alphabet, Notifications, Appearance, Holidays, and Backup; 12/24-hour time, icons, fonts, and Reduce Motion.
-- **Media:** Optional native playback and connected-device preview, compact by default. Home editing offers a separate **Expand/Compact** toggle and smaller **↕ Art size** handle with Reset. Dragging adjusts compact album artwork from 32 to 52dp without changing modes; expanded mode retains its larger artwork, song details, and Bluetooth output information. Pinned apps and notifications reflow below. The existing music-app shortcuts chevron remains independent of preview size and play/pause.
+- **Media:** Optional native playback and connected-device preview, compact by default. Home editing offers a separate **Expand/Compact** toggle and smaller **↕ Art size** handle with Reset. Dragging adjusts compact album artwork from 32 to 52dp without changing modes; expanded mode retains its larger artwork, song details, and Bluetooth output information. Pinned apps and notifications reflow below. The audio shortcuts chevron remains independent of preview size and play/pause. Bluetooth outputs show the device name and battery percentage on one line when available.
 - **Utilities:** Calculator in Search, calendar, next alarm, timer, stopwatch, and world clocks.
 
 Slide onto the cog below the last alphabet letter (with haptic feedback) to navigate to the bottom settings menu. Select Omagara settings or Omalauncher settings there. On **Home**, hold Search to enter edit mode; holding Search while browsing the alphabet still opens Omagara settings.
@@ -70,7 +76,7 @@ No new permissions or packages required.
 
 - Hide apps from the alphabetical worm while keeping them accessible in normal Search. Sort apps within letters by recent launcher usage.
 - Adjust notification start height automatically or manually. Hide selected apps' notifications only in Omagara, or compress repetitive alerts. Hidden notifications remain in Android's shade and are unaffected by Omagara Clear all.
-- Keep a compact media player with two-line song titles, fixed play/pause control and simple chevrons by default. Home settings can independently expand the media/Bluetooth card, and a temporary smaller Home editing handle adjusts artwork size without changing the selected compact/expanded mode. Expand music-app shortcuts manually using their existing chevron when external audio is connected.
+- Keep a compact media player with two-line song titles, fixed play/pause control and simple chevrons by default. Home settings can independently expand the media/Bluetooth card, and a temporary smaller Home editing handle adjusts artwork size without changing the selected compact/expanded mode. Expand audio shortcuts manually using their existing chevron when external audio is connected.
 - Align the clock, date and event with the media/notification column by default, or choose screen center. Hiding the home alphabet centers the content automatically.
 - Keep left/right alphabet input independently configurable. Identify duplicate app names by icon, package ID and profile in settings.
 - Preserve older settings backups and the existing notification gestures, holidays and Reduce Motion support.

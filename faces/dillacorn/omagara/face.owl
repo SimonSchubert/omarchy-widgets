@@ -1,5 +1,5 @@
 face "Omagara" {
-  meta { owl: 25; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.9.3"; license: "MIT"; category: "home" }
+  meta { owl: 25; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.9.4"; license: "MIT"; category: "home" }
   // Omalauncher OWL time animations are capped at 60 FPS, regardless of display Hz.
   // Keep the highest supported rate; reduce work rather than reducing responsiveness.
   fps: 60
