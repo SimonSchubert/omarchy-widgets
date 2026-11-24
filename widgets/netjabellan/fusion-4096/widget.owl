@@ -2,9 +2,9 @@ widget "Fusión 4096" {
   size: 4x4
   minSize: 4x4
   meta {
-    owl: 18
+    owl: 21
     description: "Merge matching tiles and reach 4096."
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "games"
   }
@@ -18,8 +18,23 @@ widget "Fusión 4096" {
       no: "No"
       noMoves: "No moves"
       goal: "Goal reached!"
+      record: "BEST"
+      celebration: "4096 REACHED!"
       undo: "Undo"
       restart: "Restart"
+      settings: "Settings"
+      gestures: "Swipe controls"
+      animations: "Animations"
+      sounds: "Sounds"
+      theme: "Theme"
+      enabled: "On"
+      disabled: "Off"
+      classic: "Classic"
+      forest: "Forest"
+      sunset: "Sunset"
+      paper: "Paper"
+      polar: "Polar"
+      lavender: "Lavender"
     }
     es {
       heading: "FUSIÓN 4096"
@@ -28,23 +43,79 @@ widget "Fusión 4096" {
       no: "No"
       noMoves: "Sin jugadas"
       goal: "¡Meta lograda!"
+      record: "RÉCORD"
+      celebration: "¡ALCANZASTE 4096!"
       undo: "Deshacer"
       restart: "Reiniciar"
+      settings: "Ajustes"
+      gestures: "Gestos"
+      animations: "Animaciones"
+      sounds: "Sonidos"
+      theme: "Tema"
+      enabled: "Sí"
+      disabled: "No"
+      classic: "Clásico"
+      forest: "Bosque"
+      sunset: "Atardecer"
+      paper: "Papel"
+      polar: "Polar"
+      lavender: "Lavanda"
     }
   }
 
-  background: #121020
+  background: palette.base
   padding: 10
 
   let pixel = "https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/PressStart2P-Regular.ttf"
-  let gold = #ffdb76
-  let mint = #91f7da
-  let dim = #9387aa
+  state settingsOpen = false
+  state gesturesEnabled = true persist
+  state swipeX = 0
+  state swipeY = 0
+  state animationsEnabled = true persist
+  state soundsEnabled = true persist
+  state themeChoice = 0 persist
+
+  let themes = [
+    {base: #121020, control: #2c2249, edge: #8064bd, accent: #91f7da, title: #ffdb76, dim: #9387aa, line: #d3b4ff,
+      tiles: [#211a33, #304d85, #206c71, #3c5ca1, #674f96, #913d75, #a74562, #a34e42, #8a632e, #746526, #46713f, #287e74]},
+    {base: #101d19, control: #213c30, edge: #63967a, accent: #b0efbf, title: #e9dd9b, dim: #9aac9e, line: #bbebc7,
+      tiles: [#1c3029, #315a4b, #3f6952, #416536, #616c34, #847231, #8d5b39, #865349, #714963, #555779, #32697d, #287e74]},
+    {base: #241621, control: #48263b, edge: #b96f8b, accent: #ffb2c8, title: #ffd58d, dim: #c6a1b1, line: #ffc1c9,
+      tiles: [#382333, #623f66, #75456c, #874668, #9b495e, #a64c4b, #9c572f, #936225, #826c2e, #6a713d, #496e58, #3a746e]},
+    {base: #f1e7cf, control: #e1cba1, edge: #8d6847, accent: #493522, title: #6d3027, dim: #665647, line: #694527, ink: #34241a,
+      tiles: [#e5d8bb, #f6e3a3, #efc680, #e9ad6f, #de9b76, #e59388, #d3a596, #d6b889, #b9b78a, #a9bf9c, #a9bfd0, #bfb1d3]},
+    {base: #e4f5fa, control: #c3e3ed, edge: #527b94, accent: #143d5e, title: #203371, dim: #465f71, line: #345f81, ink: #102d46,
+      tiles: [#d3eaf2, #c4edf3, #ace3f1, #9ed6ef, #9ec9ef, #a7bcea, #b9b6ed, #ccc3f0, #aabedb, #92cbc8, #9bd9c6, #b6e6d2]},
+    {base: #f2e8f7, control: #e6d1ed, edge: #886598, accent: #472856, title: #692859, dim: #68526e, line: #70457d, ink: #382040,
+      tiles: [#e9dcf0, #f2e4ad, #d8b7ed, #ade0da, #efa6bb, #aec8f4, #efba89, #b6d593, #d9a9d5, #9fd7ef, #dbbd90, #a5c0b0]}
+  ]
+  let palette = themes[themeChoice] ?? themes[0]
   let cells = range(16)
   state tiles = range(16).map(i => i == 5 || i == 10 ? 2 : 0) persist
   state score = 0 persist
+  state bestScore = 0 persist
+  state goalCelebrated = false persist
+  state celebrationTime = 0
+  let celebrationDuration = 1.6
   state previous = null
   state reset = false
+  state motion = null
+  state elapsed = 0
+  state audioWait = 0
+
+  let slideDuration = 0.13
+  let popDuration = 0.16
+  // One shared cooldown keeps rapid taps from restarting or overlapping clips.
+  let audioInterval = 0.30
+  every frame {
+    if score > bestScore { bestScore = score }
+    if celebrationTime > 0 { celebrationTime = max(0, celebrationTime - dt) }
+    if audioWait > 0 { audioWait = max(0, audioWait - dt) }
+    if motion != null {
+      elapsed = elapsed + dt
+      if elapsed >= (motion.slides ? slideDuration : 0) + popDuration { motion = null }
+    }
+  }
 
   // Read each line from the edge toward which the player is moving.
   let orders = [
@@ -53,34 +124,59 @@ widget "Fusión 4096" {
     cells.map(i => 4 * (i % 4) + floor(i / 4)),
     cells.map(i => 4 * (3 - i % 4) + floor(i / 4))
   ]
-  let stuck = !contains(tiles, 0) && !any(cells, i => (i % 4 < 3 && tiles[i] == tiles[i + 1]) || (i < 12 && tiles[i] == tiles[i + 4]))
-  let colors = [#211a33, #304d85, #206c71, #3c5ca1, #674f96, #913d75, #a74562, #a34e42, #8a632e, #746526, #46713f, #287e74]
+  let neighbors = flatten(cells.map(i => flatten([
+    i % 4 < 3 ? [{a: i, b: i + 1}] : [],
+    i < 12 ? [{a: i, b: i + 4}] : []
+  ])))
+  let stuck = !contains(tiles, 0) && !any(neighbors, pair => tiles[pair.a] == tiles[pair.b])
+  let colors = palette.tiles
+
+  let groupedTurns = orders.map(order => chunk(order, 4).map(line =>
+    reduce(line.filter(i => tiles[i] > 0), (row, i) =>
+      !row.locked && last(row.groups).value == tiles[i]
+        ? {groups: set(row.groups, -1, {value: tiles[i] * 2, from: [last(row.groups).from[0], i]}), locked: true}
+        : {groups: flatten([row.groups, [{value: tiles[i], from: [i]}]]), locked: false},
+      {groups: [], locked: false}).groups))
+  let packedTurns = groupedTurns.map(lines => flatten(lines.map(row => range(4).map(i => row[i] ?? null))))
+  let turns = range(4).map(d => cells.map(i => packedTurns[d][indexOf(orders[d], i)]))
 
   component Arrow(glyph, dir) {
     Box {
       weight: 1
       height: 30
       align: center
-      background: #2c2249
+      background: palette.control
       border: 1
-      borderColor: #8064bd
+      borderColor: palette.edge
       radius: 0
-      Text { text: glyph; color: mint; font: pixel; fontSize: 13; align: center; fill: width }
+      Text { text: glyph; color: palette.accent; font: pixel; fontSize: 13; align: center; fill: width }
       onTap: {
-        let order = orders[dir]
-        let lines = chunk(order.map(i => tiles[i]), 4)
-        let result = lines.map(line => reduce(line.filter(tile => tile > 0), (row, tile) =>
-          !row.locked && last(row.values) == tile
-            ? {values: set(row.values, -1, tile * 2), locked: true, points: row.points + tile * 2}
-            : {values: flatten([row.values, [tile]]), locked: false, points: row.points},
-          {values: [], locked: false, points: 0}))
-        let packed = flatten(result.map(row => range(4).map(i => row.values[i] ?? 0)))
-        let shifted = cells.map(i => packed[indexOf(order, i)])
-        if any(cells, i => shifted[i] != tiles[i]) {
+        let direction = dir
+        let groups = turns[direction]
+        let shifted = groups.map(group => group.value ?? 0)
+        let moved = any(cells, i => shifted[i] != tiles[i])
+        let merged = cells.filter(i => len(groups[i].from ?? []) == 2)
+        if moved {
           let gaps = cells.filter(i => shifted[i] == 0)
+          let spawn = gaps[random(len(gaps))]
           previous = {tiles: tiles, score: score}
-          tiles = set(shifted, gaps[random(len(gaps))], random(10) == 0 ? 4 : 2)
-          score = score + sum(result.map(row => row.points))
+          if animationsEnabled {
+            let moves = flatten(cells.map(i => (groups[i].from ?? []).map(j => {from: j, to: i, value: tiles[j]})))
+            motion = {moves: moves, pops: flatten([merged, [spawn]]), slides: true}
+            elapsed = 0
+          }
+          tiles = set(shifted, spawn, random(10) == 0 ? 4 : 2)
+          let nextScore = score + sum(merged.map(i => shifted[i]))
+          bestScore = max(bestScore, score, nextScore)
+          score = nextScore
+          if !goalCelebrated && any(merged, i => shifted[i] == 4096) {
+            goalCelebrated = true
+            celebrationTime = celebrationDuration
+          }
+        }
+        if soundsEnabled && audioWait <= 0 {
+          audioWait = audioInterval
+          sound(!moved ? "asset:blocked" : len(merged) > 0 ? "asset:settle" : "asset:tap")
         }
       }
     }
@@ -91,77 +187,271 @@ widget "Fusión 4096" {
     Row {
       align: center
       height: 24
-      Text { text: str.heading; font: pixel; fontSize: 9; color: gold; weight: 1; maxLines: 1 }
-      Text { text: fmtNum(score); font: pixel; fontSize: 8; color: mint; maxLines: 1 }
+      Text { text: str.heading; font: pixel; fontSize: 9; color: palette.title; weight: 1; maxLines: 1 }
+      Column {
+        gap: 3
+        align: end
+        Text { text: fmtNum(score); font: pixel; fontSize: 8; color: palette.accent; maxLines: 1 }
+        Text { text: str.record + " " + fmtNum(max(bestScore, score)); font: pixel; fontSize: 6; color: palette.title; maxLines: 1 }
+      }
+      Box {
+        size: 24
+        align: center
+        background: palette.control
+        border: 1
+        borderColor: palette.edge
+        radius: 0
+        onTap: settingsOpen = !settingsOpen
+        Canvas {
+          size: 16
+          sprite([
+            "......##......",
+            "..##..##..##..",
+            ".############.",
+            "..##########..",
+            "..###....###..",
+            "..##......##..",
+            "####......####",
+            "####......####",
+            "..##......##..",
+            "..###....###..",
+            "..##########..",
+            ".############.",
+            "..##..##..##..",
+            "......##......"
+          ], 1, 1, 1, fill: palette.accent)
+        }
+      }
     }
-    Column {
-      weight: 1
-      fill: width
-      gap: 3
-      for row in chunk(tiles, 4) {
+    if settingsOpen {
+      Column {
+        weight: 1
+        fill: width
+        gap: 7
+        padding: 8
+        background: palette.tiles[0]
+        Text { text: str.settings; font: pixel; fontSize: 10; color: palette.title }
         Row {
-          weight: 1
-          fill: width
-          gap: 3
-          for tile in row {
-            let tint = colors[len(range(11).filter(i => tile >= pow(2, i + 1)))]
-            Box {
-              weight: 1
-              fill: height
-              align: center
-              radius: 0
-              background: tint
-              border: 1
-              borderColor: mix(tint, #d3b4ff, tile == 0 ? 0.14 : 0.45)
-              if tile > 0 {
-                Canvas {
-                  fill: true
-                  rect(2, 2, width - 4, 2, fill: alpha(#ffffff, 0.20))
-                  rect(2, 4, 2, height - 7, fill: alpha(#ffffff, 0.12))
-                  rect(2, height - 4, width - 4, 2, fill: alpha(#000000, 0.28))
+          align: center
+          Text { text: str.animations; weight: 1; color: palette.accent }
+          Button {
+            text: animationsEnabled ? str.enabled : str.disabled
+            onTap: {
+              animationsEnabled = !animationsEnabled
+              motion = null
+            }
+          }
+        }
+        Row {
+          align: center
+          Text { text: str.sounds; weight: 1; color: palette.accent }
+          Button {
+            text: soundsEnabled ? str.enabled : str.disabled
+            onTap: {
+              soundsEnabled = !soundsEnabled
+              if soundsEnabled && audioWait <= 0 {
+                audioWait = audioInterval
+                sound("asset:tap")
+              }
+            }
+          }
+        }
+        Row {
+          align: center
+          Text { text: str.gestures; weight: 1; color: palette.accent }
+          Button {
+            text: gesturesEnabled ? str.enabled : str.disabled
+            onTap: {
+              gesturesEnabled = !gesturesEnabled
+              swipeX = 0
+              swipeY = 0
+            }
+          }
+        }
+        Text { text: str.theme; color: palette.accent }
+        for options in chunk(range(len(themes)), 3) {
+          Row {
+            fill: width
+            for option in options {
+              Box {
+                weight: 1
+                height: 29
+                align: center
+                radius: 0
+                background: themes[option].control
+                border: themeChoice == option ? 2 : 1
+                borderColor: themeChoice == option ? themes[option].accent : themes[option].edge
+                onTap: themeChoice = option
+                Text {
+                  text: [str.classic, str.forest, str.sunset, str.paper, str.polar, str.lavender][option]
+                  color: themes[option].title
+                  fontSize: 11
+                  fill: width
+                  align: center
+                  maxLines: 1
                 }
-                Text { text: str(tile); color: #fff4d9; fill: width; align: center; font: pixel; fontSize: tile >= 1000 ? 8 : 11; maxLines: 1 }
               }
             }
           }
         }
       }
-    }
-    if reset {
-      Row {
-        align: center
-        Text { text: str.confirmReset; font: pixel; fontSize: 7; color: gold; weight: 1 }
-        Button {
-          text: str.yes
-          onTap: {
-            let picks = shuffle(cells)
-            tiles = cells.map(i => i == picks[0] || i == picks[1] ? 2 : 0)
-            previous = null
-            score = 0
-            reset = false
+    } else {
+      Box {
+        weight: 1
+        fill: width
+        Canvas {
+          fill: true
+          let tileWidth = (width - 9) / 4
+          let tileHeight = (height - 9) / 4
+          let stepX = tileWidth + 3
+          let stepY = tileHeight + 3
+          let sliding = motion != null && motion.slides && elapsed < slideDuration
+          let progress = 1 - pow(1 - min(1, elapsed / slideDuration), 3)
+          let pop = min(1, max(0, (elapsed - (motion.slides ? slideDuration : 0)) / popDuration))
+          let pieces = sliding ? motion.moves : cells.filter(i => tiles[i] > 0).map(i => {from: i, to: i, value: tiles[i]})
+          for i in cells {
+            rect(i % 4 * stepX, floor(i / 4) * stepY, tileWidth, tileHeight,
+              fill: colors[0], stroke: mix(colors[0], palette.line, 0.14), width: 1)
+          }
+          for piece in pieces {
+            let tile = piece.value
+            let x = (piece.from % 4 + (piece.to % 4 - piece.from % 4) * progress) * stepX
+            let y = (floor(piece.from / 4) + (floor(piece.to / 4) - floor(piece.from / 4)) * progress) * stepY
+            let tint = colors[len(range(11).filter(i => tile >= pow(2, i + 1)))]
+            let bump = !sliding && motion != null && contains(motion.pops, piece.to) ? 1 - 0.24 * (1 - pop) + 0.50 * pop * (1 - pop) : 1
+            scale(bump, bump, x + tileWidth / 2, y + tileHeight / 2) {
+              rect(x, y, tileWidth, tileHeight, fill: tint, stroke: mix(tint, palette.line, 0.45), width: 1)
+              rect(x + 2, y + 2, tileWidth - 4, 2, fill: alpha(#ffffff, 0.20))
+              rect(x + 2, y + 4, 2, tileHeight - 7, fill: alpha(#ffffff, 0.12))
+              rect(x + 2, y + tileHeight - 4, tileWidth - 4, 2, fill: alpha(#000000, 0.28))
+              text(str(tile), x + tileWidth / 2, y + tileHeight / 2,
+                size: tile >= 1000 ? 8 : 11, align: center, font: pixel, color: palette.ink ?? #fff4d9)
+            }
           }
         }
-        Button { text: str.no; onTap: reset = false }
-      }
-    } else {
-      Row {
-        align: center
-        Text { text: stuck ? str.noMoves : max(tiles) >= 4096 ? str.goal : str.undo; font: pixel; fontSize: 7; weight: 1; color: previous == null ? dim : mint; onTap: {
-          if previous != null {
-            tiles = previous.tiles
-            score = previous.score
-            previous = null
+        if celebrationTime > 0 {
+          Box {
+            fill: true
+            align: center
+            if animationsEnabled {
+              Canvas {
+                fill: true
+                let progress = 1 - celebrationTime / celebrationDuration
+                let confetti = [palette.title, palette.accent, palette.edge, palette.line]
+                for i in range(24) {
+                  let spread = 0.4 + (i % 5) * 0.15
+                  let angle = i * 0.262
+                  let px = width / 2 + cos(angle) * width * 0.43 * progress * spread
+                  let py = height / 2 + sin(angle) * height * 0.43 * progress * spread
+                  rotate(i * 19 + progress * 180, px, py) {
+                    rect(px - 2, py - 3, 4, 6, fill: alpha(confetti[i % 4], min(1, 3 * (1 - progress))))
+                  }
+                }
+              }
+            }
+            Box {
+              padding: [12, 8]
+              background: palette.control
+              border: 2
+              borderColor: palette.title
+              radius: 0
+              Text { text: str.celebration; font: pixel; fontSize: 8; color: palette.title; fill: width; align: center; maxLines: 1 }
+            }
           }
-        } }
-        Text { text: str.restart; font: pixel; fontSize: 7; color: gold; onTap: reset = true }
+        }
+        if gesturesEnabled {
+          Box {
+            fill: true
+            onDrag: {
+              swipeX = swipeX + dx
+              swipeY = swipeY + dy
+            }
+            onDragEnd: {
+              let horizontal = abs(swipeX) >= abs(swipeY)
+              let distance = horizontal ? swipeX : swipeY
+              let direction = horizontal ? (distance < 0 ? 0 : 1) : (distance < 0 ? 2 : 3)
+              swipeX = 0
+              swipeY = 0
+              if abs(distance) >= 18 {
+                let groups = turns[direction]
+                let shifted = groups.map(group => group.value ?? 0)
+                let moved = any(cells, i => shifted[i] != tiles[i])
+                let merged = cells.filter(i => len(groups[i].from ?? []) == 2)
+                if moved {
+                  let gaps = cells.filter(i => shifted[i] == 0)
+                  let spawn = gaps[random(len(gaps))]
+                  previous = {tiles: tiles, score: score}
+                  if animationsEnabled {
+                    let moves = flatten(cells.map(i => (groups[i].from ?? []).map(j => {from: j, to: i, value: tiles[j]})))
+                    motion = {moves: moves, pops: flatten([merged, [spawn]]), slides: true}
+                    elapsed = 0
+                  }
+                  tiles = set(shifted, spawn, random(10) == 0 ? 4 : 2)
+                  let nextScore = score + sum(merged.map(i => shifted[i]))
+                  bestScore = max(bestScore, score, nextScore)
+                  score = nextScore
+                  if !goalCelebrated && any(merged, i => shifted[i] == 4096) {
+                    goalCelebrated = true
+                    celebrationTime = celebrationDuration
+                  }
+                }
+                if soundsEnabled && audioWait <= 0 {
+                  audioWait = audioInterval
+                  sound(!moved ? "asset:blocked" : len(merged) > 0 ? "asset:settle" : "asset:tap")
+                }
+              }
+            }
+          }
+        }
       }
-    }
-    Row {
-      gap: 3
-      Arrow { glyph: "←"; dir: 0 }
-      Arrow { glyph: "↑"; dir: 2 }
-      Arrow { glyph: "↓"; dir: 3 }
-      Arrow { glyph: "→"; dir: 1 }
+      if reset {
+        Row {
+          align: center
+          Text { text: str.confirmReset; font: pixel; fontSize: 7; color: palette.title; weight: 1 }
+          Button {
+            text: str.yes
+            onTap: {
+              let picks = shuffle(cells)
+              tiles = cells.map(i => i == picks[0] || i == picks[1] ? 2 : 0)
+              motion = animationsEnabled ? {pops: [picks[0], picks[1]], slides: false} : null
+              elapsed = 0
+              previous = null
+              bestScore = max(bestScore, score)
+              celebrationTime = 0
+              score = 0
+              reset = false
+            }
+          }
+          Button { text: str.no; onTap: reset = false }
+        }
+      } else {
+        Row {
+          align: center
+          Text { text: stuck ? str.noMoves : max(tiles) >= 4096 ? str.goal : str.undo; font: pixel; fontSize: 7; weight: 1; color: previous == null ? palette.dim : palette.accent; onTap: {
+            if previous != null {
+              motion = null
+              celebrationTime = 0
+              tiles = previous.tiles
+              score = previous.score
+              previous = null
+            }
+          } }
+          Text { text: str.restart; font: pixel; fontSize: 7; color: palette.title; onTap: reset = true }
+        }
+      }
+      if !gesturesEnabled {
+        Row {
+          gap: 3
+          Arrow { glyph: "←"; dir: 0 }
+          Arrow { glyph: "↑"; dir: 2 }
+          Arrow { glyph: "↓"; dir: 3 }
+          Arrow { glyph: "→"; dir: 1 }
+        }
+      }
     }
   }
+
+  asset tap = base64"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HAAaABkAGQAYABQAEwAPAA0ACgAIAAcABgACAAIA/v/9//z/+v/3//P/8//w/+7/7v/t/+7/8P/u/+3/7//u/+//8P/x//D/8P/y//T/9//3//f/+P/5//v//f/+////AwAFAAcABwAKAAwADQANAA0ADwAQABAAEAAQABIAEAAPAA4ADQAOAAsACgAJAAcABQAEAAEAAQD///3//f/7//n/+P/2//f/9v/2//T/8//y//H/8v/y//L/8//1//X/9v/2//b/+P/5//r/+//8//z//f///wAAAQACAAMAAwAEAAQABgAHAAgACQAIAAkACQAJAAgACAAIAAgABwAHAAYABgAGAAUABAADAAIAAQAAAP////////7//v/9//z//P/8//v/+//7//r/+v/7//v/+//6//r/+//7//v//P/8//z//f/9//7//v///wAAAAABAAEAAQABAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAQABAAEAAQABAAAAAAAAAAAA/////////////////////////////////////////////////////////////wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  asset settle = base64"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LwAyADUAOQA7AD4AQABCAEQARQBGAEYARgBGAEYARQBEAEIAQAA+ADwAOQA2ADMAMAAsACgAJQAhAB0AGQAVABEADAAIAAQAAAD8//j/9P/w/+z/6P/l/+H/3v/b/9j/1v/T/9H/z//N/8z/yv/J/8j/x//H/8b/x//H/8f/yP/J/8r/y//N/8//0f/T/9X/1//a/93/4P/j/+b/6v/t//D/9P/4//v///8DAAYACgAOABEAFAAYABsAHgAhACQAJgApACsALQAvADEAMgA0ADUANgA2ADcANwA2ADYANQA0ADMAMgAwAC4ALAAqACcAJAAhAB4AGwAYABUAEQAOAAoABwADAP//+//4//T/8f/u/+r/5//k/+H/3//c/9r/2P/W/9T/0//S/9H/0P/P/8//z//P/8//0P/R/9L/0//V/9b/2P/a/9z/3v/h/+P/5v/o/+v/7v/w//P/9v/5//z///8CAAUACAAKAA0AEAASABQAFwAZABsAHQAfACEAIgAkACUAJgAnACgAKAAoACkAKQApACkAKAAoACcAJgAlACQAIgAhAB8AHQAcABkAFwAVABMAEQAOAAwACQAHAAQAAQD///z/+v/3//T/8v/v/+3/6//p/+b/5f/j/+H/4P/e/93/3P/b/9r/2v/a/9r/2v/a/9r/2//b/9z/3f/f/+D/4v/j/+X/5//p/+v/7v/w//L/9f/3//n//P/+/wEAAwAFAAgACgAMAA4AEAASABMAFQAXABgAGQAaABsAHAAdAB0AHgAeAB4AHgAeAB4AHQAdABwAGwAaABkAGAAXABYAFAATABEAEAAOAA0ACwAJAAgABgAFAAMAAQAAAP7//P/7//r/+P/3//b/9P/z//L/8f/w/+//7//u/+7/7f/t/+3/7P/s/+z/7P/s/+3/7f/t/+7/7v/v//D/8P/x//L/8//0//X/9v/3//j/+f/6//v//P/9//7///8AAAEAAgADAAQABQAGAAcACAAIAAkACQAKAAoACwALAAsADAAMAAwADAAMAAwACwALAAsACwAKAAoACgAJAAkACAAIAAcABgAGAAUABQAEAAMAAwACAAIAAQAAAAAA//////7//v/+//3//f/9//z//P/8//z//P/7//v/+//7//v/+//7//v/+//7//z//P/8//z//P/8//3//f/9//3//f/+//7//v/+/////////////////wAAAAAAAAAAAAAAAAAAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  asset blocked = base64"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3//e/93/3f/b/9r/2P/V/9T/1P/T/9L/0P/O/87/zv/M/8z/zP/N/83/zP/O/83/zf/O/9D/0f/S/9P/1f/W/9j/2P/Y/9v/3f/e/+D/4f/k/+X/5//p/+r/6//u//D/8v/z//b/+f/8////AQACAAQABgAHAAkACwANAA8AEQASABMAFAAVABYAGAAZABoAGwAdAB4AHwAfAB8AIQAhACEAIgAjACQAJAAkACUAJQAlACUAJAAkACMAIwAjACMAIgAhACEAIAAfAB4AHQAcABsAGgAZABgAFwAWABQAEwASABAADgANAAwACgAIAAYABAADAAEA///+//3/+//5//f/9//1//P/8v/x//D/7//t/+3/7P/q/+n/6f/n/+b/5v/l/+X/5P/j/+P/4//i/+P/4//j/+P/4//j/+P/4//k/+X/5f/m/+f/5//n/+f/6P/p/+r/6//s/+3/7//w//H/8v/z//T/9f/3//j/+f/7//3//v///wAAAQADAAQABAAGAAcACAAJAAoACwALAAwADgAOAA8AEAARABIAEgATABMAFAAVABUAFgAWABYAFgAWABUAFQAVABYAFQAVABUAFQAVABUAFAATABMAEgARABAAEAAPAA8ADgAOAA0ADQAMAAsACgAJAAgABwAGAAUABAADAAIAAgABAAAA//////7//f/9//z//P/7//r/+v/5//n/+P/3//f/9v/2//X/9f/1//T/9P/0//P/8//z//P/8//z//P/8//z//P/8//0//T/9P/0//T/9P/1//X/9f/2//b/9v/2//f/9//3//j/+f/5//n/+v/6//v//P/8//3//f/9//7//v//////AAAAAAAAAQABAAEAAgACAAIAAwADAAMABAAEAAQABQAFAAUABQAFAAUABQAFAAUABQAGAAYABgAGAAYABgAGAAYABgAFAAUABQAFAAUABQAFAAUABAAEAAQABAAEAAQAAwADAAMAAwADAAMAAgACAAIAAgACAAEAAQABAAEAAQABAAAAAAAAAAAAAAAAAAAA////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 }
