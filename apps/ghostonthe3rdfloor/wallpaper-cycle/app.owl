@@ -5,7 +5,7 @@ app "wallpaper cycle" {
   // Android won't let an app set the system wallpaper silently; the live-wallpaper route is the supported way.
   // The detached Linux loop keeps cycling after you leave the app; the JSON config keeps each theme's own settings.
 
-  meta { description: "Auto-cycle theme wallpapers: hours-based interval, per-theme order, add or exclude images"; version: "2.2"; license: "MIT"; category: "system"; owl: 11 }
+  meta { description: "Auto-cycle theme wallpapers: hours-based interval, per-theme order, thumbnails, add or exclude images"; version: "2.2"; license: "MIT"; category: "system"; owl: 13 }
   title: "wallpaper cycle"
   icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
     <rect width="256" height="256" rx="56" fill="#1A1B26"/>
@@ -18,9 +18,10 @@ app "wallpaper cycle" {
   requires { pacman: ["bash", "coreutils", "findutils", "gawk", "grep", "sed", "jq", "util-linux"] }
 
   // The script writes six status lines (name, count, position, enabled, interval seconds, theme) and a JSON list
-  // of every candidate with its included/excluded state. file() sources update as soon as the files change.
+  // of every candidate with its path, included/excluded state and order. file() sources update as soon as the files change.
   source status = file("~/.cache/omalauncher/wallpaper-cycle.status")
   source wallpapers = file("~/.cache/omalauncher/wallpaper-cycle.list") json
+  source curTheme = cmd("sed -n 's/^theme[[:space:]]*=[[:space:]]\"\\(.*\\)\"/\\1/p' \"$HOME/.config/omalauncher/style/style.toml\" 2>/dev/null | tail -n 1") every 10s
   let sl = lines(status)
   let shown = sl[0] ?? ""
   let total = int(sl[1] ?? "0") ?? 0
@@ -30,12 +31,34 @@ app "wallpaper cycle" {
   let theme = sl[5] ?? ""
   let intervalText = interval >= 3600 ? "${fixed(interval / 3600, 2)} h" : "${round(interval / 60, 0)} min"
 
+  // A local order lets a button press swap two thumbnails before the saved list catches up.
+  let shownNames = orderPreview == null ? (wallpapers ?? []).map(w => w.name) : orderPreview
+  let shownItems = shownNames.map(nm => find(wallpapers ?? [], w => w.name == nm) ?? {name: nm, src: "", included: false})
+
   state installed = 0
   state hoursInput = ""
+  state showNames = false persist
+  // Taps change the dot at once; the list file confirms the saved value a moment later.
+  state pending = {}
+  state orderPreview = null
+  state lastTheme = ""
+  on wallpapers {
+    pending = {}
+    if orderPreview != null {
+      let names = (wallpapers ?? []).map(w => w.name)
+      if join(names, "|") == join(orderPreview, "|") { orderPreview = null }
+    }
+  }
   // Show the switch change immediately, then let the status file confirm it.
   state uiOn = null
   let shownOn = uiOn == null ? enabled : uiOn
   on status { uiOn = null }
+  on curTheme {
+    if curTheme != lastTheme {
+      lastTheme = curTheme
+      run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh status')
+    }
+  }
 
   // Writes the helper once; it owns ~/.cache/omalauncher/wallpaper-cycle.json and .list.
   let install = """
@@ -176,15 +199,29 @@ read_light() {
   CFG_ORDER=("${parts[@]:2}")
 }
 
+# The UI list follows the saved order first, so the order buttons have something to reorder.
+# Excluded files come after it; their position in this list is not a cycle position.
 write_list() {
   {
+    local sep="" t=${TNAME:-$(theme_name)} f d src on
+    emit() {
+      [ -n "$1" ] || return 0
+      f=$1
+      src=""
+      for d in "$HOME/.config/omarchy/backgrounds/$t" "$HOME/.config/omarchy/themes/$t/backgrounds" "$HOME/.local/share/omarchy/themes/$t/backgrounds"; do
+        [ -f "$d/$f" ] && { src="$d/$f"; break; }
+      done
+      [ -n "$src" ] || return 0
+      if in_array "$f" "${CFG_EXCLUDE[@]}"; then on=false; else on=true; fi
+      printf '%s{"name":"%s","src":"%s","included":%s}' "$sep" "$(json_quote "$f")" "$(json_quote "$src")" "$on"
+      sep=","
+    }
     printf '['
-    sep=""
+    for f in "${CFG_ORDER[@]}"; do emit "$f"; done
     while IFS= read -r f; do
       [ -n "$f" ] || continue
-      if in_array "$f" "${CFG_EXCLUDE[@]}"; then on=false; else on=true; fi
-      printf '%s{"name":"%s","included":%s}' "$sep" "$(json_quote "$f")" "$on"
-      sep=","
+      in_array "$f" "${CFG_ORDER[@]}" && continue
+      emit "$f"
     done <<< "$FOUND_LIST"
     printf ']\n'
   } > "$list.tmp" && mv "$list.tmp" "$list"
@@ -238,6 +275,24 @@ move_item() {
   write_status
 }
 
+# Move any item to any position, for the order buttons in the app.
+reorder_item() {
+  local from=$1 to=$2 n=${#CFG_ORDER[@]} item
+  local -a before after
+  [ "$from" -ge 0 ] && [ "$from" -lt "$n" ] || { write_status; return 0; }
+  [ "$to" -ge 0 ] && [ "$to" -lt "$n" ] || { write_status; return 0; }
+  [ "$from" -eq "$to" ] && { write_status; return 0; }
+  item=${CFG_ORDER[$from]}
+  unset 'CFG_ORDER[$from]'
+  CFG_ORDER=("${CFG_ORDER[@]}")
+  before=("${CFG_ORDER[@]:0:$to}")
+  after=("${CFG_ORDER[@]:$to}")
+  CFG_ORDER=("${before[@]}" "$item" "${after[@]}")
+  arr=$(printf '%s\n' "${CFG_ORDER[@]}" | json_array)
+  jq --arg t "$TNAME" --argjson arr "$arr" '.themes[$t].order = $arr' "$cfg" > "$dir/.wc-cfg.tmp" && mv "$dir/.wc-cfg.tmp" "$cfg"
+  write_status
+}
+
 kill_daemon() {
   [ -f "$pid" ] || return 0
   p=$(cat "$pid" 2>/dev/null)
@@ -281,6 +336,13 @@ case "${1:-status}" in
     sync
     case "${2:-}" in ''|*[!0-9-]*) write_status;; *) move_item "$2";; esac
     ;;
+  reorder)
+    sync
+    case "${2:-}" in
+      ''|*[!0-9]*) write_status;;
+      *) case "${3:-}" in ''|*[!0-9]*) write_status;; *) reorder_item "$2" "$3";; esac;;
+    esac
+    ;;
   next)
     sync
     step
@@ -314,22 +376,17 @@ case "${1:-status}" in
     [ -f "$pid" ] && p=$(cat "$pid" 2>/dev/null) && kill -0 "$p" 2>/dev/null && exit 0
     echo $$ > "$pid"
     trap '[ "$(cat "$pid" 2>/dev/null)" = "$$" ] && rm -f "$pid"; exit 0' TERM INT EXIT
-    # Opening the app restarts the loop, so the first change waits a whole interval.
-    # Settings are checked every 30 s, not every second: start and stop kill the loop themselves.
-    first=1
     while true; do
       sync
       read_light
       [ "$CFG_ENABLED" = 1 ] || break
       t=${TNAME:-$(theme_name)}
-      [ -n "$t" ] || { sleep 30; continue; }
-      [ -n "$first" ] || step
-      first=
+      [ -n "$t" ] || { sleep 1; continue; }
+      step
       waited=0
       while [ "$waited" -lt "$CFG_INTERVAL" ]; do
-        s=$((CFG_INTERVAL - waited < 30 ? CFG_INTERVAL - waited : 30))
-        sleep "$s"
-        waited=$((waited + s))
+        sleep 1
+        waited=$((waited + 1))
         read_light
         [ "$CFG_ENABLED" = 1 ] || break 2
         [ "${TNAME:-}" = "$t" ] || break
@@ -462,58 +519,100 @@ bash "$HOME/.cache/omalauncher/wallpaper-cycle.sh" status
       Row {
         fill: width
         align: center
-        gap: 10
-        Text { text: "Tap a wallpaper to include or exclude it."; style: small; color: muted; weight: 1 }
-        Text { text: "[ add images ]"; style: small; color: accent; onTap: { haptic(); run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh pick') } }
+        gap: 8
+        Text { text: "tap to include · ‹ › to change order"; style: small; color: muted; weight: 1; maxLines: 2 }
+        Text { text: showNames ? "[ hide names ]" : "[ show names ]"; style: small; color: accent; onTap: { haptic(); showNames = !showNames } }
       }
-      Column {
-        gap: 2
-        for w in wallpapers ?? [] key w.name {
-          Row {
-            fill: width
-            gap: 8
-            align: center
-            padding: [8, 10]
-            radius: 8 * corners
-            background: background
-            onTap: { haptic(); if w.included { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh exclude ' + sh(w.name)) } else { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh include ' + sh(w.name)) } }
-            Text { text: w.included ? "●" : "○"; color: w.included ? green : muted; width: 18; align: center }
-            Text { text: w.name; weight: 1; color: w.included ? foreground : muted; maxLines: 1 }
-            Text { text: w.included ? "in" : "out"; style: small; color: w.included ? green : muted }
-          }
-        }
-      }
-    }
-
-    // Order card.
-    Column {
-      fill: width
-      gap: 8
-      padding: 14
-      background: surface
-      radius: 10 * corners
-      Text { text: "order · ${theme}"; style: label; color: accent }
-      Text { text: "Move the current wallpaper earlier or later."; style: small; color: muted }
       Row {
         fill: width
+        align: center
         gap: 8
-        Box {
-          weight: 1
-          height: 40
-          radius: 8 * corners
-          background: background
-          align: center
-          onTap: if position > 1 { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh move -1') }
-          Text { text: "‹ earlier"; style: small; color: position > 1 ? accent : muted }
-        }
-        Box {
-          weight: 1
-          height: 40
-          radius: 8 * corners
-          background: background
-          align: center
-          onTap: if position < total { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh move 1') }
-          Text { text: "later ›"; style: small; color: position < total ? accent : muted }
+        Text { text: "Added images go into this theme's backgrounds folder."; style: small; color: muted; weight: 1; maxLines: 1 }
+        Text { text: "[ add images ]"; style: small; color: accent; onTap: { haptic(); run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh pick') } }
+      }
+      Grid {
+        fill: width
+        columns: 3
+        gap: 6
+        for w, wi in shownItems key w.name {
+          let sel = get(pending, w.name, w.included)
+          Column {
+            height: showNames ? 131 : 112
+            gap: 3
+            padding: 3
+            radius: 8 * corners
+            background: sel ? background : alpha(surface, 0.5)
+            border: 1
+            borderColor: sel ? alpha(accent, 0.5) : muted
+            opacity: sel ? 1 : 0.6
+            Box {
+              fill: width
+              height: 76
+              radius: 6 * corners
+              clip: true
+              onTap: {
+                haptic()
+                pending = set(pending, w.name, !sel)
+                if sel { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh exclude ' + sh(w.name)) }
+                else { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh include ' + sh(w.name)) }
+              }
+              Image { src: w.src; fit: cover; fill: true }
+              if sel {
+                Box {
+                  width: 10
+                  height: 10
+                  radius: 5
+                  background: #00E676
+                  border: 1
+                  borderColor: alpha(#000000, 0.4)
+                  align: topStart
+                  offset: [5, 5]
+                }
+              }
+            }
+            if showNames {
+              Text { text: w.name; style: small; color: sel ? foreground : muted; weight: 1; maxLines: 1; align: center }
+            }
+            Row {
+              fill: width
+              gap: 4
+              visible: sel
+              Box {
+                weight: 1
+                height: 24
+                radius: 5 * corners
+                background: alpha(surface, 0.9)
+                align: center
+                onTap: {
+                  if wi > 0 {
+                    haptic()
+                    let names = orderPreview ?? (wallpapers ?? []).map(x => x.name)
+                    let j = wi - 1
+                    orderPreview = set(set(names, wi, names[j]), j, names[wi])
+                    run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh reorder ' + sh(wi) + ' ' + sh(j))
+                  }
+                }
+                Text { text: "‹ up"; style: small; color: wi > 0 ? accent : muted }
+              }
+              Box {
+                weight: 1
+                height: 24
+                radius: 5 * corners
+                background: alpha(surface, 0.9)
+                align: center
+                onTap: {
+                  if wi < total - 1 {
+                    haptic()
+                    let names = orderPreview ?? (wallpapers ?? []).map(x => x.name)
+                    let j = wi + 1
+                    orderPreview = set(set(names, wi, names[j]), j, names[wi])
+                    run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh reorder ' + sh(wi) + ' ' + sh(j))
+                  }
+                }
+                Text { text: "down ›"; style: small; color: wi < total - 1 ? accent : muted }
+              }
+            }
+          }
         }
       }
     }
