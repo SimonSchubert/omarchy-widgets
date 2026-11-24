@@ -1,0 +1,456 @@
+widget "folder" {
+  meta { owl: 24; description: "Folder of Android apps: pages with their own titles and picks, theme-tinted icons, up to 6 columns, a labels toggle, custom border and corners, and optional duplicate/sync buttons."; version: "1.2.0"; license: "MIT"; category: "productivity" }
+  size: 6x3
+  minSize: 3x2
+
+  requires { pacman: ["coreutils", "grep", "sed"] }
+
+  let folderMain = true
+  let copyN = 0
+  source apps = android.apps every 1m
+  source drawer = android.drawer
+  // page one keeps the old persisted title/picks; pageList becomes the source of truth as soon as anything is edited
+  state title = "apps" persist
+  state picks = [] persist
+  state pages = null persist
+  state cur = 0 persist
+  state names = true persist
+  state themed = true persist
+  state titleSize = 12 persist
+  state iconSize = 64 persist
+  state q = ""
+  state pg = 0
+  state pageMenu = false
+  state scrollY = 0
+  state madeCopy = false
+  state askCopy = false
+  state copyPage = 1 persist
+  state synced = false persist
+  state framed = true persist
+  state colCount = 4 persist
+  state corner = "soft" persist
+
+  let pageList = pages ?? [{title: title, picks: picks}]
+  let page = pageList[cur] ?? {title: "page", picks: []}
+  let curTitle = page.title ?? "apps"
+  let curPicks = page.picks ?? []
+  let all = (apps ?? []).sortBy(a => lower(a.name))
+  let drawApps = drawer.apps ?? []
+  let items = curPicks.map(k => find(all, a => a.key == k)).filter(a => a != null)
+  // the picks still installed: the list buttons edit these, so an uninstalled app drops out
+  let keys = items.map(a => a.key)
+  let rad = corner == "edge" ? 0 : corner == "soft" ? 6 : 12
+  // a narrow tile (the landscape home screen) gets fewer columns, so an icon and its name still fit
+  let nc = min(colCount, max(2, floor(((tileWidth ?? 320) - 16) / 60)))
+  let cw = floor(((tileWidth ?? 320) - 24 - 8 * (nc - 1)) / nc)
+  let iconPx = max(28, min(iconSize, cw - 12))
+  let lines = range(ceil(len(items) / nc)).map(r => items.drop(r * nc).take(nc))
+  let avail = all.filter(a => !any(curPicks, k => k == a.key) && (q == "" || contains(lower(a.name), lower(q))))
+  // Only draw a small window of rows: it renders reliably even when the tile is short.
+  // The window slides a row at a time; a spring on the offset makes the slide smooth.
+  let stride = iconPx + (names ? 16 : 0) + (framed ? 12 : 0) + 10
+  let rowH = stride - 8
+  let contentH = len(lines) * rowH + max(0, len(lines) - 1) * 8
+  let viewH = max(40, (tileHeight ?? 272) - 72)
+  let moreApps = len(lines) > 1
+  let fitRows = max(1, floor(viewH / stride))
+  let gridH = fitRows * rowH + max(0, fitRows - 1) * 8
+  let maxScroll = max(0, (len(lines) - fitRows) * stride)
+  let scrollYc = clamp(scrollY, 0, maxScroll)
+  // firstRow changes only after a whole row has been scrolled; frac is the in-between slide.
+  let firstRow = min(floor(scrollYc / stride), max(0, len(lines) - 1))
+  let frac = min(stride, scrollYc - firstRow * stride)
+  let windowRows = min(len(lines) - firstRow, fitRows + 1)
+  let thumbH = min(gridH - 8, max(24, gridH * gridH / max(1, contentH)))
+  let thumbY = maxScroll > 0 ? (gridH - thumbH) * (scrollYc / maxScroll) : 0
+  on cur { scrollY = 0 }
+  on colCount { scrollY = 0 }
+  on iconSize { scrollY = 0 }
+  on names { scrollY = 0 }
+  on framed { scrollY = 0 }
+
+  Column {
+    gap: 6
+    Row {
+      align: center
+      Box {
+        weight: 1
+        Popup {
+          visible: pageMenu
+          onDismiss: pageMenu = false
+          position: below
+          width: 180
+          gap: 0
+          padding: [4, 2]
+          for p, pi in pageList key pi {
+            Text {
+              text: pi == cur ? "• ${p.title}" : p.title
+              color: pi == cur ? accent : foreground
+              fill: width
+              padding: [8, 10]
+              maxLines: 1
+              onTap: { cur = pi; pageMenu = false }
+            }
+          }
+        }
+        Row {
+          fill: width
+          align: center
+          gap: 4
+          Text { text: curTitle; style: label; fontSize: titleSize; color: foreground; maxLines: 1; onTap: pageMenu = true }
+          Canvas {
+            size: 10
+            onTap: pageMenu = true
+            rotation: pageMenu ? 180 : 0
+            line(2, 4, 5, 7, stroke: accent, width: 1.5, cap: round)
+            line(5, 7, 8, 4, stroke: accent, width: 1.5, cap: round)
+          }
+        }
+      }
+      Text { text: names ? "Aa" : "aa"; style: small; color: names ? accent : muted; padding: [0, 4]; onTap: names = !names }
+      Canvas {
+        size: 18
+        onTap: screen()
+        let k = width / 24
+        scale(k, k, 0, 0) {
+          for i in range(8) {
+            rotate(i * 45, 12, 12) { line(12, 2.5, 12, 5.5, stroke: accent, width: 3, cap: round) }
+          }
+          circle(12, 12, 6.5, stroke: accent, width: 2)
+          circle(12, 12, 2.8, stroke: accent, width: 2)
+        }
+      }
+    }
+    if len(items) == 0 {
+      Text { text: "tap the icon to add apps"; style: muted; onTap: screen() }
+    } else {
+      Box {
+        fill: width
+        weight: 1
+        align: topEnd
+        clip: true
+        Column {
+          fill: width
+          drag: vertical
+          offset: [0, -frac]
+          animate offset: spring(0.8, 400)
+          onDrag: scrollY = clamp(scrollY - dy, 0, maxScroll)
+          onDragEnd: {
+            let flick = abs(vy) > 600 ? (vy < 0 ? 1 : -1) : 0
+            scrollY = clamp(floor(scrollYc / stride + 0.5 + flick) * stride, 0, maxScroll)
+          }
+          gap: 8
+          align: center
+          for r, ri in lines.drop(firstRow).take(windowRows) key ri {
+            Row {
+              height: rowH
+              gap: 8
+              justify: center
+              fill: width
+              for a in r key a.key {
+                Column {
+                  let da = find(drawApps, d => d.key == a.key) ?? {}
+                  let iconSrc = da.icon ?? a.icon
+                  let irad = corner == "edge" ? 0 : corner == "soft" ? floor(iconPx * 0.25) : floor(iconPx / 2)
+                  gap: 2
+                  align: center
+                  width: cw
+                  padding: framed ? 6 : 0
+                  border: framed ? 1 : 0
+                  borderColor: border
+                  radius: rad
+                  onTap: open(a.key)
+                  Box {
+                    size: iconPx
+                    radius: irad
+                    background: iconSrc != null && !themed ? transparent : surface
+                    align: center
+                    if iconSrc != null {
+                      Image { src: iconSrc; size: themed ? max(18, floor(iconPx * 0.7)) : iconPx; tint: themed ? accent : null; label: a.name }
+                    } else {
+                      Text { text: upper(sub(a.name, 0, 1)); fontSize: max(10, floor(iconPx * 0.4)); color: accent }
+                    }
+                  }
+                  if names { Text { text: a.name; style: small; align: center; maxLines: 1 } }
+                }
+              }
+            }
+          }
+        }
+        if moreApps {
+          Box {
+            width: 4
+            height: gridH
+            align: topEnd
+            background: alpha(foreground, 0.18)
+            radius: 2 * corners
+            Box {
+              width: 4
+              height: thumbH
+              offset: [0, thumbY]
+              background: accent
+              radius: 2 * corners
+              opacity: 0.8
+            }
+          }
+        }
+      }
+    }
+    Row {
+      align: center
+      gap: 8
+      Button { text: "‹"; width: 32; visible: cur > 0; onTap: cur = cur - 1 }
+      Text { text: "${cur + 1} / ${len(pageList)}"; style: small; align: center }
+      Button { text: "›"; width: 32; visible: cur < len(pageList) - 1; onTap: cur = cur + 1 }
+    }
+  }
+
+  screen {
+    title: folderMain ? "folder · v1.2.0" : "folder · v1.2.0 (copy)"
+    Box {
+    Column {
+      scroll: true
+      gap: 10
+      padding: 8
+      Text { text: "pages (${len(pageList)})"; fontSize: 16; color: accent }
+      Flow {
+        gap: 8
+        for p, pi in pageList key pi {
+          Text {
+            text: pi == cur ? "[${p.title}]" : p.title
+            color: pi == cur ? accent : foreground
+            padding: [6, 10]
+            border: 1
+            borderColor: pi == cur ? accent : border
+            radius: rad
+            onTap: cur = pi
+          }
+        }
+      }
+      Row {
+        align: center
+        gap: 8
+        Button { text: "+ new page"; weight: 1; onTap: { let n = len(pageList); pages = flatten([pageList, [{title: "page ${n + 1}", picks: []}]]); cur = n } }
+        Button { text: "delete page"; weight: 1; color: red; visible: len(pageList) > 1; onTap: { let n = len(pageList); pages = remove(pageList, cur); cur = min(cur, n - 2) } }
+      }
+      Spacer { height: 4 }
+      Row {
+        align: center
+        Text { text: "title"; width: 110 }
+        Input { text: curTitle; placeholder: "page name"; weight: 1; onChange: pages = set(pageList, cur, merge(page, {title: value})) }
+      }
+      Row {
+        align: center
+        Text { text: "title size (${titleSize})"; weight: 1 }
+        Button { text: "A−"; width: 56; onTap: titleSize = max(8, titleSize - 2) }
+        Button { text: "A+"; width: 56; onTap: titleSize = min(40, titleSize + 2) }
+      }
+      Row {
+        align: center
+        Text { text: "application labels"; weight: 1 }
+        Button { text: names ? "on" : "off"; width: 56; onTap: names = !names }
+      }
+      Row {
+        align: center
+        Text { text: "themed icons"; weight: 1 }
+        Button { text: themed ? "on" : "off"; width: 56; onTap: themed = !themed }
+      }
+      Row {
+        align: center
+        Text { text: "icon size (${iconSize})"; weight: 1 }
+        Button { text: "−"; width: 56; onTap: iconSize = max(36, iconSize - 4) }
+        Button { text: "+"; width: 56; onTap: iconSize = min(80, iconSize + 4) }
+      }
+      Row {
+        align: center
+        Text { text: "icon border"; weight: 1 }
+        Button { text: framed ? "on" : "off"; width: 56; onTap: framed = !framed }
+      }
+      Row {
+        align: center
+        Text { text: "corners"; weight: 1 }
+        Row {
+          gap: 0
+          border: 1
+          borderColor: accent
+          radius: 8 * corners
+          clip: true
+          for c in ["edge", "soft", "round"] {
+            Text { text: "${c}"; width: 64; align: center; padding: [0, 8]; background: corner == c ? accent : alpha(accent, 0); color: corner == c ? background : foreground; onTap: corner = c }
+          }
+        }
+      }
+      Row {
+        align: center
+        Text { text: "columns"; weight: 1 }
+        Row {
+          gap: 0
+          border: 1
+          borderColor: accent
+          radius: 8 * corners
+          clip: true
+          for c in [3, 4, 5, 6] {
+            Text { text: "${c}"; width: 48; align: center; padding: [0, 8]; background: colCount == c ? accent : alpha(accent, 0); color: colCount == c ? background : foreground; onTap: colCount = c }
+          }
+        }
+      }
+      Spacer { height: 12 }
+      Text { text: "in this page (${len(items)})"; fontSize: 16; color: accent }
+      for a, i in items key a.key {
+        Row {
+          let da = find(drawApps, d => d.key == a.key) ?? {}
+          let iconSrc = da.icon ?? a.icon
+          let irad = corner == "edge" ? 0 : corner == "soft" ? floor(32 * corners) : 32
+          align: center
+          gap: 8
+          if themed {
+            Box {
+              size: 32
+              radius: irad
+              background: surface
+              align: center
+              if iconSrc != null {
+                Image { src: iconSrc; size: 22; tint: accent; label: a.name }
+              } else {
+                Text { text: upper(sub(a.name, 0, 1)); fontSize: 12; color: accent }
+              }
+            }
+          } else {
+            if iconSrc != null {
+              Image { src: iconSrc; size: 32; label: a.name }
+            } else {
+              Text { text: upper(sub(a.name, 0, 1)); fontSize: 14; color: accent }
+            }
+          }
+          Text { text: a.name; weight: 1; maxLines: 1 }
+          Button { text: "↑"; width: 40; visible: i > 0; onTap: pages = set(pageList, cur, merge(page, {picks: set(set(keys, i, keys[i - 1]), i - 1, keys[i])})) }
+          Button { text: "↓"; width: 40; visible: i < len(keys) - 1; onTap: pages = set(pageList, cur, merge(page, {picks: set(set(keys, i, keys[i + 1]), i + 1, keys[i])})) }
+          Button { text: "✕"; width: 40; color: red; onTap: pages = set(pageList, cur, merge(page, {picks: remove(keys, i)})) }
+        }
+      }
+      Spacer { height: 12 }
+      Text { text: "add an app"; fontSize: 16; color: accent }
+      Input { text: q; placeholder: "search…"; onChange: { q = value; pg = 0 } }
+      for a in avail.drop(pg * 30).take(30) key a.key {
+        Row {
+          let da = find(drawApps, d => d.key == a.key) ?? {}
+          let iconSrc = da.icon ?? a.icon
+          let irad = corner == "edge" ? 0 : corner == "soft" ? floor(32 * corners) : 32
+          align: center
+          gap: 8
+          onTap: pages = set(pageList, cur, merge(page, {picks: flatten([curPicks, [a.key]])}))
+          if themed {
+            Box {
+              size: 32
+              radius: irad
+              background: surface
+              align: center
+              if iconSrc != null {
+                Image { src: iconSrc; size: 22; tint: accent; label: a.name }
+              } else {
+                Text { text: upper(sub(a.name, 0, 1)); fontSize: 12; color: accent }
+              }
+            }
+          } else {
+            if iconSrc != null {
+              Image { src: iconSrc; size: 32; label: a.name }
+            } else {
+              Text { text: upper(sub(a.name, 0, 1)); fontSize: 14; color: accent }
+            }
+          }
+          Text { text: a.name; weight: 1; maxLines: 1 }
+          Text { text: "+"; width: 20; color: accent }
+        }
+      }
+      Row {
+        align: center
+        gap: 8
+        Button { text: "‹ prev"; width: 80; visible: pg > 0; onTap: pg = pg - 1 }
+        Text { text: "${pg + 1} / ${max(1, ceil(len(avail) / 30))}  (${len(avail)} apps)"; align: center; weight: 1 }
+        Button { text: "next ›"; width: 80; visible: (pg + 1) * 30 < len(avail); onTap: pg = pg + 1 }
+      }
+      Spacer { height: 20 }
+      Row {
+        align: center
+        gap: 8
+        fill: width
+        if !folderMain {
+          Button { text: "sync widget"; weight: 1; onTap: { synced = true; run("n=${int(copyN)}; d=~/.config/omalauncher/widgets; m=$(grep -l '^  let folderMain = true$' $d/*.owl | head -1); case $m in ?*) ;; *) exit 1;; esac; f=$d/$n-folder.owl; pg=$(grep -m1 '^  page:' $f | tr -dc 0-9); { head -1 $f; tail -n +2 $m | sed -e 's/^  order: .*$/  order: '$n'/' -e 's/^  page: .*$/  page: '$pg'/' -e 's/^  let folderMain = true$/  let folderMain = false/' -e 's/^  let copyN = 0$/  let copyN = '$n'/'; } > $f.tmp && mv $f.tmp $f") } }
+        }
+        Button { text: "duplicate widget"; weight: 1; onTap: askCopy = true }
+      }
+    }
+    if askCopy {
+      Box {
+        fill: true
+        align: center
+        background: alpha(background, 0.88)
+        onTap: askCopy = true
+        Column {
+          width: 280
+          gap: 14
+          padding: 20
+          background: surface
+          border: 1
+          borderColor: accent
+          radius: 8 * corners
+          Text { text: "duplicate widget"; fontSize: 16; color: accent }
+          Text { text: "Home page for the new copy:" }
+          Row {
+            align: center
+            gap: 8
+            Button { text: "−"; width: 56; onTap: copyPage = max(1, copyPage - 1) }
+            Text { text: "${copyPage}"; fontSize: 16; align: center; weight: 1 }
+            Button { text: "+"; width: 56; onTap: copyPage = min(9, copyPage + 1) }
+          }
+          Row {
+            gap: 8
+            Button { text: "cancel"; weight: 1; onTap: askCopy = false }
+            Button { text: "create"; weight: 1; onTap: { askCopy = false; run("p=${int(copyPage)}; d=~/.config/omalauncher/widgets; m=$(grep -l '^  let folderMain = true$' $d/*.owl | head -1); case $m in ?*) ;; *) exit 1;; esac; for n in $(seq 31 99); do f=$d/$n-folder.owl; [ -e $f ] || break; done; sed -e 's/^  order: .*$/  order: '$n'/' -e 's/^  page: .*$/  page: '$p'/' -e 's/^  let folderMain = true$/  let folderMain = false/' -e 's/^  let copyN = 0$/  let copyN = '$n'/' $m > $f.tmp && mv $f.tmp $f"); madeCopy = true } }
+          }
+        }
+      }
+    }
+    if madeCopy {
+      Box {
+        fill: true
+        align: center
+        background: alpha(background, 0.88)
+        onTap: madeCopy = true
+        Column {
+          width: 280
+          gap: 14
+          padding: 20
+          background: surface
+          border: 1
+          borderColor: accent
+          radius: 8 * corners
+          Text { text: "copy created"; fontSize: 16; color: accent }
+          Text { text: "A copy of this widget was added to your home screen." }
+          Button { text: "close"; fill: width; onTap: { madeCopy = false; close() } }
+        }
+      }
+    }
+    if synced {
+      Box {
+        fill: true
+        align: center
+        background: alpha(background, 0.88)
+        onTap: synced = true
+        Column {
+          width: 280
+          gap: 14
+          padding: 20
+          background: surface
+          border: 1
+          borderColor: accent
+          radius: 8 * corners
+          Text { text: "synced"; fontSize: 16; color: accent }
+          Text { text: "This widget was updated from the main one." }
+          Button { text: "close"; fill: width; onTap: synced = false }
+        }
+      }
+    }
+    }
+  }
+}
