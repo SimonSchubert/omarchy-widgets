@@ -1,0 +1,88 @@
+widget "heavy" {
+  meta { owl: 16; description: "Системная нагрузка: занятая RAM и три самых прожорливых процесса, завершение по двойному нажатию"; version: "1.0"; license: "MIT"; category: "system" }
+  requires { pacman: ["procps-ng"] }
+
+  strings {
+    en { clear: "ALL CLEAR" }
+    ru { clear: "ВСЁ ЧИСТО" }
+  }
+  size: 2x2
+  minSize: 2x2
+
+  source top = cmd('ps -eo pid=,rss=,comm= --sort=-rss | awk "\$2 > 40000" | head -3') every 5s
+  source mem = cmd("free -b | awk '/Mem:/ {print $2, $3}'") every 5s
+  state armed = null
+
+  let press = "https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/PressStart2P-Regular.ttf"
+  let used = num(words(mem)[1])
+  let total = num(words(mem)[0])
+  let load = total ? used / total : 0
+  let procs = lines(top).map(l => { pid: words(l)[0], mem: num(words(l)[1]) * 1024, name: upper(words(l)[2]) })
+  let hot = load > 0.85 ? red : (load > 0.6 ? yellow : green)
+
+  // Полоска из 10 пиксельных делений, как шкала здоровья в игре.
+  component Bar(frac = 0, tint = green) {
+    Row {
+      gap: 2
+      for i in range(10) key i {
+        Box { weight: 1; height: 4; radius: 0; background: i < round(frac * 10) ? tint : color0 }
+      }
+    }
+  }
+
+  Column {
+    gap: 4
+    Row {
+      gap: 4
+      Text { text: "RAM"; font: press; fontSize: 6; color: hot }
+      Box { weight: 1; Bar { frac: load; tint: hot } }
+      Text { text: "${fmtBytes(used)}"; font: press; fontSize: 6; color: muted }
+    }
+    for p in procs key p.pid {
+      Row {
+        gap: 5
+        Box {
+          weight: 1
+          height: 30
+          padding: 4
+          radius: 0
+          border: 2
+          borderColor: armed == p.pid ? red : color0
+          background: surface
+          Column {
+            gap: 3
+            Row {
+              Text { text: p.name; font: press; fontSize: 6; maxLines: 1; weight: 1 }
+              Text { text: fmtBytes(p.mem); font: press; fontSize: 6; color: yellow; width: 30; align: end }
+            }
+            Bar { frac: total ? p.mem / total * 3 : 0; tint: p.mem / total > 0.2 ? red : accent }
+          }
+        }
+        Box {
+          width: 30
+          height: 30
+          radius: 0
+          border: 2
+          borderColor: foreground
+          background: armed == p.pid ? yellow : red
+          onTap: {
+            if armed == p.pid {
+              run("kill ${int(p.pid)}")
+              armed = null
+            } else {
+              armed = p.pid
+            }
+          }
+          Column {
+            Spacer { weight: 1 }
+            Text { text: armed == p.pid ? "OK?" : "X"; font: press; fontSize: armed == p.pid ? 6 : 9; align: center; color: color0 }
+            Spacer { weight: 1 }
+          }
+        }
+      }
+    }
+    if procs.length == 0 {
+      Text { text: str.clear; font: press; fontSize: 7; color: green; align: center }
+    }
+  }
+}
