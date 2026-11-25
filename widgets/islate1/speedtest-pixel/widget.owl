@@ -3,12 +3,13 @@ widget "speedtest-pixel" {
   size: 2x2
   minSize: 2x2
   padding: 0
-  fps: modes.saver ? 8 : 15
+  // Full rate only while a test runs; an idle tile redraws a few times a second
+  fps: running ? 15 : (modes.saver ? 1 : 4)
 
   meta {
     owl: 19
     description: "Pixel-art 2x2 internet speed test (Fast.com and Cloudflare): tap to run, live download, upload, ping, history. Based on nicomaure/speedtest."
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "system"
   }
