@@ -1,0 +1,146 @@
+app "ollama" {
+  meta { owl: 15; description: "Run local Ollama models: start the server, chat, pull or import GGUF models and tune generation settings"; version: "1.0"; license: "MIT"; category: "dev" }
+  // curl checks the real server; setsid keeps it alive past the action timeout; zenity is the Linux file chooser
+  requires { pacman: ["ollama", "jq", "procps-ng", "gawk", "curl", "coreutils", "util-linux", "sed", "zenity"] }
+  title: "ollama"
+  icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+    <rect width="256" height="256" rx="56" fill="#1A1B26"/>
+    <ellipse cx="130" cy="208" rx="66" ry="16" fill="#0E1018" fill-opacity="0.65"/>
+    <path d="M86 196c-4-32 4-60 20-80h48c16 20 24 48 20 80z" fill="#A87A50"/>
+    <path d="M76 90L68 42c-1-8 8-12 13-6l27 30z" fill="#D8AC78"/>
+    <path d="M180 90l8-48c1-8-8-12-13-6l-27 30z" fill="#C99A6A"/>
+    <path d="M84 80l-4-26 20 22z" fill="#906046"/>
+    <path d="M172 80l4-26-20 22z" fill="#80543D"/>
+    <path d="M78 82c0-27 22-45 50-45s50 18 50 45c0 32-21 55-50 55s-50-23-50-55z" fill="#E4BB8A"/>
+    <path d="M128 37c28 0 50 18 50 45 0 32-21 55-50 55z" fill="#C99A6A"/>
+    <ellipse cx="128" cy="125" rx="31" ry="22" fill="#F2D6AE"/>
+    <path d="M118 115q10-6 20 0q-2 12-10 14q-8-2-10-14z" fill="#6B4A3A"/>
+    <circle cx="106" cy="94" r="6" fill="#2A2028"/>
+    <circle cx="150" cy="94" r="6" fill="#2A2028"/>
+    <circle cx="108" cy="92" r="2" fill="#F2D6AE"/>
+    <circle cx="152" cy="92" r="2" fill="#F2D6AE"/>
+  </svg>"""
+
+  state pullName = ""
+  state importName = ""
+  state ctxSize = 4096
+  state temperature = 0.7
+  state numPredict = -1
+
+  source server = cmd("curl -fsS --max-time 2 http://127.0.0.1:11434/api/version >/dev/null && echo running || echo stopped") every 5s
+  source loaded = cmd("ollama ps | tail -n +2 | awk '{print $1}' | sort -u | jq -R . | jq -s .") every 5s json
+  source models = cmd("""
+ollama list | tail -n +2 | awk '
+BEGIN { s = "[" }
+{
+  if (s != "[") s = s ","
+  s = s sprintf("{\"name\":\"%s\",\"size\":\"%s %s\"}", $1, $3, $4)
+}
+END { print s "]" }
+'""") every 10s json
+
+  Column {
+    scroll: true
+    padding: [12, 0]
+    gap: 16
+
+    Text { text: "ollama"; style: huge; bold: true }
+    Text { text: "run models locally"; style: muted }
+
+    Box {
+      radius: 12 * corners
+      background: surface
+      padding: 16
+      Column { gap: 12
+        Text { text: "server"; style: title }
+        if server == "running" {
+          Row { gap: 8; align: center
+            Text { text: "running"; color: accent }
+            Spacer { weight: 1 }
+            Button { text: "stop"; onTap: run("pkill -f '(^|/)ollama serve$'") }
+          }
+        } else {
+          Row { gap: 8; align: center
+            Text { text: "stopped"; color: red }
+            Spacer { weight: 1 }
+            Button { text: "start"; onTap: run("nohup setsid ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &") }
+          }
+        }
+      }
+    }
+
+    Text { text: "models"; style: title; color: muted }
+    Column {
+      gap: 8
+      for m in models ?? [] key m.name {
+        Box {
+          radius: 10 * corners
+          background: surface
+          padding: 14
+          Column { gap: 10
+            Row { gap: 8; align: center
+              Text { text: m.name; weight: 1 }
+              Text { text: m.size; color: muted; style: small }
+            }
+            Row { gap: 8
+              Button { text: "chat"; onTap: terminal("ollama run ${sh(m.name)}", "ollama ${m.name}") }
+              Button { text: "rm"; color: red; onTap: run("ollama rm ${sh(m.name)}") }
+              if loaded != null && loaded.any(x => x == m.name) {
+                Button { text: "unload"; color: orange; onTap: run("ollama stop ${sh(m.name)}") }
+              }
+            }
+          }
+        }
+      }
+      if len(models ?? []) == 0 {
+        Text { text: "no models yet"; color: muted; style: small }
+      }
+    }
+
+    Text { text: "pull a model"; style: title; color: muted }
+    Row { gap: 8
+      Input { placeholder: "model name"; text: pullName; onSubmit: pullName = value; weight: 1 }
+      Button { text: "pull"; onTap: terminal("ollama pull ${sh(pullName)}", "pull ${pullName}") }
+    }
+
+    Text { text: "settings"; style: title; color: muted }
+    Box {
+      radius: 12 * corners
+      background: surface
+      padding: 16
+      Column { gap: 12
+        Row { gap: 8; align: center
+          Text { text: "context"; width: 110; color: muted }
+          Slider { value: ctxSize; min: 512; max: 131072; step: 512; onChange: ctxSize = value; weight: 1 }
+          Text { text: "${int(ctxSize)}"; width: 60 }
+        }
+        Row { gap: 8; align: center
+          Text { text: "temperature"; width: 110; color: muted }
+          Slider { value: temperature * 100; min: 0; max: 200; step: 5; onChange: temperature = value / 100; weight: 1 }
+          Text { text: "${fixed(temperature, 2)}"; width: 60 }
+        }
+        Row { gap: 8; align: center
+          Text { text: "max tokens"; width: 110; color: muted }
+          Slider { value: numPredict == -1 ? 0 : numPredict; min: 0; max: 4096; step: 64; onChange: numPredict = value == 0 ? -1 : value; weight: 1 }
+          Text { text: numPredict == -1 ? "unlimited" : "${int(numPredict)}"; width: 80 }
+        }
+      }
+    }
+
+    Text { text: "add from file"; style: title; color: muted }
+    Row { gap: 8
+      Input { placeholder: "model name"; text: importName; onSubmit: importName = value; weight: 1 }
+    }
+    Row { gap: 8
+      Button { text: "pick from phone"; onTap: terminal("omalauncher pick | jq -r '.[]' | while IFS= read -r f; do b=$(basename \"$f\" | sed 's/\\.gguf$//'); ollama rm \"$b\" 2>/dev/null; echo \"FROM $f\" > /tmp/Modelfile; ollama create \"$b\" -f /tmp/Modelfile; done", "create model") }
+      Button { text: "pick from proot"; onTap: terminal("""
+f=$(zenity --file-selection --title='Choose a GGUF model' --file-filter='GGUF models | *.gguf') &&
+[ -n "$f" ] &&
+b=$(basename "$f" .gguf) &&
+{ ollama rm "$b" 2>/dev/null || true; } &&
+echo "FROM $f" > /tmp/Modelfile &&
+ollama create "$b" -f /tmp/Modelfile
+""", "create model") }
+    }
+  }
+}
