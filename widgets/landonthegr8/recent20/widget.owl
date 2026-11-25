@@ -15,7 +15,7 @@ widget "recent20" {
   // Still and untouched, the ball needs no frames: nothing moves, nothing redraws, and it costs no battery.
   fps: resting && len(fingers) == 0 ? 4 : 60
 
-  meta { description: "Recent apps on a faceted ball you roll with your finger, tapping the facet turned toward you to open that app"; version: "1.0"; license: "MIT"; category: "system"; owl: 24 }
+  meta { description: "Recent apps on a faceted ball you roll with your finger, tapping the facet turned toward you to open that app"; version: "1.1"; license: "MIT"; category: "system"; owl: 24 }
   // This widget runs no shell commands, so it needs no packages: requires { pacman: [...] } would be empty.
 
   // The long-press menu's entries, by appAction's words, in the phone's language where it has a set.
@@ -76,7 +76,6 @@ widget "recent20" {
                 [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
                 [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]]
   let ball = mesh(iv, ifaces)
-  let quad = plane(1)
   // The way each facet faces: the middle of its three corners, one unit out.
   let dirs = map(ifaces, f => norm([iv[f[0]][0] + iv[f[1]][0] + iv[f[2]][0],
                                     iv[f[0]][1] + iv[f[1]][1] + iv[f[2]][1],
@@ -205,23 +204,14 @@ widget "recent20" {
             menuShortcuts = shortcuts(frontApp.key)
           }
         }
-        // Black and white only, whatever icon pack is on and whatever theme the launcher wears: the apps are drawn as
-        // their silhouettes, white on the facet turned toward you and grey on the rest. The colors are written out
-        // rather than taken from the theme, so a theme change never puts a color back on the ball.
-        scene(cam, light: [0.3, 0.9, 0.55], ambient: 0.3) {
-          // The body, shaded facet by facet so every edge of the solid shows.
-          model(ball, turn: [pitch, yaw, 0], color: #e2e2e2, smooth: false)
-          for i in range(0, n) {
-            let rd = fnorm[i]
-            let a = apps[i]
-            // Lay the silhouette flat on its facet: tip it out to where the facet faces.
-            let tip = deg(acos(clamp(rd[1], -1, 1)))
-            let spin = deg(atan2(rd[0], rd[2]))
-            // ambient: 1 leaves the silhouette unlit, so it stays the exact grey it's given on every facet.
-            model(quad, at: [rd[0] * rr, rd[1] * rr, rd[2] * rr],
-                  turn: [tip, spin, 0], scale: i == front ? 0.42 : 0.355, ambient: 1,
-                  color: i == front ? #ffffff : alpha(#ffffff, 0.45), image: "mask:${a.key}")
-          }
+        // Black and white only, whatever icon pack is on and whatever theme the launcher wears: a dark solid with
+        // the apps standing out on it as pale silhouettes. The launcher hands an app's mask over as a white
+        // silhouette and a model's `color` doesn't tint its `image`, so the body is the dark one: white on dark
+        // reads at a glance, where the same silhouette on a pale body all but disappears. The colors are written
+        // out rather than taken from the theme, so a theme change never puts a color back on the ball.
+        scene(cam, light: [0.3, 0.9, 0.55], ambient: 0.44) {
+          // The body, shaded facet by facet so every edge of the solid shows. The apps go on over it, in 2D.
+          model(ball, turn: [pitch, yaw, 0], color: #2e2e2e, smooth: false)
         }
         // Definition without color: every facet you can see gets its three edges stroked, so the solid reads as cut
         // planes rather than a smooth shaded lump. `project` puts each corner on the canvas and the triangle is
@@ -234,7 +224,23 @@ widget "recent20" {
             let q1 = project(rv[ifaces[i][1]], cam, width, height)
             let q2 = project(rv[ifaces[i][2]], cam, width, height)
             if q0 != null && q1 != null && q2 != null {
-              path([[q0.x, q0.y], [q1.x, q1.y], [q2.x, q2.y]], closed: true, stroke: alpha(#ffffff, 0.42), width: 1)
+              path([[q0.x, q0.y], [q1.x, q1.y], [q2.x, q2.y]], closed: true, stroke: alpha(#ffffff, 0.5), width: 1)
+            }
+          }
+        }
+        // The apps themselves, drawn over the solid rather than laid on it as textures. As a texture an app's mask
+        // comes out near-black whatever the model's `color` is, which on a dark solid is a shape you can't see; in
+        // 2D, `image`'s `color` paints it, so each one goes at the middle of its own facet, white on the facet
+        // turned toward you and grey on the rest, and sized by how squarely that facet faces you. Only the facets
+        // turned well toward you get one: at the edge of the solid an icon would hang off the outline.
+        for i in range(0, n) {
+          if fnorm[i][2] > 0.52 {
+            let rd = fnorm[i]
+            let c = project([rd[0] * rr, rd[1] * rr, rd[2] * rr], cam, width, height)
+            if c != null {
+              let iw = width * (0.05 + 0.155 * fnorm[i][2])
+              image("mask:${apps[i].key}", c.x - iw / 2, c.y - iw / 2, iw, iw,
+                    color: i == front ? #ffffff : #c4c4c4)
             }
           }
         }
@@ -262,7 +268,7 @@ widget "recent20" {
             let gy = (p0.y + p1.y + p2.y) / 3
             let raw = deg(atan2(ey, ex))
             rotate(raw > 90 ? raw - 180 : (raw < -90 ? raw + 180 : raw), mx + (gx - mx) * 0.20, my + (gy - my) * 0.20) {
-              text(frontApp.name, mx + (gx - mx) * 0.20, my + (gy - my) * 0.20, size: max(7, round(size * 0.041)), align: center, color: #141414)
+              text(frontApp.name, mx + (gx - mx) * 0.20, my + (gy - my) * 0.20, size: max(9, round(size * 0.05)), align: center, color: #f7f7f7)
             }
           }
         }
