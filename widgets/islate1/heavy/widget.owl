@@ -1,5 +1,5 @@
 widget "heavy" {
-  meta { owl: 16; description: "Системная нагрузка: занятая RAM и три самых прожорливых процесса, завершение по двойному нажатию"; version: "1.0"; license: "MIT"; category: "system" }
+  meta { owl: 16; description: "System load tile: RAM usage and the three most memory-hungry processes, each with a tap-twice kill button"; version: "1.0"; license: "MIT"; category: "system" }
   requires { pacman: ["procps-ng"] }
 
   strings {
@@ -9,15 +9,16 @@ widget "heavy" {
   size: 2x2
   minSize: 2x2
 
-  source top = cmd('ps -eo pid=,rss=,comm= --sort=-rss | awk "\$2 > 40000" | head -3') every 5s
-  source mem = cmd("free -b | awk '/Mem:/ {print $2, $3}'") every 5s
+  // Skips the launcher (dev.omalauncher), proot and this widget's own shell and tools, so they can't be killed from here
+  source top = cmd("""ps -eo pid=,rss=,comm= --sort=-rss | awk '$2 > 40000 && $3 !~ /^(libproot.so|proot|bash|sh|ps|awk|head)$/ && $3 !~ /^dev.omalauncher/' | head -3""") every 30s
+  source mem = cmd("free -b | awk '/Mem:/ {print $2, $3}'") every 1m
   state armed = null
 
   let press = "https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/PressStart2P-Regular.ttf"
   let used = num(words(mem)[1])
   let total = num(words(mem)[0])
   let load = total ? used / total : 0
-  let procs = lines(top).map(l => { pid: words(l)[0], mem: num(words(l)[1]) * 1024, name: upper(words(l)[2]) })
+  let procs = lines(top).map(l => { pid: words(l)[0], mem: num(words(l)[1]) * 1024, raw: words(l)[2], name: upper(words(l)[2]) })
   let hot = load > 0.85 ? red : (load > 0.6 ? yellow : green)
 
   // Полоска из 10 пиксельных делений, как шкала здоровья в игре.
@@ -67,7 +68,7 @@ widget "heavy" {
           background: armed == p.pid ? yellow : red
           onTap: {
             if armed == p.pid {
-              run("kill ${int(p.pid)}")
+              run("p=${int(p.pid)}; [ \"$(cat /proc/$p/comm 2>/dev/null)\" = ${sh(p.raw)} ] && kill $p")
               armed = null
             } else {
               armed = p.pid
