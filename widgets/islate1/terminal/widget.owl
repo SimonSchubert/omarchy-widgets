@@ -1,0 +1,98 @@
+widget "terminal" {
+  size: 2x2
+  minSize: 2x2
+  padding: 0
+  fps: 20
+
+  meta { owl: 21; description: "Терминал в стиле 8-бит: CRT-сканлайны, подсказки команд"; version: "1.0"; license: "MIT"; category: "dev" }
+
+  strings {
+    en { d0: "files"; d1: "up"; d2: "where am I"; d3: "read"; d4: "edit"; d5: "search"; d6: "package"; d7: "processes"; d8: "disk"; d9: "clear"; d10: "stop"; d11: "history" }
+    ru { d0: "файлы"; d1: "вверх"; d2: "где я"; d3: "читать"; d4: "править"; d5: "поиск"; d6: "пакет"; d7: "процессы"; d8: "диск"; d9: "очистить"; d10: "стоп"; d11: "история" }
+  }
+
+  // Пиксельный шрифт (есть кириллица). Подсказки меняются каждые 4 секунды.
+  let press = "https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/PressStart2P-Regular.ttf"
+
+  state tip = 0
+  every 4s { tip = (tip + 1) % 12 }
+
+  let cmds = [
+    {c: "ls -la", d: str.d0},
+    {c: "cd ..", d: str.d1},
+    {c: "pwd", d: str.d2},
+    {c: "cat f", d: str.d3},
+    {c: "nano f", d: str.d4},
+    {c: "grep -r", d: str.d5},
+    {c: "pacman -S", d: str.d6},
+    {c: "htop", d: str.d7},
+    {c: "df -h", d: str.d8},
+    {c: "clear", d: str.d9},
+    {c: "Ctrl+C", d: str.d10},
+    {c: "history", d: str.d11}
+  ]
+  let cur = cmds[tip]
+  let nxt = cmds[(tip + 1) % 12]
+
+  Box {
+    background: color0
+
+    // CRT: зелёное свечение, сканлайны, бродящая светлая полоса, виньетка и мерцание.
+    // Терминал прозрачен там, где у программы нет своего фона, поэтому эффект виден сквозь него.
+    Shader {
+      fill: true
+      fallback: surface
+      uniforms: { glow: green, dark: color0 }
+      code: """
+        uniform half4 glow;
+        uniform half4 dark;
+        half4 main(float2 p) {
+          float2 uv = p / size;
+          // горизонтальные сканлайны по 4 px
+          float line = 0.5 + 0.5 * sin(p.y / 4.0 * 3.14159);
+          float scan = mix(0.55, 1.0, line);
+          // широкая полоса ходит вверх-вниз
+          float pos = 0.5 + 0.5 * sin(time * 0.45);
+          float band = exp(-pow((uv.y - pos) * 9.0, 2.0));
+          // вторая, узкая и быстрая
+          float pos2 = 0.5 + 0.5 * sin(time * 1.3 + 2.0);
+          float band2 = exp(-pow((uv.y - pos2) * 40.0, 2.0));
+          float flick = 0.97 + 0.03 * sin(time * 53.0);
+          float vx = uv.x * (1.0 - uv.x) * 4.0;
+          float vy = uv.y * (1.0 - uv.y) * 4.0;
+          float vig = clamp(pow(vx * vy, 0.35), 0.0, 1.0);
+          float k = (0.10 + 0.22 * band + 0.18 * band2) * scan * flick * vig;
+          half3 c = mix(dark.rgb, glow.rgb, k);
+          return half4(c, 1.0);
+        }
+      """
+    }
+
+    Column {
+      gap: 0
+      fill: true
+
+      // Верхняя панель: подсказка и следующая за ней
+      Box {
+        fill: width
+        height: 22
+        padding: [0, 6]
+        background: alpha(color0, 0.85)
+        border: 1
+        borderColor: alpha(green, 0.6)
+        radius: 0
+        align: center
+        Row {
+          gap: 6
+          align: center
+          Text { text: "▶"; font: press; fontSize: 8; color: yellow }
+          Text { text: cur.c; font: press; fontSize: 8; color: green; maxLines: 1 }
+          Text { text: cur.d; font: press; fontSize: 7; color: foreground; maxLines: 1; weight: 1 }
+          Text { text: "${tip + 1}/12"; font: press; fontSize: 6; color: muted; maxLines: 1 }
+        }
+      }
+
+      Terminal { weight: 1; fontSize: 7 }
+    }
+  }
+}
