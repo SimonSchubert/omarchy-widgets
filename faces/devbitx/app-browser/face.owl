@@ -1,0 +1,491 @@
+face "app browser" {
+  // The empty page left of home: a clean browser for the phone's apps, with categories and folders.
+  meta { owl: 21; description: "A clean app browser: search, categories by kind, folders that group your apps, and a favorites folder you build by long-pressing an app"; version: "1.0"; license: "MIT"; category: "productivity" }
+  page: 0
+
+  source d = android.drawer
+
+  state category = "all"
+  state folder = ""
+  state q = ""
+  state favorites = [] persist
+  state menu = ""
+  state searching = false
+  state density = "comfortable" persist
+  state railOpen = true persist
+  state pressed = ""
+  state fade = 1
+  state viewKey = ""
+
+  // Only run the frame clock hard while a view is actually fading.
+  fps: fade < 1 ? 60 : 1
+
+  // A face's screenInset is the keyboard's height while a field has it. When it drops back
+  // to the navigation bar, Back or the back gesture has put the keyboard away: close the
+  // field and forget the query, so no focused cursor can raise the keyboard again.
+  on screenInset {
+    if searching && old > 120 && value < 120 {
+      searching = false
+      q = ""
+    }
+  }
+
+  // A quick fade when the folder or category changes, so the grid doesn't snap.
+  when "${folder}|${category}" != viewKey {
+    viewKey = "${folder}|${category}"
+    fade = 0.5
+  }
+  every frame {
+    if fade < 1 { fade = min(1, fade + dt * 4) }
+  }
+
+  let all = d.apps ?? []
+  // Tablet layout: a vertical rail on the left, the grid beside it. Unfolded or rotated,
+  // `wide` makes the rail two columns and gives the grid the rest of the width.
+  let wide = (tileWidth ?? 0) > (tileHeight ?? 1)
+  let dense = density == "compact"
+  let iconSize = dense ? 52 : 76
+  let iconRadius = (dense ? 12 : 20) * corners
+  let cellWidth = dense ? 84 : 108
+  let railWidth = searching ? 0 : (railOpen ? (wide ? 200 : 150) : 44)
+  let railGap = searching ? 0 : (wide ? 14 : 10)
+  let contentWidth = max(240, (tileWidth ?? 600) - 36 - railWidth - railGap)
+  let columns = max(2, floor((contentWidth - 12) / cellWidth))
+
+  // Categories come from what the drawer knows about each app: its kind, profile and how recently it opened.
+  let cats = [
+    {id: "all", name: "all"},
+    {id: "recent", name: "recent"},
+    {id: "android", name: "android"},
+    {id: "linux", name: "linux"},
+    {id: "owl", name: "owl"},
+    {id: "shortcuts", name: "shortcuts"},
+    {id: "work", name: "work"}
+  ]
+  let catApps = category == "recent" ? all.filter(a => a.last != null).sortBy(a => -a.last).take(30)
+    : category == "work" ? all.filter(a => a.profile == "work")
+    : category == "shortcuts" ? all.filter(a => a.kind == "shortcut")
+    : category == "all" ? all
+    : all.filter(a => a.kind == category)
+
+  // Folders are views over the same apps. The words match a package or a name; favorites is yours to fill.
+  let folderDefs = [
+    {id: "favorites", name: "favorites", icon: "★", words: []},
+    {id: "work", name: "work", icon: "▣", words: []},
+    {id: "talk", name: "talk", icon: "◉", words: ["dialer", "phone", "message", "messaging", "whatsapp", "telegram", "signal", "gmail", "mail", "chat"]},
+    {id: "media", name: "media", icon: "▷", words: ["camera", "gallery", "photo", "music", "video", "youtube", "spotify", "podcast", "player"]},
+    {id: "tools", name: "tools", icon: "◇", words: ["setting", "file", "clock", "calendar", "calc", "browser", "chrome", "firefox", "terminal", "notes", "maps"]},
+    {id: "linux", name: "linux", icon: "▤", words: [], kind: "linux"},
+    {id: "owl", name: "owl", icon: "◈", words: [], kind: "owl"}
+  ]
+  let folders = folderDefs.map(f => {
+    id: f.id,
+    name: f.name,
+    icon: f.icon,
+    apps: all.filter(a =>
+      (f.id == "favorites" && contains(favorites, a.key)) ||
+      (f.id == "work" && a.profile == "work") ||
+      (f.kind != null && a.kind == f.kind) ||
+      any(f.words, w => contains(lower((a.package ?? "") + " " + (a.name ?? "")), w))
+    )
+  })
+  let picked = folders.find(f => f.id == folder)
+  let base = picked != null ? picked.apps : catApps
+  let found = q == "" ? base : rank(base, q)
+  let label = picked != null ? picked.name : (cats.find(c => c.id == category) ?? cats[0]).name
+
+  // Favorites first, then the most recently opened apps: a strip for one-tap launching.
+  let recent = all.filter(a => a.last != null).sortBy(a => -a.last)
+  let favs = favorites.map(k => all.find(a => a.key == k)).filter(a => a != null)
+  let stripCount = max(3, min(10, floor((contentWidth - 8) / 76)))
+  let strip = (favs + recent.filter(a => !contains(favorites, a.key))).take(stripCount)
+
+  background: linear(0, 0, 0, 1, [alpha(background, 0.9), alpha(background, 0.68), alpha(background, 0.72), alpha(background, 0.92)])
+  padding: 0
+
+  component Cell(a) {
+    Column {
+      gap: 6
+      align: center
+      padding: [6, 8]
+      radius: 16 * corners
+      background: pressed == "app:${a.key}" ? alpha(accent, 0.22) : alpha(surface, 0.36)
+      border: 1
+      borderColor: alpha(accent, 0.12)
+      ripple: false
+      scale: pressed == "app:${a.key}" ? 0.94 : 1
+      animate scale: spring(0.65, 420)
+      animate background: tween(140ms, "out")
+      onPress: pressed = "app:${a.key}"
+      onRelease: pressed = ""
+      onTap: { pressed = ""; open(a.key) }
+      onLongPress: { pressed = ""; haptic(); menu = a.key }
+      Box {
+        size: iconSize
+        radius: iconRadius
+        background: a.hasIcon ? transparent : alpha(surface, 0.7)
+        if a.hasIcon {
+          Image { src: a.icon; size: iconSize; label: a.label }
+        } else {
+          Text { text: a.initials; fontSize: dense ? 16 : 24; bold: true; color: accent }
+        }
+      }
+      Text { text: a.name; style: small; fontSize: dense ? 11 : 12; align: center; maxLines: dense ? 1 : 2; minLines: dense ? 1 : 2; fill: width }
+      Popup {
+        visible: menu == a.key
+        position: above
+        width: 220
+        onDismiss: menu = ""
+        Row {
+          gap: 10
+          align: center
+          padding: [10, 8]
+          if a.hasIcon { Image { src: a.icon; size: 28; label: a.label } }
+          Text { text: a.name; weight: 1; bold: true; maxLines: 1 }
+        }
+        Text {
+          text: contains(favorites, a.key) ? "☆  remove from favorites" : "★  add to favorites"
+          fill: width
+          padding: [10, 12]
+          radius: 10 * corners
+          background: pressed == "fav:${a.key}" ? alpha(accent, 0.3) : transparent
+          ripple: false
+          scale: pressed == "fav:${a.key}" ? 0.97 : 1
+          animate scale: spring(0.7, 480)
+          animate background: tween(140ms, "out")
+          onPress: pressed = "fav:${a.key}"
+          onRelease: pressed = ""
+          onTap: {
+            pressed = ""
+            haptic()
+            favorites = contains(favorites, a.key) ? favorites.filter(k => k != a.key) : favorites + [a.key]
+            menu = ""
+          }
+        }
+        for w in a.actions key w {
+          Text {
+            text: w
+            fill: width
+            padding: [10, 12]
+            radius: 10 * corners
+            background: pressed == "act:${a.key}:${w}" ? alpha(accent, 0.3) : transparent
+            ripple: false
+            scale: pressed == "act:${a.key}:${w}" ? 0.97 : 1
+            animate scale: spring(0.7, 480)
+            animate background: tween(140ms, "out")
+            onPress: pressed = "act:${a.key}:${w}"
+            onRelease: pressed = ""
+            onTap: { pressed = ""; menu = ""; appAction(w, a.key) }
+          }
+        }
+      }
+    }
+  }
+
+  component SearchField() {
+    Input {
+      weight: 1
+      text: q
+      placeholder: "search apps"
+      underline: false
+      clear: true
+      onChange: q = value
+      onSubmit: {
+        if len(found) > 0 { open(found[0].key) }
+        q = ""
+        searching = false
+      }
+      height: 56
+      fontSize: 15
+      padding: [12, 10]
+      background: alpha(surface, 0.5)
+      border: 1
+      borderColor: alpha(accent, 0.18)
+      radius: 18 * corners
+    }
+  }
+
+  component FolderList() {
+    Column {
+      gap: 6
+      Text { text: "folders"; style: label; color: muted; padding: [0, 4] }
+      for f in folders key f.id {
+        Text {
+          text: "${f.icon}  ${f.name}"
+          color: folder == f.id ? background : foreground
+          background: pressed == "f:${f.id}" ? alpha(accent, 0.85) : (folder == f.id ? accent : alpha(surface, 0.5))
+          padding: [12, 10]
+          radius: 14 * corners
+          ripple: false
+          scale: pressed == "f:${f.id}" ? 0.96 : 1
+          animate scale: spring(0.65, 420)
+          animate background: tween(140ms, "out")
+          onPress: pressed = "f:${f.id}"
+          onRelease: pressed = ""
+          onTap: { pressed = ""; folder = folder == f.id ? "" : f.id; category = "all"; q = "" }
+        }
+      }
+    }
+  }
+
+  component CategoryList() {
+    Column {
+      gap: 6
+      Text { text: "category"; style: label; color: muted; padding: [0, 4] }
+      for c in cats key c.id {
+        Text {
+          text: c.name
+          color: category == c.id && folder == "" ? background : muted
+          background: pressed == "c:${c.id}" ? alpha(accent, 0.85) : (category == c.id && folder == "" ? accent : alpha(surface, 0.35))
+          padding: [12, 10]
+          radius: 14 * corners
+          ripple: false
+          scale: pressed == "c:${c.id}" ? 0.96 : 1
+          animate scale: spring(0.65, 420)
+          animate background: tween(140ms, "out")
+          onPress: pressed = "c:${c.id}"
+          onRelease: pressed = ""
+          onTap: { pressed = ""; category = c.id; folder = ""; q = "" }
+        }
+      }
+    }
+  }
+
+  Column {
+    fill: true
+    gap: 0
+    padding: [18, 12]
+
+    Row {
+      gap: railGap
+
+      if !searching {
+        Column {
+          width: railWidth
+          scroll: true
+          gap: 14
+          Text {
+            text: railOpen ? "‹  hide" : "›"
+            color: muted
+            background: pressed == "rail" ? alpha(accent, 0.5) : alpha(surface, 0.45)
+            padding: [12, 10]
+            height: 44
+            radius: 12 * corners
+            align: center
+            ripple: false
+            scale: pressed == "rail" ? 0.95 : 1
+            animate scale: spring(0.65, 420)
+            animate background: tween(140ms, "out")
+            onPress: pressed = "rail"
+            onRelease: pressed = ""
+            onTap: { pressed = ""; railOpen = !railOpen }
+          }
+          if railOpen {
+            if wide {
+              Row {
+                gap: 10
+                Column {
+                  weight: 1
+                  FolderList { }
+                }
+                Column {
+                  weight: 1
+                  CategoryList { }
+                }
+              }
+            } else {
+              FolderList { }
+              CategoryList { }
+            }
+          }
+        }
+      }
+
+      Column {
+        weight: 1
+        gap: 0
+
+        Row {
+          align: center
+          Text { text: "apps"; style: title }
+          Spacer { weight: 1 }
+          Text {
+            text: dense ? "icons: small" : "icons: large"
+            color: muted
+            background: pressed == "density" ? alpha(accent, 0.6) : alpha(surface, 0.5)
+            padding: [10, 12]
+            height: 44
+            radius: 14 * corners
+            ripple: false
+            scale: pressed == "density" ? 0.95 : 1
+            animate scale: spring(0.65, 420)
+            animate background: tween(140ms, "out")
+            onPress: pressed = "density"
+            onRelease: pressed = ""
+            onTap: { pressed = ""; density = dense ? "comfortable" : "compact"; haptic() }
+          }
+          Text { text: "${len(all)} installed"; style: small; color: muted; padding: [0, 8] }
+        }
+
+        Spacer { height: 12 }
+        Row {
+          align: center
+          Text { text: label; style: small; bold: true }
+          Spacer { weight: 1 }
+          Text { text: "${len(found)}"; style: small; color: muted }
+        }
+
+        if q == "" && len(strip) > 0 {
+          Column {
+            opacity: fade
+            gap: 6
+            Text { text: "recent & favorites"; style: label; color: muted; padding: [0, 2] }
+            Row {
+              gap: 8
+              fill: width
+              align: center
+              for a in strip key a.key {
+                Column {
+                  width: 68
+                  gap: 4
+                  align: center
+                  padding: [8, 4]
+                  radius: 14 * corners
+                  background: pressed == "strip:${a.key}" ? alpha(accent, 0.35) : (contains(favorites, a.key) ? alpha(accent, 0.16) : alpha(surface, 0.45))
+                  border: 1
+                  borderColor: contains(favorites, a.key) ? alpha(accent, 0.5) : alpha(accent, 0.1)
+                  ripple: false
+                  scale: pressed == "strip:${a.key}" ? 0.94 : 1
+                  animate scale: spring(0.65, 420)
+                  animate background: tween(140ms, "out")
+                  onPress: pressed = "strip:${a.key}"
+                  onRelease: pressed = ""
+                  onTap: { pressed = ""; open(a.key) }
+                  Box {
+                    size: dense ? 34 : 40
+                    radius: 10 * corners
+                    background: a.hasIcon ? transparent : alpha(surface, 0.7)
+                    if a.hasIcon {
+                      Image { src: a.icon; size: dense ? 34 : 40; label: a.label }
+                    } else {
+                      Text { text: a.initials; fontSize: dense ? 12 : 15; bold: true; color: accent }
+                    }
+                  }
+                  Text { text: a.name; style: small; fontSize: 10; align: center; maxLines: 1; fill: width }
+                }
+              }
+            }
+          }
+          Spacer { height: 12 }
+        }
+
+        if len(found) == 0 {
+          Column {
+            opacity: fade
+            weight: 1
+            align: center
+            justify: center
+            gap: 12
+            Text { text: "nothing here"; style: title; color: muted }
+            Text {
+              text: q != "" ? "no app matches '${q}'" : (folder == "favorites" ? "long press an app to add it" : "try another folder or category")
+              style: small
+              color: muted
+              align: center
+            }
+            if q != "" {
+              Text {
+                text: "clear search"
+                color: background
+                background: pressed == "clear" ? alpha(accent, 0.75) : accent
+                padding: [12, 18]
+                radius: 16 * corners
+                ripple: false
+                scale: pressed == "clear" ? 0.95 : 1
+                animate scale: spring(0.65, 420)
+                animate background: tween(140ms, "out")
+                onPress: pressed = "clear"
+                onRelease: pressed = ""
+                onTap: { pressed = ""; q = "" }
+              }
+            }
+            Text {
+              text: "show all apps"
+              color: foreground
+              background: pressed == "all" ? alpha(accent, 0.5) : alpha(surface, 0.5)
+              padding: [12, 18]
+              radius: 16 * corners
+              ripple: false
+              scale: pressed == "all" ? 0.95 : 1
+              animate scale: spring(0.65, 420)
+              animate background: tween(140ms, "out")
+              onPress: pressed = "all"
+              onRelease: pressed = ""
+              onTap: { pressed = ""; q = ""; folder = ""; category = "all" }
+            }
+          }
+        } else {
+          Grid {
+            opacity: fade
+            columns: columns
+            gap: 6
+            lazy: true
+            weight: 1
+            fill: width
+            onPull: refresh()
+            for a in found key a.key { Cell { a: a } }
+          }
+        }
+
+        Spacer { height: 10 }
+        if searching {
+          Row {
+            gap: 8
+            align: center
+            SearchField { }
+            Text {
+              text: "done"
+              color: muted
+              background: pressed == "done" ? alpha(accent, 0.6) : alpha(surface, 0.5)
+              height: 56
+              fontSize: 15
+              padding: [12, 10]
+              radius: 14 * corners
+              ripple: false
+              scale: pressed == "done" ? 0.95 : 1
+              animate scale: spring(0.65, 420)
+              animate background: tween(140ms, "out")
+              onPress: pressed = "done"
+              onRelease: pressed = ""
+              onTap: { pressed = ""; searching = false; q = "" }
+            }
+          }
+        } else {
+          Text {
+            text: "⌕  search apps"
+            color: muted
+            background: pressed == "search" ? alpha(accent, 0.5) : alpha(surface, 0.5)
+            border: 1
+            borderColor: alpha(accent, 0.18)
+            height: 56
+            fontSize: 15
+            padding: [12, 10]
+            radius: 18 * corners
+            align: center
+            fill: width
+            ripple: false
+            scale: pressed == "search" ? 0.98 : 1
+            animate scale: spring(0.65, 420)
+            animate background: tween(140ms, "out")
+            onPress: pressed = "search"
+            onRelease: pressed = ""
+            onTap: { pressed = ""; searching = true }
+          }
+        }
+
+        Text { text: "swipe up for all apps  ·  long press for options"; style: label; color: muted; align: center; fill: width; padding: [4, 8] }
+        Spacer { height: screenInset }
+      }
+    }
+  }
+}
