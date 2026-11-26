@@ -1,0 +1,519 @@
+face "app drawer" {
+  // A whole home page that draws the app drawer itself, so the order and folders set in the drawer settings app
+  // take effect. Install both from the store and swipe to this page; the page's own search field finds any app.
+  meta { description: "A sortable app drawer as a home page: folders you manage in drawer settings, adjustable background transparency, search and each app's long-press menu"; version: "1.0"; license: "MIT"; category: "system"; owl: 16 }
+  // The launcher's gear, as its settings buttons draw it; currentColor takes the accent.
+  asset gear = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iY3VycmVudENvbG9yIiBkPSJNMTkuMTQsMTIuOTRjMC4wNCwtMC4zIDAuMDYsLTAuNjEgMC4wNiwtMC45NGMwLC0wLjMyIC0wLjAyLC0wLjY0IC0wLjA3LC0wLjk0bDIuMDMsLTEuNThjMC4xOCwtMC4xNCAwLjIzLC0wLjQxIDAuMTIsLTAuNjFsLTEuOTIsLTMuMzJjLTAuMTIsLTAuMjIgLTAuMzcsLTAuMjkgLTAuNTksLTAuMjJsLTIuMzksMC45NmMtMC41LC0wLjM4IC0xLjAzLC0wLjcgLTEuNjIsLTAuOTRMMTQuNCwyLjgxYy0wLjA0LC0wLjI0IC0wLjI0LC0wLjQxIC0wLjQ4LC0wLjQxaC0zLjg0Yy0wLjI0LDAgLTAuNDMsMC4xNyAtMC40NywwLjQxTDkuMjUsNS4zNUM4LjY2LDUuNTkgOC4xMiw1LjkyIDcuNjMsNi4yOUw1LjI0LDUuMzNjLTAuMjIsLTAuMDggLTAuNDcsMCAtMC41OSwwLjIyTDIuNzQsOC44N0MyLjYyLDkuMDggMi42Niw5LjM0IDIuODYsOS40OGwyLjAzLDEuNThDNC44NCwxMS4zNiA0LjgsMTEuNjkgNC44LDEyczAuMDIsMC42NCAwLjA3LDAuOTRsLTIuMDMsMS41OGMtMC4xOCwwLjE0IC0wLjIzLDAuNDEgLTAuMTIsMC42MWwxLjkyLDMuMzJjMC4xMiwwLjIyIDAuMzcsMC4yOSAwLjU5LDAuMjJsMi4zOSwtMC45NmMwLjUsMC4zOCAxLjAzLDAuNyAxLjYyLDAuOTRsMC4zNiwyLjU0YzAuMDUsMC4yNCAwLjI0LDAuNDEgMC40OCwwLjQxaDMuODRjMC4yNCwwIDAuNDQsLTAuMTcgMC40NywtMC40MWwwLjM2LC0yLjU0YzAuNTksLTAuMjQgMS4xMywtMC41NiAxLjYyLC0wLjk0bDIuMzksMC45NmMwLjIyLDAuMDggMC40NywwIDAuNTksLTAuMjJsMS45MiwtMy4zMmMwLjEyLC0wLjIyIDAuMDcsLTAuNDcgLTAuMTIsLTAuNjFMMTkuMTQsMTIuOTR6TTEyLDE1LjZjLTEuOTgsMCAtMy42LC0xLjYyIC0zLjYsLTMuNnMxLjYyLC0zLjYgMy42LC0zLjZzMy42LDEuNjIgMy42LDMuNlMxMy45OCwxNS42IDEyLDE1LjZ6Ii8+PC9zdmc+"
+  // A shopping bag with a sparkle cut out of it, the app store tile's icon; currentColor takes the tint.
+  asset bag = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjUgNiAzOCAzOCI+PHBhdGggZmlsbD0iY3VycmVudENvbG9yIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0xNyAxN3YtMmE3IDcgMCAwIDEgMTQgMHYyaC0zdi0yYTQgNCAwIDAgMC04IDB2MnpNMTIuMiAxN2gyMy42YTIuMiAyLjIgMCAwIDEgMi4yIDJsMS41IDE5LjZhMy4yIDMuMiAwIDAgMS0zLjIgMy40SDExLjdhMy4yIDMuMiAwIDAgMS0zLjItMy40TDEwIDE5YTIuMiAyLjIgMCAwIDEgMi4yLTJ6TTI0IDIzLjVxMS4xIDUuNCA2LjUgNi41cS01LjQgMS4xLTYuNSA2LjVxLTEuMS01LjQtNi41LTYuNXE1LjQtMS4xIDYuNS02LjV6Ii8+PC9zdmc+"
+  // A clean, rounded folder for the folder tiles; currentColor takes the tint.
+  asset folder = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iY3VycmVudENvbG9yIiBkPSJNMyA3YTIgMiAwIDAgMSAyLTJoNC4ybDEuOCAySDE5YTIgMiAwIDAgMSAyIDJ2OWEyIDIgMCAwIDEtMiAySDVhMiAyIDAgMCAxLTItMnoiLz48L3N2Zz4="
+  // A folder with setting sliders: the drawer's folder/sorting controls, not the launcher's gear.
+  asset folderSettings = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iY3VycmVudENvbG9yIiBkPSJNMyA3YTIgMiAwIDAgMSAyLTJoNGwyIDJoOGEyIDIgMCAwIDEgMiAydjJIM3oiLz48cGF0aCBmaWxsPSJjdXJyZW50Q29sb3IiIG9wYWNpdHk9Ii42NSIgZD0iTTMgMTFoMTh2N2EyIDIgMCAwIDEtMiAySDVhMiAyIDAgMCAxLTItMnoiLz48cGF0aCBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIxLjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgZD0iTTYuNSAxNC41aDExTTYuNSAxOGgxMSIvPjxjaXJjbGUgY3g9IjEwIiBjeT0iMTQuNSIgcj0iMS41IiBmaWxsPSJjdXJyZW50Q29sb3IiLz48Y2lyY2xlIGN4PSIxNC41IiBjeT0iMTgiIHI9IjEuNSIgZmlsbD0iY3VycmVudENvbG9yIi8+PC9zdmc+"
+  // What the drawer says, in the phone's language where it has a set, and in English where it doesn't. The action
+  // words (pin, info, ...) are appAction's, so a long-press menu names each with get(str, word).
+  strings {
+    en {
+      personal: "personal"; work: "work"; apps: "apps"; linux: "linux"; shortcuts: "shortcuts"; android: "android"; folders: "folders"; manage: "manage"; back: "back"; noApps: "no apps"
+      workApps: "work apps"; workPaused: "work apps paused"; linuxApps: "linux apps"; appStore: "app store"
+      pin: "add to home"; info: "app info"; uninstall: "uninstall"; remove: "remove"; edit: "edit"; share: "share"
+      settings: "settings"; folderSettings: "folder settings"; settingsApp: "drawer settings"; search: "find an app"; turnOn: "turn on"; pause: "pause"; installing: "installing…"; installLinux: "install linux"
+      open: "open"; ask: "ask"; askInstallLinux: "ask an agent · install linux"; askInstallAgent: "ask an agent · install one"
+      askAgent: (bin, text) => "ask ${bin}: ${text}"
+    }
+    id {
+      personal: "pribadi"; work: "kerja"; apps: "aplikasi"; linux: "linux"; shortcuts: "pintasan"; android: "android"; folders: "folder"; manage: "kelola"; back: "kembali"; noApps: "tidak ada aplikasi"
+      workApps: "aplikasi kerja"; workPaused: "aplikasi kerja dijeda"; linuxApps: "aplikasi linux"; appStore: "toko aplikasi"
+      pin: "tambah ke layar utama"; info: "info aplikasi"; uninstall: "uninstal"; remove: "hapus"; edit: "edit"; share: "bagikan"
+      settings: "setelan"; folderSettings: "pengaturan folder"; settingsApp: "drawer settings"; search: "cari aplikasi"; turnOn: "aktifkan"; pause: "jeda"; installing: "menginstal…"; installLinux: "instal linux"
+      open: "buka"; ask: "tanya"; askInstallLinux: "tanya agen · instal linux"; askInstallAgent: "tanya agen · instal satu"
+      askAgent: (bin, text) => "tanya ${bin}: ${text}"
+    }
+    es {
+      personal: "personal"; work: "trabajo"; apps: "apps"; linux: "linux"; shortcuts: "accesos directos"; android: "android"; folders: "carpetas"; manage: "gestionar"; back: "atrás"; noApps: "sin apps"
+      workApps: "apps de trabajo"; workPaused: "apps de trabajo en pausa"; linuxApps: "apps de linux"; appStore: "tienda de apps"
+      pin: "agregar a inicio"; info: "info de la app"; uninstall: "desinstalar"; remove: "quitar"; edit: "editar"; share: "compartir"
+      settings: "configuración"; folderSettings: "ajustes de carpetas"; settingsApp: "drawer settings"; search: "buscar una app"; turnOn: "activar"; pause: "pausar"; installing: "instalando…"; installLinux: "instalar linux"
+      open: "abrir"; ask: "preguntar"; askInstallLinux: "preguntar a un agente · instalar linux"; askInstallAgent: "preguntar a un agente · instalar uno"
+      askAgent: (bin, text) => "preguntar a ${bin}: ${text}"
+    }
+    pt {
+      personal: "pessoal"; work: "trabalho"; apps: "apps"; linux: "linux"; shortcuts: "atalhos"; android: "android"; folders: "pastas"; manage: "gerenciar"; back: "voltar"; noApps: "sem apps"
+      workApps: "apps de trabalho"; workPaused: "apps de trabalho pausados"; linuxApps: "apps linux"; appStore: "loja de apps"
+      pin: "adicionar à tela inicial"; info: "informações do app"; uninstall: "desinstalar"; remove: "remover"; edit: "editar"; share: "compartilhar"
+      settings: "configurações"; folderSettings: "configurações de pastas"; settingsApp: "drawer settings"; search: "buscar um app"; turnOn: "ativar"; pause: "pausar"; installing: "instalando…"; installLinux: "instalar linux"
+      open: "abrir"; ask: "perguntar"; askInstallLinux: "perguntar a um agente · instalar linux"; askInstallAgent: "perguntar a um agente · instalar um"
+      askAgent: (bin, text) => "perguntar ao ${bin}: ${text}"
+    }
+    de {
+      personal: "persönlich"; work: "arbeit"; apps: "apps"; linux: "linux"; shortcuts: "verknüpfungen"; android: "android"; folders: "ordner"; manage: "verwalten"; back: "zurück"; noApps: "keine apps"
+      workApps: "arbeits-apps"; workPaused: "arbeits-apps pausiert"; linuxApps: "linux-apps"; appStore: "app-store"
+      pin: "zum startbildschirm hinzufügen"; info: "app-info"; uninstall: "deinstallieren"; remove: "entfernen"; edit: "bearbeiten"; share: "teilen"
+      settings: "einstellungen"; folderSettings: "ordnereinstellungen"; settingsApp: "drawer settings"; search: "app suchen"; turnOn: "aktivieren"; pause: "pausieren"; installing: "wird installiert…"; installLinux: "linux installieren"
+      open: "öffnen"; ask: "fragen"; askInstallLinux: "einen agenten fragen · linux installieren"; askInstallAgent: "einen agenten fragen · einen installieren"
+      askAgent: (bin, text) => "${bin} fragen: ${text}"
+    }
+    zh {
+      personal: "个人"; work: "工作"; apps: "应用"; linux: "linux"; shortcuts: "快捷方式"; android: "android"; folders: "文件夹"; manage: "管理"; back: "返回"; noApps: "没有应用"
+      workApps: "工作应用"; workPaused: "工作应用已暂停"; linuxApps: "linux 应用"; appStore: "应用商店"
+      pin: "添加到主屏幕"; info: "应用信息"; uninstall: "卸载"; remove: "移除"; edit: "编辑"; share: "分享"
+      settings: "设置"; folderSettings: "文件夹设置"; settingsApp: "drawer settings"; search: "查找应用"; turnOn: "开启"; pause: "暂停"; installing: "正在安装…"; installLinux: "安装 linux"
+      open: "打开"; ask: "提问"; askInstallLinux: "问智能体 · 安装 linux"; askInstallAgent: "问智能体 · 先装一个"
+      askAgent: (bin, text) => "问 ${bin}：${text}"
+    }
+    ru {
+      personal: "личные"; work: "рабочие"; apps: "приложения"; linux: "linux"; shortcuts: "ярлыки"; android: "android"; folders: "папки"; manage: "управлять"; back: "назад"; noApps: "нет приложений"
+      workApps: "рабочие приложения"; workPaused: "рабочие приложения приостановлены"; linuxApps: "приложения linux"; appStore: "магазин приложений"
+      pin: "добавить на главный экран"; info: "о приложении"; uninstall: "удалить"; remove: "убрать"; edit: "изменить"; share: "поделиться"
+      settings: "настройки"; folderSettings: "настройки папок"; settingsApp: "drawer settings"; search: "найти приложение"; turnOn: "включить"; pause: "приостановить"; installing: "установка…"; installLinux: "установить linux"
+      open: "открыть"; ask: "спросить"; askInstallLinux: "спросить агента · установить linux"; askInstallAgent: "спросить агента · установить агента"
+      askAgent: (bin, text) => "спросить ${bin}: ${text}"
+    }
+    ja {
+      personal: "個人用"; work: "仕事用"; apps: "アプリ"; linux: "linux"; shortcuts: "ショートカット"; android: "android"; folders: "フォルダ"; manage: "管理"; back: "戻る"; noApps: "アプリなし"
+      workApps: "仕事用アプリ"; workPaused: "仕事用アプリは一時停止中"; linuxApps: "linux アプリ"; appStore: "アプリストア"
+      pin: "ホームに追加"; info: "アプリ情報"; uninstall: "アンインストール"; remove: "削除"; edit: "編集"; share: "共有"
+      settings: "設定"; folderSettings: "フォルダ設定"; settingsApp: "drawer settings"; search: "アプリを検索"; turnOn: "オンにする"; pause: "一時停止"; installing: "インストール中…"; installLinux: "linux をインストール"
+      open: "開く"; ask: "聞く"; askInstallLinux: "エージェントに聞く · linux をインストール"; askInstallAgent: "エージェントに聞く · まずインストール"
+      askAgent: (bin, text) => "${bin} に聞く：${text}"
+    }
+    uk {
+      personal: "особисті"; work: "робочі"; apps: "додатки"; linux: "linux"; shortcuts: "ярлики"; android: "android"; folders: "папки"; manage: "керувати"; back: "назад"; noApps: "нема додатків"
+      workApps: "робочі додатки"; workPaused: "робочі додатки призупинено"; linuxApps: "додатки linux"; appStore: "магазин додатків"
+      pin: "додати на головний екран"; info: "про додаток"; uninstall: "видалити"; remove: "прибрати"; edit: "змінити"; share: "поділитися"
+      settings: "налаштування"; folderSettings: "налаштування папок"; settingsApp: "drawer settings"; search: "знайти додаток"; turnOn: "увімкнути"; pause: "призупинити"; installing: "встановлення…"; installLinux: "встановити linux"
+      open: "відкрити"; ask: "запитати"; askInstallLinux: "запитати агента · встановити linux"; askInstallAgent: "запитати агента · встановити агента"
+      askAgent: (bin, text) => "запитати ${bin}: ${text}"
+    }
+    fr {
+      personal: "perso"; work: "pro"; apps: "applis"; linux: "linux"; shortcuts: "raccourcis"; android: "android"; folders: "dossiers"; manage: "gérer"; back: "retour"; noApps: "aucune appli"
+      workApps: "applis pro"; workPaused: "applis pro en pause"; linuxApps: "applis linux"; appStore: "boutique d’applis"
+      pin: "ajouter à l’accueil"; info: "infos sur l’appli"; uninstall: "désinstaller"; remove: "retirer"; edit: "modifier"; share: "partager"
+      settings: "paramètres"; folderSettings: "paramètres des dossiers"; settingsApp: "drawer settings"; search: "chercher une appli"; turnOn: "activer"; pause: "mettre en pause"; installing: "installation…"; installLinux: "installer linux"
+      open: "ouvrir"; ask: "demander"; askInstallLinux: "demander à un agent · installer linux"; askInstallAgent: "demander à un agent · en installer un"
+      askAgent: (bin, text) => "demander à ${bin} : ${text}"
+    }
+    tr {
+      personal: "kişisel"; work: "iş"; apps: "uygulamalar"; linux: "linux"; shortcuts: "kısayollar"; android: "android"; folders: "klasörler"; manage: "yönet"; back: "geri"; noApps: "uygulama yok"
+      workApps: "iş uygulamaları"; workPaused: "iş uygulamaları duraklatıldı"; linuxApps: "linux uygulamaları"; appStore: "uygulama mağazası"
+      pin: "ana ekrana ekle"; info: "uygulama bilgileri"; uninstall: "yüklemeyi kaldır"; remove: "kaldır"; edit: "düzenle"; share: "paylaş"
+      settings: "ayarlar"; folderSettings: "klasör ayarları"; settingsApp: "drawer settings"; search: "bir uygulama bul"; turnOn: "etkinleştir"; pause: "duraklat"; installing: "yükleniyor…"; installLinux: "linux’u yükle"
+      open: "aç"; ask: "sor"; askInstallLinux: "bir ajana sor · linux’u yükle"; askInstallAgent: "bir ajana sor · önce ajan yükle"
+      // Not "${bin}’a sor": the suffix follows the name's vowels.
+      askAgent: (bin, text) => "${bin} ile sor: ${text}"
+    }
+    it {
+      personal: "personali"; work: "lavoro"; apps: "app"; linux: "linux"; shortcuts: "scorciatoie"; android: "android"; folders: "cartelle"; manage: "gestisci"; back: "indietro"; noApps: "nessuna app"
+      workApps: "app di lavoro"; workPaused: "app di lavoro in pausa"; linuxApps: "app linux"; appStore: "store delle app"
+      pin: "aggiungi alla schermata home"; info: "informazioni app"; uninstall: "disinstalla"; remove: "rimuovi"; edit: "modifica"; share: "condividi"
+      settings: "impostazioni"; folderSettings: "impostazioni cartelle"; settingsApp: "drawer settings"; search: "cerca un’app"; turnOn: "attiva"; pause: "metti in pausa"; installing: "installazione…"; installLinux: "installa linux"
+      open: "apri"; ask: "chiedi"; askInstallLinux: "chiedi a un agente · installa linux"; askInstallAgent: "chiedi a un agente · installane uno"
+      askAgent: (bin, text) => "chiedi a ${bin}: ${text}"
+    }
+  }
+  source d = android.drawer
+  source ag = android.agents
+  // The sorting and folders set in drawer settings; a missing file reads as an empty config.
+  source cfgRaw = file("~/.config/omalauncher/drawer-settings.json") json
+  // The app whose long-press menu is open, by key, and the shortcuts it offers: null while they load, and the menu
+  // waits for them, so it opens whole rather than growing.
+  state menu = ""
+  state menuShortcuts = null
+  state tab = "personal"
+  // The folder whose apps are showing, "" for the drawer's lists.
+  state openFolder = ""
+  // The result picked in the search list, -1 for the ask row; null follows the ranking.
+  state pick = null
+  // The page's own search field: a face has no prompt bar to type in.
+  state search = ""
+  // Which sections are collapsed, by section id; absent means expanded.
+  state collapsed = {}
+
+  // As the launcher's drawer fits them: a column for every 76 dp.
+  let cols = max(1, floor(((screenWidth ?? 400) - 24) / 76))
+  let typed = trim(search)
+  let searching = typed != ""
+  let cfg = cfgRaw != null && cfgRaw.folders != null ? cfgRaw : {sort: "kind", folders: []}
+  let sort = cfg.sort ?? "kind"
+  let transparency = clamp(num(cfg.transparency ?? 3), 0, 100)
+  let folders = cfg.folders ?? []
+  // Sorting applies to sections and folders alike. Search keeps the launcher's own ranking.
+  let appsAll = sort == "name" ? d.apps.sortBy(a => lower(a.name ?? ""))
+    : sort == "recent" ? d.apps.sortBy(a => -(a.last ?? 0))
+    : d.apps
+  let folderItems = folders.map(f => {
+      name: f.name ?? "",
+      apps: (f.apps ?? []).map(k => find(appsAll, a => a.key == k)).filter(a => a != null)
+    })
+  let folderKeys = flatten(folderItems.map(f => f.apps.map(a => a.key)))
+  let openFolderItem = find(folderItems, f => f.name == openFolder)
+  let openApps = openFolderItem != null ? openFolderItem.apps : []
+  let openRows = chunk(openApps, cols).map((cells, r) => {key: "fo:" + r, cells: cells})
+  // Foldered apps leave their kind's section, but stay in search.
+  let mine = appsAll.filter(a => (tab == "work") == (a.profile == "work") && !any(folderKeys, k => k == a.key))
+  // A folders section sits above the kind sections, with a row of folder tiles per cols apps.
+  let folderRows = tab == "personal" && len(folderItems) > 0 ? flatten([
+      [{key: "h:folders", title: str.folders, manage: true, toggle: "folders", collapsed: get(collapsed, "folders", false)}],
+      !get(collapsed, "folders", false) ? chunk(folderItems, cols).map((cells, r) => {key: "f:" + r, folderCells: cells}) : []
+    ]) : []
+  // Each section's id keys its rows; its title is the one shown.
+  let sections = tab == "work" ? [
+      {id: "shortcuts", title: str.shortcuts, apps: mine.filter(a => a.kind == "shortcut")},
+      {id: "work", title: d.work.paused ? str.workPaused : str.workApps, apps: mine.filter(a => a.kind == "android"), work: true}
+    ] : [
+      // The store first, then the apps from it, so there's always a way to get more; not while the list loads.
+      {id: "apps", title: str.apps, apps: flatten([len(d.apps) > 0 ? [{store: true}] : [], mine.filter(a => a.kind == "owl")])},
+      {id: "linux", title: str.linux, apps: mine.filter(a => a.kind == "linux"), linux: true},
+      {id: "shortcuts", title: str.shortcuts, apps: mine.filter(a => a.kind == "shortcut")},
+      {id: "android", title: str.android, apps: mine.filter(a => a.kind == "android")}
+    ]
+  // A title, then rows of cols apps. Without Linux, its section is an offer to install it.
+  let sectionRows = flatten(sections.filter(s => len(s.apps) > 0 || s.work || (s.linux && !linux)).map(s => flatten([
+      [{key: "h:" + s.id, title: s.linux && !linux ? str.linuxApps : s.title, work: s.work, offer: s.linux && !linux, toggle: s.id, collapsed: get(collapsed, s.id, false)}],
+      !get(collapsed, s.id, false) ? chunk(s.apps, cols).map((cells, r) => {key: s.id + ":" + r, cells: cells}) : []
+    ])))
+  let rows = flatten([folderRows, sectionRows])
+  // Every profile's apps match while typing, best first.
+  let hits = searching ? rank(d.apps, typed) : []
+  let hitRows = chunk(hits, cols).map((cells, r) => {key: "q:" + r, start: r * cols, cells: cells})
+  // Enter opens the best match when it names an app well; anything else, a prompt of more lines among it, goes to the agent.
+  let opens = len(hits) > 0 && strongMatch(hits[0], typed)
+  // What Enter acts on: a result by its place in hits, or -1 for the ask row.
+  let chosen = pick ?? (opens ? 0 : -1)
+  let agent = ag.default
+  // The installed settings app, found by name since a store install gives its file its own name.
+  let settingsApp = find(d.apps, a => a.kind == "owl" && lower(a.name ?? "") == lower(str.settingsApp))
+
+  // How much the page covers the wallpaper, from the transparency slider in drawer settings.
+  background: alpha(background, 1 - transparency / 100)
+
+  // An app's icon as the drawer draws it: its own, its silhouette on a badge with monochrome icons, or its initials.
+  component AppIcon(a) {
+    Box {
+      size: 52
+      align: topEnd
+      Box {
+        size: 52
+        align: center
+        radius: 26 * corners
+        background: a.hasIcon && !d.monochrome ? transparent : surface
+        if a.hasIcon {
+          Image { src: a.icon; size: d.monochrome ? 36 : 52; tint: d.monochrome ? accent : null; label: a.label }
+        } else {
+          Text { text: a.initials; fontSize: 18; color: accent }
+        }
+      }
+      // The notification dot, on the edge of a round icon as stock launchers draw it.
+      if a.dot {
+        Box { size: 12; radius: 6; offset: [-2, 2]; background: accent; border: 2; borderColor: background }
+      }
+    }
+  }
+
+  component Cell(a, picked) {
+    Column {
+      weight: 1
+      align: center
+      gap: 6
+      padding: [4, 10]
+      radius: 16 * corners
+      border: picked ? 2 : 0
+      borderColor: accent
+      // Paused work apps show dimmed; opening one turns work apps back on.
+      opacity: a.paused ? 0.4 : 1
+      onTap: open(a.key)
+      onLongPress: {
+        haptic()
+        menuShortcuts = null
+        menu = a.key
+        menuShortcuts = shortcuts(a.key)
+      }
+      AppIcon { a: a }
+      // Always two lines tall, so a row keeps its height whichever apps fill it.
+      Text { text: a.name; fontSize: 12; align: center; maxLines: 2; minLines: 2; fill: width }
+      Popup {
+        visible: menu == a.key && menuShortcuts != null
+        position: above
+        onDismiss: menu = ""
+        width: 200
+        gap: 0
+        // The app's shortcuts first, as stock launchers list them: tap to open, + to put one on home.
+        for s in menuShortcuts key s.key {
+          Row {
+            fill: width
+            align: center
+            gap: 10
+            padding: [12, 6]
+            onTap: { menu = ""; open(s.key) }
+            Image { src: s.icon; size: 24; tint: d.monochrome ? accent : null; label: s.name }
+            Text { text: s.name; weight: 1; maxLines: 1 }
+            Text { text: "[+]"; color: accent; onTap: { menu = ""; appAction("pin", s.key) } }
+          }
+        }
+        Spacer { visible: len(menuShortcuts) > 0; height: 1; fill: width; background: border }
+        for w in a.actions {
+          Text { text: get(str, w, w); fontSize: 15; fill: width; padding: [12, 12]; onTap: { menu = ""; appAction(w, a.key) } }
+        }
+      }
+    }
+  }
+
+  // A folder preview: up to seven of its app icons sit on a faint folder, with a +N tile when there are more.
+  component FolderCell(f) {
+    let total = len(f.apps)
+    let more = total > 7
+    let shown = more ? 6 : total
+    let minis = f.apps.take(shown)
+    let layouts = [
+      [],
+      [[0, 0]],
+      [[-8, 0], [8, 0]],
+      [[-16, 0], [0, 0], [16, 0]],
+      [[-8, -8], [8, -8], [-8, 8], [8, 8]],
+      [[-16, -8], [0, -8], [16, -8], [-8, 8], [8, 8]],
+      [[-16, -8], [0, -8], [16, -8], [-16, 8], [0, 8], [16, 8]],
+      [[-16, -14], [0, -14], [16, -14], [-8, 0], [8, 0], [-8, 14], [8, 14]]
+    ]
+    let places = layouts[more ? 7 : shown]
+    Column {
+      weight: 1
+      align: center
+      gap: 6
+      padding: [4, 10]
+      radius: 16 * corners
+      onTap: { openFolder = f.name; pick = null }
+      onLongPress: { haptic(); if settingsApp != null { open(settingsApp.key) } else { launcher("store") } }
+      Box {
+        size: 52
+        radius: 12
+        background: surface
+        align: center
+        clip: true
+        Image { src: folder; size: 40; opacity: 0.35; tint: accent; label: f.name }
+        for a, i in minis key a.key {
+          Box {
+            size: 16
+            offset: places[i]
+            radius: 4
+            clip: true
+            background: a.hasIcon && !d.monochrome ? transparent : surface
+            if a.hasIcon {
+              Image { src: a.icon; size: 16; tint: d.monochrome ? accent : null; label: a.label ?? a.name }
+            } else {
+              Text { text: a.initials; fontSize: 8; color: accent; align: center }
+            }
+          }
+        }
+        if more {
+          Box {
+            size: 16
+            offset: places[shown]
+            radius: 8
+            background: accent
+            align: center
+            Text { text: "+${total - 6}"; fontSize: 8; bold: true; color: background; align: center }
+          }
+        }
+      }
+      Text { text: f.name; fontSize: 12; align: center; maxLines: 2; minLines: 2; fill: width }
+    }
+  }
+
+  // The app store, before the apps it installs: the bag in the accent on the theme's surface, as the settings button
+  // draws its gear, shaped like the apps' icons.
+  component StoreCell() {
+    Column {
+      weight: 1
+      align: center
+      gap: 6
+      padding: [4, 10]
+      radius: 16 * corners
+      onTap: launcher("store:apps")
+      Box {
+        size: 52
+        radius: 12
+        background: surface
+        align: center
+        Image { src: bag; size: 34; tint: accent; label: str.appStore }
+      }
+      Text { text: str.appStore; fontSize: 12; align: center; maxLines: 2; minLines: 2; fill: width }
+    }
+  }
+
+  Column {
+    gap: 0
+    padding: [12, 0]
+    Row {
+      fill: width
+      align: center
+      gap: 8
+      padding: [0, 12, 8, 12]
+      radius: 12 * corners
+      background: surface
+      // A face has no prompt bar, so its own field searches every profile and takes Enter.
+      Input {
+        text: search
+        placeholder: str.search
+        clear: true
+        weight: 1
+        onChange: { search = value; pick = null }
+        onSubmit: {
+          search = value
+          if chosen >= 0 {
+            open(hits[chosen].key)
+          } else if !linux {
+            launcher("linux")
+          } else if agent == null {
+            launcher("agents")
+          } else {
+            ask(value)
+          }
+        }
+      }
+    }
+    Row {
+      align: center
+      padding: [0, 12, 0, 8]
+      gap: 6
+      // Typing searches every profile, so the tabs step aside.
+      for t in d.work != null && !searching ? ["personal", "work"] : [] {
+        Text { text: get(str, t); color: tab == t ? accent : muted; background: tab == t ? surface : transparent; radius: 18 * corners; padding: [14, 10]; onTap: { tab = t; openFolder = "" } }
+      }
+      Spacer { weight: 1 }
+      Box {
+        size: 44
+        radius: 22 * corners
+        background: surface
+        align: center
+        onTap: { if settingsApp != null { open(settingsApp.key) } else { launcher("store") } }
+        Image { src: folderSettings; size: 22; tint: accent; label: str.folderSettings }
+      }
+      Box {
+        size: 44
+        radius: 22 * corners
+        background: surface
+        align: center
+        onTap: launcher("settings")
+        Image { src: gear; size: 22; tint: accent; label: str.settings }
+        // System updates are waiting: settings › system updates lists them.
+        Box { visible: d.updates > 0; align: topEnd; size: 44; padding: 8; Box { size: 8; radius: 4; background: red } }
+      }
+    }
+    Column {
+      visible: !searching && openFolder == ""
+      lazy: true
+      weight: 1
+      fill: width
+      gap: 0
+      for row in rows key row.key {
+        if row.title != null {
+          // A section's title, with the work switch, the offer to install Linux or folder management at its end.
+          Row {
+            fill: width
+            gap: 0
+            align: center
+            padding: [8, 12, 0, 4]
+            Text { text: row.title; color: muted; weight: 1 }
+            Text { text: row.collapsed ? "▶" : "▼"; color: muted; padding: [0, 6]; onTap: collapsed = set(collapsed, row.toggle, !row.collapsed) }
+            Text { text: "[" + str.manage + "]"; visible: row.manage == true; color: accent; onTap: { if settingsApp != null { open(settingsApp.key) } else { launcher("store") } } }
+            Text { text: "[" + (d.work.paused ? str.turnOn : str.pause) + "]"; visible: row.work == true; color: accent; onTap: workApps("toggle") }
+            Text { text: "[" + (d.linux == "installing" ? str.installing : str.installLinux) + "]"; visible: row.offer == true; color: accent; onTap: launcher("linux") }
+          }
+        } else if row.folderCells != null {
+          Row {
+            fill: width
+            gap: 0
+            for f in row.folderCells { FolderCell { f: f } }
+            // A short last row keeps its cells the width of the others'.
+            for s in range(0, cols - len(row.folderCells)) { Spacer { weight: 1 } }
+          }
+        } else {
+          Row {
+            fill: width
+            gap: 0
+            for a in row.cells {
+              if a.store == true {
+                StoreCell { }
+              } else {
+                Cell { a: a; picked: false }
+              }
+            }
+            // A short last row keeps its cells the width of the others'.
+            for s in range(0, cols - len(row.cells)) { Spacer { weight: 1 } }
+          }
+        }
+      }
+    }
+    Column {
+      visible: !searching && openFolder != ""
+      lazy: true
+      weight: 1
+      fill: width
+      gap: 0
+      Row {
+        fill: width
+        align: center
+        gap: 0
+        padding: [8, 12, 0, 8]
+        Text { text: "[‹ " + str.back + "]"; color: accent; padding: [14, 10]; onTap: openFolder = "" }
+        Text { text: openFolder; weight: 1; color: muted; maxLines: 1 }
+        Text { text: "[" + str.manage + "]"; color: accent; padding: [14, 10]; onTap: { if settingsApp != null { open(settingsApp.key) } else { launcher("store") } } }
+      }
+      if len(openApps) == 0 {
+        Text { text: str.noApps; color: muted; align: center; padding: [24, 12] }
+      } else {
+        for row in openRows key row.key {
+          Row {
+            fill: width
+            gap: 0
+            for a in row.cells { Cell { a: a; picked: false } }
+            for s in range(0, cols - len(row.cells)) { Spacer { weight: 1 } }
+          }
+        }
+      }
+    }
+    Column {
+      visible: searching
+      lazy: true
+      weight: 1
+      fill: width
+      gap: 0
+      for row in hitRows key row.key {
+        Row {
+          fill: width
+          gap: 0
+          for a, i in row.cells { Cell { a: a; picked: row.start + i == chosen } }
+          for s in range(0, cols - len(row.cells)) { Spacer { weight: 1 } }
+        }
+      }
+    }
+    // The line that sends what's typed to the agent; outlined when that's what Enter does.
+    Row {
+      visible: searching
+      fill: width
+      gap: 4
+      padding: [12, 10]
+      border: chosen == -1 ? 2 : 0
+      borderColor: accent
+      radius: 16 * corners
+      onTap: {
+        if !linux {
+          launcher("linux")
+        } else if agent == null {
+          launcher("agents")
+        } else {
+          ask(typed)
+        }
+      }
+      Text { text: "⏎"; color: chosen == -1 ? accent : muted }
+      Text {
+        text: !linux ? str.askInstallLinux : agent == null ? str.askInstallAgent : str.askAgent(agent.bin, typed)
+        color: chosen == -1 ? foreground : muted
+        maxLines: 1
+        weight: 1
+      }
+    }
+    // Keep the last row clear of the navigation bar, and of the keyboard while the field has it.
+    Spacer { height: screenInset }
+  }
+}
