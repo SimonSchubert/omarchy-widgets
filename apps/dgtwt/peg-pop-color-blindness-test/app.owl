@@ -2,8 +2,8 @@ app "Peg Pop: Color Blindness Test" {
   meta {
     owl: 21
     category: "games"
-    description: "An informal color blindness test game. Match pegs to boxes across eight colors and review your first-try stats."
-    version: "1.0"
+    description: "An informal color-matching game across eight colors. Try Normal, Hard, or Hardcore and review your first-try stats and achievements."
+    version: "1.1"
     license: "MIT"
   }
   title: ""
@@ -31,6 +31,23 @@ app "Peg Pop: Color Blindness Test" {
       subtitle: "Color Blindness Test"
       backToPlay: "‹  Back to play"
       statsTitle: "Colour stats"
+      difficulty: "Difficulty"
+      normal: "Normal"
+      hard: "Hard"
+      hardcore: "Hardcore"
+      modeSubtitle: (mode) => "${mode} mode"
+      achievements: "Achievements"
+      unlocked: "Unlocked"
+      cleanHits: "Clean hits"
+      cleanHitsGoal: "Match 10 pegs on the first try."
+      fullSpectrum: "Full spectrum"
+      fullSpectrumGoal: "Match each of the eight colours on the first try."
+      wrongTurns: "Wrong turns"
+      wrongTurnsGoal: "Miss five first taps."
+      repeatMixup: "Déjà vu"
+      repeatMixupGoal: "Make the same first-tap mix-up three times."
+      shadeName: (number) => "Shade ${number}"
+      earlierStats: (matches, tries) => "In earlier purple-only rounds, you matched ${matches} of ${tries} on the first try."
       statsEmpty: "Play a few pegs to see results here."
       statsSummary: (matches, tries) => "${matches} of ${tries} matched on the first try"
       statsButton: (matches, tries) => "${matches} of ${tries} first try  ·  Stats"
@@ -47,7 +64,8 @@ app "Peg Pop: Color Blindness Test" {
       mixupPair: (target, choice) => "${target} peg → ${lower(choice)} box"
       mixupCount: (picks, offers) => "Picked ${picks} of ${offers} times that box was offered"
       resetStats: "Reset stats"
-      resetPrompt: "Clear all first-try stats and start a new round?"
+      resetPrompt: (mode) => "Clear ${mode} stats and start a new round?"
+      resetChallengePrompt: (mode) => "Clear ${mode} stats and achievements, and start a new round?"
       cancel: "Cancel"
       niceMatch: "Nice match!"
       tryAgain: "Try another box"
@@ -70,11 +88,23 @@ app "Peg Pop: Color Blindness Test" {
   state firstPick = -1
   state statsOpen = false
   state resetOpen = false
+  state difficulty = 0 persist
   state colourResults = [] persist
+  // Preserve scores from the original purple-only challenge rounds.
+  state challengeResults = [[], []] persist
+  state familyResults = [[], [], []] persist
   state phase = "ready"
   state elapsed = 0
   state pickedBox = 0
 
+  // Keep the saved IDs for Hard and Hardcore. A saved Hell selection opens Hardcore.
+  let activeDifficulty = difficulty == 2 ? 1 : difficulty
+  let modes = [
+    {label: str.normal, spread: 1},
+    {label: str.hardcore, spread: 0.12},
+    null,
+    {label: str.hard, spread: 0.32}
+  ]
   let colours = [
     {name: str.redName, main: #EB414C, light: #FF999D, dark: #B62C3A, inside: #802C3D, pale: #FCE4E2},
     {name: str.blueName, main: #3373DF, light: #8DB7FF, dark: #2452A7, inside: #203F81, pale: #E3ECFF},
@@ -85,18 +115,33 @@ app "Peg Pop: Color Blindness Test" {
     {name: str.tealName, main: #17A9AF, light: #7CDCE0, dark: #117581, inside: #1B505E, pale: #DEF3F3},
     {name: str.pinkName, main: #E963A4, light: #FFA9CF, dark: #AE3977, inside: #78284F, pale: #FCE3F1}
   ]
-  let results = len(colourResults) > 0 ? colourResults : range(len(colours)).map(i => {
+  let pegColour = pegs[roundIndex % len(pegs)]
+  let base = colours[pegColour]
+  // Every challenge round uses one colour family, with a random shade as its match.
+  let spread = modes[activeDifficulty].spread
+  let shades = activeDifficulty == 0 ? colours : colours.map(colour => {
+    main: mix(base.main, colour.main, spread),
+    light: mix(base.light, colour.light, spread),
+    dark: mix(base.dark, colour.dark, spread),
+    inside: mix(base.inside, colour.inside, spread),
+    pale: mix(base.pale, colour.pale, spread)
+  })
+  let targetShade = activeDifficulty == 0 ? pegColour : first(shuffle(range(len(shades)), boxSeed + 2))
+  let peg = shades[targetShade]
+  // Older saves contain only the Hardcore and Hell score lists.
+  let familyScores = len(familyResults) == 2 ? familyResults + [[]] : familyResults
+  let savedResults = activeDifficulty == 0 ? colourResults : familyScores[activeDifficulty - 1]
+  let earlier = activeDifficulty == 1 ? challengeResults[0] : []
+  let results = len(savedResults) > 0 ? savedResults : range(len(colours)).map(i => {
     tries: 0, matches: 0,
     offered: range(len(colours)).map(j => 0), picked: range(len(colours)).map(j => 0)
   })
-  let pegColour = pegs[roundIndex % len(pegs)]
-  let peg = colours[pegColour]
-  let missed = firstPick >= 0 && firstPick != pegColour
+  let missed = firstPick >= 0 && firstPick != targetShade
   let totalTries = sum(results.map(result => result.tries))
   let totalMatches = sum(results.map(result => result.matches))
-  // Show two fixed comparisons and one other colour beside the match.
+  // Show two fixed comparisons and one other shade beside the match.
   let comparisons = [[3, 4], [5, 6], [4, 7], [0, 6], [0, 2], [1, 7], [1, 3], [2, 5]]
-  let choices = [pegColour] + comparisons[pegColour]
+  let choices = [targetShade] + comparisons[targetShade]
   let remaining = range(len(colours)).filter(c => !any(choices, choice => choice == c))
   let boxes = shuffle(choices + [first(shuffle(remaining, boxSeed))], boxSeed + 1)
   let compact = (screenHeight ?? 700) < 520
@@ -160,15 +205,97 @@ app "Peg Pop: Color Blindness Test" {
           results[target].picked.map((n, choice) => {
             target: target, choice: choice, picks: n, offers: results[target].offered[choice]
           })
-        )).filter(pair => pair.target != pair.choice && pair.picks > 0).sortBy(pair => -pair.picks)
+        )).filter(pair => pair.picks > 0 && (activeDifficulty != 0 || pair.target != pair.choice)).sortBy(pair => -pair.picks)
         let mostFrequent = first(mixups)
+        let shadeNames = activeDifficulty == 0 ? colours.map(colour => colour.name) : range(len(colours)).map(i => str.shadeName(i + 1))
+        let earlierTries = sum(earlier.map(result => result.tries))
 
         Text { text: str.statsTitle; font: sans; fontSize: 30; fontWeight: 900; color: #33263E }
+        Column {
+          gap: 6
+          Text { text: str.difficulty; font: sans; fontSize: 17; fontWeight: 800; color: #33263E }
+          Row {
+            fill: width
+            height: 44
+            gap: 6
+            for i in [0, 3, 1] {
+              Box {
+                weight: 1
+                fill: height
+                align: center
+                radius: 14
+                background: activeDifficulty == i ? #604F69 : #F5E8D8
+                onTap: {
+                  if activeDifficulty != i {
+                    difficulty = i
+                    pegs = shuffle(range(len(colours)))
+                    boxSeed = random(1000000)
+                    roundIndex = 0
+                    firstPick = -1
+                    phase = "ready"
+                    resetOpen = false
+                  }
+                }
+                Text {
+                  text: modes[i].label
+                  align: center
+                  font: sans
+                  fontSize: 15
+                  fontWeight: 650
+                  color: activeDifficulty == i ? #FFF8ED : #604F69
+                }
+              }
+            }
+          }
+        }
         Text {
           text: totalTries == 0 ? str.statsEmpty : str.statsSummary(totalMatches, totalTries)
           font: sans
           fontSize: 17
           color: #604F69
+        }
+        if earlierTries > 0 {
+          Text {
+            text: str.earlierStats(sum(earlier.map(result => result.matches)), earlierTries)
+            font: sans
+            fontSize: 15
+            color: #604F69
+          }
+        }
+
+        if activeDifficulty != 0 {
+          Column {
+            gap: 6
+            let badges = [
+              {name: str.cleanHits, goal: str.cleanHitsGoal, count: totalMatches, target: 10, positive: true},
+              {name: str.fullSpectrum, goal: str.fullSpectrumGoal,
+                count: len(results.filter(result => result.matches > 0)), target: len(colours), positive: true},
+              {name: str.wrongTurns, goal: str.wrongTurnsGoal, count: totalTries - totalMatches, target: 5, positive: false},
+              {name: str.repeatMixup, goal: str.repeatMixupGoal, count: mostFrequent.picks ?? 0, target: 3, positive: false}
+            ]
+            Text { text: str.achievements; font: sans; fontSize: 18; fontWeight: 800; color: #33263E }
+            for badge in badges {
+              let earned = badge.count >= badge.target
+              Column {
+                gap: 3
+                padding: [12, 8]
+                radius: 12
+                background: earned ? (badge.positive ? #E1F2DD : #FCE4E2) : #F5E8D8
+                Row {
+                  gap: 8
+                  Text { weight: 1; text: badge.name; font: sans; fontSize: 16; fontWeight: 750; color: #33263E }
+                  Text {
+                    text: earned ? str.unlocked : str.colourScore(badge.count, badge.target)
+                    font: sans
+                    fontSize: 14
+                    fontWeight: 650
+                    color: earned ? (badge.positive ? #23563D : #802C3D) : #604F69
+                  }
+                }
+                Text { text: badge.goal; font: sans; fontSize: 14; color: #604F69 }
+              }
+            }
+          }
         }
 
         Column {
@@ -180,7 +307,7 @@ app "Peg Pop: Color Blindness Test" {
           Text {
             text: totalTries == 0 ? str.patternsEmpty :
               mostFrequent.picks > 1 ? str.frequentMixup(colours[mostFrequent.target].name,
-                colours[mostFrequent.choice].name, mostFrequent.picks, mostFrequent.offers) :
+                shadeNames[mostFrequent.choice], mostFrequent.picks, mostFrequent.offers) :
               len(mixups) > 0 ? str.oneOffMixups : str.allMatched
             font: sans
             fontSize: 15
@@ -194,7 +321,13 @@ app "Peg Pop: Color Blindness Test" {
           }
         }
 
-        Text { text: str.firstTryByColour; font: sans; fontSize: 18; fontWeight: 800; color: #33263E }
+        Text {
+          text: str.firstTryByColour
+          font: sans
+          fontSize: 18
+          fontWeight: 800
+          color: #33263E
+        }
         Column {
           gap: 4
           for colour, i in colours {
@@ -227,7 +360,7 @@ app "Peg Pop: Color Blindness Test" {
               radius: 12
               background: #F5E8D8
               Text {
-                text: str.mixupPair(colours[pair.target].name, colours[pair.choice].name)
+                text: str.mixupPair(colours[pair.target].name, shadeNames[pair.choice])
                 font: sans
                 fontSize: 16
                 fontWeight: 700
@@ -244,11 +377,16 @@ app "Peg Pop: Color Blindness Test" {
         }
       }
 
-      if totalTries > 0 {
+      if totalTries > 0 || len(earlier) > 0 {
         Column {
           gap: 8
           if resetOpen {
-            Text { text: str.resetPrompt; font: sans; fontSize: 15; color: #33263E }
+            Text {
+              text: activeDifficulty == 0 ? str.resetPrompt(str.normal) : str.resetChallengePrompt(modes[activeDifficulty].label)
+              font: sans
+              fontSize: 15
+              color: #33263E
+            }
           }
           Row {
             height: 44
@@ -272,7 +410,13 @@ app "Peg Pop: Color Blindness Test" {
               background: resetOpen ? #802C3D : #F5E8D8
               onTap: {
                 if resetOpen {
-                  colourResults = []
+                  if activeDifficulty == 0 { colourResults = [] }
+                  else {
+                    familyResults = set(familyScores, activeDifficulty - 1, [])
+                    if len(earlier) > 0 {
+                      challengeResults = set(challengeResults, 0, [])
+                    }
+                  }
                   pegs = shuffle(range(len(colours)))
                   boxSeed = random(1000000)
                   roundIndex = 0
@@ -313,7 +457,7 @@ app "Peg Pop: Color Blindness Test" {
         color: #33263E
       }
       Text {
-        text: str.subtitle
+        text: activeDifficulty == 0 ? str.subtitle : str.modeSubtitle(modes[activeDifficulty].label)
         align: center
         font: sans
         fontSize: compact ? 16 : 21
@@ -357,7 +501,7 @@ app "Peg Pop: Color Blindness Test" {
             radius: 5 * pegSize, fill: alpha(#BA987D, 0.3 * (1 - flight)))
 
           for colour, index in boxes {
-            let bin = colours[colour]
+            let bin = shades[colour]
             let bx = (index % 2) * (boxWidth + gapSize)
             let by = stageHeight + gapSize + floor(index / 2) * (boxHeight + gapSize)
             let cx = bx + boxWidth / 2
@@ -424,19 +568,23 @@ app "Peg Pop: Color Blindness Test" {
                   onTap: {
                     if phase != "match" {
                       let chosen = boxes[index]
+                      let matched = chosen == targetShade
                       if firstPick < 0 {
                         let result = results[pegColour]
-                        colourResults = set(results, pegColour, {
+                        let distractors = boxes.filter(box => box != targetShade)
+                        let updatedResults = set(results, pegColour, {
                           tries: result.tries + 1,
-                          matches: result.matches + (chosen == pegColour ? 1 : 0),
-                          offered: result.offered.map((n, colour) => n + (any(boxes, box => box == colour) ? 1 : 0)),
-                          picked: set(result.picked, chosen, result.picked[chosen] + 1)
+                          matches: result.matches + (matched ? 1 : 0),
+                          offered: result.offered.map((n, shade) => n + (any(distractors, box => box == shade) ? 1 : 0)),
+                          picked: matched ? result.picked : set(result.picked, chosen, result.picked[chosen] + 1)
                         })
+                        if activeDifficulty == 0 { colourResults = updatedResults }
+                        else { familyResults = set(familyScores, activeDifficulty - 1, updatedResults) }
                         firstPick = chosen
                       }
                       pickedBox = index
                       elapsed = 0
-                      if chosen == pegColour {
+                      if matched {
                         phase = "match"
                         sound(matchChime)
                       } else {
