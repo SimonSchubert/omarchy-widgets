@@ -2,6 +2,8 @@
 
 ## v1.9.5 changes
 
+- **Default font:** Launcher is now the default face font. Existing installations receive this change once; subsequent font choices remain saved.
+
 - **Scrolling defaults:** Smooth alphabet opening is now OFF and static app-list scrolling is ON, with the existing 1-row step and vibration OFF defaults. Existing installations receive the two changed preferences once; later user selections are preserved. Fast flicks still coast smoothly. Revisit these defaults if the OWL engine's 60 FPS limit is lifted.
 
 - **Shortcut names:** Hold a pinned Android shortcut in Search, A–Z, a folder or Omagara Home and choose **Rename shortcut…**. Save a custom name or restore its original name. Names are local to Omagara, are included in settings backups, and determine the alphabetical section. Icons, launch targets and pins remain unchanged; manual moves involving a shortcut are cleared when it changes alphabetical section.
