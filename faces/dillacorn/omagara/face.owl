@@ -109,6 +109,11 @@ face "Omagara" {
   state worldZones = [] persist
   // Keys and package/profile pairs are persisted separately from display preferences.
   state hiddenAppKeys = [] persist
+  // Local display names only; the Android shortcut key and launch target never change.
+  state shortcutNames = [] persist
+  state renameShortcutKey = ""
+  state renameShortcutDraft = ""
+  state renameShortcutReturn = "face"
   // Per-app relative moves, replayed after automatic sorting within each letter.
   state manualAppMoves = [] persist
   state rightAlignedAppKeys = [] persist
@@ -353,7 +358,10 @@ face "Omagara" {
   // Other apps continue following usage/name ordering. Keys include profile copies.
   // Retain native app keys for existing settings; drawer shortcut keys are distinct.
   // The drawer includes accepted browser web apps and other pinned Android shortcuts.
-  let pinnedShortcuts = (drawer.apps ?? []).filter(a => a.kind == "shortcut").map(a => merge(a, {package: get(split(first(split(a.key, "/")), ":"), 1, "")}))
+  let rawShortcuts = (drawer.apps ?? []).filter(a => a.kind == "shortcut")
+  let pinnedShortcuts = rawShortcuts.map(a => merge(a, {name: find(shortcutNames, n => n.key == a.key).name ?? a.name, originalName: a.name, alias: a.name + " " + (a.alias ?? ""), package: get(split(first(split(a.key, "/")), ":"), 1, "")}))
+  let renameShortcut = find(rawShortcuts, a => a.key == renameShortcutKey)
+  let renameShortcutValid = renameShortcut != null && trim(renameShortcutDraft) != "" && len(trim(renameShortcutDraft)) <= 64
   let appCatalog = (installed ?? []) + pinnedShortcuts
   let searchApps = appCatalog.sortBy(a => cfg.sortMode == "Most used" ? -(a.score ?? 0) : lower(trim(a.name)))
   let automaticGroups = groupBy(searchApps, a => contains(fullAlphabet, upper(sub(trim(a.name), 0, 1))) ? upper(sub(trim(a.name), 0, 1)) : "#")
@@ -1543,6 +1551,20 @@ face "Omagara" {
             onTap: { menu = ""; customFolders = customFolders.map(f => f.id == folderOpenId ? merge(f, {keys: f.keys.filter(k => k != a.key)}) : f) }
           }
         }
+        if a.kind == "shortcut" {
+          Text {
+            text: "Rename shortcut…"
+            fill: width
+            padding: [12, 14]
+            onTap: {
+              menu = ""; menuShortcuts = null
+              renameShortcutKey = a.key; renameShortcutDraft = a.name
+              renameShortcutReturn = searchView ? "search" : "face"
+              screenMode = "shortcutRename"
+              if !searchView { appVelocity = 0; railHeld = false; activeSide = 0; folderOpenId = ""; screen() }
+            }
+          }
+        }
         Text {
           text: contains(pinnedAppKeys, a.key) ? "Unpin app" : "Pin app"
           fill: width
@@ -1994,6 +2016,18 @@ face "Omagara" {
               folderPickReturnMode = "face"
               screenMode = "folderPick"
               screen()
+            }
+          }
+        }
+        if a.kind == "shortcut" {
+          Text {
+            text: "Rename shortcut…"
+            fill: width
+            padding: [12, 14]
+            onTap: {
+              pinnedMenuKey = ""; pinnedMenuShortcuts = null; folderOpenId = ""
+              renameShortcutKey = a.key; renameShortcutDraft = a.name
+              renameShortcutReturn = "face"; screenMode = "shortcutRename"; screen()
             }
           }
         }
@@ -4646,8 +4680,39 @@ face "Omagara" {
   }
 
   screen {
-    title: screenMode == "folderList" ? "Folders" : screenMode == "folderEdit" ? "Edit folder" : screenMode == "folderPick" ? "Add to folder" : screenMode == "calendarAdd" ? "Add event · calendar app" : screenMode == "settings" ? "Omagara Settings" : screenMode == "clock" ? "Clock" : screenMode == "calendar" ? "Calendar" : "Search apps"
-    if screenMode == "folderList" {
+    title: screenMode == "shortcutRename" ? "Rename shortcut" : screenMode == "folderList" ? "Folders" : screenMode == "folderEdit" ? "Edit folder" : screenMode == "folderPick" ? "Add to folder" : screenMode == "calendarAdd" ? "Add event · calendar app" : screenMode == "settings" ? "Omagara Settings" : screenMode == "clock" ? "Clock" : screenMode == "calendar" ? "Calendar" : "Search apps"
+    if screenMode == "shortcutRename" {
+      Column {
+        fill: true
+        gap: 12
+        if renameShortcut != null {
+          AppIdentity { a: find(pinnedShortcuts, a => a.key == renameShortcutKey) }
+          Text { text: "Original name: " + renameShortcut.name; font: chosenFont; color: secondaryText; fontSize: 13 }
+          Input { text: renameShortcutDraft; placeholder: "Shortcut name (1–64 characters)"; focus: true; onChange: renameShortcutDraft = value }
+          Text { text: "The name changes only in Omagara. Its browser, icon, pins and folders stay the same."; font: chosenFont; fontSize: 13; color: muted }
+          if renameShortcutValid {
+            Button {
+              text: "Save name"
+              onTap: {
+                let newName = trim(renameShortcutDraft)
+                shortcutNames = shortcutNames.filter(n => n.key != renameShortcutKey) + (newName == renameShortcut.name ? [] : [{key: renameShortcutKey, name: newName}])
+                if renameShortcutReturn == "face" { close() } else { screenMode = renameShortcutReturn }
+              }
+            }
+          } else { Text { text: "Enter a name between 1 and 64 characters."; font: chosenFont; color: muted; fontSize: 13 } }
+          if any(shortcutNames, n => n.key == renameShortcutKey) {
+            Button {
+              text: "Restore original name"
+              onTap: {
+                shortcutNames = shortcutNames.filter(n => n.key != renameShortcutKey)
+                if renameShortcutReturn == "face" { close() } else { screenMode = renameShortcutReturn }
+              }
+            }
+          }
+        } else { Text { text: "This shortcut is no longer available."; font: chosenFont; color: muted } }
+        Button { text: "Cancel"; onTap: { if renameShortcutReturn == "face" { close() } else { screenMode = renameShortcutReturn } } }
+      }
+    } else if screenMode == "folderList" {
       Column {
         fill: true
         gap: 10
@@ -5339,17 +5404,18 @@ face "Omagara" {
             } else {
               Text { text: "Backup & reset"; color: accent; font: chosenFont; fontSize: 18; padding: [0, 8, 0, 4] }
               Text { text: "Export or restore Omagara preferences."; font: chosenFont; fontSize: 13; color: secondaryText }
-        Button { text: "Export Omagara settings to clipboard"; onTap: copy(toJson({version: 1, prefs: cfg, zones: worldZones, hiddenApps: hiddenAppKeys, musicApps: musicAppKeys, compactAlerts: compactAlertApps, hiddenNotifications: hiddenNoticeApps, manualMoves: manualAppMoves, rightAlignedApps: rightAlignedAppKeys, layout: {rail: alphabetRailShift, header: headerSpacing, notices: noticeSpacing, compact: compactHeader, musicExpanded: musicAreaExpanded, musicSize: musicAreaSize}, folders: customFolders, folderSerial: folderSerial, pinnedApps: pinnedAppKeys, pinLayouts: pinnedLayouts})) }
+        Button { text: "Export Omagara settings to clipboard"; onTap: copy(toJson({version: 1, prefs: cfg, zones: worldZones, hiddenApps: hiddenAppKeys, shortcutNames: shortcutNames, musicApps: musicAppKeys, compactAlerts: compactAlertApps, hiddenNotifications: hiddenNoticeApps, manualMoves: manualAppMoves, rightAlignedApps: rightAlignedAppKeys, layout: {rail: alphabetRailShift, header: headerSpacing, notices: noticeSpacing, compact: compactHeader, musicExpanded: musicAreaExpanded, musicSize: musicAreaSize}, folders: customFolders, folderSerial: folderSerial, pinnedApps: pinnedAppKeys, pinLayouts: pinnedLayouts})) }
         Input { text: importText; placeholder: "Paste Omagara settings JSON"; lines: 3; onChange: importText = value }
         Button {
           text: "Import Omagara settings"
           onTap: {
             let imported = parseJson(importText)
-            if imported.version == 1 && all(keys(defaults), k => (k == "shadeHeaderOpacity" || k == "shadeAlphabetOpacity" || k == "shadeNoticeOpacity" || k == "shadeCardOpacity" || k == "shadeAppOpacity" || k == "shadeButtonOpacity") ? get(imported.prefs, k) == null || contains(range(101), get(imported.prefs, k)) : k == "staticScrollStep" ? get(imported.prefs, k) == null || contains(staticScrollStepChoices, get(imported.prefs, k)) : k == "sortMode" ? get(imported.prefs, k) == null || contains(sortModeChoices, get(imported.prefs, k)) || get(imported.prefs, k) == "Manual" : k == "noticeStartPercent" ? get(imported.prefs, k) == null || contains(range(6, 51), get(imported.prefs, k)) : k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : k == "iconStyle" ? get(imported.prefs, k) == null || contains(iconStyleChoices, get(imported.prefs, k)) : k == "iconOverlayOpacity" ? get(imported.prefs, k) == null || contains(iconOverlayChoices, get(imported.prefs, k)) : k == "faceFont" ? get(imported.prefs, k) == null || contains(faceFontChoices, get(imported.prefs, k)) : k == "headerAlignment" ? get(imported.prefs, k) == null || contains(headerAlignmentChoices, get(imported.prefs, k)) : k == "textTone" ? get(imported.prefs, k) == null || contains(textToneChoices, get(imported.prefs, k)) : k == "textContrast" ? get(imported.prefs, k) == null || contains(textContrastChoices, get(imported.prefs, k)) : k == "customTextHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "shadeColorMode" ? get(imported.prefs, k) == null || contains(shadeColorChoices, get(imported.prefs, k)) : k == "shadeCustomHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "timeFormat" ? get(imported.prefs, k) == null || get(imported.prefs, k) == "System" || contains(timeFormatChoices, get(imported.prefs, k)) : k == "alphabetSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : k == "controlSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : k == "closeSide" ? get(imported.prefs, k) == null || contains(["Follow search", "Left", "Right"], get(imported.prefs, k)) : k == "showSwipeCue" || k == "holidayEasterEggs" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts" || k == "notificationTimes" || k == "mediaPlayer" || k == "musicShortcuts" || k == "noticeAutoPosition" || k == "compactPins" || k == "batteryPercentage" || k == "dateAbbreviated" || k == "shadeMediaCard" || k == "shadeNoticeCards" || k == "shadeButtons" || k == "smoothAlphabet" || k == "staticScrolling" || k == "staticScrollVibrate") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) && sub(toJson(imported.hiddenApps ?? []), 0, 1) == "[" && sub(toJson(imported.musicApps ?? []), 0, 1) == "[" && sub(toJson(imported.compactAlerts ?? []), 0, 1) == "[" && sub(toJson(imported.hiddenNotifications ?? []), 0, 1) == "[" && sub(toJson(imported.manualMoves ?? []), 0, 1) == "[" && all(imported.manualMoves ?? [], m => m.key != null && m.anchor != null && contains(fullAlphabet, m.letter) && (m.after == true || m.after == false)) && sub(toJson(imported.rightAlignedApps ?? []), 0, 1) == "[" && (imported.layout == null || (num(get(imported.layout, "rail", 0)) != null && num(get(imported.layout, "header", 0)) != null && num(get(imported.layout, "notices", 0)) != null && (get(imported.layout, "compact", false) == true || get(imported.layout, "compact", false) == false) && (get(imported.layout, "musicExpanded", false) == true || get(imported.layout, "musicExpanded", false) == false) && num(get(imported.layout, "musicSize", 0)) != null && num(get(imported.layout, "musicSize", 0)) >= 0 && num(get(imported.layout, "musicSize", 0)) <= 80)) && sub(toJson(imported.pinnedApps ?? []), 0, 1) == "[" && sub(toJson(imported.pinLayouts ?? []), 0, 1) == "[" && all(imported.pinLayouts ?? [], p => p.key != null && (p.showLabel == null || p.showLabel == true || p.showLabel == false) && (p.newRow == null || p.newRow == true || p.newRow == false) && (p.alignRight == null || p.alignRight == true || p.alignRight == false)) && sub(toJson(imported.folders ?? []), 0, 1) == "[" && all(imported.folders ?? [], f => f.id != null && f.name != null && trim(f.name) != "" && len(f.name) <= 32 && sub(toJson(f.keys ?? []), 0, 1) == "[") && (imported.folderSerial == null || num(imported.folderSerial) >= 0 && num(imported.folderSerial) < 1000000000) {
+            if imported.version == 1 && all(keys(defaults), k => (k == "shadeHeaderOpacity" || k == "shadeAlphabetOpacity" || k == "shadeNoticeOpacity" || k == "shadeCardOpacity" || k == "shadeAppOpacity" || k == "shadeButtonOpacity") ? get(imported.prefs, k) == null || contains(range(101), get(imported.prefs, k)) : k == "staticScrollStep" ? get(imported.prefs, k) == null || contains(staticScrollStepChoices, get(imported.prefs, k)) : k == "sortMode" ? get(imported.prefs, k) == null || contains(sortModeChoices, get(imported.prefs, k)) || get(imported.prefs, k) == "Manual" : k == "noticeStartPercent" ? get(imported.prefs, k) == null || contains(range(6, 51), get(imported.prefs, k)) : k == "appScale" ? get(imported.prefs, k) == null || contains(appScaleChoices, get(imported.prefs, k)) : k == "hapticFeedback" ? get(imported.prefs, k) == null || contains(hapticChoices, get(imported.prefs, k)) : k == "bubbleBorder" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : k == "iconStyle" ? get(imported.prefs, k) == null || contains(iconStyleChoices, get(imported.prefs, k)) : k == "iconOverlayOpacity" ? get(imported.prefs, k) == null || contains(iconOverlayChoices, get(imported.prefs, k)) : k == "faceFont" ? get(imported.prefs, k) == null || contains(faceFontChoices, get(imported.prefs, k)) : k == "headerAlignment" ? get(imported.prefs, k) == null || contains(headerAlignmentChoices, get(imported.prefs, k)) : k == "textTone" ? get(imported.prefs, k) == null || contains(textToneChoices, get(imported.prefs, k)) : k == "textContrast" ? get(imported.prefs, k) == null || contains(textContrastChoices, get(imported.prefs, k)) : k == "customTextHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "shadeColorMode" ? get(imported.prefs, k) == null || contains(shadeColorChoices, get(imported.prefs, k)) : k == "shadeCustomHex" ? get(imported.prefs, k) == null || match(get(imported.prefs, k), "^#[0-9A-Fa-f]{6}$") != null : k == "timeFormat" ? get(imported.prefs, k) == null || get(imported.prefs, k) == "System" || contains(timeFormatChoices, get(imported.prefs, k)) : k == "alphabetSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : k == "controlSide" ? get(imported.prefs, k) == null || contains(["Left", "Right"], get(imported.prefs, k)) : k == "closeSide" ? get(imported.prefs, k) == null || contains(["Follow search", "Left", "Right"], get(imported.prefs, k)) : k == "showSwipeCue" || k == "holidayEasterEggs" ? get(imported.prefs, k) == null || get(imported.prefs, k) == true || get(imported.prefs, k) == false : get(imported.prefs, k) == true || get(imported.prefs, k) == false || (k == "calculator" || k == "searchContacts" || k == "notificationTimes" || k == "mediaPlayer" || k == "musicShortcuts" || k == "noticeAutoPosition" || k == "compactPins" || k == "batteryPercentage" || k == "dateAbbreviated" || k == "shadeMediaCard" || k == "shadeNoticeCards" || k == "shadeButtons" || k == "smoothAlphabet" || k == "staticScrolling" || k == "staticScrollVibrate") && get(imported.prefs, k) == null) && sub(toJson(imported.zones), 0, 1) == "[" && all(imported.zones, z => contains(zoneChoices, z)) && sub(toJson(imported.hiddenApps ?? []), 0, 1) == "[" && sub(toJson(imported.shortcutNames ?? []), 0, 1) == "[" && all(imported.shortcutNames ?? [], n => sub(toJson(n.key), 0, 1) == "\"" && sub(n.key, 0, 2) == "s:" && sub(toJson(n.name), 0, 1) == "\"" && trim(n.name) != "" && len(trim(n.name)) <= 64) && sub(toJson(imported.musicApps ?? []), 0, 1) == "[" && sub(toJson(imported.compactAlerts ?? []), 0, 1) == "[" && sub(toJson(imported.hiddenNotifications ?? []), 0, 1) == "[" && sub(toJson(imported.manualMoves ?? []), 0, 1) == "[" && all(imported.manualMoves ?? [], m => m.key != null && m.anchor != null && contains(fullAlphabet, m.letter) && (m.after == true || m.after == false)) && sub(toJson(imported.rightAlignedApps ?? []), 0, 1) == "[" && (imported.layout == null || (num(get(imported.layout, "rail", 0)) != null && num(get(imported.layout, "header", 0)) != null && num(get(imported.layout, "notices", 0)) != null && (get(imported.layout, "compact", false) == true || get(imported.layout, "compact", false) == false) && (get(imported.layout, "musicExpanded", false) == true || get(imported.layout, "musicExpanded", false) == false) && num(get(imported.layout, "musicSize", 0)) != null && num(get(imported.layout, "musicSize", 0)) >= 0 && num(get(imported.layout, "musicSize", 0)) <= 80)) && sub(toJson(imported.pinnedApps ?? []), 0, 1) == "[" && sub(toJson(imported.pinLayouts ?? []), 0, 1) == "[" && all(imported.pinLayouts ?? [], p => p.key != null && (p.showLabel == null || p.showLabel == true || p.showLabel == false) && (p.newRow == null || p.newRow == true || p.newRow == false) && (p.alignRight == null || p.alignRight == true || p.alignRight == false)) && sub(toJson(imported.folders ?? []), 0, 1) == "[" && all(imported.folders ?? [], f => f.id != null && f.name != null && trim(f.name) != "" && len(f.name) <= 32 && sub(toJson(f.keys ?? []), 0, 1) == "[") && (imported.folderSerial == null || num(imported.folderSerial) >= 0 && num(imported.folderSerial) < 1000000000) {
               letter = highlightedLetter; appTracking = false
               prefs = reduce(keys(defaults), (m, k) => set(m, k, k == "searchContacts" ? false : k == "textContrast" ? "High" : k == "timeFormat" && get(imported.prefs, k) == "System" ? "24-hour" : k == "sortMode" && get(imported.prefs, k) == "Manual" ? "Most used" : (get(imported.prefs, k) ?? get(defaults, k))), {})
               worldZones = unique(imported.zones ?? [])
               hiddenAppKeys = unique(imported.hiddenApps ?? [])
+              shortcutNames = (imported.shortcutNames ?? []).map(n => {key: n.key, name: trim(n.name)})
               manualAppMoves = imported.manualMoves ?? []
                rightAlignedAppKeys = unique(imported.rightAlignedApps ?? [])
                alphabetRailShift = clamp(num(get(imported.layout ?? {}, "rail", 0)), -160, 160)
@@ -5378,7 +5444,7 @@ face "Omagara" {
         if resetConfirm {
           Text { text: "Reset Omagara appearance and world clocks?"; font: chosenFont }
           Row {
-            Button { text: "Confirm reset"; onTap: { letter = highlightedLetter; appTracking = false; prefs = {}; worldZones = []; hiddenAppKeys = []; manualAppMoves = []; rightAlignedAppKeys = []; alphabetRailShift = 0; headerSpacing = 0; noticeSpacing = 0; compactHeader = false; musicAreaExpanded = false; musicAreaSize = 0; layoutEditMode = ""; customFolders = []; folderSerial = 0; pinnedAppKeys = []; pinnedLayouts = []; expandedPinnedKey = ""; pinnedNoticeShown = 4; pinnedMenuKey = ""; pinnedMenuShortcuts = null; musicAppKeys = []; compactAlertApps = []; hiddenNoticeApps = []; appPickerQuery = ""; holidayPreview = "Auto"; holidayAnimPlaying = false; holidayPlayedStamp = ""; resetConfirm = false; importText = ""; customTextEntry = ""; customShadeEntry = ""; importStatus = "" } }
+            Button { text: "Confirm reset"; onTap: { letter = highlightedLetter; appTracking = false; prefs = {}; worldZones = []; hiddenAppKeys = []; shortcutNames = []; manualAppMoves = []; rightAlignedAppKeys = []; alphabetRailShift = 0; headerSpacing = 0; noticeSpacing = 0; compactHeader = false; musicAreaExpanded = false; musicAreaSize = 0; layoutEditMode = ""; customFolders = []; folderSerial = 0; pinnedAppKeys = []; pinnedLayouts = []; expandedPinnedKey = ""; pinnedNoticeShown = 4; pinnedMenuKey = ""; pinnedMenuShortcuts = null; musicAppKeys = []; compactAlertApps = []; hiddenNoticeApps = []; appPickerQuery = ""; holidayPreview = "Auto"; holidayAnimPlaying = false; holidayPlayedStamp = ""; resetConfirm = false; importText = ""; customTextEntry = ""; customShadeEntry = ""; importStatus = "" } }
             Button { text: "Cancel"; onTap: resetConfirm = false }
           }
         }
