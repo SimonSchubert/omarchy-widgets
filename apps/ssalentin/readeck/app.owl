@@ -1,29 +1,54 @@
 app "readeck" {
   edge: true
+  statusBar: true
 
-  meta { owl: 18; description: "A Readeck client for a server or an export: lists, labels, search, a reader with pictures, notes and bulk changes. Summary and tidy-up use Claude Code, which sends the text to Anthropic"; version: "2.3"; license: "MIT"; category: "news" }
+  meta { owl: 18; description: "A Readeck client for a server or an export: lists, labels, search, a reader with pictures, notes and bulk changes. Summary and tidy-up use Claude Code, which sends the text to Anthropic"; version: "2.4"; license: "MIT"; category: "news" }
 
-  title: readId != "" ? item.title ?? "reading" : view == "setup" ? "connect" : view == "labels" ? "labels" : label != "" ? label : capitalize(view)
-  back: readId != "" || view == "labels" || view == "setup" || label != ""
+  title: ""
+  back: readId != "" || showMenu || showSearch || showAdd || picking || view == "setup" || view == "all" || label != ""
   onBack: {
     notice = ""
-    if readId != "" {
-      if editing {
+    said = ""
+    if showMenu {
+      showMenu = false
+    } else if readId != "" {
+      if showTypo {
+        showTypo = false
+      } else if editing {
         editing = false
+        confirmId = ""
+      } else if !reading && fromReader {
+        fromReader = false
+        reading = true
+        confirmId = ""
       } else {
         // Leaving keeps what was actually read in Readeck, not an instant "read": the
         // last page counts as finished. It goes in the same queue as every other tap.
-        if reading && len(para) > 0 && item.prog != 100 {
+        if reading && len(para) > 0 && item.prog != 100 && int(readPct) != (item.prog ?? -1) {
           wants = wants + [toJson({mode: "change", id: item.id, json: "{\"read_progress\":" + "${int(readPct)}" + "}", patch: {read_progress: int(readPct)}})]
         }
+        fromReader = false
         readId = ""
+        confirmId = ""
       }
+    } else if showSearch {
+      showSearch = false
+      typed = ""
+      query = ""
+    } else if showAdd {
+      showAdd = false
+    } else if picking {
+      picking = false
+      picked = []
     } else if view == "setup" {
       view = "unread"
+      connectMsg = ""
     } else if label != "" {
       // A label's bookmarks go back to the list of labels they came from.
       label = ""
       view = "labels"
+    } else if view == "all" {
+      view = "unread"
     } else {
       view = "unread"
     }
@@ -41,6 +66,30 @@ app "readeck" {
       <path fill="currentColor" d="M91.191 69.188v47.12l50.536-23.558Z"/>
     </g>
   </svg>"""
+
+  // Monochrome 24x24 white SVG icons tinted via Image { tint: ... }.
+  asset icUnread = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCA2YTIgMiAwIDAgMSAyLTJoMTJhMiAyIDAgMCAxIDIgMnYxMmEyIDIgMCAwIDEtMiAySDZhMiAyIDAgMCAxLTItMlY2eiIvPjxwYXRoIGQ9Ik00IDEzaDVsMiAzaDJsMi0zaDUiLz48L3N2Zz4="
+  asset icFav = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTIgMy41bDIuNyA1LjUgNiAuOS00LjMgNC4yIDEgNi01LjQtMi44LTUuNCAyLjggMS02TDMuMyA5LjlsNi0uOXoiLz48L3N2Zz4="
+  asset icFavFill = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iI2ZmZmZmZiIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuNiIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgZD0iTTEyIDMuNWwyLjcgNS41IDYgLjktNC4zIDQuMiAxIDYtNS40LTIuOC01LjQgMi44IDEtNkwzLjMgOS45bDYtLjl6Ii8+PC9zdmc+"
+  asset icArchive = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSIzIiB5PSI0IiB3aWR0aD0iMTgiIGhlaWdodD0iNCIgcng9IjEiLz48cGF0aCBkPSJNNSA4djEwYTIgMiAwIDAgMCAyIDJoMTBhMiAyIDAgMCAwIDItMlY4Ii8+PHBhdGggZD0iTTEwIDEyaDQiLz48L3N2Zz4="
+  asset icLabels = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMjAuNTkgMTMuNDFsLTcuMTcgNy4xN2EyIDIgMCAwIDEtMi44MyAwTDIgMTJWMmgxMGw4LjU5IDguNTlhMiAyIDAgMCAxIDAgMi44MnoiLz48Y2lyY2xlIGN4PSI3LjUiIGN5PSI3LjUiIHI9IjEuNCIgZmlsbD0iI2ZmZmZmZiIgc3Ryb2tlPSJub25lIi8+PC9zdmc+"
+  asset icSearch = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSIxMSIgY3k9IjExIiByPSI3Ii8+PHBhdGggZD0iTTIwIDIwbC0zLjUtMy41Ii8+PC9zdmc+"
+  asset icPlus = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDV2MTRNNSAxMmgxNCIvPjwvc3ZnPg=="
+  asset icMore = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PGNpcmNsZSBjeD0iMTIiIGN5PSI1LjUiIHI9IjEuNiIgZmlsbD0iI2ZmZmZmZiIvPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjEuNiIgZmlsbD0iI2ZmZmZmZiIvPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTguNSIgcj0iMS42IiBmaWxsPSIjZmZmZmZmIi8+PC9zdmc+"
+  asset icBack = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjIuMSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTUgMThsLTYtNiA2LTYiLz48L3N2Zz4="
+  asset icInfo = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI5Ii8+PHBhdGggZD0iTTEyIDExdjUuNSIvPjxjaXJjbGUgY3g9IjEyIiBjeT0iNy44IiByPSIxLjIiIGZpbGw9IiNmZmZmZmYiIHN0cm9rZT0ibm9uZSIvPjwvc3ZnPg=="
+  asset icSync = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMjEgMTJhOSA5IDAgMCAxLTE1LjUgNi4zNk0zIDEyYTkgOSAwIDAgMSAxNS41LTYuMzYiLz48cGF0aCBkPSJNMjEgM3Y1aC01TTMgMjF2LTVoNSIvPjwvc3ZnPg=="
+  asset icSelect = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHJ4PSIzIi8+PHBhdGggZD0iTTkgMTJsMiAyIDQtNCIvPjwvc3ZnPg=="
+  asset icSettings = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCA2aDE2TTQgMTJoMTZNNCAxOGgxNiIvPjxjaXJjbGUgY3g9IjkiIGN5PSI2IiByPSIyIiBmaWxsPSIjZmZmZmZmIiBzdHJva2U9Im5vbmUiLz48Y2lyY2xlIGN4PSIxNSIgY3k9IjEyIiByPSIyIiBmaWxsPSIjZmZmZmZmIiBzdHJva2U9Im5vbmUiLz48Y2lyY2xlIGN4PSIxMCIgY3k9IjE4IiByPSIyIiBmaWxsPSIjZmZmZmZmIiBzdHJva2U9Im5vbmUiLz48L3N2Zz4="
+  asset icRead = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCA1LjVDNCA0LjQgNC45IDMuNSA2IDMuNUgxMlYxOS41SDZDNC45IDE5LjUgNCAyMC40IDQgMjEuNVY1LjVaIi8+PHBhdGggZD0iTTIwIDUuNUMyMCA0LjQgMTkuMSAzLjUgMTggMy41SDEyVjE5LjVIMThDMTkuMSAxOS41IDIwIDIwLjQgMjAgMjEuNVY1LjVaIi8+PC9zdmc+"
+  asset icOpen = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTQgNGg2djYiLz48cGF0aCBkPSJNMTAgMTRMMjAgNCIvPjxwYXRoIGQ9Ik0xOSAxNHY0LjVhMS41IDEuNSAwIDAgMS0xLjUgMS41aC0xMkExLjUgMS41IDAgMCAxIDQgMTguNXYtMTJBMS41IDEuNSAwIDAgMSA1LjUgNUgxMCIvPjwvc3ZnPg=="
+  asset icCopy = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSI5IiB5PSI5IiB3aWR0aD0iMTEiIGhlaWdodD0iMTEiIHJ4PSIyIi8+PHBhdGggZD0iTTUgMTVoLS41QTEuNSAxLjUgMCAwIDEgMyAxMy41di05QTEuNSAxLjUgMCAwIDEgNC41IDNoOUExLjUgMS41IDAgMCAxIDE1IDQuNVY1Ii8+PC9zdmc+"
+  asset icShare = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSIxOCIgY3k9IjUuNSIgcj0iMi41Ii8+PGNpcmNsZSBjeD0iNiIgY3k9IjEyIiByPSIyLjUiLz48Y2lyY2xlIGN4PSIxOCIgY3k9IjE4LjUiIHI9IjIuNSIvPjxwYXRoIGQ9Ik04LjIgMTAuOUwxNS44IDYuNk04LjIgMTMuMUwxNS44IDE3LjQiLz48L3N2Zz4="
+  asset icEdit = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCAyMGg0TDE4LjUgOS41YTIuMTIgMi4xMiAwIDAgMCAwLTNsLTEtMWEyLjEyIDIuMTIgMCAwIDAtMyAwTDQgMTZ2NHoiLz48L3N2Zz4="
+  asset icTrash = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCA3aDE2TTkuNSA0aDVNNi41IDdsMSAxMi41YTEuNSAxLjUgMCAwIDAgMS41IDEuNWg2YTEuNSAxLjUgMCAwIDAgMS41LTEuNUwxNy41IDciLz48L3N2Zz4="
+  asset icSparkle = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDJsMi40IDcuNkwyMiAxMmwtNy42IDIuNEwxMiAyMmwtMi40LTcuNkwyIDEybDcuNi0yLjRMMTIgMnoiLz48L3N2Zz4="
+  asset icDownload = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMjEgMTV2NGEyIDIgMCAwIDEtMiAySDVhMiAyIDAgMCAxLTItMnYtNCIvPjxwYXRoIGQ9Ik03IDEwbDUgNSA1LTUiLz48cGF0aCBkPSJNMTIgMTVWMyIvPjwvc3ZnPg=="
+  asset icServer = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSIzIiB5PSI0IiB3aWR0aD0iMTgiIGhlaWdodD0iNyIgcng9IjEuNSIvPjxyZWN0IHg9IjMiIHk9IjEzIiB3aWR0aD0iMTgiIGhlaWdodD0iNyIgcng9IjEuNSIvPjxjaXJjbGUgY3g9IjciIGN5PSI3LjUiIHI9IjEiIGZpbGw9IiNmZmZmZmYiIHN0cm9rZT0ibm9uZSIvPjxjaXJjbGUgY3g9IjciIGN5PSIxNi41IiByPSIxIiBmaWxsPSIjZmZmZmZmIiBzdHJva2U9Im5vbmUiLz48L3N2Zz4="
 
   // The library, from the server or from an export of it, as the app's own helper
   // (owl-readeck, installed above) fetches it: one bookmark a line.
@@ -778,10 +827,10 @@ fetch | reload)
 esac
 READECK_LIB_END
 fi
-if ! grep -qF '# owl-readeck-read 1.2' "$bin/owl-readeck-read" 2>/dev/null; then
+if ! grep -qF '# owl-readeck-read 1.3' "$bin/owl-readeck-read" 2>/dev/null; then
   cat > "$bin/owl-readeck-read" << 'READECK_READ_END'
 #!/usr/bin/env python3
-# owl-readeck-read 1.2: the reader side of the launcher's Readeck app (readeck.owl).
+# owl-readeck-read 1.3: the reader side of the launcher's Readeck app (readeck.owl).
 # Turns a Readeck article's HTML (its export's container/index.html, or the
 # server's /article endpoint) into the light text the app draws: one element a
 # line, "heading: ", "quote: " and "list: " marking what isn't a paragraph, so
@@ -853,8 +902,10 @@ class Reader(HTMLParser):
                 self.want = "li"
             elif tag == "blockquote":
                 self.want = "q"
-            elif tag in ("figcaption", "dt", "dd", "summary", "pre"):
+            elif tag in ("figcaption", "dt", "dd", "summary"):
                 self.want = "fig"
+            elif tag == "pre":
+                self.want = "pre"
             elif tag in ("p", "td", "th"):
                 self.want = "p"
         if tag == "pre":
@@ -873,11 +924,11 @@ class Reader(HTMLParser):
             if tag in SKIP:
                 self.skip -= 1
             return
-        if tag == "pre":
-            self.pre = max(0, self.pre - 1)
         if tag in ("h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote",
-                   "figcaption", "dt", "dd", "summary"):
+                   "figcaption", "dt", "dd", "summary", "pre"):
             self.flush()
+            if tag == "pre":
+                self.pre = max(0, self.pre - 1)
             self.want = "p"
         elif tag in BLOCK:
             self.flush()
@@ -931,6 +982,15 @@ echo ready""") every 1h
   source ready = cmd("""test -x "$HOME/.local/bin/owl-readeck" && test -x "$HOME/.local/bin/owl-readeck-read" && echo yes || echo no""") every 10s
   let helpers = trim(ready ?? "") == "yes"
 
+  // Theme-adaptive surface & typography tokens.
+  let cardBg = mix(background, foreground, 0.04)
+  let surfaceBg = mix(background, foreground, 0.08)
+  let subFg = mix(foreground, muted, 0.45)
+  let bodyFg = mix(foreground, background, 0.08)
+  let hairline = alpha(border, 0.45)
+  let chipBg = alpha(accent, 0.13)
+  let scrim = alpha(background, 0.12)
+
   // The server and an API token from its settings (made in its profile page). Either
   // "readeck.example.org" or "https://readeck.example.org" will do. The setup page
   // edits drafts, so typing an address or a token doesn't start a fetch per letter.
@@ -954,7 +1014,7 @@ echo ready""") every 1h
   state notice = ""
   state readId = ""
   state editing = false
-  // Whether the article's text is on show under its details, and not only the page's link.
+  // Whether the article's text is on show, mutually exclusive with Article Info.
   state reading = false persist
   // Whether the reader shows the tidied text and the summary (both made by Claude Code,
   // which sends the text to Anthropic, once each), and whether those are being made now.
@@ -996,13 +1056,13 @@ echo ready""") every 1h
   state group = "" persist
   // The reader's text size, in points, and where you got to in each article (a map
   // from its id to a paragraph number), kept so an article opens where you left it.
-  state textSize = 16 persist
+  state textSize = 17 persist
   // [{id, i}] — how far into each article you got, so it opens where you left it.
   state where = [] persist
   // Whether taps pick bookmarks for a bulk change, and which are picked.
   state picking = false
   state picked = []
-  // A "delete" waiting for a second tap, by id; a label's × that needs one too.
+  // A "delete" waiting for a second tap, by id; a label's delete that needs one too.
   state confirmId = ""
   state confirmLabel = ""
   state connectMsg = ""
@@ -1015,11 +1075,21 @@ echo ready""") every 1h
   // Whether the "save a link" bar is open: it stays out of the way until asked for.
   state showAdd = false
   // The reader's typography, as the official app's: a font and a spacing, kept per phone.
-  state readFont = "sans" persist
+  state readFont = "serif" persist
   state readGap = 1 persist
   // Paragraphs kept highlighted in the reader, by article id: the official app's
   // highlights, kept on this phone since the server's API has no word for them.
   state hl = {} persist
+  // Non-persisted v2.4 UI & navigation states.
+  state showSearch = false
+  state showMenu = false
+  state showTypo = false
+  state fromReader = false
+  state labelMenu = ""
+  state importPath = ""
+  state draftTitle = ""
+  state draftLabels = ""
+  state draftNote = ""
 
   // The library the helper writes: one bookmark per line.
   source lib = file("~/.cache/omalauncher/readeck.jsonl")
@@ -1054,7 +1124,6 @@ echo ready""") every 1h
     : current.mode == "change" ? "owl-readeck change ${sh(server)} ${sh(token)} ${sh(current.id)} ${sh(current.json)} >/dev/null 2>&1; rc=$?; echo ${int(current.n)} $rc; head -1 \"$HOME/.cache/omalauncher/readeck-op.err\" 2>/dev/null; echo @@IDS@@; cat \"$HOME/.cache/omalauncher/readeck-op-failed.txt\" 2>/dev/null"
     : current.mode == "bulk" ? "owl-readeck bulk ${sh(server)} ${sh(token)} ${sh(current.json)} ${sh(toJson(current.ids ?? []))} >/dev/null 2>&1; rc=$?; echo ${int(current.n)} $rc; head -1 \"$HOME/.cache/omalauncher/readeck-op.err\" 2>/dev/null; echo @@IDS@@; cat \"$HOME/.cache/omalauncher/readeck-op-failed.txt\" 2>/dev/null"
     : current.mode == "add" ? "owl-readeck add ${sh(server)} ${sh(token)} ${sh(current.id)} >/dev/null 2>&1; rc=$?; echo ${int(current.n)} $rc; head -1 \"$HOME/.cache/omalauncher/readeck-op.err\" 2>/dev/null; echo @@IDS@@"
-
     : current.mode == "labelrm" ? "owl-readeck labelrm ${sh(server)} ${sh(token)} ${sh(current.id)} >/dev/null 2>&1; rc=$?; echo ${int(current.n)} $rc; head -1 \"$HOME/.cache/omalauncher/readeck-op.err\" 2>/dev/null; echo @@IDS@@"
     : current.mode == "import" ? "owl-readeck import-file ${sh(current.id)} >/dev/null 2>&1; rc=$?; echo ${int(current.n)} $rc; head -1 \"$HOME/.cache/omalauncher/readeck-op.err\" 2>/dev/null; echo @@IDS@@"
     : "echo ${int(current.n)} 1; echo @@IDS@@") every 12h timeout 900s
@@ -1321,18 +1390,22 @@ echo ready""") every 1h
   let filtered = tabbed.filter(b =>
     (typedNeedle == "" || contains(lower(b.title + " " + b.site + " " + b.labels + " " + b.url + " " + b.desc + " " + b.authors), typedNeedle)) &&
     (needle == "" || contains(lower(b.title + " " + b.site + " " + b.labels + " " + b.url + " " + b.desc + " " + b.authors), needle) || hits.any(id => id == b.id)))
-  let seen = (sort == "title" ? filtered.sortBy(b => lower(b.title))
-    : sort == "length" ? filtered.sortBy(b => -(b.mins ?? 0))
-    : sort == "shortest" ? filtered.sortBy(b => b.mins ?? 9999)
-    : sort == "created" ? filtered.sortBy(b => b.added ?? "")
-    : filtered.sortBy(b => "" + (b.when ?? "")))
-    .reverse()
+  let sorted = sort == "title" ? filtered.sortBy(b => lower(b.title))
+    : sort == "length" ? filtered.sortBy(b => -(b.mins ?? -1))
+    : sort == "shortest" ? filtered.sortBy(b => b.mins ?? 999999)
+    : sort == "created" ? filtered.sortBy(b => parseTime(b.added ?? b.when) ?? 9999999999)
+    : filtered.sortBy(b => -(parseTime(b.when ?? b.added) ?? 0))
+  // Pre-sort by group key when grouped so headers never fragment across non-adjacent rows.
+  let seen = group == "site" ? sorted.sortBy(b => b.site == "" ? "\uffff" : lower(b.site))
+    : group == "label" ? sorted.sortBy(b => b.labels == "" ? "\uffff" : lower(first(split(b.labels, ", ")) ?? ""))
+    : group == "day" ? sorted.sortBy(b => sort == "created" ? (num(fmtTime(parseTime(b.when ?? b.added), "yyyyMMdd")) ?? 99999999) : -(num(fmtTime(parseTime(b.when ?? b.added), "yyyyMMdd")) ?? 0))
+    : sorted
   // The rows to draw: a header when grouped, then the items under it.
-  let rows = seen.map(b => {h: group == "day" ? fmtTime(parseTime(b.when ?? b.added), "d MMM yyyy")
-    : group == "site" ? b.site
-    : group == "label" ? (first(split(b.labels, ", ")) ?? "no label")
+  let rows = seen.map(b => {h: group == "day" ? (fmtTime(parseTime(b.when ?? b.added), "d MMM yyyy") ?? "Undated")
+    : group == "site" ? (b.site == "" ? "No Site" : b.site)
+    : group == "label" ? (b.labels == "" ? "No Label" : first(split(b.labels, ", ")) ?? "No Label")
     : "", b: b})
-  let counted = {unread: all.count(b => b.prog != 100 && !b.arch), favorite: all.count(b => b.fav && !b.arch), archived: all.count(b => b.arch), all: all.count(b => !b.arch)}
+  let counted = {unread: all.count(b => b.prog != 100 && !b.arch), favorite: all.count(b => b.fav), archived: all.count(b => b.arch), all: all.count(b => !b.arch)}
   // How long the queue is to read, in minutes, said as "2h 5m" or "39m".
   let queue = all.filter(b => b.prog != 100 && !b.arch).map(b => b.mins ?? 0)
   let queueMin = sum(queue)
@@ -1342,18 +1415,53 @@ echo ready""") every 1h
   let labelNames = unique((flatten(all.map(b => split(b.labels, ", "))) + (parseJson(serverLabels) ?? []).map(l => l.name ?? "")).filter(l => l != "")).sortBy(l => lower(l))
   let labels = labelNames.map(l => {name: l, count: all.count(b => contains(lower(", " + b.labels + ","), ", " + lower(l) + ","))})
   let offline = server == "" || token == ""
+  let showStatus = notice != "" || lastErr != "" || syncMsg != "" || syncing || syncStalled || (current != null && current.mode == "add")
 
-  component Tab(name, count) {
+  component NavTab(name, title, icon, activeIcon, badge = 0) {
+    let active = name == "labels" ? (view == "labels" || label != "") : (view == name && label == "")
     Column {
       weight: 1
-      gap: 3
-      padding: [8, 9]
-      radius: 10 * corners
+      gap: 4
+      padding: [4, 6]
       align: center
-      background: view == name && label == "" ? alpha(foreground, 0.10) : null
-      onTap: { view = name; label = ""; typed = ""; query = ""; notice = ""; haptic() }
-      Text { text: name; style: body; fontSize: 15; align: center; maxLines: 1; bold: view == name && label == ""; color: view == name && label == "" ? foreground : muted }
-      Text { text: count > 999 ? "${floor(count / 1000)}k" : "${count}"; style: label; fontSize: 12; align: center; color: muted }
+      onTap: {
+        view = name
+        label = ""
+        typed = ""
+        query = ""
+        notice = ""
+        showSearch = false
+        showAdd = false
+        showMenu = false
+        labelMenu = ""
+        confirmLabel = ""
+        picking = false
+        picked = []
+        haptic()
+      }
+      Box {
+        width: 58
+        height: 28
+        radius: 14
+        align: center
+        background: active ? chipBg : null
+        Image { src: active ? activeIcon : icon; size: 22; tint: active ? accent : subFg }
+        if badge > 0 {
+          Box {
+            align: topEnd
+            fill: true
+            Box {
+              padding: [5, 1]
+              radius: 999
+              background: accent
+              border: 1
+              borderColor: background
+              Text { text: badge > 999 ? "${floor(badge / 1000)}k" : "${badge}"; font: sans; fontSize: 9; fontWeight: 700; color: background; maxLines: 1 }
+            }
+          }
+        }
+      }
+      Text { text: title; font: sans; fontSize: 11; fontWeight: active ? 700 : 400; letterSpacing: 0.1; align: center; maxLines: 1; color: active ? foreground : subFg }
     }
   }
 
@@ -1361,10 +1469,12 @@ echo ready""") every 1h
   // old value is back on show.
   component Retry(id) {
     Text {
-      text: "retry"
-      style: label
+      text: "Retry"
+      font: sans
+      fontSize: 11.5
+      fontWeight: 600
       color: red
-      padding: [2, 4]
+      padding: [4, 2]
       maxLines: 1
       onTap: {
         let op = get(retry, id, null)
@@ -1376,34 +1486,85 @@ echo ready""") every 1h
     }
   }
 
+  component ActionTile(title, icon, active = false, tintCol = null) {
+    let fg = tintCol != null ? tintCol : active ? accent : foreground
+    let bg = tintCol != null && active ? alpha(tintCol, 0.13) : active ? chipBg : cardBg
+    let bd = tintCol != null && active ? alpha(tintCol, 0.38) : active ? alpha(accent, 0.38) : border
+    Column {
+      fill: width
+      align: center
+      gap: 5
+      padding: [4, 9]
+      radius: 10 * corners
+      background: bg
+      border: 1
+      borderColor: bd
+      Image { src: icon; size: 19; tint: fg }
+      Text { text: title; font: sans; fontSize: 11.5; fontWeight: active ? 600 : 500; color: fg; maxLines: 1; align: center }
+    }
+  }
+
+  component UtilPill(title, icon, danger = false) {
+    Row {
+      fill: width
+      height: 34
+      align: center
+      justify: center
+      gap: 5
+      padding: [6, 0]
+      radius: 8 * corners
+      background: danger ? alpha(red, 0.10) : cardBg
+      border: 1
+      borderColor: danger ? alpha(red, 0.36) : border
+      Image { src: icon; size: 14; tint: danger ? red : subFg }
+      Text { text: title; font: sans; fontSize: 11.5; fontWeight: danger ? 600 : 500; color: danger ? red : foreground; maxLines: 1 }
+    }
+  }
+
+  component SegOpt(title, active, previewFont = "") {
+    Row {
+      fill: width
+      align: center
+      justify: center
+      gap: 5
+      padding: [8, 7]
+      radius: 6 * corners
+      background: active ? chipBg : null
+      border: active ? 1 : 0
+      borderColor: alpha(accent, 0.4)
+      if previewFont != "" {
+        Text { text: "Aa"; font: previewFont; fontSize: 14; fontWeight: 700; color: active ? foreground : subFg; maxLines: 1 }
+      }
+      Text { text: title; font: sans; fontSize: 12.5; fontWeight: active ? 600 : 500; color: active ? foreground : subFg; maxLines: 1 }
+    }
+  }
+
   // An entry in the list: the story's picture or the site's icon (never both, so a
-  // long list stays under the image limit), its title, the site and labels, how long a
-  // read it is and how old, what its change is doing, and a tick when it's picked for a
-  // bulk change. Tapping opens it; a left swipe archives or restores it, a right swipe
-  // marks it read or unread. The action's tab shows at the edge while the row moves.
+  // long list stays under the image limit), its title, the site, authors and up to 3
+  // label pills, reading time and age, progress bar, and swipe-left/right reveal.
   component Entry(b) {
+    let lbls = split(b.labels, ", ").filter(l => l != "").take(3)
+    let isPicked = picked.any(id => id == b.id)
     Box {
       fill: width
-      radius: 8 * corners
+      radius: 10 * corners
       clip: true
-      // The strip's colour is the row's own background: the content slides over it
-      // and uncovers it at the edge the finger opens, deepening as the swipe nears
-      // the point where letting go does the action.
+      border: 1
+      borderColor: swipeId == b.id && swipeX < 0 ? alpha(red, 0.35) : swipeId == b.id && swipeX > 0 ? alpha(accent, 0.35) : hairline
       background: swipeId == b.id && swipeX > 0
-        ? linear(0, 0, 1, 0, range(31).map(i => i / 30 <= 0.26 ? mix(background, accent, 0.14 + 0.30 * min(1, abs(swipeX) / 88)) : mix(background, foreground, 0.04)))
+        ? linear(0, 0, 1, 0, range(31).map(i => i / 30 <= 0.28 ? mix(background, accent, 0.14 + 0.26 * min(1, abs(swipeX) / 88)) : cardBg))
         : swipeId == b.id && swipeX < 0
-        ? linear(0, 0, 1, 0, range(31).map(i => i / 30 >= 0.74 ? mix(background, red, 0.12 + 0.30 * min(1, abs(swipeX) / 88)) : mix(background, foreground, 0.04)))
-        : mix(background, foreground, 0.04)
-      // The action tabs ride in from the edges on the same spring as the content, so
-      // each label arrives with the row it belongs to instead of sitting over it;
-      // a row left open keeps its tab uncovered, to tap.
+        ? linear(0, 0, 1, 0, range(31).map(i => i / 30 >= 0.72 ? mix(background, red, 0.14 + 0.26 * min(1, abs(swipeX) / 88)) : cardBg))
+        : cardBg
       Row {
         fill: width
         align: center
-        Box {
+        Column {
           width: 96
-          height: 56
+          height: 64
           align: center
+          justify: center
+          gap: 4
           offset: [swipeId == b.id && swipeX > 0 ? swipeX - 96 : -96, 0]
           animate offset: spring(0.85, 500)
           onTap: {
@@ -1412,13 +1573,16 @@ echo ready""") every 1h
             swipeX = 0
             haptic()
           }
-          Text { text: b.prog == 100 ? "mark unread" : "mark read"; style: label; color: foreground; maxLines: 1; align: center; padding: [0, 8] }
+          Image { src: icRead; size: 18; tint: foreground }
+          Text { text: b.prog == 100 ? "Unread" : "Read"; font: sans; fontSize: 12; fontWeight: 700; color: foreground; maxLines: 1; align: center }
         }
         Spacer { weight: 1 }
-        Box {
+        Column {
           width: 96
-          height: 56
+          height: 64
           align: center
+          justify: center
+          gap: 4
           offset: [swipeId == b.id && swipeX < 0 ? swipeX + 96 : 96, 0]
           animate offset: spring(0.85, 500)
           onTap: {
@@ -1427,19 +1591,18 @@ echo ready""") every 1h
             swipeX = 0
             haptic()
           }
-          Text { text: b.arch ? "restore" : "archive"; style: label; color: foreground; maxLines: 1; align: center; padding: [0, 8] }
+          Image { src: icArchive; size: 18; tint: foreground }
+          Text { text: b.arch ? "Restore" : "Archive"; font: sans; fontSize: 12; fontWeight: 700; color: foreground; maxLines: 1; align: center }
         }
       }
       Row {
         let st = get(saving, b.id, 0) > 0 ? "saving" : get(failed, b.id, "") != "" ? "failed" : get(okIds, b.id, false) ? "saved" : ""
         fill: width
-        gap: 10
+        gap: 12
         align: top
-        padding: [10, 9]
-        radius: 8 * corners
-        // Opaque, so the content hides the tabs where it still covers them.
-        background: picked.any(id => id == b.id) ? mix(background, accent, 0.12) : mix(background, foreground, 0.04)
-        // Sideways only: the list still scrolls up and down under a finger on a row.
+        padding: [12, 10]
+        radius: 10 * corners
+        background: isPicked ? mix(background, accent, 0.14) : cardBg
         offset: [swipeId == b.id ? swipeX : 0, 0]
         animate offset: spring(0.85, 500)
         drag: horizontal
@@ -1451,15 +1614,11 @@ echo ready""") every 1h
             }
             let was = abs(swipeX)
             swipeX = clamp(swipeX + dx, -96, 96)
-            // A tick when the swipe reaches "let go and it happens", so the thumb
-            // knows the difference between opening the row and doing the action.
             if was < 88 && abs(swipeX) >= 88 { haptic() }
           }
         }
         onDragEnd: {
           if swipeId == b.id {
-            // Past the mark (or flung) the action runs at once; a shorter swipe leaves
-            // the row open on its actions, to tap or to drag back.
             let archive = swipeX <= -88 || (vx < -500 && swipeX < -24)
             let mark = swipeX >= 88 || (vx > 500 && swipeX > 24)
             if archive {
@@ -1482,115 +1641,135 @@ echo ready""") every 1h
             }
           }
         }
-        // A long press picks without leaving the list; a tap opens, or picks while picking.
         onLongPress: {
           picking = true
-          picked = picked.any(id => id == b.id) ? picked.filter(id => id != b.id) : picked + [b.id]
+          picked = isPicked ? picked.filter(id => id != b.id) : picked + [b.id]
           haptic()
         }
         onTap: {
           if swipeId == b.id && swipeX != 0 {
-            // A tap on an open row closes its actions before it opens the bookmark.
             swipeId = ""
             swipeX = 0
           } else if picking {
-            picked = picked.any(id => id == b.id) ? picked.filter(id => id != b.id) : picked + [b.id]
+            picked = isPicked ? picked.filter(id => id != b.id) : picked + [b.id]
           } else {
             notice = ""
             lastErr = ""
+            said = ""
             readId = b.id
             editing = false
             confirmId = ""
+            showTypo = false
+            fromReader = false
             reading = true
             swipeId = ""
             swipeX = 0
             haptic()
           }
         }
-      Box {
-        width: 6
-        height: 52
-        radius: 3
-        background: b.fav ? orange : b.prog == 100 ? alpha(muted, 0.4) : accent
-      }
-      Column {
-        weight: 1
-        gap: 4
-        Text { text: b.title; maxLines: 3 }
-        Row {
-          gap: 6
-          align: center
-          if b.icon != "" && b.thumb == "" {
-            Box { width: 14; height: 14; Image { src: b.icon; fill: true; fit: contain } }
-          }
-          // What kind of thing was saved: the official app keeps videos and pictures
-          // beside articles, and says so on the row.
-          if b.dtype == "video" {
-            Text { text: "▶"; style: small; color: accent; maxLines: 1 }
-          } else if b.dtype == "image" {
-            Text { text: "▣"; style: small; color: accent; maxLines: 1 }
-          }
-          // The site takes the free width; length and age share one label at the end.
-          Text { text: b.site; style: small; color: muted; maxLines: 1; weight: 1 }
-          if b.note != "" {
-            Text { text: "✎"; style: small; color: muted; maxLines: 1 }
-          }
-          // One right-aligned label for both, so the site keeps the width it can.
-          Text {
-            text: "${b.mins != null ? "${b.mins}m" : ""}${b.mins != null && b.when != null ? " · " : ""}${b.when != null ? fmtAgo(parseTime(b.when), now) : ""}"
-            style: label
-            color: muted
-            maxLines: 1
-            width: 66
-            align: end
-            visible: b.mins != null || b.when != null
+        if picking {
+          Box {
+            width: 20
+            height: 20
+            radius: 5 * corners
+            align: center
+            border: 1.5
+            borderColor: isPicked ? accent : border
+            background: isPicked ? accent : null
+            if isPicked {
+              Text { text: "✓"; font: sans; fontSize: 12; fontWeight: 700; color: background; maxLines: 1 }
+            }
           }
         }
-        // The authors when they're not just the site's name; else the labels.
-        if b.authors != "" && b.authors != b.site {
-          Text { text: b.authors; style: label; color: muted; maxLines: 1 }
-        } else if b.labels != "" {
-          Text { text: b.labels; style: label; color: accent; maxLines: 1 }
-        }
-        // How far into a piece you got, for one you started and didn't finish.
-        if b.prog > 0 && b.prog < 100 {
-          Progress { value: b.prog; height: 2; color: accent; radius: 1 }
-        }
-        // What the last change to this bookmark is doing.
-        if st == "saving" {
-          Text { text: "saving…"; style: label; color: accent; maxLines: 1 }
-        } else if st == "failed" {
+        Column {
+          weight: 1
+          gap: 5
+          Text { text: b.title; font: sans; fontSize: 15.5; fontWeight: b.prog == 100 ? 400 : 600; color: b.prog == 100 ? subFg : foreground; maxLines: 3 }
           Row {
-            gap: 6
-            Text { text: get(failed, b.id, "couldn't save"); style: label; color: red; maxLines: 3; weight: 1 }
-            Retry { id: b.id }
+            gap: 5
+            align: center
+            if b.icon != "" && b.thumb == "" {
+              Box { width: 14; height: 14; radius: 3 * corners; clip: true; Image { src: b.icon; fill: true; fit: contain } }
+            }
+            if b.dtype == "video" {
+              Text { text: "▶"; font: sans; fontSize: 11; color: accent; maxLines: 1 }
+            } else if b.dtype == "image" {
+              Text { text: "▣"; font: sans; fontSize: 11; color: accent; maxLines: 1 }
+            }
+            Text { text: b.site; font: sans; fontSize: 12; fontWeight: 600; color: subFg; maxLines: 1; weight: 1 }
+            if b.note != "" {
+              Text { text: "✎"; font: sans; fontSize: 11.5; color: subFg; maxLines: 1 }
+            }
+            if b.mins != null || b.when != null {
+              Text {
+                text: "${b.mins != null ? "${b.mins}m" : ""}${b.mins != null && b.when != null ? " · " : ""}${b.when != null ? fmtAgo(parseTime(b.when), now) : ""}"
+                font: sans
+                fontSize: 12
+                color: subFg
+                maxLines: 1
+              }
+            }
+            if b.fav {
+              Text { text: "★"; font: sans; fontSize: 12; color: orange; maxLines: 1 }
+            }
           }
-        } else if st == "saved" {
-          Text { text: "✓ saved"; style: label; color: green; maxLines: 1 }
+          if (b.authors != "" && b.authors != b.site) || len(lbls) > 0 {
+            Flow {
+              gap: 5
+              fill: width
+              if b.authors != "" && b.authors != b.site {
+                Text { text: "by ${b.authors}"; font: sans; fontSize: 12; color: subFg; maxLines: 1 }
+              }
+              for l in lbls key l {
+                Text { text: l; font: sans; fontSize: 11; fontWeight: 600; letterSpacing: 0.1; color: accent; background: chipBg; padding: [6, 2]; radius: 4 * corners; maxLines: 1 }
+              }
+            }
+          }
+          if b.prog > 0 && b.prog < 100 {
+            Row {
+              gap: 8
+              align: center
+              fill: width
+              Progress { value: b.prog; weight: 1; height: 2; color: accent; track: hairline; radius: 1 }
+              Text { text: "${int(b.prog)}%"; font: sans; fontSize: 10.5; fontWeight: 600; color: accent; maxLines: 1 }
+            }
+          }
+          if st == "saving" {
+            Text { text: "saving…"; font: sans; fontSize: 11.5; color: accent; maxLines: 1 }
+          } else if st == "failed" {
+            Row {
+              gap: 6
+              align: center
+              Text { text: get(failed, b.id, "couldn't save"); font: sans; fontSize: 11.5; color: red; maxLines: 3; weight: 1 }
+              Retry { id: b.id }
+            }
+          } else if st == "saved" {
+            Text { text: "✓ saved"; font: sans; fontSize: 11.5; color: green; maxLines: 1 }
+          }
         }
-      }
-      if b.thumb != "" {
-        Box { width: 76; height: 52; radius: 6 * corners; clip: true; Image { src: b.thumb; fill: true; fit: cover } }
-      } else if b.fav {
-        Text { text: "★"; color: orange; width: 20; align: end; maxLines: 1 }
-      }
-      if picked.any(id => id == b.id) {
-        Text { text: "✓"; color: accent; width: 20; align: end; maxLines: 1 }
-      } else if b.thumb != "" && b.fav {
-        Text { text: "★"; color: orange; width: 16; align: end; maxLines: 1 }
-      }
+        if b.thumb != "" {
+          Box {
+            width: 72
+            height: 56
+            radius: 8 * corners
+            clip: true
+            background: surfaceBg
+            border: 1
+            borderColor: hairline
+            Image { src: b.thumb; fill: true; fit: cover }
+            Box { fill: true; background: scrim }
+          }
+        }
       }
     }
   }
 
   component List(rows, loading) {
     Column {
-      // lazy: only the rows in view are built, so a library of a thousand opens at the
-      // same speed as a short one; a pull at the top fetches it again.
       lazy: true
       weight: 1
       gap: 6
-      padding: [12, 4, 12, 12]
+      padding: [12, 8, 12, 10]
       onPull: {
         notice = ""
         lastErr = ""
@@ -1598,608 +1777,1776 @@ echo ready""") every 1h
         haptic()
       }
       if loading {
-        // The first run, and until something is there: both ways in, whichever fits.
         Column {
-          gap: 8
-          padding: [8, 4]
-          Text { text: offline ? "Nothing to read yet." : "Fetching your bookmarks…"; style: body; color: muted }
+          gap: 10
+          padding: [16, 14]
+          radius: 10 * corners
+          background: cardBg
+          border: 1
+          borderColor: hairline
+          Text { text: offline ? "Nothing to read yet." : "Fetching your bookmarks…"; font: sans; fontSize: 16; fontWeight: 600; color: foreground }
           if offline {
-            Text { text: "Point the app at your Readeck server, and its API token, to fetch your library. Or import an export of it, to read offline."; style: small; color: muted }
-            Button { text: "connect a server"; color: accent; onTap: { draftBase = base; draftToken = token; view = "setup"; haptic() } }
+            Text { text: "Point the app at your Readeck server, and its API token, to fetch your library. Or import an export of it, to read offline."; font: sans; fontSize: 13; color: subFg }
+            Box {
+              padding: [14, 9]
+              radius: 8 * corners
+              background: accent
+              onTap: { draftBase = base; draftToken = token; view = "setup"; haptic() }
+              Text { text: "Connect Server"; font: sans; fontSize: 13; fontWeight: 700; color: background; maxLines: 1 }
+            }
           } else {
-            Text { text: "The app's library is empty. Fetch the list, or import an export of yours."; style: small; color: muted }
-            Button { text: "fetch now"; color: muted; onTap: { notice = ""; syncAsk = syncAsk + 1; haptic() } }
+            Text { text: "The app's library is empty. Fetch the list, or import an export of yours."; font: sans; fontSize: 13; color: subFg }
+            Box {
+              padding: [14, 9]
+              radius: 8 * corners
+              background: surfaceBg
+              border: 1
+              borderColor: border
+              onTap: { notice = ""; syncAsk = syncAsk + 1; haptic() }
+              Text { text: "Fetch Now"; font: sans; fontSize: 13; fontWeight: 600; color: foreground; maxLines: 1 }
+            }
           }
-          Text { text: "Import an export (its data.json, or the zip)"; style: label; color: muted }
-          Input { placeholder: "/path/to/data.json or .zip"; clear: true; onSubmit: { notice = ""; wants = wants + [toJson({mode: "import", id: trim(value)})] } }
+          Text { text: "Import an export (.zip, data.json or .jsonl)"; font: sans; fontSize: 12; fontWeight: 600; color: subFg }
+          Input {
+            placeholder: "/path/to/data.json or .zip"
+            clear: true
+            fill: width
+            onSubmit: {
+              let f = trim(value)
+              if f != "" {
+                notice = ""
+                wants = wants + [toJson({mode: "import", id: f})]
+                haptic()
+              }
+            }
+          }
           if current != null && current.mode == "import" {
-            Text { text: "importing…"; style: label; color: accent }
+            Text { text: "importing…"; font: sans; fontSize: 12; color: accent }
           }
         }
       }
       if !loading && len(rows) == 0 {
         Column {
-          gap: 6
-          padding: [12, 18]
-          Text { text: typed != "" || query != "" ? "nothing found for “${trim(typed != "" ? typed : query)}”" : label != "" ? "nothing under this label" : "nothing here"; color: muted; style: small }
+          gap: 8
+          padding: [16, 18]
+          Text { text: typed != "" || query != "" ? "Nothing found for “${trim(typed != "" ? typed : query)}”" : label != "" ? "Nothing under this label" : "Nothing here"; font: sans; fontSize: 14; color: subFg }
           if typed != "" || query != "" {
-            Text { text: "enter searches the articles' own text too, not just titles"; color: muted; style: label; visible: query == "" }
-            Text { text: "clear the search"; style: label; color: accent; padding: [4, 0]; onTap: { typed = ""; query = ""; haptic() } }
+            Text { text: "Press Enter to search inside saved article text too."; font: sans; fontSize: 12; color: muted; visible: query == "" }
+            Box {
+              padding: [12, 7]
+              radius: 8 * corners
+              background: chipBg
+              onTap: { typed = ""; query = ""; haptic() }
+              Text { text: "Clear Search"; font: sans; fontSize: 12.5; fontWeight: 600; color: accent; maxLines: 1 }
+            }
           }
         }
       }
       for r, i in rows key r.b.id {
-        if r.h != "" && (i == 0 || rows[i - 1].h != r.h) {
-          Text { text: r.h; style: label; color: muted; padding: [10, 4, 2, 4] }
+        if r.h != "" && (i == 0 || lower(rows[i - 1].h) != lower(r.h)) {
+          Text { text: upper(r.h); font: sans; fontSize: 11; fontWeight: 600; letterSpacing: 1.0; color: subFg; padding: [4, 10, 4, 2]; maxLines: 1 }
         }
         Entry { b: r.b }
       }
-      Spacer { height: screenInset }
+      Spacer { height: 4 }
     }
   }
 
   Column {
     fill: true
     gap: 0
+    background: background
 
     if readId != "" && len(all) > 0 {
-      // One bookmark.
-      for k in [viewKey] key k {
-      Column {
-        scroll: true
-        fill: true
-        gap: readGap == 0 ? 8 : readGap == 1 ? 12 : 16
-        padding: [12, 8]
-        // The paragraphs kept highlighted here, and the space between them the
-        // spacing control asks for.
-        let hlList = get(hl, readId, [])
-        let pgap = readGap == 0 ? 2 : readGap == 1 ? 6 : 12
-        // The reader: the article's text, as the script pulled it out of its page, at the
-        // size chosen, opened where you stopped last time.
-        if reading {
-          Column {
-            gap: 10
-            padding: [4, 0]
-            if len(para) == 0 {
-              // A video or a picture has no text to draw: the official app saves them
-              // to open in their own place, and says what they are.
-              Text { text: item.dtype == "video" ? "A video, saved for later: watch it in the browser." : item.dtype == "image" ? "A picture, saved for later: see it in the browser." : offline ? "This article's text isn't saved. Import an export of your library to read it here." : article != null && trim(article) == "" ? "This page has no readable text: open it in the browser." : "Fetching the article…"; style: small; color: muted }
-              if item.dtype == "video" || item.dtype == "image" {
-                Button { text: "open it"; color: accent; onTap: url(item.url) }
+      let hlList = get(hl, readId, [])
+      let pgap = readGap == 0 ? 4 : readGap == 1 ? 8 : 14
+
+      if reading {
+        // Distraction-Free Reader (strictly mutually exclusive with Article Info).
+        Column {
+          fill: true
+          gap: 0
+
+          // 44dp top bar + Aa Popup.
+          Row {
+            fill: width
+            height: 44
+            padding: [10, 0]
+            align: center
+            gap: 8
+            Box {
+              size: 36
+              align: center
+              radius: 8 * corners
+              onTap: {
+                if len(para) > 0 && item.prog != 100 && int(readPct) != (item.prog ?? -1) {
+                  wants = wants + [toJson({mode: "change", id: item.id, json: "{\"read_progress\":" + "${int(readPct)}" + "}", patch: {read_progress: int(readPct)}})]
+                }
+                showTypo = false
+                fromReader = false
+                readId = ""
+                confirmId = ""
+                haptic()
+              }
+              Image { src: icBack; size: 20; tint: foreground }
+            }
+            Text {
+              text: len(para) > 0 ? "${pageNo} / ${pageCount} · ${round(readPct)}%" : item.site
+              font: sans
+              fontSize: 12.5
+              fontWeight: 500
+              letterSpacing: 0.2
+              color: subFg
+              weight: 1
+              align: center
+              maxLines: 1
+            }
+            Box {
+              padding: [10, 5]
+              radius: 7 * corners
+              background: showTypo ? chipBg : surfaceBg
+              border: 1
+              borderColor: showTypo ? alpha(accent, 0.42) : border
+              onTap: { showTypo = !showTypo; haptic() }
+              Text { text: "Aa"; font: sans; fontSize: 13; fontWeight: 600; color: showTypo ? accent : foreground; maxLines: 1 }
+              Popup {
+                visible: showTypo
+                onDismiss: showTypo = false
+                position: below
+                align: end
+                width: min(320, (screenWidth ?? 400) - 24)
+                padding: 0
+                background: surfaceBg
+                border: 1
+                borderColor: border
+                radius: 10 * corners
+                Column {
+                  fill: width
+                  padding: 14
+                  gap: 12
+                  background: surfaceBg
+                  radius: 10 * corners
+                  Column {
+                    fill: width
+                    gap: 6
+                    Text { text: "TYPEFACE"; font: sans; fontSize: 10.5; fontWeight: 700; letterSpacing: 0.8; color: subFg; maxLines: 1 }
+                    Row {
+                      fill: width
+                      padding: 3
+                      gap: 4
+                      radius: 8 * corners
+                      background: background
+                      border: 1
+                      borderColor: border
+                      Box { weight: 1; onTap: { readFont = "serif"; haptic() }; SegOpt { title: "Serif"; active: readFont == "serif"; previewFont: "serif" } }
+                      Box { weight: 1; onTap: { readFont = "sans"; haptic() }; SegOpt { title: "Sans"; active: readFont == "sans"; previewFont: "sans" } }
+                    }
+                  }
+                  Row {
+                    fill: width
+                    align: center
+                    gap: 12
+                    Text { text: "TEXT SIZE"; font: sans; fontSize: 10.5; fontWeight: 700; letterSpacing: 0.8; color: subFg; weight: 1; maxLines: 1 }
+                    Row {
+                      align: center
+                      gap: 0
+                      radius: 8 * corners
+                      background: background
+                      border: 1
+                      borderColor: border
+                      Text { text: "A−"; font: sans; fontSize: 12.5; fontWeight: 600; color: foreground; padding: [14, 7]; maxLines: 1; onTap: { textSize = clamp(textSize - 2, 12, 26); haptic() } }
+                      Box { width: 1; height: 22; background: border }
+                      Text { text: "${textSize}"; font: sans; fontSize: 13; fontWeight: 700; color: accent; padding: [14, 7]; maxLines: 1 }
+                      Box { width: 1; height: 22; background: border }
+                      Text { text: "A+"; font: sans; fontSize: 15.5; fontWeight: 600; color: foreground; padding: [14, 7]; maxLines: 1; onTap: { textSize = clamp(textSize + 2, 12, 26); haptic() } }
+                    }
+                  }
+                  Column {
+                    fill: width
+                    gap: 6
+                    Text { text: "PARAGRAPH SPACING"; font: sans; fontSize: 10.5; fontWeight: 700; letterSpacing: 0.8; color: subFg; maxLines: 1 }
+                    Row {
+                      fill: width
+                      padding: 3
+                      gap: 4
+                      radius: 8 * corners
+                      background: background
+                      border: 1
+                      borderColor: border
+                      Box { weight: 1; onTap: { readGap = 0; haptic() }; SegOpt { title: "Compact"; active: readGap == 0 } }
+                      Box { weight: 1; onTap: { readGap = 1; haptic() }; SegOpt { title: "Cozy"; active: readGap == 1 } }
+                      Box { weight: 1; onTap: { readGap = 2; haptic() }; SegOpt { title: "Wide"; active: readGap == 2 } }
+                    }
+                  }
+                  if len(prettied) > 0 || (aiOk && len(plain) > 0) {
+                    Box { height: 1; fill: width; background: hairline }
+                    Column {
+                      fill: width
+                      gap: 6
+                      Row {
+                        fill: width
+                        align: center
+                        Text { text: "ARTICLE TEXT"; font: sans; fontSize: 10.5; fontWeight: 700; letterSpacing: 0.8; color: subFg; weight: 1; maxLines: 1 }
+                        Text { text: aiName; font: sans; fontSize: 10.5; color: subFg; maxLines: 1 }
+                      }
+                      if len(prettied) > 0 {
+                        Row {
+                          fill: width
+                          padding: 3
+                          gap: 4
+                          radius: 8 * corners
+                          background: background
+                          border: 1
+                          borderColor: border
+                          Box { weight: 1; onTap: { pretty = false; haptic() }; SegOpt { title: "Original"; active: !pretty } }
+                          Row {
+                            weight: 1
+                            align: center
+                            justify: center
+                            gap: 5
+                            padding: [6, 7]
+                            radius: 6 * corners
+                            background: pretty ? chipBg : null
+                            border: pretty ? 1 : 0
+                            borderColor: alpha(accent, 0.4)
+                            onTap: { pretty = true; haptic() }
+                            Image { src: icSparkle; size: 13; tint: accent }
+                            Text { text: "AI Tidied"; font: sans; fontSize: 12.5; fontWeight: pretty ? 600 : 500; color: pretty ? foreground : subFg; maxLines: 1 }
+                          }
+                        }
+                      } else {
+                        Row {
+                          fill: width
+                          align: center
+                          justify: center
+                          gap: 6
+                          padding: [10, 8]
+                          radius: 8 * corners
+                          background: chipBg
+                          border: 1
+                          borderColor: alpha(accent, 0.38)
+                          onTap: { if aiWant == "" { aiWant = "pretty " + item.id }; haptic() }
+                          Image { src: icSparkle; size: 14; tint: accent }
+                          Text { text: aiWant == "pretty " + item.id ? "Tidying with ${aiName}…" : "Tidy Text with Claude"; font: sans; fontSize: 12.5; fontWeight: 600; color: accent; maxLines: 1 }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            Box {
+              size: 34
+              align: center
+              radius: 8 * corners
+              onTap: { showTypo = false; fromReader = true; reading = false; confirmId = ""; haptic() }
+              Image { src: icInfo; size: 19; tint: subFg }
+            }
+          }
+          Progress { value: readPct; fill: width; height: 2; color: accent; track: surfaceBg; radius: 0 }
+
+          for k in [viewKey] key k {
+            Column {
+              scroll: true
+              weight: 1
+              fill: width
+              padding: [18, 14]
+              gap: pgap + 6
+              if len(para) == 0 {
+                Column {
+                  gap: 12
+                  padding: [4, 10]
+                  Text { text: item.dtype == "video" ? "A video, saved for later: watch it in the browser." : item.dtype == "image" ? "A picture, saved for later: see it in the browser." : offline ? "This article's text isn't saved. Import an export of your library to read it here." : article != null && trim(article) == "" ? "This page has no readable text: open it in the browser." : "Fetching the article…"; font: sans; fontSize: 14; color: subFg }
+                  if item.dtype == "video" || item.dtype == "image" || (article != null && trim(article) == "") {
+                    Box {
+                      padding: [14, 9]
+                      radius: 8 * corners
+                      background: chipBg
+                      border: 1
+                      borderColor: alpha(accent, 0.35)
+                      onTap: url(item.url)
+                      Text { text: "Open in Browser ↗"; font: sans; fontSize: 13; fontWeight: 600; color: accent; maxLines: 1 }
+                    }
+                  }
+                }
+              } else {
+                if pageNo == 1 {
+                  Column {
+                    fill: width
+                    gap: 8
+                    Text {
+                      text: "${item.site}${item.mins != null ? " · ${item.mins} min" : ""}${item.when != null ? " · ${fmtTime(parseTime(item.when), "d MMM")}" : ""}"
+                      font: sans
+                      fontSize: 12
+                      fontWeight: 600
+                      letterSpacing: 0.2
+                      color: accent
+                      maxLines: 1
+                    }
+                    Text { text: item.title; font: readFont; fontSize: 24; fontWeight: 700; letterSpacing: -0.3; color: foreground }
+                    if item.authors != "" || item.words != null {
+                      Text {
+                        text: "${item.authors != "" ? "By ${item.authors}" : ""}${item.authors != "" && item.words != null ? " · " : ""}${item.words != null ? "${fmtNum(item.words)} words" : ""}"
+                        font: sans
+                        fontSize: 12.5
+                        color: subFg
+                      }
+                    }
+                    if item.desc != "" {
+                      Text { text: item.desc; font: readFont; fontSize: 15; italic: true; color: subFg }
+                    }
+                    Box { height: 1; fill: width; background: hairline }
+                  }
+                }
+
+                for p, i in shown key pageStart + i {
+                  let pidx = pageStart + i
+                  let isHl = hlList.any(x => x == pidx)
+                  if p.k == "h" {
+                    Text {
+                      text: p.t
+                      font: readFont
+                      fontSize: textSize + 4
+                      fontWeight: 700
+                      letterSpacing: -0.1
+                      color: foreground
+                      padding: [isHl ? 10 : 2, pgap + 6, isHl ? 10 : 2, 2]
+                      radius: 6 * corners
+                      background: isHl ? alpha(accent, 0.16) : null
+                      onLongPress: { hl = set(hl, readId, isHl ? hlList.filter(x => x != pidx) : hlList + [pidx]); haptic() }
+                    }
+                  } else if p.k == "q" {
+                    Box {
+                      fill: width
+                      radius: 6 * corners
+                      clip: true
+                      background: accent
+                      padding: [3, 0, 0, 0]
+                      onLongPress: { hl = set(hl, readId, isHl ? hlList.filter(x => x != pidx) : hlList + [pidx]); haptic() }
+                      Box {
+                        fill: width
+                        background: isHl ? mix(background, accent, 0.14) : mix(background, foreground, 0.05)
+                        padding: [12, 8]
+                        Text { text: p.t; font: readFont; fontSize: textSize; italic: true; color: isHl ? foreground : subFg; fill: width }
+                      }
+                    }
+                  } else if p.k == "li" {
+                    Row {
+                      fill: width
+                      gap: 8
+                      align: top
+                      padding: [isHl ? 10 : 2, 3]
+                      radius: 6 * corners
+                      background: isHl ? alpha(accent, 0.16) : null
+                      onLongPress: { hl = set(hl, readId, isHl ? hlList.filter(x => x != pidx) : hlList + [pidx]); haptic() }
+                      Text { text: "•"; font: readFont; fontSize: textSize; fontWeight: 700; color: accent; width: max(18, textSize); align: center }
+                      Text { text: p.t; font: readFont; fontSize: textSize; color: isHl ? foreground : bodyFg; weight: 1 }
+                    }
+                  } else if p.k == "pre" {
+                    Box {
+                      fill: width
+                      padding: [12, 10]
+                      radius: 8 * corners
+                      background: isHl ? mix(background, accent, 0.14) : surfaceBg
+                      border: 1
+                      borderColor: isHl ? alpha(accent, 0.45) : hairline
+                      onLongPress: { hl = set(hl, readId, isHl ? hlList.filter(x => x != pidx) : hlList + [pidx]); haptic() }
+                      Text { text: p.t; font: mono; fontSize: max(12, textSize - 4); color: foreground; fill: width }
+                    }
+                  } else if p.k == "img" {
+                    Box {
+                      fill: width
+                      height: 220
+                      radius: 8 * corners
+                      clip: true
+                      background: cardBg
+                      border: 1
+                      borderColor: isHl ? accent : hairline
+                      onLongPress: { hl = set(hl, readId, isHl ? hlList.filter(x => x != pidx) : hlList + [pidx]); haptic() }
+                      Image { src: p.t; fill: true; fit: contain }
+                    }
+                  } else if p.k == "fig" {
+                    Text {
+                      text: p.t
+                      font: sans
+                      fontSize: 12
+                      italic: true
+                      letterSpacing: 0.1
+                      color: subFg
+                      padding: [isHl ? 8 : 2, 2]
+                      radius: 6 * corners
+                      background: isHl ? alpha(accent, 0.16) : null
+                      onLongPress: { hl = set(hl, readId, isHl ? hlList.filter(x => x != pidx) : hlList + [pidx]); haptic() }
+                    }
+                  } else if isHl {
+                    Box {
+                      fill: width
+                      radius: 6 * corners
+                      clip: true
+                      background: accent
+                      padding: [3, 0, 0, 0]
+                      onLongPress: { hl = set(hl, readId, hlList.filter(x => x != pidx)); haptic() }
+                      Box {
+                        fill: width
+                        background: mix(background, accent, 0.14)
+                        padding: [12, 8]
+                        Text { text: p.t; font: readFont; fontSize: textSize; color: foreground; fill: width }
+                      }
+                    }
+                  } else {
+                    Text {
+                      text: p.t
+                      font: readFont
+                      fontSize: textSize
+                      color: bodyFg
+                      fill: width
+                      padding: [2, 2]
+                      onLongPress: { hl = set(hl, readId, hlList + [pidx]); haptic() }
+                    }
+                  }
+                }
+
+                if len(hlList) == 0 && pageNo == 1 {
+                  Text { text: "Tip: long-press any paragraph to highlight"; font: sans; fontSize: 11; color: muted; align: center; fill: width; padding: [0, 4] }
+                }
+              }
+            }
+          }
+
+          // Calm Bottom Paging Bar.
+          Box { height: 1; fill: width; background: hairline }
+          Row {
+            fill: width
+            height: 52
+            padding: [16, 0]
+            align: center
+            justify: spaceBetween
+            background: background
+            Box {
+              padding: [12, 7]
+              radius: 8 * corners
+              background: pageNo > 1 ? surfaceBg : null
+              border: pageNo > 1 ? 1 : 0
+              borderColor: border
+              onTap: {
+                if pageNo > 1 {
+                  where = where.filter(w => w.id != readId) + [{id: readId, i: max(0, pageStart - pageLen)}]
+                  haptic()
+                }
+              }
+              Text { text: "‹ Prev"; font: sans; fontSize: 13.5; fontWeight: pageNo > 1 ? 600 : 500; color: pageNo > 1 ? foreground : muted; maxLines: 1 }
+            }
+            Text { text: "Page ${pageNo} of ${pageCount}"; font: sans; fontSize: 12; fontWeight: 500; color: subFg; maxLines: 1 }
+            if pageNo < pageCount {
+              Box {
+                padding: [14, 7]
+                radius: 8 * corners
+                background: chipBg
+                border: 1
+                borderColor: alpha(accent, 0.4)
+                onTap: {
+                  where = where.filter(w => w.id != readId) + [{id: readId, i: pageStart + pageLen}]
+                  haptic()
+                }
+                Text { text: "Next ›"; font: sans; fontSize: 13.5; fontWeight: 600; color: accent; maxLines: 1 }
+              }
+            } else if item.prog != 100 {
+              Box {
+                padding: [12, 7]
+                radius: 8 * corners
+                background: alpha(green, 0.14)
+                border: 1
+                borderColor: alpha(green, 0.4)
+                onTap: {
+                  wants = wants + [toJson({mode: "change", id: item.id, json: "{\"read_progress\":100}", patch: {read_progress: 100}})]
+                  haptic()
+                }
+                Text { text: "✓ Finish & Mark Read"; font: sans; fontSize: 12.5; fontWeight: 600; color: green; maxLines: 1 }
               }
             } else {
-              // How the text is set: the page, its size, its font and its spacing,
-              // as the official app's typography controls, and the way back to the
-              // article's details.
-              Row {
-                gap: 6
-                align: center
-                wrap: true
-                Text { text: "page ${pageNo} of ${pageCount}"; style: label; color: muted; weight: 1; maxLines: 1 }
-                Text { text: "A−"; style: small; color: muted; padding: [4, 8]; onTap: { textSize = clamp(textSize - 2, 12, 26); haptic() } }
-                Text { text: "${textSize}"; style: label; color: muted; width: 30; align: center }
-                Text { text: "A+"; style: body; color: muted; padding: [4, 8]; onTap: { textSize = clamp(textSize + 2, 12, 26); haptic() } }
-                Text { text: readFont == "serif" ? "serif" : "sans"; style: label; color: muted; padding: [4, 8]; onTap: { readFont = readFont == "serif" ? "sans" : "serif"; haptic() } }
-                Text { text: readGap == 0 ? "compact" : readGap == 1 ? "cozy" : "wide"; style: label; color: muted; padding: [4, 8]; onTap: { readGap = (readGap + 1) % 3; haptic() } }
-                // The reader is first while reading; this gets back to the article's details.
-                Text { text: "details"; style: label; color: muted; padding: [4, 6]; onTap: { reading = false; haptic() } }
+              Text { text: "✓ Read"; font: sans; fontSize: 13; fontWeight: 600; color: green; padding: [10, 7]; maxLines: 1 }
+            }
+          }
+          Spacer { height: screenInset }
+        }
+      } else {
+        // Article Info & Inline Edit (mutually exclusive from Reader).
+        Column {
+          fill: true
+          gap: 0
+
+          Row {
+            fill: width
+            height: 48
+            padding: [12, 0]
+            align: center
+            gap: 8
+            Box {
+              size: 34
+              align: center
+              radius: 8 * corners
+              onTap: {
+                if editing {
+                  editing = false
+                  confirmId = ""
+                } else if fromReader {
+                  fromReader = false
+                  reading = true
+                  confirmId = ""
+                } else {
+                  readId = ""
+                  confirmId = ""
+                }
+                haptic()
               }
-              Progress { value: readPct; height: 3; color: accent; radius: 2 }
-              if len(hlList) == 0 {
-                Text { text: "long-press a paragraph to highlight it"; style: label; color: muted; maxLines: 1 }
-              }
-              for p, i in shown key i {
-                if p.k == "h" {
-                  // a section heading: larger than the text, but not a page title
-                  Text { text: p.t; style: body; bold: true; fontSize: textSize + 3; font: readFont; padding: [pgap + 8, 2, 2, 2]; radius: 4 * corners; background: hlList.any(x => x == i) ? alpha(accent, 0.16) : null; onLongPress: { hl = set(hl, readId, hlList.any(x => x == i) ? hlList.filter(x => x != i) : hlList + [i]); haptic() } }
-                } else if p.k == "q" {
-                  Text { text: p.t; style: body; fontSize: textSize; font: readFont; italic: true; color: muted; padding: [pgap + 2, 10]; radius: 4 * corners; background: hlList.any(x => x == i) ? alpha(accent, 0.16) : alpha(foreground, 0.05); onLongPress: { hl = set(hl, readId, hlList.any(x => x == i) ? hlList.filter(x => x != i) : hlList + [i]); haptic() } }
-                } else if p.k == "li" {
-                  Row {
-                    gap: 6
-                    padding: [pgap, 2]
-                    radius: 4 * corners
-                    background: hlList.any(x => x == i) ? alpha(accent, 0.16) : null
-                    onLongPress: { hl = set(hl, readId, hlList.any(x => x == i) ? hlList.filter(x => x != i) : hlList + [i]); haptic() }
-                    Text { text: "•"; style: body; fontSize: textSize; font: readFont; color: muted; width: 10 }
-                    Text { text: p.t; style: body; fontSize: textSize; font: readFont; weight: 1 }
+              Image { src: icBack; size: 20; tint: foreground }
+            }
+            Text { text: editing ? "Edit Details" : "Article Info"; font: sans; fontSize: 20; fontWeight: 700; letterSpacing: -0.2; color: foreground; weight: 1; maxLines: 1 }
+            if editing {
+              Box {
+                padding: [12, 5]
+                radius: 7 * corners
+                background: chipBg
+                border: 1
+                borderColor: alpha(accent, 0.38)
+                onTap: {
+                  if trim(draftTitle) != item.title && trim(draftTitle) != "" {
+                    wants = wants + [toJson({mode: "change", id: item.id, json: "{\"title\":" + toJson(draftTitle) + "}", patch: {title: draftTitle}})]
                   }
-                } else if p.k == "img" {
-                  // A picture in the article, localised by the helper so it reads
-                  // offline; contained, not cropped, so diagrams stay whole.
+                  if draftLabels != item.labels {
+                    let ls = split(draftLabels, ",").map(s => trim(s)).filter(s => s != "")
+                    wants = wants + [toJson({mode: "change", id: item.id, json: "{\"labels\":" + toJson(ls) + "}", patch: {labels: ls}})]
+                  }
+                  if draftNote != item.note {
+                    wants = wants + [toJson({mode: "change", id: item.id, json: "{\"note\":" + toJson(draftNote) + "}", patch: {note: draftNote}})]
+                  }
+                  editing = false
+                  confirmId = ""
+                  haptic()
+                }
+                Text { text: "Done"; font: sans; fontSize: 13; fontWeight: 600; color: accent; maxLines: 1 }
+              }
+            } else {
+              Box {
+                padding: [10, 4]
+                radius: 6 * corners
+                background: chipBg
+                border: 1
+                borderColor: alpha(accent, 0.35)
+                Text { text: "${int(item.prog ?? 0)}% read"; font: sans; fontSize: 12; fontWeight: 600; color: accent; maxLines: 1 }
+              }
+            }
+          }
+          Box { height: 1; fill: width; background: hairline }
+
+          if editing {
+            Column {
+              scroll: true
+              weight: 1
+              fill: width
+              padding: [16, 14]
+              gap: 13
+              Row {
+                fill: width
+                gap: 10
+                align: center
+                padding: [12, 10]
+                radius: 10 * corners
+                background: cardBg
+                border: 1
+                borderColor: border
+                if item.thumb != "" {
                   Box {
-                    fill: width
-                    height: 240
+                    width: 44
+                    height: 44
                     radius: 6 * corners
                     clip: true
-                    background: alpha(foreground, 0.04)
-                    onLongPress: { hl = set(hl, readId, hlList.any(x => x == i) ? hlList.filter(x => x != i) : hlList + [i]); haptic() }
-                    Image { src: p.t; fill: true; fit: contain }
-                  }
-                } else if p.k == "fig" {
-                  Text { text: p.t; style: small; color: muted; padding: [pgap, 2]; radius: 4 * corners; background: hlList.any(x => x == i) ? alpha(accent, 0.16) : null; onLongPress: { hl = set(hl, readId, hlList.any(x => x == i) ? hlList.filter(x => x != i) : hlList + [i]); haptic() } }
-                } else {
-                  Text { text: p.t; style: body; fontSize: textSize; font: readFont; padding: [pgap, 2]; radius: 4 * corners; background: hlList.any(x => x == i) ? alpha(accent, 0.16) : null; onLongPress: { hl = set(hl, readId, hlList.any(x => x == i) ? hlList.filter(x => x != i) : hlList + [i]); haptic() } }
-                }
-              }
-              // A page at a time, the position kept per article so the next open starts
-              // here. At the last page, the way on is to finish it: mark it read.
-              Row {
-                gap: 8
-                align: center
-                Button {
-                  text: "‹ back"
-                  color: pageNo > 1 ? foreground : muted
-                  onTap: {
-                    if pageNo > 1 {
-                      where = where.filter(w => w.id != readId) + [{id: readId, i: max(0, pageStart - pageLen)}]
-                      haptic()
-                    }
+                    background: surfaceBg
+                    Image { src: item.thumb; fill: true; fit: cover }
+                    Box { fill: true; background: scrim }
                   }
                 }
-                Spacer { weight: 1 }
-                Button {
-                  text: "next ›"
-                  color: pageNo < pageCount ? accent : muted
-                  onTap: {
-                    if pageNo < pageCount {
-                      where = where.filter(w => w.id != readId) + [{id: readId, i: pageStart + pageLen}]
-                      haptic()
-                    }
+                Column {
+                  weight: 1
+                  gap: 3
+                  Text { text: item.title; font: readFont; fontSize: 13.5; fontWeight: 700; color: foreground; maxLines: 1 }
+                  Text {
+                    text: "${item.site}${item.authors != "" ? " · By ${item.authors}" : ""}${item.mins != null ? " · ${item.mins} min" : ""}"
+                    font: sans
+                    fontSize: 11.5
+                    color: subFg
+                    maxLines: 1
                   }
                 }
               }
-              if pageNo == pageCount && item.prog != 100 {
-                Button {
-                  text: "finish: mark read"
-                  color: accent
-                  onTap: {
-                    wants = wants + [toJson({mode: "change", id: item.id, json: "{\"read_progress\":100}", patch: {read_progress: 100}})]
+
+              Column {
+                fill: width
+                gap: 6
+                Text { text: "TITLE"; font: sans; fontSize: 11; fontWeight: 700; letterSpacing: 0.8; color: subFg; maxLines: 1 }
+                Input {
+                  text: draftTitle
+                  fill: width
+                  onChange: draftTitle = value
+                  onSubmit: {
+                    draftTitle = value
+                    wants = wants + [toJson({mode: "change", id: item.id, json: "{\"title\":" + toJson(value) + "}", patch: {title: value}})]
                     haptic()
                   }
                 }
               }
-              Spacer { height: 8 }
-            }
-          }
-        }
-        // The story's own picture, full width, when its page has one.
-        if item.thumb != "" {
-          Box { fill: width; height: 190; radius: 8 * corners; clip: true; Image { src: item.thumb; fill: true; fit: cover } }
-        }
-        Text { text: item.title; style: title; maxLines: 4 }
-        // Who wrote it, where, when, and how long a read: the page's own facts.
-        Row {
-          gap: 6
-          align: center
-          if item.icon != "" {
-            Box { width: 14; height: 14; Image { src: item.icon; fill: true; fit: contain } }
-          }
-          if item.dtype == "video" {
-            Text { text: "▶"; style: small; color: accent; maxLines: 1 }
-          } else if item.dtype == "image" {
-            Text { text: "▣"; style: small; color: accent; maxLines: 1 }
-          }
-          Text { text: item.site; style: small; color: muted; maxLines: 1; width: 130 }
-          Spacer { weight: 1 }
-          if item.when != null {
-            Text { text: fmtTime(parseTime(item.when), "d MMM yyyy"); style: label; color: muted; maxLines: 1 }
-          }
-        }
-        Text { text: "${item.authors}${item.authors != "" && item.mins != null ? " · " : ""}${item.mins != null ? "${item.mins} min" : ""}${item.words != null ? " · ${fmtNum(item.words)} words" : ""}${item.lang != "" ? " · ${upper(item.lang)}" : ""}"; style: label; color: muted; maxLines: 2; visible: item.authors != "" || item.mins != null || item.words != null }
-        // A summary by Claude Code (the text went to Anthropic): made once, kept beside the article.
-        if summary != "" {
-          Column {
-            gap: 4
-            padding: [8, 10]
-            radius: 6 * corners
-            background: alpha(accent, 0.09)
-            Row {
-              gap: 6
-              align: center
-              Text { text: "summary"; style: label; color: accent; width: 80 }
-              Text { text: "made by ${aiName} · text sent to Anthropic"; style: label; color: muted; maxLines: 1 }
-            }
-            Text { text: summary; style: body; fontSize: textSize; font: readFont }
-          }
-        } else if item.desc != "" {
-          // The page's own summary, in italic, like a standfirst.
-          Text { text: item.desc; style: body; italic: true; color: muted; padding: [2, 0] }
-        }
-        // The AI's buttons: a summary if there isn't one, and the text tidied or plain.
-        if aiOk && len(plain) > 0 {
-          Row {
-            gap: 6
-            wrap: true
-            if summary == "" {
-              Button { text: aiWant == "summary " + item.id ? "summarising…" : "summarise"; color: accent; onTap: { aiWant = "summary " + item.id; haptic() } }
-            }
-            // Tidied (the AI's) or as it came (the page's own words).
-            Button {
-              text: len(prettied) == 0 ? (aiWant == "pretty " + item.id ? "tidying…" : "tidy the text") : pretty ? "tidied text" : "tidy the text"
-              color: pretty && len(prettied) > 0 ? foreground : muted
-              onTap: {
-                if len(prettied) > 0 {
-                  pretty = !pretty
-                } else if aiWant == "" {
-                  aiWant = "pretty " + item.id
+
+              Column {
+                fill: width
+                gap: 6
+                Text { text: "LABELS (COMMA SEPARATED)"; font: sans; fontSize: 11; fontWeight: 700; letterSpacing: 0.8; color: subFg; maxLines: 1 }
+                Input {
+                  text: draftLabels
+                  fill: width
+                  onChange: draftLabels = value
+                  onSubmit: {
+                    draftLabels = value
+                    let ls = split(value, ",").map(s => trim(s)).filter(s => s != "")
+                    wants = wants + [toJson({mode: "change", id: item.id, json: "{\"labels\":" + toJson(ls) + "}", patch: {labels: ls}})]
+                    haptic()
+                  }
                 }
-                haptic()
+                let editLbls = split(draftLabels, ",").map(s => trim(s)).filter(s => s != "")
+                if len(editLbls) > 0 {
+                  Flow {
+                    gap: 6
+                    fill: width
+                    for l in editLbls key l {
+                      Text { text: l; font: sans; fontSize: 11; fontWeight: 600; color: accent; background: chipBg; padding: [7, 3]; radius: 4 * corners; maxLines: 1 }
+                    }
+                  }
+                }
               }
+
+              Column {
+                fill: width
+                gap: 6
+                Row {
+                  fill: width
+                  align: center
+                  Text { text: "NOTE"; font: sans; fontSize: 11; fontWeight: 700; letterSpacing: 0.8; color: subFg; weight: 1; maxLines: 1 }
+                  Text { text: "Enter saves"; font: sans; fontSize: 11; color: subFg; maxLines: 1 }
+                }
+                Input {
+                  text: draftNote
+                  lines: 4
+                  fill: width
+                  placeholder: "Write a note about this bookmark…"
+                  onChange: draftNote = value
+                  onSubmit: {
+                    draftNote = value
+                    wants = wants + [toJson({mode: "change", id: item.id, json: "{\"note\":" + toJson(value) + "}", patch: {note: value}})]
+                    haptic()
+                  }
+                }
+              }
+
+              Column {
+                fill: width
+                padding: [14, 12]
+                gap: 10
+                radius: 10 * corners
+                background: cardBg
+                border: 1
+                borderColor: border
+                Row {
+                  fill: width
+                  align: center
+                  Text { text: "READING PROGRESS"; font: sans; fontSize: 11; fontWeight: 700; letterSpacing: 0.8; color: subFg; weight: 1; maxLines: 1 }
+                  Text { text: "${int(item.prog ?? 0)}%${len(para) > 0 ? " · Page ${pageNo} of ${pageCount}" : ""}"; font: sans; fontSize: 13; fontWeight: 700; color: accent; maxLines: 1 }
+                }
+                Slider {
+                  value: item.prog ?? 0
+                  max: 100
+                  step: 5
+                  color: accent
+                  fill: width
+                  onChange: { wants = wants + [toJson({mode: "change", id: item.id, json: "{\"read_progress\":" + "${int(value)}" + "}", patch: {read_progress: int(value)}})] }
+                }
+                Row {
+                  fill: width
+                  gap: 8
+                  for pr in [{v: 0, t: "0% Unread"}, {v: 50, t: "50%"}, {v: 100, t: "100% Read"}] key pr.v {
+                    let on = int(item.prog ?? 0) == pr.v
+                    Box {
+                      weight: 1
+                      align: center
+                      padding: [6, 6]
+                      radius: 6 * corners
+                      background: on ? chipBg : surfaceBg
+                      border: 1
+                      borderColor: on ? alpha(accent, 0.45) : border
+                      onTap: { wants = wants + [toJson({mode: "change", id: item.id, json: "{\"read_progress\":" + "${pr.v}" + "}", patch: {read_progress: pr.v}})]; haptic() }
+                      Text { text: pr.t; font: sans; fontSize: 11; fontWeight: on ? 600 : 500; color: on ? accent : foreground; maxLines: 1 }
+                    }
+                  }
+                }
+              }
+
+              Box { height: 1; fill: width; background: hairline }
+              Column {
+                fill: width
+                gap: 7
+                Text { text: "DANGER ZONE"; font: sans; fontSize: 10.5; fontWeight: 700; letterSpacing: 0.8; color: subFg; maxLines: 1 }
+                Row {
+                  fill: width
+                  gap: 10
+                  align: center
+                  padding: [14, 11]
+                  radius: 10 * corners
+                  background: alpha(red, 0.10)
+                  border: 1
+                  borderColor: alpha(red, 0.42)
+                  onTap: {
+                    if confirmId == item.id {
+                      confirmId = ""
+                      editing = false
+                      fromReader = false
+                      wants = wants + [toJson({mode: "change", id: item.id, json: "{\"is_deleted\":true}", patch: {is_deleted: true}})]
+                      if readId == item.id { readId = "" }
+                      haptic()
+                    } else {
+                      confirmId = item.id
+                      haptic()
+                    }
+                  }
+                  Image { src: icTrash; size: 16; tint: red }
+                  Column {
+                    weight: 1
+                    gap: 2
+                    Text { text: confirmId == item.id ? "Really delete bookmark?" : "Delete Bookmark"; font: sans; fontSize: 13.5; fontWeight: 700; color: red; maxLines: 1 }
+                    Text { text: confirmId == item.id ? "2-tap confirm · removes from server" : "Tap twice to delete"; font: sans; fontSize: 11; color: subFg; maxLines: 1 }
+                  }
+                  Box {
+                    padding: [11, 6]
+                    radius: 6 * corners
+                    background: confirmId == item.id ? red : alpha(red, 0.16)
+                    Text { text: confirmId == item.id ? "Confirm" : "Delete"; font: sans; fontSize: 12; fontWeight: 700; color: confirmId == item.id ? "#ffffff" : red; maxLines: 1 }
+                  }
+                }
+              }
+              Spacer { height: screenInset }
             }
-            if len(prettied) > 0 {
-              Button { text: "as it came"; color: pretty ? muted : foreground; onTap: { pretty = false; haptic() } }
-            }
-          }
-          if aiWant == "pretty " + item.id {
-            Text { text: "tidying the text with ${aiName}…"; style: small; color: muted }
-          }
-        }
-        Text { text: "${item.url}"; style: small; color: muted; maxLines: 2 }
-        Flow {
-          gap: 6
-          for l in split(item.labels, ", ").filter(l => l != "" ) key l {
-            Text { text: l; style: label; color: accent; padding: [4, 6]; width: null; radius: 4 * corners; background: alpha(accent, 0.14) }
-          }
-        }
-        Row {
-          gap: 6
-          wrap: true
-          if item.dtype != "video" && item.dtype != "image" {
-            Button { text: reading ? "hide the text" : "read here"; color: reading ? muted : accent; onTap: { reading = !reading; haptic() } }
-          }
-          Button { text: item.dtype == "video" ? "open the video" : item.dtype == "image" ? "open the image" : "open the article"; onTap: url(item.url) }
-        }
-        if editing {
-          Text { text: "title"; style: label; color: muted }
-          Input { text: item.title; onSubmit: { wants = wants + [toJson({mode: "change", id: item.id, json: "{\"title\":" + toJson(value) + "}", patch: {title: value}})] } }
-          Text { text: "labels, comma separated"; style: label; color: muted }
-          Input { text: item.labels; onSubmit: {
-            let ls = split(value, ",").map(s => trim(s)).filter(s => s != "")
-            wants = wants + [toJson({mode: "change", id: item.id, json: "{\"labels\":" + toJson(ls) + "}", patch: {labels: ls}})]
-          } }
-          Text { text: "your note"; style: label; color: muted }
-          Input { text: item.note; placeholder: "a note about this one…"; onSubmit: { wants = wants + [toJson({mode: "change", id: item.id, json: "{\"note\":" + toJson(value) + "}", patch: {note: value}})] } }
-          // Where you are in it, by hand.
-          Text { text: "read ${item.prog ?? 0}%"; style: label; color: muted }
-          Slider {
-            value: item.prog ?? 0
-            max: 100
-            step: 5
-            color: accent
-            onChange: { wants = wants + [toJson({mode: "change", id: item.id, json: "{\"read_progress\":" + "${int(value)}" + "}", patch: {read_progress: int(value)}})] }
-          }
-        }
-        Row {
-          gap: 8
-          wrap: true
-          Button { text: item.fav ? "★ favorite" : "☆ favorite"; color: item.fav ? orange : muted; onTap: { wants = wants + [toJson({mode: "change", id: item.id, json: "{\"is_marked\":" + toJson(!item.fav) + "}", patch: {is_marked: !item.fav}})] } }
-          Button { text: item.arch ? "unarchive" : "archive"; color: muted; onTap: { wants = wants + [toJson({mode: "change", id: item.id, json: "{\"is_archived\":" + toJson(!item.arch) + "}", patch: {is_archived: !item.arch}})] } }
-          if item.prog == 100 {
-            Button { text: "mark unread"; color: muted; onTap: { wants = wants + [toJson({mode: "change", id: item.id, json: "{\"read_progress\":0}", patch: {read_progress: 0}})] } }
           } else {
-            Button { text: "mark read"; color: muted; onTap: { wants = wants + [toJson({mode: "change", id: item.id, json: "{\"read_progress\":100}", patch: {read_progress: 100}})] } }
-          }
-          Button { text: editing ? "close edit" : "edit"; color: muted; onTap: editing = !editing }
-          // Delete asks once more, then goes.
-          Button {
-            text: confirmId == item.id ? "really delete?" : "delete"
-            color: red
-            onTap: {
-              if confirmId == item.id {
-                confirmId = ""
-                wants = wants + [toJson({mode: "change", id: item.id, json: "{\"is_deleted\":true}", patch: {is_deleted: true}})]
-                if readId == item.id { readId = "" }
-              } else {
-                confirmId = item.id
-                haptic()
+            for k in [viewKey] key k {
+              Column {
+                scroll: true
+                weight: 1
+                fill: width
+                padding: [16, 12]
+                gap: 12
+
+                if item.thumb != "" {
+                  Box {
+                    fill: width
+                    height: 150
+                    radius: 10 * corners
+                    clip: true
+                    background: cardBg
+                    border: 1
+                    borderColor: hairline
+                    Image { src: item.thumb; fill: true; fit: cover }
+                    Box { fill: true; background: scrim }
+                  }
+                }
+
+                Column {
+                  fill: width
+                  gap: 6
+                  Text { text: item.title; font: readFont; fontSize: 22; fontWeight: 700; letterSpacing: -0.25; color: foreground }
+                  Row {
+                    fill: width
+                    gap: 6
+                    align: center
+                    if item.icon != "" {
+                      Box { width: 14; height: 14; radius: 3 * corners; clip: true; Image { src: item.icon; fill: true; fit: contain } }
+                    }
+                    if item.dtype == "video" {
+                      Text { text: "▶"; font: sans; fontSize: 11; color: accent; maxLines: 1 }
+                    } else if item.dtype == "image" {
+                      Text { text: "▣"; font: sans; fontSize: 11; color: accent; maxLines: 1 }
+                    }
+                    Text { text: item.site; font: sans; fontSize: 13; fontWeight: 600; color: foreground; weight: 1; maxLines: 1 }
+                    if item.when != null {
+                      Text { text: fmtTime(parseTime(item.when), "d MMM yyyy"); font: sans; fontSize: 12; color: subFg; maxLines: 1 }
+                    }
+                  }
+                  if item.authors != "" || item.mins != null || item.words != null {
+                    Text {
+                      text: "${item.authors != "" ? "By ${item.authors}" : ""}${item.authors != "" && item.mins != null ? " · " : ""}${item.mins != null ? "${item.mins} min read" : ""}${item.words != null ? " · ${fmtNum(item.words)} words" : ""}${item.lang != "" ? " · ${upper(item.lang)}" : ""}"
+                      font: sans
+                      fontSize: 12.5
+                      color: subFg
+                    }
+                  }
+                  Text { text: item.url; font: mono; fontSize: 11; color: muted; maxLines: 2; onTap: url(item.url) }
+                  let detLbls = split(item.labels, ", ").filter(l => l != "")
+                  if len(detLbls) > 0 {
+                    Flow {
+                      gap: 6
+                      fill: width
+                      for l in detLbls key l {
+                        Text { text: l; font: sans; fontSize: 11.5; fontWeight: 500; color: accent; background: chipBg; padding: [8, 4]; radius: 5 * corners; maxLines: 1 }
+                      }
+                    }
+                  }
+                }
+
+                // Primary 4-tile strip: Read, Open, Favorite, Archive.
+                Row {
+                  fill: width
+                  gap: 8
+                  Box {
+                    weight: 1
+                    onTap: { fromReader = false; reading = true; confirmId = ""; haptic() }
+                    ActionTile { title: item.dtype == "video" || item.dtype == "image" ? "View" : "Read"; icon: icRead; active: true }
+                  }
+                  Box {
+                    weight: 1
+                    onTap: url(item.url)
+                    ActionTile { title: "Open ↗"; icon: icOpen }
+                  }
+                  Box {
+                    weight: 1
+                    onTap: { wants = wants + [toJson({mode: "change", id: item.id, json: "{\"is_marked\":" + toJson(!item.fav) + "}", patch: {is_marked: !item.fav}})]; haptic() }
+                    ActionTile { title: "Favorite"; icon: item.fav ? icFavFill : icFav; active: item.fav; tintCol: item.fav ? orange : null }
+                  }
+                  Box {
+                    weight: 1
+                    onTap: { wants = wants + [toJson({mode: "change", id: item.id, json: "{\"is_archived\":" + toJson(!item.arch) + "}", patch: {is_archived: !item.arch}})]; haptic() }
+                    ActionTile { title: item.arch ? "Restore" : "Archive"; icon: icArchive; active: item.arch }
+                  }
+                }
+
+                // Secondary utility strip: Mark Read/Unread, Copy, Share, Edit.
+                Row {
+                  fill: width
+                  gap: 8
+                  Box {
+                    weight: 1
+                    onTap: { wants = wants + [toJson({mode: "change", id: item.id, json: item.prog == 100 ? "{\"read_progress\":0}" : "{\"read_progress\":100}", patch: {read_progress: item.prog == 100 ? 0 : 100}})]; haptic() }
+                    UtilPill { title: item.prog == 100 ? "Unread" : "Mark Read"; icon: icSelect }
+                  }
+                  Box {
+                    weight: 1
+                    onTap: { copy(item.url); said = "Link copied"; haptic() }
+                    UtilPill { title: "Copy"; icon: icCopy }
+                  }
+                  Box {
+                    weight: 1
+                    onTap: { share(item.title + " " + item.url); haptic() }
+                    UtilPill { title: "Share"; icon: icShare }
+                  }
+                  Box {
+                    weight: 1
+                    onTap: { draftTitle = item.title; draftLabels = item.labels; draftNote = item.note; editing = true; confirmId = ""; haptic() }
+                    UtilPill { title: "Edit"; icon: icEdit }
+                  }
+                }
+
+                if said != "" {
+                  Text { text: "✓ ${said}"; font: sans; fontSize: 12; color: green; maxLines: 1 }
+                }
+                if get(saving, item.id, 0) > 0 {
+                  Text { text: "saving…"; font: sans; fontSize: 12; color: accent; maxLines: 1 }
+                } else if get(failed, item.id, "") != "" {
+                  Row {
+                    fill: width
+                    gap: 8
+                    align: center
+                    Text { text: "couldn't save: ${get(failed, item.id, "")}"; font: sans; fontSize: 12; color: red; weight: 1; maxLines: 3 }
+                    Retry { id: item.id }
+                  }
+                } else if get(okIds, item.id, false) {
+                  Text { text: "✓ saved"; font: sans; fontSize: 12; color: green; maxLines: 1 }
+                }
+
+                // Elevated Claude Summary card (with Anthropic disclosure) or standfirst.
+                if summary != "" || (aiOk && len(plain) > 0) || len(prettied) > 0 {
+                  Column {
+                    fill: width
+                    padding: [13, 11]
+                    gap: 8
+                    radius: 10 * corners
+                    background: alpha(accent, 0.08)
+                    border: 1
+                    borderColor: alpha(accent, 0.30)
+                    Row {
+                      fill: width
+                      gap: 6
+                      align: center
+                      Image { src: icSparkle; size: 14; tint: accent }
+                      Text { text: "Claude Summary"; font: sans; fontSize: 12.5; fontWeight: 700; color: accent; weight: 1; maxLines: 1 }
+                      Text { text: "Sent to Anthropic · ${aiName}"; font: sans; fontSize: 10.5; color: subFg; maxLines: 1 }
+                    }
+                    if summary != "" {
+                      Text { text: summary; font: readFont; fontSize: max(14, textSize - 2); color: bodyFg }
+                    } else if aiOk && len(plain) > 0 {
+                      Box {
+                        padding: [12, 7]
+                        radius: 7 * corners
+                        background: chipBg
+                        border: 1
+                        borderColor: alpha(accent, 0.35)
+                        onTap: { if aiWant == "" { aiWant = "summary " + item.id }; haptic() }
+                        Text { text: aiWant == "summary " + item.id ? "Summarising…" : "Generate Summary"; font: sans; fontSize: 12.5; fontWeight: 600; color: accent; maxLines: 1 }
+                      }
+                    }
+                    if (aiOk && len(plain) > 0) || len(prettied) > 0 {
+                      Box { height: 1; fill: width; background: hairline }
+                      Row {
+                        fill: width
+                        align: center
+                        gap: 8
+                        Text {
+                          text: len(prettied) > 0 ? "✓ Tidied text cached" : aiWant == "pretty " + item.id ? "Tidying with ${aiName}…" : "Original extracted text"
+                          font: sans
+                          fontSize: 11.5
+                          fontWeight: 500
+                          color: len(prettied) > 0 ? green : subFg
+                          weight: 1
+                          maxLines: 1
+                        }
+                        if len(prettied) > 0 {
+                          Text {
+                            text: "Read Tidied Text →"
+                            font: sans
+                            fontSize: 11.5
+                            fontWeight: 600
+                            color: accent
+                            maxLines: 1
+                            onTap: { pretty = true; fromReader = false; reading = true; haptic() }
+                          }
+                        } else if aiOk && len(plain) > 0 {
+                          Text {
+                            text: aiWant == "pretty " + item.id ? "Tidying…" : "Tidy Text"
+                            font: sans
+                            fontSize: 11.5
+                            fontWeight: 600
+                            color: accent
+                            maxLines: 1
+                            onTap: { if aiWant == "" { aiWant = "pretty " + item.id }; haptic() }
+                          }
+                        }
+                      }
+                    }
+                  }
+                } else if item.desc != "" {
+                  Text { text: item.desc; font: readFont; fontSize: 14.5; italic: true; color: subFg }
+                }
+
+                // Personal Note card.
+                if item.note != "" || len(hlList) > 0 {
+                  Column {
+                    fill: width
+                    padding: [13, 10]
+                    gap: 5
+                    radius: 10 * corners
+                    background: cardBg
+                    border: 1
+                    borderColor: border
+                    Row {
+                      fill: width
+                      align: center
+                      Text { text: "YOUR NOTE"; font: sans; fontSize: 10.5; fontWeight: 700; letterSpacing: 0.8; color: subFg; weight: 1; maxLines: 1 }
+                      if len(hlList) > 0 {
+                        Text { text: len(hlList) == 1 ? "1 highlight" : "${len(hlList)} highlights"; font: sans; fontSize: 11; color: accent; maxLines: 1 }
+                      }
+                    }
+                    Text { text: item.note != "" ? item.note : "No note yet — tap Edit to add one."; font: sans; fontSize: 13; color: item.note != "" ? bodyFg : muted }
+                  }
+                }
+
+                // Bottom Danger Zone 2-tap Delete.
+                Box { height: 1; fill: width; background: hairline }
+                Row {
+                  fill: width
+                  gap: 10
+                  align: center
+                  padding: [12, 9]
+                  radius: 10 * corners
+                  background: alpha(red, 0.08)
+                  border: 1
+                  borderColor: alpha(red, 0.35)
+                  onTap: {
+                    if confirmId == item.id {
+                      confirmId = ""
+                      fromReader = false
+                      wants = wants + [toJson({mode: "change", id: item.id, json: "{\"is_deleted\":true}", patch: {is_deleted: true}})]
+                      if readId == item.id { readId = "" }
+                      haptic()
+                    } else {
+                      confirmId = item.id
+                      haptic()
+                    }
+                  }
+                  Image { src: icTrash; size: 15; tint: red }
+                  Text { text: confirmId == item.id ? "Really delete bookmark?" : "Delete Bookmark"; font: sans; fontSize: 12.5; fontWeight: 600; color: red; weight: 1; maxLines: 1 }
+                  if confirmId == item.id {
+                    Box {
+                      padding: [10, 4]
+                      radius: 6 * corners
+                      background: red
+                      Text { text: "Confirm"; font: sans; fontSize: 11.5; fontWeight: 700; color: "#ffffff"; maxLines: 1 }
+                    }
+                  }
+                }
+                Spacer { height: screenInset }
               }
             }
           }
         }
-        // A link to keep: on the clipboard, or to another app.
-        Row {
-          gap: 8
-          wrap: true
-          Button { text: "copy link"; color: muted; onTap: { copy(item.url); said = "link copied"; haptic() } }
-          Button { text: "share"; color: muted; onTap: { share(item.title + " " + item.url); haptic() } }
-        }
-        if said != "" {
-          Text { text: said; style: label; color: green }
-        }
-        if get(saving, item.id, 0) > 0 {
-          Text { text: "saving…"; style: small; color: accent }
-        } else if get(failed, item.id, "") != "" {
-          Row {
-            gap: 8
-            Text { text: "couldn't save: ${get(failed, item.id, "")}"; style: small; color: red; weight: 1; maxLines: 4 }
-            Retry { id: item.id }
-          }
-        } else if get(okIds, item.id, false) {
-          Text { text: "✓ saved"; style: label; color: green }
-        }
-        if item.note != "" {
-          Text { text: "note"; style: label; color: muted }
-          Text { text: item.note; style: body; padding: [4, 8]; radius: 6 * corners; background: alpha(foreground, 0.04) }
-        }
-        if item.prog == 100 { Text { text: "read"; style: small; color: muted } }
-        if item.arch { Text { text: "archived"; style: small; color: muted } }
       }
-      }
-    } else {
-      // The list: what's copied is a link to save.
+    } else if view == "setup" {
+      // Server Setup & Offline Export Import.
       Column {
         fill: true
         gap: 0
 
-        if view == "labels" {
+        Row {
+          fill: width
+          height: 48
+          padding: [12, 0]
+          align: center
+          gap: 8
+          Box {
+            size: 34
+            align: center
+            radius: 8 * corners
+            onTap: { view = "unread"; connectMsg = ""; haptic() }
+            Image { src: icBack; size: 20; tint: foreground }
+          }
+          Text { text: "Server & Import"; font: sans; fontSize: 20; fontWeight: 700; letterSpacing: -0.2; color: foreground; weight: 1; maxLines: 1 }
+        }
+        Box { height: 1; fill: width; background: hairline }
+
+        Column {
+          scroll: true
+          weight: 1
+          fill: width
+          padding: [14, 16]
+          gap: 16
+
+          Column {
+            fill: width
+            padding: 16
+            gap: 12
+            radius: 10 * corners
+            background: cardBg
+            border: 1
+            borderColor: hairline
+            Row {
+              fill: width
+              align: center
+              gap: 7
+              Image { src: icServer; size: 16; tint: accent }
+              Text { text: "READECK SERVER"; font: sans; fontSize: 11; fontWeight: 700; letterSpacing: 0.8; color: subFg; weight: 1; maxLines: 1 }
+              Box {
+                padding: [8, 2]
+                radius: 999
+                background: !offline ? alpha(green, 0.14) : alpha(subFg, 0.14)
+                border: 1
+                borderColor: !offline ? alpha(green, 0.35) : hairline
+                Text { text: !offline ? "Connected" : "Offline"; font: sans; fontSize: 11; fontWeight: 600; color: !offline ? green : subFg; maxLines: 1 }
+              }
+            }
+
+            Column {
+              fill: width
+              gap: 5
+              Text { text: "Server URL"; font: sans; fontSize: 12; fontWeight: 600; color: foreground; maxLines: 1 }
+              Input { text: draftBase; placeholder: "readeck.example.org"; fill: width; onChange: draftBase = trim(value); onSubmit: draftBase = trim(value) }
+            }
+
+            Column {
+              fill: width
+              gap: 5
+              Text { text: "API Token"; font: sans; fontSize: 12; fontWeight: 600; color: foreground; maxLines: 1 }
+              Text { text: "In Readeck web, open Settings → API tokens"; font: sans; fontSize: 11.5; color: subFg }
+              Input { text: draftToken; placeholder: "API token"; password: true; fill: width; onChange: draftToken = trim(value); onSubmit: draftToken = trim(value) }
+            }
+
+            if connectMsg != "" {
+              let msgOk = startsWith(connectMsg, "the token") || startsWith(connectMsg, "ok")
+              Row {
+                fill: width
+                padding: [10, 8]
+                radius: 8 * corners
+                background: msgOk ? alpha(green, 0.14) : connectMsg == "checking…" ? chipBg : alpha(red, 0.12)
+                border: 1
+                borderColor: msgOk ? alpha(green, 0.35) : connectMsg == "checking…" ? alpha(accent, 0.35) : alpha(red, 0.35)
+                Text { text: msgOk ? "✓ ${connectMsg}" : connectMsg; font: sans; fontSize: 12; fontWeight: 600; color: msgOk ? green : connectMsg == "checking…" ? accent : red }
+              }
+            }
+            if notice != "" {
+              Text { text: "✓ ${notice}"; font: sans; fontSize: 12; color: green }
+            }
+
+            Row {
+              fill: width
+              gap: 8
+              Box {
+                weight: 1
+                align: center
+                padding: [12, 10]
+                radius: 8 * corners
+                background: accent
+                onTap: {
+                  base = trim(draftBase)
+                  token = trim(draftToken)
+                  view = "unread"
+                  notice = ""
+                  lastErr = ""
+                  syncAsk = syncAsk + 1
+                  haptic()
+                }
+                Text { text: "Connect & Sync"; font: sans; fontSize: 13; fontWeight: 700; color: background; maxLines: 1 }
+              }
+              Box {
+                align: center
+                padding: [14, 10]
+                radius: 8 * corners
+                background: surfaceBg
+                border: 1
+                borderColor: border
+                onTap: {
+                  draftBase = trim(draftBase)
+                  draftToken = trim(draftToken)
+                  connectMsg = "checking…"
+                  connectCheck = true
+                  haptic()
+                }
+                Text { text: "Test Token"; font: sans; fontSize: 13; fontWeight: 600; color: foreground; maxLines: 1 }
+              }
+            }
+
+            if token != "" {
+              Box { height: 1; fill: width; background: hairline }
+              Row {
+                fill: width
+                align: center
+                gap: 8
+                Text { text: "Credentials stored locally on device"; font: sans; fontSize: 11.5; color: subFg; weight: 1 }
+                Box {
+                  padding: [12, 7]
+                  radius: 8 * corners
+                  background: alpha(red, 0.12)
+                  border: 1
+                  borderColor: alpha(red, 0.32)
+                  onTap: { token = ""; draftToken = ""; connectMsg = ""; haptic() }
+                  Text { text: "Forget Token"; font: sans; fontSize: 12; fontWeight: 600; color: red; maxLines: 1 }
+                }
+              }
+            }
+          }
+
+          Column {
+            fill: width
+            padding: 16
+            gap: 12
+            radius: 10 * corners
+            background: cardBg
+            border: 1
+            borderColor: hairline
+            Row {
+              fill: width
+              align: center
+              gap: 7
+              Image { src: icDownload; size: 16; tint: accent }
+              Text { text: "OFFLINE EXPORT IMPORT"; font: sans; fontSize: 11; fontWeight: 700; letterSpacing: 0.8; color: subFg; maxLines: 1 }
+            }
+            Text { text: "Use an export without a server: export from Readeck web (Settings → Export) as a .zip or data.json / .jsonl file to read and search offline."; font: sans; fontSize: 12.5; color: subFg }
+            Column {
+              fill: width
+              gap: 5
+              Text { text: "Export File Path"; font: sans; fontSize: 12; fontWeight: 600; color: foreground; maxLines: 1 }
+              Input {
+                text: importPath
+                placeholder: "/path/to/data.json or .zip"
+                clear: true
+                fill: width
+                onChange: importPath = value
+                onSubmit: {
+                  let f = trim(value)
+                  if f != "" {
+                    notice = ""
+                    importPath = ""
+                    wants = wants + [toJson({mode: "import", id: f})]
+                    haptic()
+                  }
+                }
+              }
+            }
+            Row {
+              fill: width
+              align: center
+              gap: 10
+              Box {
+                padding: [14, 9]
+                radius: 8 * corners
+                background: chipBg
+                border: 1
+                borderColor: alpha(accent, 0.35)
+                onTap: {
+                  let f = trim(importPath)
+                  if f != "" {
+                    notice = ""
+                    importPath = ""
+                    wants = wants + [toJson({mode: "import", id: f})]
+                    haptic()
+                  }
+                }
+                Text { text: "Import Archive"; font: sans; fontSize: 13; fontWeight: 600; color: accent; maxLines: 1 }
+              }
+              Text { text: "Extracts HTML & local images"; font: sans; fontSize: 11.5; color: subFg; weight: 1; align: end; maxLines: 1 }
+            }
+            if current != null && current.mode == "import" {
+              Text { text: "importing…"; font: sans; fontSize: 12; color: accent; maxLines: 1 }
+            }
+          }
+          Spacer { height: screenInset }
+        }
+      }
+    } else {
+      // Library & Labels (shared 48dp header + overflow Popup + transient status + bottom nav).
+      Column {
+        fill: true
+        gap: 0
+
+        Row {
+          fill: width
+          height: 48
+          padding: [14, 0, 10, 0]
+          align: center
+          gap: 8
+          if view == "all" || label != "" {
+            Box {
+              size: 32
+              align: center
+              radius: 8 * corners
+              onTap: {
+                if label != "" {
+                  label = ""
+                  view = "labels"
+                } else {
+                  view = "unread"
+                }
+                notice = ""
+                haptic()
+              }
+              Image { src: icBack; size: 20; tint: foreground }
+            }
+          }
+          Row {
+            weight: 1
+            align: center
+            gap: 8
+            Text {
+              text: view == "labels" && label == "" ? "Labels" : label != "" ? label : view == "favorite" ? "Favorites" : view == "archived" ? "Archive" : view == "all" ? "All" : "Unread"
+              font: sans
+              fontSize: 20
+              fontWeight: 700
+              letterSpacing: -0.2
+              color: foreground
+              maxLines: 1
+            }
+            Text {
+              text: picking ? "${len(picked)} selected"
+                : view == "labels" && label == "" ? "${len(labels)} labels"
+                : typed != "" || query != "" ? "${len(seen)} found"
+                : view == "unread" && label == "" ? (queue == [] ? "0 unread" : "${len(queue)} · ${queueText}")
+                : "${len(seen)} items"
+              font: sans
+              fontSize: 12
+              fontWeight: 500
+              letterSpacing: 0.2
+              color: picking ? orange : subFg
+              maxLines: 1
+              weight: 1
+            }
+          }
+          Row {
+            gap: 2
+            align: center
+            Box {
+              size: 36
+              align: center
+              radius: 8 * corners
+              background: showSearch ? chipBg : null
+              onTap: {
+                if view == "labels" && label == "" { view = "unread" }
+                showSearch = !showSearch
+                showMenu = false
+                if !showSearch { typed = ""; query = "" }
+                haptic()
+              }
+              Image { src: icSearch; size: 20; tint: showSearch ? accent : foreground }
+            }
+            if view != "labels" || label != "" {
+              Box {
+                size: 36
+                align: center
+                radius: 8 * corners
+                background: showAdd ? chipBg : null
+                onTap: { showAdd = !showAdd; showMenu = false; haptic() }
+                Image { src: icPlus; size: 20; tint: showAdd ? accent : foreground }
+              }
+            }
+            Box {
+              size: 36
+              align: center
+              radius: 8 * corners
+              background: showMenu ? chipBg : null
+              onTap: { showMenu = !showMenu; haptic() }
+              Image { src: icMore; size: 20; tint: showMenu ? accent : foreground }
+              Popup {
+                visible: showMenu
+                onDismiss: showMenu = false
+                position: below
+                align: end
+                width: min(240, (screenWidth ?? 400) - 24)
+                padding: 0
+                background: surfaceBg
+                border: 1
+                borderColor: border
+                radius: 10 * corners
+                Column {
+                  fill: width
+                  padding: 11
+                  gap: 8
+                  background: surfaceBg
+                  radius: 10 * corners
+                  Text { text: "SORT BY"; font: sans; fontSize: 10; fontWeight: 700; letterSpacing: 0.8; color: subFg; maxLines: 1 }
+                  Flow {
+                    gap: 5
+                    fill: width
+                    for s in [{k: "-created", t: "Newest"}, {k: "created", t: "Oldest"}, {k: "title", t: "Title"}, {k: "length", t: "Longest"}, {k: "shortest", t: "Shortest"}] key s.k {
+                      let on = sort == s.k
+                      Text {
+                        text: on ? "${s.t} ✓" : s.t
+                        font: sans
+                        fontSize: 11.5
+                        fontWeight: on ? 600 : 500
+                        color: on ? accent : foreground
+                        background: on ? chipBg : alpha(subFg, 0.14)
+                        border: 1
+                        borderColor: on ? alpha(accent, 0.35) : alpha(border, 0.25)
+                        radius: 6 * corners
+                        padding: [7, 4]
+                        maxLines: 1
+                        onTap: { sort = s.k; showMenu = false; haptic() }
+                      }
+                    }
+                  }
+                  Text { text: "GROUP BY"; font: sans; fontSize: 10; fontWeight: 700; letterSpacing: 0.8; color: subFg; maxLines: 1 }
+                  Flow {
+                    gap: 5
+                    fill: width
+                    for g in [{k: "", t: "None"}, {k: "day", t: "Day"}, {k: "site", t: "Site"}, {k: "label", t: "Label"}] key g.k {
+                      let on = group == g.k
+                      Text {
+                        text: on ? "${g.t} ✓" : g.t
+                        font: sans
+                        fontSize: 11.5
+                        fontWeight: on ? 600 : 500
+                        color: on ? accent : foreground
+                        background: on ? chipBg : alpha(subFg, 0.14)
+                        border: 1
+                        borderColor: on ? alpha(accent, 0.35) : alpha(border, 0.25)
+                        radius: 6 * corners
+                        padding: [7, 4]
+                        maxLines: 1
+                        onTap: { group = g.k; showMenu = false; haptic() }
+                      }
+                    }
+                  }
+                  Box { height: 1; fill: width; background: hairline }
+                  Row {
+                    fill: width
+                    align: center
+                    padding: [4, 5]
+                    radius: 6 * corners
+                    background: view == "all" && label == "" ? chipBg : null
+                    onTap: { view = view == "all" ? "unread" : "all"; label = ""; showMenu = false; haptic() }
+                    Text { text: "Show All Unarchived"; font: sans; fontSize: 12.5; fontWeight: 500; color: view == "all" && label == "" ? accent : foreground; weight: 1; maxLines: 1 }
+                    Text { text: "${counted.all}"; font: sans; fontSize: 11.5; color: subFg; maxLines: 1 }
+                  }
+                  Row {
+                    fill: width
+                    align: center
+                    gap: 8
+                    padding: [4, 5]
+                    radius: 6 * corners
+                    onTap: {
+                      picking = !picking
+                      if !picking { picked = [] }
+                      if view == "labels" && label == "" { view = "unread" }
+                      showMenu = false
+                      notice = ""
+                      haptic()
+                    }
+                    Image { src: icSelect; size: 15; tint: picking ? accent : foreground }
+                    Text { text: picking ? "Cancel Selection" : "Select Multiple"; font: sans; fontSize: 12.5; fontWeight: 500; color: picking ? accent : foreground; weight: 1; maxLines: 1 }
+                  }
+                  Row {
+                    fill: width
+                    align: center
+                    gap: 8
+                    padding: [4, 5]
+                    radius: 6 * corners
+                    onTap: {
+                      showMenu = false
+                      if !offline && !syncing { notice = ""; lastErr = ""; syncAsk = syncAsk + 1 }
+                      haptic()
+                    }
+                    Image { src: icSync; size: 15; tint: syncing ? muted : foreground }
+                    Text { text: "Sync Now"; font: sans; fontSize: 12.5; fontWeight: 500; color: syncing ? muted : foreground; weight: 1; maxLines: 1 }
+                    Text { text: offline ? "offline" : syncing ? "syncing…" : lastSync == 0 ? "never" : fmtAgo(lastSync, now) == "now" ? "just now" : "${fmtAgo(lastSync, now)} ago"; font: sans; fontSize: 11; color: subFg; maxLines: 1 }
+                  }
+                  Row {
+                    fill: width
+                    align: center
+                    gap: 8
+                    padding: [4, 5]
+                    radius: 6 * corners
+                    onTap: { showMenu = false; draftBase = base; draftToken = token; connectMsg = ""; view = "setup"; notice = ""; haptic() }
+                    Image { src: icSettings; size: 15; tint: foreground }
+                    Text { text: "Server & Import"; font: sans; fontSize: 12.5; fontWeight: 500; color: foreground; weight: 1; maxLines: 1 }
+                  }
+                }
+              }
+            }
+          }
+        }
+        Box { height: 1; fill: width; background: hairline }
+
+        if showStatus {
+          Row {
+            fill: width
+            gap: 8
+            align: center
+            padding: [14, 5]
+            background: notice != "" ? alpha(green, 0.10) : (lastErr != "" || syncMsg != "" || syncStalled) ? alpha(red, 0.10) : alpha(accent, 0.10)
+            Text {
+              text: current != null && current.mode == "add" ? "saving the link…" : notice != "" ? "✓ ${notice}" : lastErr != "" ? lastErr : syncMsg != "" ? syncMsg : syncing ? "syncing…" : "sync stalled"
+              font: sans
+              fontSize: 12
+              fontWeight: 500
+              color: notice != "" ? green : (lastErr != "" || syncMsg != "" || syncStalled) ? red : accent
+              weight: 1
+              maxLines: 2
+            }
+            if notice != "" || lastErr != "" {
+              Text { text: "×"; font: sans; fontSize: 15; color: subFg; padding: [4, 2]; onTap: { notice = ""; lastErr = ""; haptic() } }
+            }
+          }
+          Box { height: 1; fill: width; background: hairline }
+        }
+
+        if view == "labels" && label == "" {
           Column {
             scroll: true
             weight: 1
-            padding: [8, 8]
-            gap: 2
+            fill: width
+            padding: [12, 10]
+            gap: 10
             onPull: {
               notice = ""
               lastErr = ""
               syncAsk = syncAsk + 1
               haptic()
             }
-            Text { text: "${len(labels)} labels"; style: label; color: muted; padding: [0, 4] }
-            // The × deletes a label (asks twice, since it's for good). Readeck has no
-            // API to make one: a label comes with the first bookmark given it.
+            Row {
+              align: center
+              gap: 6
+              padding: [12, 6]
+              radius: 999
+              background: cardBg
+              border: 1
+              borderColor: hairline
+              onTap: { if !offline && !syncing { notice = ""; lastErr = ""; syncAsk = syncAsk + 1 }; haptic() }
+              Image { src: icSync; size: 13; tint: accent }
+              Text {
+                text: "${offline ? "Offline library" : lastSync == 0 ? "Not synced yet" : fmtAgo(lastSync, now) == "now" ? "Synced just now" : "Synced ${fmtAgo(lastSync, now)} ago"} · pull down to refresh"
+                font: sans
+                fontSize: 11.5
+                fontWeight: 500
+                color: subFg
+                maxLines: 1
+              }
+            }
             if current != null && current.mode == "labelrm" {
-              Text { text: "deleting the label…"; style: label; color: accent; padding: [2, 4] }
+              Text { text: "deleting label…"; font: sans; fontSize: 12; color: accent; maxLines: 1 }
             }
-            if notice != "" {
-              Text { text: "✓ ${notice}"; style: label; color: green; padding: [2, 4] }
-            } else if lastErr != "" {
-              Text { text: lastErr; style: label; color: red; padding: [2, 4]; maxLines: 2 }
-            }
-            for l in labels key l.name {
-              Row {
-                gap: 10
-                padding: [12, 8]
-                radius: 6 * corners
-                background: label == l.name ? alpha(accent, 0.14) : null
-                // A label opens its bookmarks; Back comes back here.
-                onTap: { label = l.name; view = "label"; typed = ""; query = ""; notice = ""; confirmLabel = ""; haptic() }
-                Text { text: l.name; maxLines: 1; weight: 1; color: label == l.name ? accent : foreground }
-                Text { text: "${l.count}"; style: small; color: muted; width: 44; align: end; maxLines: 1 }
-                Text {
-                  text: confirmLabel == l.name ? "sure?" : "×"
-                  style: small
-                  color: red
-                  padding: [2, 8]
-                  onTap: {
-                    if confirmLabel == l.name {
-                      confirmLabel = ""
-                      wants = wants + [toJson({mode: "labelrm", id: l.name})]
-                    } else {
-                      confirmLabel = l.name
-                      haptic()
+            if len(labels) == 0 {
+              Text { text: "No labels yet. Add labels inside any article's details."; font: sans; fontSize: 13; color: subFg; padding: [4, 8] }
+            } else {
+              Column {
+                fill: width
+                gap: 0
+                radius: 10 * corners
+                clip: true
+                background: cardBg
+                border: 1
+                borderColor: hairline
+                for l, i in labels key l.name {
+                  if i > 0 { Box { height: 1; fill: width; background: hairline } }
+                  Row {
+                    fill: width
+                    gap: 10
+                    align: center
+                    padding: [12, 10]
+                    background: label == l.name ? chipBg : null
+                    Row {
+                      weight: 1
+                      gap: 11
+                      align: center
+                      onTap: { label = l.name; view = "label"; typed = ""; query = ""; notice = ""; labelMenu = ""; confirmLabel = ""; haptic() }
+                      Image { src: icLabels; size: 17; tint: label == l.name ? accent : subFg }
+                      Text { text: l.name; font: sans; fontSize: 14.5; fontWeight: 500; color: label == l.name ? accent : foreground; weight: 1; maxLines: 1 }
+                    }
+                    Text {
+                      text: "${l.count}"
+                      font: sans
+                      fontSize: 12
+                      fontWeight: 600
+                      color: l.count > 0 ? subFg : muted
+                      background: alpha(subFg, 0.14)
+                      padding: [8, 2]
+                      radius: 999
+                      maxLines: 1
+                    }
+                    Box {
+                      width: 32
+                      height: 28
+                      align: center
+                      radius: 6 * corners
+                      background: labelMenu == l.name ? alpha(foreground, 0.08) : null
+                      onTap: {
+                        labelMenu = labelMenu == l.name ? "" : l.name
+                        confirmLabel = ""
+                        haptic()
+                      }
+                      Text { text: "⋯"; font: sans; fontSize: 15; fontWeight: 700; color: subFg; maxLines: 1 }
+                    }
+                  }
+                  if labelMenu == l.name {
+                    Row {
+                      fill: width
+                      gap: 8
+                      align: center
+                      padding: [12, 8]
+                      background: alpha(red, 0.08)
+                      Text {
+                        text: confirmLabel == l.name ? "Confirm permanent delete?" : "Delete label “${l.name}”?"
+                        font: sans
+                        fontSize: 12
+                        fontWeight: 500
+                        color: confirmLabel == l.name ? red : subFg
+                        weight: 1
+                        maxLines: 1
+                      }
+                      Box {
+                        padding: [10, 5]
+                        radius: 6 * corners
+                        background: surfaceBg
+                        border: 1
+                        borderColor: border
+                        onTap: { labelMenu = ""; confirmLabel = ""; haptic() }
+                        Text { text: "Cancel"; font: sans; fontSize: 12; fontWeight: 600; color: foreground; maxLines: 1 }
+                      }
+                      Box {
+                        padding: [10, 5]
+                        radius: 6 * corners
+                        background: confirmLabel == l.name ? red : alpha(red, 0.16)
+                        border: 1
+                        borderColor: alpha(red, 0.4)
+                        onTap: {
+                          if confirmLabel == l.name {
+                            confirmLabel = ""
+                            labelMenu = ""
+                            wants = wants + [toJson({mode: "labelrm", id: l.name})]
+                            haptic()
+                          } else {
+                            confirmLabel = l.name
+                            haptic()
+                          }
+                        }
+                        Text { text: confirmLabel == l.name ? "Confirm" : "Delete?"; font: sans; fontSize: 12; fontWeight: 600; color: confirmLabel == l.name ? "#ffffff" : red; maxLines: 1 }
+                      }
                     }
                   }
                 }
               }
             }
-            Spacer { height: screenInset }
-          }
-                } else if view == "setup" {
-          // The server's address and a token from its Settings → API tokens.
-          Column {
-            scroll: true
-            weight: 1
-            padding: [12, 8]
-            gap: 8
-            Text { text: "Readeck server"; style: label; color: muted }
-            Input { text: draftBase; placeholder: "readeck.example.org"; onChange: draftBase = trim(value); onSubmit: draftBase = trim(value) }
-            Text { text: "In your Readeck, Settings → API tokens makes one for this app. Paste it here."; style: small; color: muted }
-            Input { text: draftToken; placeholder: "API token"; password: true; onChange: draftToken = trim(value); onSubmit: draftToken = trim(value) }
-            Row {
-              gap: 8
-              wrap: true
-              Button { text: "connect"; color: accent; onTap: {
-                // Only what is connected is fetched; drafts don't start a sync as they type.
-                base = trim(draftBase)
-                token = trim(draftToken)
-                view = "unread"
-                notice = ""
-                lastErr = ""
-                syncAsk = syncAsk + 1
-                haptic()
-              } }
-              Button { text: "test the token"; color: muted; onTap: {
-                draftBase = trim(draftBase)
-                draftToken = trim(draftToken)
-                connectMsg = "checking…"
-                connectCheck = true
-                haptic()
-              } }
-              if token != "" {
-                Button { text: "forget it"; color: red; onTap: { token = ""; draftToken = ""; connectMsg = ""; haptic() } }
-              }
-            }
-            if connectMsg != "" {
-              Text { text: connectMsg; style: small; color: startsWith(connectMsg, "ok") ? green : red }
-            }
-            if notice != "" {
-              Text { text: "✓ ${notice}"; style: label; color: green }
-            }
-            Spacer { height: 8 }
-            // Without a server, an export works on its own; importing writes its text too,
-            // so the reader and search work offline.
-            Text { text: "Without a server, an export of your library works on its own: import it from the Readeck web app (Settings → Export), and the app reads it offline."; style: small; color: muted }
-            Text { text: "Import an export (its data.json, or the zip)"; style: label; color: muted }
-            Input {
-              placeholder: "/path/to/data.json or .zip"
-              clear: true
-              onSubmit: {
-                let f = trim(value)
-                if f != "" {
-                  notice = ""
-                  wants = wants + [toJson({mode: "import", id: f})]
-                  haptic()
-                }
-              }
-            }
-            if current != null && current.mode == "import" {
-              Text { text: "importing…"; style: label; color: accent }
-            }
-            Button { text: "back"; color: muted; onTap: view = "unread" }
+            Text { text: "Add or edit tags inside any article's details"; font: sans; fontSize: 11.5; color: subFg; align: center; fill: width; padding: [0, 4] }
           }
         } else {
-          // Unread, favorites, archive or everything: hidden while one label's bookmarks
-          // are on show, since the label says what the list holds.
-          if label == "" {
-            Row {
-              gap: 6
-              padding: [12, 8, 12, 6]
-              for t in ["unread", "favorite", "archived", "all"] key t {
-                Tab { name: t; count: counted[t] ?? 0 }
-              }
-            }
-          }
-          // Search, labels and the server setup are always one tap away: the box narrows
-          // the list as you type, and Enter also looks through the articles' own text.
-          Row {
-            gap: 8
-            align: center
-            padding: [12, 4, 12, 6]
-            Input {
-              text: typed
-              placeholder: "search…"
-              weight: 1
-              fontSize: 15
-              underline: false
-              background: alpha(foreground, 0.06)
-              radius: 8 * corners
-              padding: [10, 4]
-              onChange: typed = value
-              onSubmit: { query = trim(value); typed = trim(value); haptic() }
-            }
-            if typed != "" || query != "" {
-              Text { text: "×"; fontSize: 17; color: muted; padding: [10, 6]; onTap: { typed = ""; query = ""; haptic() } }
-            }
-            // The save-a-link bar, opened only when wanted: one less row between the
-            // list and the top of the screen.
-            Text { text: showAdd ? "−" : "+"; fontSize: 17; color: showAdd ? accent : muted; padding: [10, 6]; onTap: { showAdd = !showAdd; haptic() } }
-            Text { text: "labels"; style: small; fontSize: 14; color: accent; padding: [7, 8]; onTap: { view = "labels"; label = ""; query = ""; typed = ""; notice = ""; haptic() } }
-            Text { text: "setup"; style: small; fontSize: 14; color: muted; padding: [7, 8]; onTap: { draftBase = base; draftToken = token; view = "setup"; notice = ""; haptic() } }
-          }
-          // How fresh the list is, and the way to fetch it now. The last answer rides
-          // on this one line too — green when it worked, red when it didn't — so the
-          // list keeps the height a notice would have taken.
-          Row {
-            gap: 8
-            align: center
-            padding: [12, 2]
-            Text {
-              text: notice != "" ? "✓ ${notice}" : lastErr != "" ? lastErr : syncMsg != "" ? syncMsg : offline ? "reading an imported export" : syncing ? "syncing…" : syncStalled ? "sync stalled" : syncFailed ? "sync failed" : lastSync == 0 ? "not synced yet" : fmtAgo(lastSync, now) == "now" ? "synced just now" : "synced ${fmtAgo(lastSync, now)} ago"
-              style: small
-              fontSize: 13
-              color: notice != "" ? green : lastErr != "" || syncMsg != "" ? red : syncing ? accent : muted
-              weight: 1
-              maxLines: 2
-            }
-            if !offline {
-              Text {
-                text: "sync now"
-                style: small
-                fontSize: 14
-                color: syncing ? muted : accent
-                padding: [4, 6]
-                onTap: {
-                  if !syncing { notice = ""; lastErr = ""; syncAsk = syncAsk + 1; haptic() }
+          if showSearch {
+            Box {
+              fill: width
+              padding: [12, 8, 12, 4]
+              Row {
+                fill: width
+                gap: 8
+                align: center
+                padding: [10, 4]
+                radius: 10 * corners
+                background: alpha(foreground, 0.07)
+                border: 1
+                borderColor: alpha(accent, 0.38)
+                Image { src: icSearch; size: 17; tint: accent }
+                Input {
+                  text: typed
+                  placeholder: "Search library…"
+                  weight: 1
+                  fontSize: 14
+                  underline: false
+                  onChange: typed = value
+                  onSubmit: { query = trim(value); typed = trim(value); haptic() }
                 }
-              }
-            }
-          }
-          if current != null && current.mode == "add" {
-            Text { text: "saving the link…"; style: label; color: accent; padding: [12, 2, 12, 4]; maxLines: 1 }
-          }
-          // What the queue amounts to (or how many matches), how the list is ordered and
-          // grouped, and the way to pick several. The first takes the free width, so the
-          // row always fits on one line.
-          Row {
-            gap: 6
-            padding: [12, 2, 12, 6]
-            Text { text: typed != "" || query != "" ? "${len(seen)} found" : queue == [] ? "nothing to read" : "${len(queue)} · ${queueText}"; style: small; fontSize: 13; color: muted; weight: 1; maxLines: 1 }
-            Text { text: sort == "-created" ? "newest" : sort == "created" ? "oldest" : sort == "title" ? "title" : sort == "length" ? "longest" : "shortest"; style: small; fontSize: 13; color: accent; padding: [2, 6]; width: 76; maxLines: 1; align: end; onTap: { sort = sort == "-created" ? "created" : sort == "created" ? "title" : sort == "title" ? "length" : sort == "length" ? "shortest" : "-created"; haptic() } }
-            Text { text: group == "" ? "no group" : group; style: small; fontSize: 13; color: group == "" ? muted : accent; padding: [2, 6]; width: 84; maxLines: 1; align: end; onTap: { group = group == "" ? "day" : group == "day" ? "site" : group == "site" ? "label" : ""; haptic() } }
-            Text { text: picking ? (picked == [] ? "picking" : "${len(picked)} picked") : "select"; style: small; fontSize: 13; color: picking ? orange : muted; padding: [2, 6]; width: 80; maxLines: 1; align: end; onTap: { picking = !picking; picked = []; notice = ""; haptic() } }
-          }
-          // What's picked, acted on together. One tap queues it for every pick, so the
-          // rows change at once and only the server's refusals come back to retry.
-          if picking {
-            Row {
-              gap: 6
-              wrap: true
-              padding: [12, 0, 12, 8]
-              Button { text: "pick all"; color: muted; onTap: { picked = seen.map(x => x.id); haptic() } }
-              Button { text: "archive"; color: muted; onTap: wants = wants + [toJson({mode: "bulk", ids: picked, json: "{\"is_archived\":true}", patch: {is_archived: true}})] }
-              Button { text: "unarchive"; color: muted; onTap: wants = wants + [toJson({mode: "bulk", ids: picked, json: "{\"is_archived\":false}", patch: {is_archived: false}})] }
-              Button { text: "favorite"; color: orange; onTap: wants = wants + [toJson({mode: "bulk", ids: picked, json: "{\"is_marked\":true}", patch: {is_marked: true}})] }
-              Button { text: "unread"; color: muted; onTap: wants = wants + [toJson({mode: "bulk", ids: picked, json: "{\"read_progress\":0}", patch: {read_progress: 0}})] }
-              Button { text: "read"; color: muted; onTap: wants = wants + [toJson({mode: "bulk", ids: picked, json: "{\"read_progress\":100}", patch: {read_progress: 100}})] }
-              Button { text: "delete"; color: red; onTap: wants = wants + [toJson({mode: "bulk", ids: picked, json: "{\"is_deleted\":true}", patch: {is_deleted: true}})] }
-              Button { text: "done"; color: muted; onTap: { picking = false; picked = [] } }
-            }
-          }
-          // A link to save; without a server, where to put one.
-          if offline {
-            Row {
-              gap: 8
-              padding: [2, 10, 8, 10]
-              align: center
-              // A tap text, not a Button: a Button makes its whole row tall.
-              Text { text: token == "" ? "no token set" : server == "" ? "no server set" : ""; style: small; color: muted; width: 250 }
-              Text { text: "connect"; style: label; color: accent; padding: [4, 4]; onTap: { draftBase = base; draftToken = token; view = "setup"; haptic() } }
-            }
-          } else if showAdd {
-            Row {
-              gap: 8
-              padding: [12, 3, 12, 10]
-              align: center
-              Input {
-                text: newUrl
-                placeholder: "save a link…"
-                weight: 1
-                onSubmit: {
-                  let u = trim(value)
-                  if u != "" {
-                    newUrl = ""
-                    notice = ""
-                    wants = wants + [toJson({mode: "add", id: u})]
-                    haptic()
+                if typed != "" && query == "" {
+                  Text {
+                    text: "Full text ↵"
+                    font: sans
+                    fontSize: 11
+                    fontWeight: 600
+                    color: accent
+                    background: chipBg
+                    padding: [7, 3]
+                    radius: 6 * corners
+                    maxLines: 1
+                    onTap: { query = trim(typed); typed = trim(typed); haptic() }
                   }
                 }
-              }
-              Button {
-                text: "save"
-                color: accent
-                onTap: {
-                  let u = trim(newUrl)
-                  if u != "" {
-                    newUrl = ""
-                    notice = ""
-                    wants = wants + [toJson({mode: "add", id: u})]
-                    haptic()
-                  }
+                if typed != "" || query != "" {
+                  Text { text: "×"; font: sans; fontSize: 17; color: subFg; padding: [6, 3]; maxLines: 1; onTap: { typed = ""; query = ""; haptic() } }
                 }
               }
             }
           }
-          // The label whose bookmarks are on show, and the way back to all of them.
-          if label != "" {
-            Row {
-              padding: [12, 0, 12, 8]
-              gap: 8
-              align: center
-              Text { text: "label: ${label}"; style: small; color: accent; maxLines: 1; weight: 1 }
-              Text { text: "all labels"; style: label; color: muted; padding: [4, 6]; onTap: { label = ""; view = "labels"; haptic() } }
+          if showAdd {
+            if offline {
+              Row {
+                fill: width
+                gap: 8
+                padding: [12, 6]
+                align: center
+                background: cardBg
+                Text { text: token == "" ? "No API token set" : "No server URL set"; font: sans; fontSize: 13; color: subFg; weight: 1; maxLines: 1 }
+                Box {
+                  padding: [10, 5]
+                  radius: 6 * corners
+                  background: chipBg
+                  onTap: { showAdd = false; draftBase = base; draftToken = token; view = "setup"; haptic() }
+                  Text { text: "Connect"; font: sans; fontSize: 12; fontWeight: 600; color: accent; maxLines: 1 }
+                }
+              }
+            } else {
+              Row {
+                fill: width
+                gap: 8
+                padding: [12, 6, 12, 4]
+                align: center
+                Input {
+                  text: newUrl
+                  placeholder: "https://… save a link"
+                  weight: 1
+                  onChange: newUrl = value
+                  onSubmit: {
+                    let u = trim(value)
+                    if u != "" {
+                      newUrl = ""
+                      showAdd = false
+                      notice = ""
+                      wants = wants + [toJson({mode: "add", id: u})]
+                      haptic()
+                    }
+                  }
+                }
+                Box {
+                  padding: [14, 9]
+                  radius: 8 * corners
+                  background: accent
+                  onTap: {
+                    let u = trim(newUrl)
+                    if u != "" {
+                      newUrl = ""
+                      showAdd = false
+                      notice = ""
+                      wants = wants + [toJson({mode: "add", id: u})]
+                      haptic()
+                    }
+                  }
+                  Text { text: "Save"; font: sans; fontSize: 13; fontWeight: 700; color: background; maxLines: 1 }
+                }
+              }
             }
           }
           List { rows: rows; loading: len(all) == 0 }
+        }
+
+        // Bottom Navigation Bar / Bulk Action Bar.
+        Box { height: 1; fill: width; background: hairline }
+        if picking {
+          Column {
+            fill: width
+            padding: [12, 8]
+            gap: 8
+            background: background
+            Row {
+              fill: width
+              align: center
+              gap: 10
+              Text { text: "${len(picked)} selected"; font: sans; fontSize: 12.5; fontWeight: 700; color: foreground; weight: 1; maxLines: 1 }
+              Text { text: "Select All"; font: sans; fontSize: 12.5; fontWeight: 600; color: accent; padding: [6, 4]; maxLines: 1; onTap: { picked = seen.map(x => x.id); haptic() } }
+              Text { text: "Done"; font: sans; fontSize: 12.5; fontWeight: 600; color: foreground; padding: [6, 4]; maxLines: 1; onTap: { picking = false; picked = []; haptic() } }
+            }
+            Flow {
+              gap: 6
+              fill: width
+              for act in [
+                {t: "Archive", c: foreground, bg: surfaceBg, j: "{\"is_archived\":true}", p: {is_archived: true}},
+                {t: "Unarchive", c: foreground, bg: surfaceBg, j: "{\"is_archived\":false}", p: {is_archived: false}},
+                {t: "Favorite", c: orange, bg: alpha(orange, 0.14), j: "{\"is_marked\":true}", p: {is_marked: true}},
+                {t: "Read", c: accent, bg: chipBg, j: "{\"read_progress\":100}", p: {read_progress: 100}},
+                {t: "Unread", c: foreground, bg: surfaceBg, j: "{\"read_progress\":0}", p: {read_progress: 0}},
+                {t: "Delete", c: red, bg: alpha(red, 0.14), j: "{\"is_deleted\":true}", p: {is_deleted: true}}
+              ] key act.t {
+                Box {
+                  padding: [10, 6]
+                  radius: 7 * corners
+                  background: act.bg
+                  border: 1
+                  borderColor: hairline
+                  onTap: { wants = wants + [toJson({mode: "bulk", ids: picked, json: act.j, patch: act.p})]; haptic() }
+                  Text { text: act.t; font: sans; fontSize: 12; fontWeight: 600; color: act.c; maxLines: 1 }
+                }
+              }
+            }
+            Spacer { height: screenInset }
+          }
+        } else {
+          Column {
+            fill: width
+            gap: 0
+            background: background
+            Row {
+              fill: width
+              gap: 0
+              padding: [4, 4]
+              NavTab { name: "unread"; title: "Unread"; icon: icUnread; activeIcon: icUnread; badge: counted.unread }
+              NavTab { name: "favorite"; title: "Favorites"; icon: icFav; activeIcon: icFavFill }
+              NavTab { name: "archived"; title: "Archive"; icon: icArchive; activeIcon: icArchive }
+              NavTab { name: "labels"; title: "Labels"; icon: icLabels; activeIcon: icLabels }
+            }
+            Spacer { height: screenInset }
+          }
         }
       }
     }
