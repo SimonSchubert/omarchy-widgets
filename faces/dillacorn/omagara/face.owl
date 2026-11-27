@@ -106,6 +106,8 @@ face "Omagara" {
   state staticLastHaptic = 0
   // Run the v1.9 Most used migration once; later user sort choices stay saved.
   state mostUsedMigrationDone = false persist
+  // Apply the v1.9.5 scrolling defaults once, including existing installations.
+  state scrollDefaults195MigrationDone = false persist
   state worldZones = [] persist
   // Keys and package/profile pairs are persisted separately from display preferences.
   state hiddenAppKeys = [] persist
@@ -219,7 +221,7 @@ face "Omagara" {
   state timerLeft = 0 persist
   state watchStarted = 0
   state watchElapsed = 0
-  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", headerAlignment: "Content column", clock: true, date: true, dateAbbreviated: false, batteryPercentage: false, event: true, notifications: true, previews: true, curve: true, smoothAlphabet: true, staticScrolling: false, staticScrollVibrate: false, staticScrollStep: "1 row", reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, sortMode: "Most used", compactPins: false, musicShortcuts: true, mediaPlayer: true, noticeAutoPosition: true, noticeStartPercent: 24, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeMediaCard: true, shadeNoticeCards: true, shadeButtons: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, holidayEasterEggs: true, showSwipeCue: true, roundAppLabels: false, alphabetSide: "Right", controlSide: "Right", closeSide: "Follow search"}
+  let defaults = {idleAlphabet: true, hideEmpty: true, icons: true, iconStyle: "Theme overlay", iconOverlayOpacity: 30, faceFont: "Sans", headerAlignment: "Content column", clock: true, date: true, dateAbbreviated: false, batteryPercentage: false, event: true, notifications: true, previews: true, curve: true, smoothAlphabet: false, staticScrolling: true, staticScrollVibrate: false, staticScrollStep: "1 row", reduceMotion: false, leftInput: true, grouping: true, actions: true, clockTap: true, dateTap: true, eventTap: true, searchContacts: false, calculator: true, sortMode: "Most used", compactPins: false, musicShortcuts: true, mediaPlayer: true, noticeAutoPosition: true, noticeStartPercent: 24, appScale: 80, timeFormat: "24-hour", notificationTimes: true, hapticFeedback: "Every letter", roundTime: false, roundDate: false, roundEvent: false, roundAlphabet: false, roundNotifications: false, roundNoticeHeading: false, roundClearAll: false, roundSearch: false, roundClose: false, roundLetterCue: false, roundCalendar: false, bubbleBorder: false, textTone: "Theme", textContrast: "High", customTextHex: "#FAFAFA", shadeColorMode: "Theme", shadeCustomHex: "#555555", shadeHeader: true, shadeAlphabet: true, shadeNoticeLabels: true, shadeAppLabels: true, shadeMediaCard: true, shadeNoticeCards: true, shadeButtons: true, shadeHeaderOpacity: 29, shadeAlphabetOpacity: 49, shadeNoticeOpacity: 49, shadeCardOpacity: 48, shadeAppOpacity: 78, shadeButtonOpacity: 85, holidayEasterEggs: true, showSwipeCue: true, roundAppLabels: false, alphabetSide: "Right", controlSide: "Right", closeSide: "Follow search"}
   let sortModeChoices = ["Most used", "Alphabetical"]
   let appScaleChoices = [75, 80, 85, 90, 95, 100, 105, 110, 115]
   let hapticChoices = ["Off", "Reduced", "Every letter"]
@@ -242,6 +244,12 @@ face "Omagara" {
   when !mostUsedMigrationDone {
     prefs = set(prefs, "sortMode", "Most used")
     mostUsedMigrationDone = true
+  }
+  // Prefer stepped dragging and the quicker entrance while OWL is capped at 60 FPS.
+  // Do not reapply on restart: users may choose either behavior afterward.
+  when !scrollDefaults195MigrationDone {
+    prefs = merge(prefs, {smoothAlphabet: false, staticScrolling: true})
+    scrollDefaults195MigrationDone = true
   }
   // Preserve existing global icon-only users once. New pins start named,
   // on their own row, regardless of the earlier compact pin preference.
