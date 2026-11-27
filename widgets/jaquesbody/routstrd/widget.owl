@@ -2,12 +2,11 @@
 // amber when this phone can't reach it, red when it is down; a tap opens the
 
 // wallet, a switch for the daemon, the last 30 days, the monitor's breakdowns,
-// the logs and a Lightning top-up. The shell program behind every button is in
-// this file: curl reads routstrd's loopback API, ssh runs the same program on
-// the machine that holds it, systemctl and journalctl drive it there, and
-// qrencode draws the invoice's QR on this device. The SSH host is a setting on
-// the screen; blank runs the commands here. No address, user or token is kept
-// in the file, so the same file runs on both devices.
+// the logs and a Lightning top-up. Data and control go through one command,
+// routstr-ctl: reads over the SSH tunnel this phone keeps to the desktop,
+// start/stop/restart and the journal over SSH, where routstrd listens on its
+// own loopback only. The file carries no address, user or token, so the same
+// file runs on both devices.
 widget "routstrd" {
   meta {
     owl: 16
@@ -179,7 +178,7 @@ esac
   let scRestart = replace(replace(replace(agent, "__H__", link), "__V__", "restart"), "__A__", "")
 
   // ---- sources ----------------------------------------------------------
-  source st = cmd("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scStatus)} 2>/dev/null || bash -c ${sh(scStatus)}; else bash -c ${sh(scStatus)}; fi") every 20s json timeout 20s
+  source st = cmd("f=~/.cache/routstrd-status.sh; mkdir -p ~/.cache; printf %s ${sh(scStatus)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-status.sh && bash ~/.cache/routstrd-status.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi") every 20s json timeout 20s
 
   let loading = st == null
   let svc = loading ? "" : (st.service ?? "unknown")
@@ -207,8 +206,8 @@ esac
 
   // the monitor's summary and the journal: only while their views are open;
   // "echo '{}'" and "true" are empty answers that cost no work
-  source u = cmd(view == "monitor" ? "if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scUsage)} 2>/dev/null || bash -c ${sh(scUsage)}; else bash -c ${sh(scUsage)}; fi" : "echo '{}'") every 30s json timeout 25s
-  source lg = cmd(view == "logs" ? "if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scLogs)} 2>/dev/null || bash -c ${sh(scLogs)}; else bash -c ${sh(scLogs)}; fi" : "true") every 30s timeout 25s
+  source u = cmd(view == "monitor" ? "f=~/.cache/routstrd-usage.sh; mkdir -p ~/.cache; printf %s ${sh(scUsage)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-usage.sh && bash ~/.cache/routstrd-usage.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi" : "echo '{}'") every 30s json timeout 25s
+  source lg = cmd(view == "logs" ? "f=~/.cache/routstrd-logs.sh; mkdir -p ~/.cache; printf %s ${sh(scLogs)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-logs.sh && bash ~/.cache/routstrd-logs.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi" : "true") every 30s timeout 25s
 
   let loaded = u != null && u.w != null
   let uErr = u == null ? "" : (u.error ?? "")
@@ -260,7 +259,7 @@ esac
   // no invoice, no command: this block starts nothing while the wallet is idle
   every 5s {
     if quoteId != "" {
-      quoteRaw = run("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scQuote)} 2>/dev/null || bash -c ${sh(scQuote)}; else bash -c ${sh(scQuote)}; fi")
+      quoteRaw = run("f=~/.cache/routstrd-quote.sh; mkdir -p ~/.cache; printf %s ${sh(scQuote)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-quote.sh && bash ~/.cache/routstrd-quote.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi")
     }
   }
 
@@ -379,7 +378,7 @@ esac
               placeholder: str.sats
               underline: false
               onChange: amount = value
-              onSubmit: { topupRaw = run("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scTopup)} 2>/dev/null || bash -c ${sh(scTopup)}; else bash -c ${sh(scTopup)}; fi"); invRaw = topupRaw; paid = false; qrPath = ""; let parsed = parseJson(topupRaw); let b = parsed == null ? "" : (parsed.invoice ?? ""); if b != "" { run("mkdir -p ~/.cache && printf %s ${sh(b)} | qrencode -o ~/.cache/routstr-qr.png -s 6 -m 2 -l M"); qrPath = "~/.cache/routstr-qr.png" } }
+              onSubmit: { topupRaw = run("f=~/.cache/routstrd-topup.sh; mkdir -p ~/.cache; printf %s ${sh(scTopup)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-topup.sh && bash ~/.cache/routstrd-topup.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi"); invRaw = topupRaw; paid = false; qrPath = ""; let parsed = parseJson(topupRaw); let b = parsed == null ? "" : (parsed.invoice ?? ""); if b != "" { run("mkdir -p ~/.cache && printf %s ${sh(b)} | qrencode -o ~/.cache/routstr-qr.png -s 6 -m 2 -l M"); qrPath = "~/.cache/routstr-qr.png" } }
             }
             if amount != "" {
               Text { text: " " + str.sats; style: body; color: muted; maxLines: 1 }
@@ -393,7 +392,7 @@ esac
           border: 1
           borderColor: alpha(accent, 0.3)
           background: alpha(background, 0.35)
-          onTap: { haptic(); topupRaw = run("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scTopup)} 2>/dev/null || bash -c ${sh(scTopup)}; else bash -c ${sh(scTopup)}; fi"); invRaw = topupRaw; paid = false; qrPath = ""; let parsed = parseJson(topupRaw); let b = parsed == null ? "" : (parsed.invoice ?? ""); if b != "" { run("mkdir -p ~/.cache && printf %s ${sh(b)} | qrencode -o ~/.cache/routstr-qr.png -s 6 -m 2 -l M"); qrPath = "~/.cache/routstr-qr.png" } }
+          onTap: { haptic(); topupRaw = run("f=~/.cache/routstrd-topup.sh; mkdir -p ~/.cache; printf %s ${sh(scTopup)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-topup.sh && bash ~/.cache/routstrd-topup.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi"); invRaw = topupRaw; paid = false; qrPath = ""; let parsed = parseJson(topupRaw); let b = parsed == null ? "" : (parsed.invoice ?? ""); if b != "" { run("mkdir -p ~/.cache && printf %s ${sh(b)} | qrencode -o ~/.cache/routstr-qr.png -s 6 -m 2 -l M"); qrPath = "~/.cache/routstr-qr.png" } }
         }
       }
 
@@ -497,7 +496,7 @@ esac
         align: center
         Text { text: "●"; style: title; color: dotColor }
         Text { text: stateText; style: body; color: #ffffff; weight: 1; maxLines: 1 }
-        Box { onTap: { haptic(); run("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(up ? scStop : scStart)} || bash -c ${sh(up ? scStop : scStart)}; else bash -c ${sh(up ? scStop : scStart)}; fi"); refresh() }; Toggle { lit: up } }
+        Box { onTap: { haptic(); if up { run("f=~/.cache/routstrd-stop.sh; mkdir -p ~/.cache; printf %s ${sh(scStop)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-stop.sh && bash ~/.cache/routstrd-stop.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi") } else { run("f=~/.cache/routstrd-start.sh; mkdir -p ~/.cache; printf %s ${sh(scStart)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-start.sh && bash ~/.cache/routstrd-start.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi") }; refresh() }; Toggle { lit: up } }
         Button { text: str.host; onTap: { haptic(); linkDraft = link; editLink = !editLink } }
       }
 
@@ -578,7 +577,7 @@ esac
           background: alpha(background, 0.35)
           text: str.restart
           weight: 1
-          onTap: { haptic(); run("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scRestart)} || bash -c ${sh(scRestart)}; else bash -c ${sh(scRestart)}; fi"); refresh() }
+          onTap: { haptic(); run("f=~/.cache/routstrd-restart.sh; mkdir -p ~/.cache; printf %s ${sh(scRestart)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-restart.sh && bash ~/.cache/routstrd-restart.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi"); refresh() }
         }
         Button {
           text: str.logs
