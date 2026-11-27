@@ -32,9 +32,12 @@ status | usage <window> | logs <lines> | start | stop | restart | topup <sats> |
 - `qrencode` draws the invoice's QR on the phone that is looking at the screen.
 
 The commands run on this device when the **Host** setting is blank (how the desktop uses the widget).
-Set an SSH host alias in that field to run the same program on the machine that runs routstrd instead;
-the phone falls back to the local copy if the SSH connection fails. Only the host alias, the amount and
-an operation id ever go into a command, each through `sh()`. There is no token, address, username or key
+Set an SSH host alias in that field to run the same program on the machine that runs routstrd instead.
+For each command the widget writes the filled-in program to `~/.cache/routstrd-<verb>.sh` with
+`printf %s` and runs that file; over SSH the same text goes on stdin and is written and run there. The
+program is data, never a shell word, so no widget value is executed as code. If the SSH connection
+fails, the phone runs the file it already wrote locally. Only the host alias, the amount and an
+operation id are passed as shell words, each through `sh()`. There is no token, address, username or key
 in the file.
 
 The quote poll starts nothing while the wallet is idle: an `every 5s` block only asks the daemon about
