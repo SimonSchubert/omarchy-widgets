@@ -1,0 +1,134 @@
+widget "tocando-agora" {
+  size: 6x2
+  minSize: 4x2
+  padding: 12
+  requires { pacman: ["bash", "systemd", "jq"] }
+  meta { owl: 13; description: "Capa, faixa e controles de reprodução para players MPRIS na sessão do Omarchy."; version: "1.0"; license: "MIT"; category: "media" }
+
+  // Read the cover, status and controls together from each desktop media session.
+  source sessions = cmd("""
+    names=$(busctl --user --timeout=1s --json=short call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ListNames 2>/dev/null)
+    jq -r '.data[0][] | select(test("^org[.]mpris[.]MediaPlayer2[.][A-Za-z0-9_.-]+$"))
+      | select(split(".")[3] != "playerctld")' <<< "$names" |
+    while IFS= read -r name; do
+      busctl --user --timeout=800ms --auto-start=no --json=short call "$name" /org/mpris/MediaPlayer2 \
+        org.freedesktop.DBus.Properties GetAll s org.mpris.MediaPlayer2.Player 2>/dev/null |
+      jq -c --arg name "$name" '
+        def caption: if type == "string" then gsub("[\r\n\t]+"; " ") | .[:240] else "" end;
+        .data[0] as $p | ($p.Metadata.data // {}) as $m
+        | select($p.PlaybackStatus.data == "Playing" or $p.PlaybackStatus.data == "Paused")
+        | {
+            name: $name,
+            app: ($name | split(".")[3]),
+            title: ($m["xesam:title"].data | caption),
+            artist: ($m["xesam:artist"].data | if type == "array" then join(", ") else . end | caption),
+            art: ($m["mpris:artUrl"].data
+              | if type == "string" and length <= 4096 and test("^(file:/|https://)") then . else null end),
+            playing: ($p.PlaybackStatus.data == "Playing"),
+            canPlay: ($p.CanControl.data == true and $p.CanPlay.data == true),
+            canPause: ($p.CanControl.data == true and $p.CanPause.data == true),
+            canNext: ($p.CanControl.data == true and $p.CanGoNext.data == true),
+            canPrevious: ($p.CanControl.data == true and $p.CanGoPrevious.data == true)
+          }
+        | select(.title != "" or .artist != "")'
+    done | jq -cs 'sort_by(.name)'
+  """) every 2s json
+
+  state lastPlayer = null
+  let previousPlayer = find(sessions ?? [], player => player.name == lastPlayer)
+  let playingPlayer = find(sessions ?? [], player => player.playing)
+  let player = (previousPlayer.playing ? previousPlayer : playingPlayer) ?? previousPlayer ?? first(sessions ?? [])
+  on sessions first {
+    if player != null { lastPlayer = player.name }
+  }
+
+  let compact = (tileWidth ?? 404) < 318
+  let artworkSize = min((tileHeight ?? 128) - 24, ((tileWidth ?? 404) - 24) * 0.40)
+  let appName = player.app == "chromium" ? "Chromium" : player.app == "spotify" ? "Spotify" : player.app
+
+  component Transport(method, available) {
+    let primary = method == "Play" || method == "Pause"
+    Canvas {
+      width: primary ? 44 : 36
+      height: 44
+      opacity: available ? 1 : 0.35
+      onTap: {
+        if available {
+          run("busctl --user --timeout=1s --auto-start=no --quiet call ${sh(player.name)} /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player ${sh(method)}")
+        }
+      }
+      let cx = width / 2
+      let cy = height / 2
+      if primary { circle(cx, cy, 21, fill: accent) }
+      if method == "Pause" {
+        rect(cx - 6, cy - 7, 4, 14, radius: 1, fill: background)
+        rect(cx + 2, cy - 7, 4, 14, radius: 1, fill: background)
+      } else if method == "Play" {
+        path([[cx - 4, cy - 8], [cx + 8, cy], [cx - 4, cy + 8]], closed: true, fill: background)
+      } else {
+        let direction = method == "Next" ? 1 : -1
+        path([[cx - 6 * direction, cy - 7], [cx + 4 * direction, cy], [cx - 6 * direction, cy + 7]], closed: true, fill: foreground)
+        rect(cx + 6 * direction - 1, cy - 7, 2, 14, fill: foreground)
+      }
+    }
+  }
+
+  Row {
+    fill: true
+    align: center
+    gap: 12
+    Box {
+      width: artworkSize
+      height: artworkSize
+      background: mix(surface, accent, 0.22)
+      clip: true
+      Text { text: "♪"; color: foreground; font: sans; fontSize: 42; align: center; fill: width }
+      if player.art != null {
+        Image { src: player.art; fit: cover; fill: true; label: "Capa da faixa" }
+      }
+    }
+    Column {
+      weight: 1
+      fill: height
+      gap: 4
+      if player != null {
+        Text {
+          text: player.title == "" ? player.artist : player.title
+          font: sans
+          style: title
+          fontSize: compact ? 17 : 21
+          bold: true
+          maxLines: 1
+          fill: width
+        }
+        if player.title != "" && player.artist != "" {
+          Text { text: player.artist; style: small; font: sans; maxLines: 1; fill: width }
+        }
+        Spacer { weight: 1 }
+        Row {
+          fill: width
+          align: center
+          gap: 4
+          if compact {
+            Spacer { weight: 1 }
+          } else {
+            Text { text: appName; style: small; color: accent; weight: 1; maxLines: 1 }
+          }
+          Transport { method: "Previous"; available: player.canPrevious }
+          Transport { method: player.playing ? "Pause" : "Play"; available: player.playing ? player.canPause : player.canPlay }
+          Transport { method: "Next"; available: player.canNext }
+        }
+      } else {
+        Spacer { weight: 1 }
+        Text {
+          text: sessions == null ? "Buscando mídia…" : "Nenhuma faixa tocando"
+          style: title
+          font: sans
+          maxLines: 2
+          fill: width
+        }
+        Spacer { weight: 1 }
+      }
+    }
+  }
+}
