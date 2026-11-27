@@ -1,0 +1,150 @@
+app "Omarchy Real" {
+  meta { owl: 16; description: "Control a nested Omarchy session from the launcher: see its Wayland and screensaver state, start or stop it with commands you set"; version: "1.0"; license: "MIT"; category: "system" }
+  title: str.appTitle
+  icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+    <rect width="256" height="256" rx="56" fill="#1A1B26"/>
+    <rect x="44" y="72" width="160" height="120" rx="16" fill="#11121A"/>
+    <rect x="40" y="60" width="160" height="120" rx="16" fill="#2A3148"/>
+    <rect x="56" y="76" width="160" height="120" rx="16" fill="#3A445F"/>
+    <path d="M56 92a16 16 0 0 1 16-16h128a16 16 0 0 1 16 16v16H56z" fill="#7AA2F7"/>
+    <path d="M56 92a16 16 0 0 1 16-16h128a16 16 0 0 1 16 16v8H56z" fill="#A9C1FF"/>
+    <circle cx="76" cy="100" r="6" fill="#F7768E"/>
+    <circle cx="96" cy="100" r="6" fill="#7AA2F7"/>
+    <circle cx="116" cy="100" r="6" fill="currentColor"/>
+    <rect x="76" y="132" width="72" height="12" rx="6" fill="#A9C1FF"/>
+    <rect x="76" y="156" width="112" height="12" rx="6" fill="#7AA2F7"/>
+    <rect x="76" y="180" width="48" height="12" rx="6" fill="#565B78"/>
+  </svg>"""
+
+  strings {
+    en {
+      appTitle: "Omarchy Real"
+      heading: "real Omarchy"
+      subtitle: "Hyprland + Omarchy shell in a nested Wayland session"
+      session: "session"
+      screensaver: "screensaver"
+      checking: "checking…"
+      launch: "launch / restart Omarchy"
+      startSaver: "start landscape screensaver"
+      closeSaver: "close screensaver"
+      stop: "stop session"
+      sessionPath: "session start script"
+      saverPath: "screensaver script"
+      pathHint: "Absolute paths to your own scripts, saved on this phone."
+      hint: "The desktop opens as a window on the launcher. If it is hidden, reopen this app and launch again."
+    }
+  }
+
+  requires { pacman: ["procps-ng"] }
+
+  // The user enters their own script paths; none are shipped in this file.
+  state sessionScript = "" persist
+  state saverScript = "" persist
+
+  source status = cmd("""
+    [ -S "/run/user/$(id -u)/wayland-1" ] && printf 'running' || printf 'stopped'
+  """) every 10s
+  source saver = cmd("pgrep -f '[o]rg.omarchy.screensaver' >/dev/null && echo running || echo stopped") every 10s
+
+  Column {
+    gap: 10
+    padding: [16, 0]
+
+    Column {
+      gap: 2
+      padding: [16, 16]
+      radius: 14 * corners
+      background: surface
+      Text { text: str.heading; fontSize: 20; fontWeight: 700; color: accent }
+      Text { text: str.subtitle; fontSize: 11; color: muted }
+      Row {
+        gap: 6
+        Text { text: str.session; font: mono; fontSize: 10; color: muted }
+        Text { text: status ?? str.checking; font: mono; fontSize: 10; color: status != null && startsWith(status, "running") ? accent : muted; weight: 1 }
+      }
+      Row {
+        gap: 6
+        Text { text: str.screensaver; font: mono; fontSize: 10; color: muted }
+        Text { text: saver ?? str.checking; font: mono; fontSize: 10; color: saver == "running" ? accent : muted; weight: 1 }
+      }
+    }
+
+    Column {
+      gap: 8
+
+      Column {
+        gap: 4
+        padding: [12, 16]
+        radius: 8 * corners
+        background: surface
+        Text { text: str.sessionPath; fontSize: 11; color: muted }
+        Input { text: sessionScript; placeholder: "/absolute/path/to/start-script"; fontSize: 12; onSubmit: sessionScript = value }
+        Text { text: str.saverPath; fontSize: 11; color: muted }
+        Input { text: saverScript; placeholder: "/absolute/path/to/screensaver-script"; fontSize: 12; onSubmit: saverScript = value }
+        Text { text: str.pathHint; fontSize: 10; color: muted }
+      }
+
+      Box {
+        padding: [14, 16]
+        radius: 8 * corners
+        background: accent
+        onTap: run("${sh(sessionScript)}")
+        Row {
+          gap: 8
+          align: center
+          Text { text: "▶"; fontSize: 16; color: background }
+          Text { text: str.launch; fontSize: 14; fontWeight: 600; color: background; weight: 1 }
+        }
+      }
+      Box {
+        padding: [14, 16]
+        radius: 8 * corners
+        background: surface
+        border: 1
+        borderColor: border
+        onTap: run("${sh(saverScript)}")
+        Row {
+          gap: 8
+          align: center
+          Text { text: "✦"; fontSize: 15; color: accent }
+          Text { text: str.startSaver; fontSize: 13; color: foreground; weight: 1 }
+        }
+      }
+      Box {
+        padding: [14, 16]
+        radius: 8 * corners
+        background: surface
+        border: 1
+        borderColor: border
+        onTap: run("pkill -f '[o]rg.omarchy.screensaver' 2>/dev/null || true")
+        Row {
+          gap: 8
+          align: center
+          Text { text: "×"; fontSize: 15; color: muted }
+          Text { text: str.closeSaver; fontSize: 13; color: foreground; weight: 1 }
+        }
+      }
+      Box {
+        padding: [14, 16]
+        radius: 8 * corners
+        background: surface
+        border: 1
+        borderColor: border
+        onTap: run("pkill -f 'hyprland' 2>/dev/null || true; pkill -x quickshell 2>/dev/null || true; pkill -x swaybg 2>/dev/null || true")
+        Row {
+          gap: 8
+          align: center
+          Text { text: "■"; fontSize: 13; color: muted }
+          Text { text: str.stop; fontSize: 13; color: foreground; weight: 1 }
+        }
+      }
+    }
+
+    Text {
+      text: str.hint
+      fontSize: 10
+      color: muted
+      maxLines: 3
+    }
+  }
+}
