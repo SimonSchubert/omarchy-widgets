@@ -4695,6 +4695,10 @@ face "Omagara" {
               text: "Save name"
               onTap: {
                 let newName = trim(renameShortcutDraft)
+                let oldName = find(pinnedShortcuts, a => a.key == renameShortcutKey).name
+                let oldInitial = upper(sub(trim(oldName), 0, 1))
+                let newInitial = upper(sub(newName, 0, 1))
+                if (contains(fullAlphabet, oldInitial) ? oldInitial : "#") != (contains(fullAlphabet, newInitial) ? newInitial : "#") { manualAppMoves = manualAppMoves.filter(m => m.key != renameShortcutKey && m.anchor != renameShortcutKey) }
                 shortcutNames = shortcutNames.filter(n => n.key != renameShortcutKey) + (newName == renameShortcut.name ? [] : [{key: renameShortcutKey, name: newName}])
                 if renameShortcutReturn == "face" { close() } else { screenMode = renameShortcutReturn }
               }
@@ -4704,6 +4708,10 @@ face "Omagara" {
             Button {
               text: "Restore original name"
               onTap: {
+                let oldName = find(pinnedShortcuts, a => a.key == renameShortcutKey).name
+                let oldInitial = upper(sub(trim(oldName), 0, 1))
+                let newInitial = upper(sub(trim(renameShortcut.name), 0, 1))
+                if (contains(fullAlphabet, oldInitial) ? oldInitial : "#") != (contains(fullAlphabet, newInitial) ? newInitial : "#") { manualAppMoves = manualAppMoves.filter(m => m.key != renameShortcutKey && m.anchor != renameShortcutKey) }
                 shortcutNames = shortcutNames.filter(n => n.key != renameShortcutKey)
                 if renameShortcutReturn == "face" { close() } else { screenMode = renameShortcutReturn }
               }
