@@ -17,37 +17,38 @@ when it is down. Tap it for the full screen:
 
 ## What it runs
 
-Everything goes through one command, `routstr-ctl`, on the phone:
+Everything is in `widget.owl`, including the shell program that backs every button. No helper script is
+installed or needed. The program is written once in the file as `agent` and filled in with a verb and
+an argument for each command:
 
 ```
-routstr-ctl status|usage <window>|logs [lines]|start|stop|restart|topup <sats>|quote <operation-id>
+status | usage <window> | logs <lines> | start | stop | restart | topup <sats> | quote <operation-id>
 ```
 
-The widget carries no address, username, key or token, and every value in a command goes through `sh()`.
-The store installs one `widget.owl`, so the helper isn't bundled: install your own `routstr-ctl` at
-`~/.local/bin/routstr-ctl` on the phone and on the machine that runs routstrd. Its job is to hide the
-difference between the two devices:
+- `curl` reads routstrd's loopback API at `127.0.0.1:8008`; `jq` trims the large usage reply and shapes
+  the JSON the screen draws;
+- `systemctl --user` starts, stops and restarts `routstrd.service`, and `journalctl --user` reads its
+  log;
+- `qrencode` draws the invoice's QR on the phone that is looking at the screen.
 
-- reads ask routstrd's loopback API (`127.0.0.1:8008`), through the SSH tunnel this phone keeps to that
-  machine when it is up, and over SSH when it isn't;
-- start, stop, restart and the logs always go over SSH;
-- the phone's copy draws the QR code locally with `qrencode` from the invoice the daemon returns, and
-  shapes the 40 KB usage reply down to the few kilobytes the screen draws.
+The commands run on this device when the **Host** setting is blank (how the desktop uses the widget).
+Set an SSH host alias in that field to run the same program on the machine that runs routstrd instead;
+the phone falls back to the local copy if the SSH connection fails. Only the host alias, the amount and
+an operation id ever go into a command, each through `sh()`. There is no token, address, username or key
+in the file.
 
-Set up an SSH host named `routstr` in `~/.ssh/config` (key-only, `BatchMode`, a short timeout), keep
-routstrd on loopback, and adapt the helper to your own paths. Without the helper the screen says so; the
-tile stays amber.
+The quote poll starts nothing while the wallet is idle: an `every 5s` block only asks the daemon about
+an invoice while one is open. The status, monitor and journal sources read on their own slower
+intervals, and only while their view is on screen.
 
 ## Requires
 
-The widget declares `openssh`, `coreutils`, `curl`, `jq` and `qrencode`; it also needs `routstr-ctl` and a
-running `routstrd` (with its wallet) on a Linux machine this phone can reach over SSH, or through the
-tunnel.
+`openssh`, `coreutils`, `curl`, `jq` and `qrencode`, plus a reachable `routstrd` with a funded wallet on
+the machine named in **Host** (or on this device when it is blank). Without a reachable daemon the tile
+is amber and the screen shows a **Host** card for setting the alias.
 
 ## Notes
 
 - The status colours are fixed (green `#4ade80`, amber `#fbbf24`, red `#f87171`) rather than theme names:
   some themes, hackerman among them, name their red green.
-- The quote poll runs every 5 seconds only while a top-up invoice is open; with no invoice the command is
-  a no-op.
-- `meta`: version 1.2, MIT, category `dev`, owl 16.
+- `meta`: version 1.3, MIT, category `dev`, owl 16.
