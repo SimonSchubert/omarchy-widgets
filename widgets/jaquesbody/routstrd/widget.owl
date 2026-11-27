@@ -2,11 +2,12 @@
 // amber when this phone can't reach it, red when it is down; a tap opens the
 
 // wallet, a switch for the daemon, the last 30 days, the monitor's breakdowns,
-// the logs and a Lightning top-up. Data and control go through one command,
-// routstr-ctl: reads over the SSH tunnel this phone keeps to the desktop,
-// start/stop/restart and the journal over SSH, where routstrd listens on its
-// own loopback only. The file carries no address, user or token, so the same
-// file runs on both devices.
+// the logs and a Lightning top-up. The shell program behind every button is in
+// this file: curl reads routstrd's loopback API, ssh runs the same program on
+// the machine that holds it, systemctl and journalctl drive it there, and
+// qrencode draws the invoice's QR on this device. The SSH host is a setting on
+// the screen; blank runs the commands here. No address, user or token is kept
+// in the file, so the same file runs on both devices.
 widget "routstrd" {
   meta {
     owl: 16
