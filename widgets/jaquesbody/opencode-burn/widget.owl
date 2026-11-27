@@ -51,7 +51,6 @@ widget "opencode-burn" {
       paidLowLabel: "Paid (low balance)"
       paidModels: "paid models"
       models: "models"
-      topUp: "top up"
       connectHelp: "Your provider should connect automatically. If not, paste the API key below and press connect."
       apiKey: "API key"
       connect: "connect"
@@ -1005,7 +1004,6 @@ if [ -r "$cache" ]; then cat "$cache"; else echo '{"ok":0,"ts":0,"btc":{}}'; fi
   let paidWhy = paidOn ? "" : (pr.why ?? "setup")
   let bal = pr.balance ?? 0
   let reserved = pr.reserved ?? 0
-  let paidReqs = pr.req ?? 0
   let spendToday = pr.dday ?? 0
   let spend24 = pr.d24 ?? 0
   let spend7 = pr.d7 ?? 0
@@ -1015,7 +1013,6 @@ if [ -r "$cache" ]; then cat "$cache"; else echo '{"ok":0,"ts":0,"btc":{}}'; fi
   let paidUrl = pr.url ?? ""
   let paidProvider = pr.provider ?? ""
   let paidModel = pr.model ?? ""
-  let paidTopup = pr.topup ?? ""
   let paidUrlClean = replace(replace(paidUrl, "https://", ""), "http://", "")
   let paidWhereTxt = paidHost != "" ? paidHost : split(paidUrlClean, "/")[0]
   let paidErrTxt = paidWhy == "setup" ? "not set up"
@@ -1960,27 +1957,6 @@ if [ -r "$cache" ]; then cat "$cache"; else echo '{"ok":0,"ts":0,"btc":{}}'; fi
                 style: small
                 color: paidOn ? paidTone : muted
                 maxLines: 1
-              }
-            }
-
-            // connected: the screen's hero already carries the balance, so the
-            // card shows a line only when there is a top-up to spend it on
-            if (paidOn && paidTopup != "") {
-              Row {
-                align: center
-                fill: width
-                gap: 8
-                Text { text: "${paidReqs} " + str.requests; style: small; color: muted; maxLines: 1 }
-                Spacer { weight: 1 }
-                Button {
-                  radius: 8 * corners
-                  border: 1
-                  borderColor: alpha(accent, 0.3)
-                  background: alpha(background, 0.35)
-                  text: str.topUp
-                  color: paidTone
-                  onTap: { haptic(); url(paidTopup) }
-                }
               }
             }
 
