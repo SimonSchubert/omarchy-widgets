@@ -1,0 +1,653 @@
+face "gita sloka" {
+  page: 0
+  edge: true
+  statusBar: false
+  meta { owl: 14; description: "A full-screen Bhagavad Gita face with Hindi/English meaning, transliteration, cached AI reflection, favorites, daily verse, jump, and reading controls."; version: "2.0"; license: "MIT"; category: "home" }
+
+  // Verse counts per chapter (1-18).
+  let counts = [47, 72, 43, 42, 29, 47, 30, 28, 34, 42, 55, 20, 35, 27, 20, 24, 28, 78]
+  let chapterNames = [
+    "Arjuna Vishada Yoga", "Sankhya Yoga", "Karma Yoga", "Jnana Karma Sannyasa Yoga",
+    "Karma Sannyasa Yoga", "Dhyana Yoga", "Jnana Vijnana Yoga", "Aksara Brahma Yoga",
+    "Raja Vidya Raja Guhya Yoga", "Vibhuti Yoga", "Vishwarupa Darshana Yoga", "Bhakti Yoga",
+    "Kshetra Kshetrajna Vibhaga Yoga", "Gunatraya Vibhaga Yoga", "Purushottama Yoga",
+    "Daivasura Sampad Vibhaga Yoga", "Sraddhatraya Vibhaga Yoga", "Moksha Sannyasa Yoga"
+  ]
+  let totalVerses = 700
+
+  state ch = 2 persist
+  state vs = 47 persist
+  state langMode = "en" persist
+  state textSize = "M" persist
+  state dailyMode = false persist
+  state favorites = [] persist
+  state aiCache = {} persist
+  state verseCache = [] persist
+  state aiOut = ""
+  state aiKey = ""
+  state aiBusy = false
+  state aiStyle = "practical" persist
+  state aiLang = "en" persist
+  state showTranslit = true persist
+  state showSaved = false
+  state showJump = false
+  state showMenu = false
+  state jumpCh = "2"
+  state jumpVs = "47"
+  state confirmClear = false
+
+  source today = clock every 1h
+  source slok = http("https://vedicscriptures.github.io/slok/${int(ch)}/${int(vs)}") json timeout 10s status
+
+  let dayStr = fmtTime(today, "yyyyMMdd")
+  let dailyIdx = floor(hash(dayStr) * totalVerses)
+  let dailyCh = dailyIdx < 47 ? 1 : dailyIdx < 119 ? 2 : dailyIdx < 162 ? 3 : dailyIdx < 204 ? 4 : dailyIdx < 233 ? 5 : dailyIdx < 280 ? 6 : dailyIdx < 310 ? 7 : dailyIdx < 338 ? 8 : dailyIdx < 372 ? 9 : dailyIdx < 414 ? 10 : dailyIdx < 469 ? 11 : dailyIdx < 489 ? 12 : dailyIdx < 524 ? 13 : dailyIdx < 551 ? 14 : dailyIdx < 571 ? 15 : dailyIdx < 595 ? 16 : dailyIdx < 623 ? 17 : 18
+  let dailyOffsets = [0, 47, 119, 162, 204, 233, 280, 310, 338, 372, 414, 469, 489, 524, 551, 571, 595, 623]
+  let dailyVs = dailyIdx - dailyOffsets[dailyCh - 1] + 1
+  let isDaily = ch == dailyCh && vs == dailyVs
+
+  let favKey = "${int(ch)}:${int(vs)}"
+  let cached = verseCache.find(v => v.key == favKey)
+  let verse = slok.ok ? slok.out : (cached != null ? cached.data : null)
+  let fromCache = !slok.ok && cached != null
+
+  let meaningEn = verse != null ? (verse.siva.et ?? verse.purohit.et ?? "") : null
+  let meaningHi = verse != null ? (verse.tej.ht ?? verse.siva.et ?? verse.purohit.et ?? "") : null
+  let meaningEnAuthor = verse != null ? (verse.siva.et != null ? "Swami Sivananda" : (verse.purohit.et != null ? "Shri Purohit Swami" : "")) : ""
+  let meaningHiAuthor = verse != null ? (verse.tej.ht != null ? "Swami Tejomayananda" : meaningEnAuthor) : ""
+  let meaning = langMode == "hi" ? meaningHi : langMode == "both" ? ((meaningEn ?? "") + (meaningHi != null && meaningHi != "" ? "\n\n" + meaningHi : "")) : meaningEn
+  let meaningAuthor = langMode == "hi" ? meaningHiAuthor : langMode == "both" ? join(filter([meaningEnAuthor != "" ? "EN: " + meaningEnAuthor : null, meaningHiAuthor != "" ? "HI: " + meaningHiAuthor : null], x => x != null), "  ·  ") : meaningEnAuthor
+  let sanskrit = verse != null ? (verse.slok ?? "") : null
+  let sanskritShare = verse != null ? replace(verse.slok ?? "", "\n", "  ") : null
+  let translit = verse != null ? (verse.transliteration ?? "") : null
+  let translitShare = verse != null ? replace(verse.transliteration ?? "", "\n", "  ") : null
+  let chapterName = chapterNames[ch - 1] ?? ""
+  let ref = "BG ${ch}.${vs}"
+  let sourceUrl = "https://bhagavadgita.com/chapter/${int(ch)}/verse/${int(vs)}?hl=hi"
+  let isFav = any(favorites, f => f.key == favKey)
+  let aiCacheKey = "${favKey}:${aiStyle}:${aiLang}"
+  let aiText = get(aiCache, aiCacheKey, "")
+  let hasAi = aiText != ""
+  let verseNum = sum(take(counts, ch - 1)) + vs
+  let chapterProgress = counts[ch - 1] > 0 ? vs / counts[ch - 1] : 0
+
+  let prevCh = vs > 1 ? ch : (ch > 1 ? ch - 1 : 18)
+  let prevVs = vs > 1 ? vs - 1 : (ch > 1 ? counts[ch - 2] : 78)
+  let nextCh = vs < counts[ch - 1] ? ch : (ch < 18 ? ch + 1 : 1)
+  let nextVs = vs < counts[ch - 1] ? vs + 1 : (ch < 18 ? 1 : 1)
+
+  let shareText = "${ref} · ${chapterName}\n${sourceUrl}\n\n${sanskritShare ?? ""}\n\n${translitShare ?? ""}\n\nMeaning${meaningAuthor != "" ? " (" + meaningAuthor + ")" : ""}: ${meaning ?? ""}${hasAi ? "\n\nAI Reflection (generated locally): ${aiText}" : ""}"
+
+  on slok {
+    if slok.ok && slok.out != null {
+      let k = "${int(ch)}:${int(vs)}"
+      let rest = verseCache.filter(v => v.key != k)
+      verseCache = ([{key: k, ch: ch, vs: vs, data: slok.out}] + rest).take(80)
+    }
+  }
+
+  on aiOut {
+    aiBusy = false
+    if aiKey != "" {
+      let t = trim(aiOut)
+      if t != "" { aiCache = set(aiCache, aiKey, t) }
+    }
+  }
+
+  let w = tileWidth ?? 360
+  let h = tileHeight ?? 720
+  let wide = w > h + 80
+  let short = h < 680
+  let compact = w < 410 || h < 590
+  let pad = compact ? 14 : 22
+  let gap = compact ? 12 : 16
+  let cardRadius = 28 * corners
+  let titleFont = "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf"
+  let verseFont = "https://raw.githubusercontent.com/google/fonts/main/ofl/tirodevanagarisanskrit/TiroDevanagariSanskrit-Regular.ttf"
+  let scale = textSize == "S" ? 0.92 : textSize == "L" ? 1.18 : 1
+  let titleSize = (compact ? 28 : (short ? 36 : 44)) * scale
+  let slokaSize = (compact ? 24 : (short ? 30 : 36)) * scale
+  let bodySize = (compact ? 16 : (short ? 18 : 21)) * scale
+  let commentarySize = (compact ? 15 : (short ? 17 : 19)) * scale
+  let smallSize = (compact ? 12 : 14) * scale
+  let labelSize = (compact ? 11 : 12) * scale
+  let cardPad = compact ? 16 : 24
+  let cardBg = alpha(surface, 0.24)
+  let cardBgSoft = alpha(surface, 0.16)
+  let cardBorder = alpha(foreground, 0.09)
+  let cardBorderAccent = alpha(accent, 0.24)
+
+  padding: 0
+  background: linear(0, 0, 0, 1, [alpha(background, 1.0), alpha(mix(background, surface, 0.82), 0.98), alpha(background, 0.96)])
+
+  component SectionLabel(label, tint = accent) {
+    Text { text: label; font: titleFont; fontSize: labelSize; fontWeight: 800; color: tint; letterSpacing: 2.2 }
+  }
+
+  component IconBtn(icon, tint = foreground, bg = cardBgSoft, borderTint = cardBorder, active = false, size = 46) {
+    Box {
+      width: compact ? size - 4 : size
+      height: compact ? size - 4 : size
+      radius: 15 * corners
+      background: active ? alpha(accent, 0.24) : bg
+      border: 1
+      borderColor: active ? alpha(accent, 0.34) : borderTint
+      animate background: tween(180ms, "out")
+      Column { fill: true; justify: center; align: center; Text { text: icon; fontSize: (compact ? 18 : 20) * scale; fontWeight: 700; color: active ? accent : tint; align: center } }
+    }
+  }
+
+  component PillBtn(label, tint = foreground, bg = cardBgSoft, borderTint = cardBorder, active = false) {
+    Box {
+      padding: compact ? [10, 8] : [13, 10]
+      radius: 14 * corners
+      background: active ? alpha(accent, 0.22) : bg
+      border: 1
+      borderColor: active ? alpha(accent, 0.32) : borderTint
+      animate background: tween(180ms, "out")
+      Text { text: label; font: titleFont; fontSize: 12 * scale; fontWeight: 700; color: active ? accent : tint; maxLines: 1 }
+    }
+  }
+
+  component CopyBtn(text, tint = muted) {
+    Box {
+      width: compact ? 32 : 36
+      height: compact ? 32 : 36
+      radius: 11 * corners
+      background: alpha(surface, 0.20)
+      border: 1
+      borderColor: alpha(foreground, 0.08)
+      onTap: copy(text ?? "")
+      Column { fill: true; justify: center; align: center; Text { text: "⧉"; fontSize: 14 * scale; fontWeight: 700; color: tint } }
+    }
+  }
+
+  component VerseCard() {
+    Box {
+      fill: width
+      padding: cardPad
+      radius: cardRadius
+      frost: 20
+      background: linear(0, 0, 1, 1, [alpha(accent, 0.18), alpha(surface, 0.26), alpha(accent, 0.10)])
+      border: 1
+      borderColor: cardBorderAccent
+      animate opacity: tween(220ms, "out")
+      opacity: verse == null && !fromCache ? 0.65 : 1
+      Column {
+        gap: compact ? 12 : 16
+        Row {
+          align: center
+          gap: 10
+          SectionLabel { label: "SHLOKA"; weight: 1 }
+          CopyBtn { text: sanskrit }
+          Text { text: "॥"; font: verseFont; fontSize: 20 * scale; color: alpha(accent, 0.85) }
+        }
+        Box {
+          fill: width
+          padding: [compact ? 8 : 12, compact ? 4 : 8]
+          radius: 18 * corners
+          background: alpha(background, 0.10)
+          Column {
+            gap: compact ? 8 : 10
+            Text { text: sanskrit ?? "…"; font: verseFont; fontSize: slokaSize; fontWeight: 700; color: foreground; align: center }
+            Text { text: "॥"; font: verseFont; fontSize: 22 * scale; color: alpha(accent, 0.72); align: center }
+          }
+        }
+        if showTranslit && translit != null && translit != "" {
+          Column {
+            gap: 8
+            Box { height: 1; fill: width; background: alpha(accent, 0.20) }
+            Row {
+              align: center
+              gap: 8
+              Text { text: "TRANSLITERATION"; font: titleFont; fontSize: labelSize; fontWeight: 800; color: muted; letterSpacing: 1.8; weight: 1 }
+              CopyBtn { text: translit }
+            }
+            Text { text: translit; font: titleFont; fontSize: (compact ? 14 : 16) * scale; fontWeight: 500; color: alpha(foreground, 0.82); align: center }
+          }
+        }
+      }
+    }
+  }
+
+  component MeaningCard() {
+    Box {
+      fill: width
+      padding: cardPad
+      radius: cardRadius
+      frost: 16
+      background: cardBg
+      border: 1
+      borderColor: cardBorder
+      animate opacity: tween(220ms, "out")
+      opacity: verse == null && !fromCache ? 0.65 : 1
+      Column {
+        gap: compact ? 12 : 14
+        Row {
+          align: center
+          gap: 8
+          SectionLabel { label: langMode == "hi" ? "MEANING (HI)" : langMode == "both" ? "MEANING (EN+HI)" : "MEANING (EN)"; tint: muted; weight: 1 }
+          CopyBtn { text: meaning }
+        }
+        Text { text: meaning ?? "…"; font: titleFont; fontSize: bodySize; fontWeight: 500; color: alpha(foreground, 0.96) }
+        if meaningAuthor != "" {
+          Text { text: "Translation: ${meaningAuthor}"; font: titleFont; fontSize: smallSize; fontWeight: 600; color: alpha(foreground, 0.62) }
+        }
+        if fromCache {
+          Box {
+            fill: width
+            padding: [8, 10]
+            radius: 12 * corners
+            background: alpha(accent, 0.10)
+            Text { text: "Showing cached verse while offline."; font: titleFont; fontSize: smallSize; fontWeight: 600; color: accent }
+          }
+        }
+      }
+    }
+  }
+
+  component CommentaryCard() {
+    let ready = aiText != null && aiText != ""
+    Box {
+      fill: width
+      padding: cardPad
+      radius: cardRadius
+      frost: 16
+      background: linear(0, 0, 1, 1, [alpha(accent, 0.14), alpha(surface, 0.22)])
+      border: 1
+      borderColor: alpha(accent, 0.20)
+      Column {
+        gap: compact ? 12 : 14
+        Row {
+          align: center
+          gap: 8
+          SectionLabel { label: "AI REFLECTION"; weight: 1 }
+          Text { text: ready ? "cached" : (aiBusy ? "generating" : "on demand"); font: titleFont; fontSize: smallSize; fontWeight: 600; color: muted }
+          CopyBtn { text: aiText; tint: accent }
+        }
+        Flow {
+          gap: 8
+          for s in [["practical","Practical"], ["devotional","Devotional"], ["short","Short"]] {
+            Box {
+              onTap: aiStyle = s[0]
+              PillBtn { label: s[1]; active: aiStyle == s[0]; tint: accent; bg: alpha(surface, 0.16); borderTint: alpha(accent, 0.16) }
+            }
+          }
+          Box { onTap: aiLang = aiLang == "en" ? "hi" : "en"; PillBtn { label: aiLang == "en" ? "AI: EN" : "AI: HI"; active: true; tint: accent; bg: alpha(accent, 0.14); borderTint: alpha(accent, 0.20) } }
+        }
+        Box {
+          fill: width
+          padding: ready ? 0 : [12, 14]
+          radius: 14 * corners
+          background: ready ? alpha(background, 0) : alpha(background, 0.12)
+          Text {
+            text: ready ? aiText : (aiBusy ? "Generating a ${aiStyle} reflection…" : "Choose a style and tap AI for a reflection. Commentary is cached per verse and style.")
+            font: titleFont
+            fontSize: commentarySize
+            fontWeight: 500
+            color: ready ? alpha(foreground, 0.96) : alpha(foreground, 0.74)
+          }
+        }
+        Text { text: "AI reflection, generated locally"; font: titleFont; fontSize: smallSize; fontWeight: 600; color: alpha(foreground, 0.54) }
+      }
+    }
+  }
+
+  Box {
+    fill: true
+
+    Canvas {
+      fill: true
+      let cx = width * 0.74
+      let cy = height * 0.26
+      let r = min(width, height) * 0.33
+      circle(cx, cy, r * 1.2, fill: alpha(accent, 0.045))
+      circle(cx, cy, r, stroke: alpha(accent, 0.07), width: 2)
+      circle(cx, cy, r * 0.78, stroke: alpha(accent, 0.05), width: 1.5)
+      circle(cx, cy, r * 0.56, stroke: alpha(accent, 0.04), width: 1.5)
+      circle(cx, cy, r * 0.34, stroke: alpha(accent, 0.035), width: 1)
+      for i in range(12) {
+        let a = i / 12 * 6.28318
+        line(cx + cos(a) * r * 0.35, cy + sin(a) * r * 0.35, cx + cos(a) * r * 0.98, cy + sin(a) * r * 0.98, stroke: alpha(accent, 0.03), width: 1)
+      }
+    }
+
+    Column {
+      fill: true
+      gap: gap
+      padding: [pad, (screenTop ?? 0) + pad, pad, 10]
+
+      Box {
+        fill: width
+        padding: compact ? 14 : 18
+        radius: cardRadius
+        frost: 18
+        background: alpha(surface, 0.22)
+        border: 1
+        borderColor: cardBorder
+        Column {
+          gap: 12
+          Row {
+            align: center
+            gap: 14
+            Box { width: 5; height: compact ? 48 : 60; radius: 3; background: linear(0, 0, 0, 1, [accent, alpha(accent, 0.35)]) }
+            Column {
+              weight: 1
+              gap: 3
+              Text { text: "GITA SLOKA"; font: titleFont; fontSize: titleSize; fontWeight: 800; color: foreground; letterSpacing: -0.6; maxLines: 1 }
+              Text { spans: [{text: "Ch ${int(ch)}", color: accent, bold: true}, {text: " · ", color: muted}, {text: chapterName, color: foreground, bold: true}]; font: titleFont; fontSize: compact ? 14 : 16; fontWeight: 600; maxLines: 1 }
+              Text { text: "Verse ${int(vs)} of ${counts[ch - 1]}  •  ${verseNum} of ${totalVerses}${isDaily ? "  •  Daily verse" : ""}"; font: titleFont; fontSize: smallSize; fontWeight: 500; color: alpha(foreground, 0.62); maxLines: 1 }
+            }
+            Row {
+              gap: 8
+              Box { onTap: url(sourceUrl); IconBtn { icon: "↗"; tint: accent; bg: alpha(accent, 0.12); borderTint: alpha(accent, 0.18); size: 40 } }
+              Box { onTap: { showSaved = !showSaved; confirmClear = false }; IconBtn { icon: showSaved ? "×" : "★"; tint: accent; bg: alpha(accent, 0.12); borderTint: alpha(accent, 0.18); active: showSaved; size: 40 } }
+              Box {
+                onTap: showMenu = !showMenu
+                IconBtn { icon: "⋮"; tint: foreground; bg: alpha(surface, 0.16); borderTint: alpha(foreground, 0.08); active: showMenu; size: 40 }
+                Popup {
+                  visible: showMenu
+                  position: below
+                  align: end
+                  width: compact ? 210 : 240
+                  gap: 2
+                  onDismiss: showMenu = false
+                  Column {
+                    gap: 2
+                    Text { text: "Meaning"; style: label; color: muted; padding: [10, 8] }
+                    Row {
+                      gap: 6
+                      padding: [8, 4]
+                      Box { onTap: { langMode = "en"; showMenu = false }; PillBtn { label: "EN"; active: langMode == "en"; tint: accent } }
+                      Box { onTap: { langMode = "hi"; showMenu = false }; PillBtn { label: "HI"; active: langMode == "hi"; tint: accent } }
+                      Box { onTap: { langMode = "both"; showMenu = false }; PillBtn { label: "EN+HI"; active: langMode == "both"; tint: accent } }
+                    }
+                    Box { height: 1; fill: width; background: alpha(foreground, 0.08) }
+                    Text { text: "Reading"; style: label; color: muted; padding: [10, 8] }
+                    Row {
+                      gap: 6
+                      padding: [8, 4]
+                      Box { onTap: { textSize = "S"; showMenu = false }; PillBtn { label: "A-"; active: textSize == "S" } }
+                      Box { onTap: { textSize = "M"; showMenu = false }; PillBtn { label: "A"; active: textSize == "M" } }
+                      Box { onTap: { textSize = "L"; showMenu = false }; PillBtn { label: "A+"; active: textSize == "L" } }
+                    }
+                    Box { fill: width; padding: [11, 12]; radius: 12 * corners; background: alpha(surface, 0.08); onTap: { showTranslit = !showTranslit; showMenu = false }; Text { text: showTranslit ? "Hide transliteration" : "Show transliteration"; font: titleFont; fontSize: 14 * scale; fontWeight: 600; color: foreground } }
+                    Box { fill: width; padding: [11, 12]; radius: 12 * corners; onTap: { ch = dailyCh; vs = dailyVs; dailyMode = true; showMenu = false }; Text { text: isDaily ? "Daily verse (active)" : "Go to daily verse"; font: titleFont; fontSize: 14 * scale; fontWeight: 600; color: isDaily ? accent : foreground } }
+                    Box { fill: width; padding: [11, 12]; radius: 12 * corners; onTap: { showJump = !showJump; showMenu = false }; Text { text: showJump ? "Close jump" : "Jump to verse"; font: titleFont; fontSize: 14 * scale; fontWeight: 600; color: foreground } }
+                    Box { fill: width; padding: [11, 12]; radius: 12 * corners; onTap: { copy(shareText); showMenu = false }; Text { text: "Copy verse"; font: titleFont; fontSize: 14 * scale; fontWeight: 600; color: foreground } }
+                    Box { fill: width; padding: [11, 12]; radius: 12 * corners; onTap: { share(shareText); showMenu = false }; Text { text: "Share verse"; font: titleFont; fontSize: 14 * scale; fontWeight: 600; color: foreground } }
+                  }
+                }
+              }
+            }
+          }
+          Box {
+            fill: width
+            height: 5
+            radius: 3
+            background: alpha(foreground, 0.10)
+            Box { width: max(10, (tileWidth ?? 360) * 0.65 * chapterProgress); height: 5; radius: 3; background: linear(1, 0, 0, 0, [accent, alpha(accent, 0.6)]) }
+          }
+        }
+      }
+
+      if showSaved {
+        Box {
+          weight: 1
+          fill: width
+          padding: compact ? 14 : 20
+          radius: cardRadius
+          frost: 16
+          background: alpha(surface, 0.20)
+          border: 1
+          borderColor: alpha(foreground, 0.08)
+          Column {
+            fill: true
+            gap: 12
+            Row {
+              align: center
+              gap: 8
+              SectionLabel { label: "SAVED VERSES"; tint: accent; weight: 1 }
+              Text { text: "${len(favorites)} saved"; font: titleFont; fontSize: 12 * scale; fontWeight: 600; color: muted }
+              if len(aiCache) > 0 {
+                Box { onTap: aiCache = {}; PillBtn { label: "Clear AI"; tint: muted; bg: alpha(surface, 0.14); borderTint: alpha(foreground, 0.08) } }
+              }
+              if len(favorites) > 0 {
+                Box {
+                  onTap: confirmClear = !confirmClear
+                  PillBtn { label: confirmClear ? "Cancel" : "Clear all"; tint: red; bg: alpha(red, 0.10); borderTint: alpha(red, 0.16); active: confirmClear }
+                }
+              }
+            }
+            if confirmClear {
+              Box {
+                fill: width
+                padding: 12
+                radius: 14 * corners
+                background: alpha(red, 0.08)
+                border: 1
+                borderColor: alpha(red, 0.14)
+                Row {
+                  align: center
+                  gap: 10
+                  Text { text: "Remove all saved verses?"; font: titleFont; fontSize: 13 * scale; fontWeight: 600; color: foreground; weight: 1 }
+                  Box { onTap: { favorites = []; confirmClear = false }; PillBtn { label: "Clear"; tint: red; bg: alpha(red, 0.14); borderTint: alpha(red, 0.2); active: true } }
+                }
+              }
+            }
+            if len(favorites) == 0 {
+              Column {
+                weight: 1
+                justify: center
+                align: center
+                gap: 10
+                Box { size: 64; radius: 32 * corners; background: alpha(accent, 0.10); Column { fill: true; justify: center; align: center; Text { text: "☆"; fontSize: 30; color: accent } } }
+                Text { text: "No saved verses yet"; font: titleFont; fontSize: compact ? 22 : 26; fontWeight: 800; color: foreground; align: center }
+                Text { text: "Save verses you want to revisit. They stay on this device."; font: titleFont; fontSize: 14 * scale; fontWeight: 500; color: muted; align: center }
+              }
+            } else {
+              Column {
+                weight: 1
+                scroll: true
+                gap: 10
+                for f, i in favorites key f.key {
+                  Box {
+                    fill: width
+                    padding: 14
+                    radius: 18 * corners
+                    frost: 10
+                    background: alpha(background, 0.18)
+                    border: 1
+                    borderColor: alpha(foreground, 0.06)
+                    Row {
+                      align: center
+                      gap: 12
+                      Column {
+                        weight: 1
+                        gap: 4
+                        onTap: { ch = f.ch; vs = f.vs; showSaved = false }
+                        Text { text: (f.ref ?? f.key) + " · " + (chapterNames[(f.ch ?? 1) - 1] ?? ""); font: titleFont; fontSize: 14 * scale; fontWeight: 800; color: accent; maxLines: 1 }
+                        Text { text: f.meaning ?? ""; font: titleFont; fontSize: 12 * scale; fontWeight: 500; color: muted; maxLines: 2 }
+                      }
+                      Box {
+                        width: 34
+                        height: 34
+                        radius: 11 * corners
+                        background: alpha(red, 0.12)
+                        border: 1
+                        borderColor: alpha(red, 0.16)
+                        onTap: favorites = favorites.filter(x => x.key != f.key)
+                        Column { fill: true; justify: center; align: center; Text { text: "×"; fontSize: 17; fontWeight: 700; color: red } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else {
+        if showJump {
+          Box {
+            fill: width
+            padding: compact ? 10 : 12
+            radius: 18 * corners
+            frost: 12
+            background: alpha(surface, 0.14)
+            border: 1
+            borderColor: alpha(foreground, 0.06)
+            Row {
+              gap: 8
+              align: center
+              Box {
+                weight: 1
+                padding: [10, 6]
+                radius: 12 * corners
+                background: alpha(background, 0.18)
+                border: 1
+                borderColor: alpha(foreground, 0.08)
+                Input { text: jumpCh; placeholder: "Chapter"; fontSize: 14; onChange: jumpCh = value }
+              }
+              Box {
+                weight: 1
+                padding: [10, 6]
+                radius: 12 * corners
+                background: alpha(background, 0.18)
+                border: 1
+                borderColor: alpha(foreground, 0.08)
+                Input { text: jumpVs; placeholder: "Verse"; fontSize: 14; onChange: jumpVs = value }
+              }
+              Box {
+                onTap: {
+                  let jc = clamp(int(jumpCh == "" ? ch : jumpCh), 1, 18)
+                  let jv = clamp(int(jumpVs == "" ? 1 : jumpVs), 1, counts[jc - 1])
+                  ch = jc
+                  vs = jv
+                  dailyMode = false
+                  showJump = false
+                }
+                PillBtn { label: "Go"; tint: accent; bg: alpha(accent, 0.16); borderTint: alpha(accent, 0.22); active: true }
+              }
+            }
+          }
+        }
+
+        if verse == null && !fromCache {
+          Box {
+            weight: 1
+            fill: width
+            radius: cardRadius
+            frost: 14
+            background: alpha(surface, 0.16)
+            Column {
+              fill: true
+              justify: center
+              align: center
+              gap: 12
+              Text { text: "॥"; font: verseFont; fontSize: 42; color: alpha(accent, 0.7) }
+              Text { text: slok != null && !slok.ok ? "Offline" : "Loading sloka…"; font: titleFont; fontSize: compact ? 26 : 32; fontWeight: 800; color: foreground; align: center }
+              Text { text: slok != null && !slok.ok ? "This verse is not cached yet. Try another verse when online." : "Fetching verse, transliteration, and meaning"; font: titleFont; fontSize: 14 * scale; fontWeight: 500; color: muted; align: center }
+            }
+          }
+        } else if wide {
+          Row {
+            weight: 1
+            gap: gap
+            Column {
+              weight: 6
+              fill: height
+              scroll: true
+              gap: gap
+              VerseCard { }
+              MeaningCard { }
+            }
+            Column {
+              weight: 5
+              fill: height
+              scroll: true
+              gap: gap
+              CommentaryCard { }
+              Box {
+                fill: width
+                padding: compact ? 14 : 18
+                radius: 20 * corners
+                frost: 12
+                background: alpha(surface, 0.16)
+                border: 1
+                borderColor: alpha(foreground, 0.06)
+                Column {
+                  gap: 6
+                  Text { spans: [{text: chapterName, bold: true, color: foreground}, {text: " · Verse ${int(vs)} of ${counts[ch - 1]}", color: muted}]; font: titleFont; fontSize: 14 * scale; fontWeight: 600 }
+                  Text { text: "Browse, save favorites, copy sections, or generate a cached AI reflection."; font: titleFont; fontSize: 12 * scale; fontWeight: 500; color: muted }
+                }
+              }
+            }
+          }
+        } else {
+          Column {
+            weight: 1
+            scroll: true
+            gap: gap
+            VerseCard { }
+            MeaningCard { }
+            CommentaryCard { }
+            Spacer { height: 2 }
+          }
+        }
+
+        Box {
+          fill: width
+          padding: compact ? 10 : 12
+          radius: 24 * corners
+          frost: 20
+          background: alpha(surface, 0.22)
+          border: 1
+          borderColor: cardBorder
+          Row {
+            gap: compact ? 8 : 10
+            align: center
+            Box { onTap: { ch = prevCh; vs = prevVs; dailyMode = false }; IconBtn { icon: "←"; tint: foreground; bg: cardBgSoft } }
+            Box { onTap: { ch = nextCh; vs = nextVs; dailyMode = false }; IconBtn { icon: "→"; tint: foreground; bg: cardBgSoft } }
+            Box {
+              onTap: {
+                let nextRCh = random(1, 18)
+                ch = nextRCh
+                vs = random(1, counts[nextRCh - 1])
+                dailyMode = false
+              }
+              IconBtn { icon: "⟳"; tint: accent; bg: alpha(accent, 0.14); borderTint: alpha(accent, 0.22) }
+            }
+            Box {
+              onTap: {
+                if isFav {
+                  favorites = favorites.filter(f => f.key != favKey)
+                } else if verse != null {
+                  favorites = ([{key: favKey, ch: ch, vs: vs, ref: ref, sanskrit: sanskrit ?? "", meaning: meaningEn ?? "", meaningHi: meaningHi ?? ""}] + favorites).take(80)
+                }
+              }
+              IconBtn { icon: isFav ? "★" : "☆"; tint: isFav ? accent : foreground; bg: isFav ? alpha(accent, 0.18) : alpha(surface, 0.18); borderTint: isFav ? alpha(accent, 0.26) : alpha(foreground, 0.08); active: isFav }
+            }
+            Box { onTap: copy(shareText); IconBtn { icon: "⧉"; tint: foreground } }
+            Box { onTap: share(shareText); IconBtn { icon: "↗"; tint: foreground } }
+            Spacer { weight: 1 }
+            Box {
+              onTap: {
+                if !aiBusy && meaning != null {
+                  aiBusy = true
+                  aiKey = aiCacheKey
+                  let styleText = aiStyle == "devotional" ? "devotional, warm, and faith-centered" : aiStyle == "short" ? "very short, clear, and practical in 1-2 sentences" : "warm, practical in 2-3 sentences"
+                  let langText = aiLang == "hi" ? "Hindi" : "English"
+                  let p = "Give a ${styleText} commentary in ${langText} on Bhagavad Gita ${ch}.${vs}. Meaning: ${meaningEn ?? ""} Reply with plain text only."
+                  aiOut = run("opencode run --format json --auto --archived --title gita-widget ${sh(p)} | jq -rs '[.[] | select(.type==\"text\") | .part.text] | last // \"\"'")
+                }
+              }
+              IconBtn { icon: aiBusy ? "…" : "✦"; tint: accent; bg: alpha(accent, aiBusy ? 0.10 : 0.16); borderTint: alpha(accent, aiBusy ? 0.14 : 0.22); active: hasAi }
+            }
+          }
+        }
+      }
+
+      Spacer { height: screenInset }
+    }
+  }
+}
