@@ -1,8 +1,8 @@
 widget "timesheet" {
   meta {
-    owl: 10
+    owl: 16
     description: "A weekly timesheet: clock-in prompts, a running balance that turns into holidays, and sick or holiday days booked whole or half right on the tile."
-    version: "2.13"
+    version: "2.14"
     license: "MIT"
     category: "productivity"
   }
@@ -14,6 +14,65 @@ widget "timesheet" {
   padding: 10
 
   requires { pacman: ["gawk", "coreutils"] }
+
+  strings {
+    en {
+      title: "timesheet"
+      builtBy: "built by jaquesbody"
+      timesheet: "timesheet"
+      ignore: "Ignore"
+      set: "Set"
+      confirm: "Confirm"
+      confirmLower: "confirm"
+      week: "W"
+      weekMissing: "this week isn't on your timesheet yet"
+      addWeek: "Add W"
+      confirmToday: "confirm today's hours"
+      am: "AM"
+      pm: "PM"
+      amStart: "AM Start"
+      amFinish: "AM Finish"
+      pmStart: "PM Start"
+      pmFinish: "PM Finish"
+      hours: "hours"
+      days: "days"
+      holidays: "Holidays"
+      sickDays: "Sick days"
+      setAverage: "set average week (Mon-Fri)"
+      avgDay: "avg day"
+      addWeekend: "Add Sat & Sun to your week"
+      addLunch: "Add default lunch break"
+      startTime: "Start time:"
+      duration: "Duration:"
+      daysOff: "log your days off"
+      holidayAsk: "How many holidays do you get?"
+      of: " of"
+      daysLogged: "days logged"
+      unconfirmed: " unconfirmed"
+      sick: "sick"
+      warningAlready: "WARNING: you already have a "
+      selectFolder: "select folder to save to"
+      folderHint: "Launcher Files/Home/Downloads"
+      saveAs: "save as:"
+      md: ".md"
+      txt: ".txt"
+      csv: ".csv"
+      autoSave: "Auto save: Automatically save after any change"
+      sure: "sure?"
+      delete: "delete"
+      saved: "saved ✓"
+      saveWord: "save"
+      tapHoliday: "tap a day to plan it off, tap it again to confirm"
+      tapSick: "tap a day to log a full or half sick day"
+      sickDay: "Sick day"
+      dayOff: "Day off"
+      remove: "Remove"
+      cancel: "Cancel"
+      fullDay: "full day"
+      halfAm: "½ day AM"
+      halfPm: "½ day PM"
+    }
+  }
 
   state weeks = [] persist
   state avgWeekHrs = 38.3333 persist
@@ -441,16 +500,14 @@ widget "timesheet" {
       Box {
         fill: true
         align: center
-        background: alpha(green, 0.07)
-        border: 1
-        borderColor: alpha(green, 0.45)
-        radius: 10 * corners
+        background: alpha(accent, 0.1)
+        radius: 12 * corners
         Column {
           fill: true
           align: center
           justify: center
-          gap: 10
-          padding: [8, 10]
+          gap: 8
+          padding: [10, 10]
           Text {
             text: clockSlot.label
             fontSize: 18
@@ -467,7 +524,7 @@ widget "timesheet" {
               width: 36
               height: 44
               align: center
-              background: alpha(background, 0.5)
+              background: alpha(background, 0.35)
               border: 1
               borderColor: alpha(accent, 0.3)
               radius: 8 * corners
@@ -519,7 +576,7 @@ widget "timesheet" {
               width: 36
               height: 44
               align: center
-              background: alpha(background, 0.5)
+              background: alpha(background, 0.35)
               border: 1
               borderColor: alpha(accent, 0.3)
               radius: 8 * corners
@@ -540,7 +597,7 @@ widget "timesheet" {
               weight: 1
               height: 34
               align: center
-              background: alpha(background, 0.5)
+              background: alpha(background, 0.35)
               border: 1
               borderColor: alpha(accent, 0.55)
               radius: 8 * corners
@@ -552,7 +609,7 @@ widget "timesheet" {
                   if slotNum == 3 { daySummary = todayKey }
                 }
               }
-              Text { text: "Ignore"; fontSize: 13; color: #ffffff; align: center }
+              Text { text: str.ignore; fontSize: 13; color: #ffffff; align: center }
             }
             Box {
               weight: 1
@@ -578,7 +635,7 @@ widget "timesheet" {
                   haptic()
                 }
               }
-              Text { text: "Set"; fontSize: 13; color: clockShownMin >= 0 ? green : #ffffff; fontWeight: 500; align: center }
+              Text { text: str.set; fontSize: 13; color: clockShownMin >= 0 ? green : #ffffff; fontWeight: 500; align: center }
             }
           }
         }
@@ -588,18 +645,16 @@ widget "timesheet" {
     Box {
       fill: true
       align: center
-      background: alpha(accent, 0.07)
-      border: 1
-      borderColor: alpha(accent, 0.45)
-      radius: 10 * corners
+      background: alpha(accent, 0.1)
+      radius: 12 * corners
       Column {
         fill: true
         align: center
         justify: center
-        gap: 9
-        padding: [8, 10]
+        gap: 8
+        padding: [10, 10]
         Text {
-          text: "W${todayWkNum} · ${todayWkDate}"
+          text: str.week + todayWkNum + " · " + todayWkDate
           fontSize: 22
           fontWeight: 500
           color: green
@@ -607,7 +662,7 @@ widget "timesheet" {
           maxLines: 1
         }
         Text {
-          text: "this week isn't on your timesheet yet"
+          text: str.weekMissing
           fontSize: 16
           color: #ffffff
           align: center
@@ -622,7 +677,7 @@ widget "timesheet" {
             weight: 1
             height: 32
             align: center
-            background: alpha(background, 0.5)
+            background: alpha(background, 0.35)
             border: 1
             borderColor: alpha(accent, 0.55)
             radius: 8 * corners
@@ -630,7 +685,7 @@ widget "timesheet" {
               addWeekSkip = todayMonIso
               haptic()
             }
-            Text { text: "Ignore"; fontSize: 13; color: #ffffff; align: center }
+            Text { text: str.ignore; fontSize: 13; color: #ffffff; align: center }
           }
           Box {
             weight: 1
@@ -658,7 +713,7 @@ widget "timesheet" {
               }
               haptic()
             }
-            Text { text: "Add W${todayWkNum}"; fontSize: 13; color: accent; fontWeight: 500; align: center; maxLines: 1 }
+            Text { text: str.addWeek + todayWkNum; fontSize: 13; color: accent; fontWeight: 500; align: center; maxLines: 1 }
           }
         }
       }
@@ -668,25 +723,23 @@ widget "timesheet" {
     Box {
       fill: true
       align: center
-      background: alpha(green, 0.07)
-      border: 1
-      borderColor: alpha(green, 0.45)
-      radius: 10 * corners
+      background: alpha(accent, 0.1)
+      radius: 12 * corners
       Column {
         fill: true
         align: center
         justify: center
-        gap: 6
-        padding: [8, 10]
-        Text { text: "confirm today's hours"; fontSize: 13; fontWeight: 500; color: green; align: center; maxLines: 1 }
+        gap: 8
+        padding: [10, 10]
+        Text { text: str.confirmToday; fontSize: 13; fontWeight: 500; color: green; align: center; maxLines: 1 }
         Row {
           fill: width
           align: center
           justify: center
           gap: 6
-          Text { text: "AM Start"; style: small; color: #ffffff; align: center }
+          Text { text: str.amStart; style: small; color: #ffffff; align: center }
           Text { text: sumSlots[0].m == null ? "—" : fmtTime(sumSlots[0].m * 60, "HH:mm", "UTC"); style: small; color: accent; align: center }
-          Text { text: "AM Finish"; style: small; color: #ffffff; align: center }
+          Text { text: str.amFinish; style: small; color: #ffffff; align: center }
           Text { text: sumSlots[1].m == null ? "—" : fmtTime(sumSlots[1].m * 60, "HH:mm", "UTC"); style: small; color: accent; align: center }
         }
         Row {
@@ -694,9 +747,9 @@ widget "timesheet" {
           align: center
           justify: center
           gap: 6
-          Text { text: "PM Start"; style: small; color: #ffffff; align: center }
+          Text { text: str.pmStart; style: small; color: #ffffff; align: center }
           Text { text: sumSlots[2].m == null ? "—" : fmtTime(sumSlots[2].m * 60, "HH:mm", "UTC"); style: small; color: accent; align: center }
-          Text { text: "PM Finish"; style: small; color: #ffffff; align: center }
+          Text { text: str.pmFinish; style: small; color: #ffffff; align: center }
           Text { text: sumSlots[3].m == null ? "—" : fmtTime(sumSlots[3].m * 60, "HH:mm", "UTC"); style: small; color: accent; align: center }
         }
         Row {
@@ -708,12 +761,12 @@ widget "timesheet" {
             weight: 1
             height: 30
             align: center
-            background: alpha(background, 0.5)
+            background: alpha(background, 0.35)
             border: 1
             borderColor: alpha(accent, 0.55)
             radius: 8 * corners
             onTap: { daySummary = "" }
-            Text { text: "Ignore"; fontSize: 13; color: #ffffff; align: center }
+            Text { text: str.ignore; fontSize: 13; color: #ffffff; align: center }
           }
           Box {
             weight: 1
@@ -731,14 +784,14 @@ widget "timesheet" {
               haptic()
               daySummary = ""
             }
-            Text { text: "Confirm"; fontSize: 13; color: green; fontWeight: 500; align: center }
+            Text { text: str.confirm; fontSize: 13; color: green; fontWeight: 500; align: center }
           }
         }
       }
     }
     } else {
     Row {
-      Text { text: "TIMESHEET"; style: label; color: #ffffff; letterSpacing: 1.2 }
+      Text { text: upper(str.timesheet); style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
       Text {
         text: topWeek == null ? "" : "W${topWeek.week} · ${topWeek.date}"
         style: label
@@ -915,8 +968,28 @@ widget "timesheet" {
   }
   }
 
+  // On/off setting switch: a track and a knob. The handler stays at the use.
+  component Toggle(on) {
+    Box {
+      width: 46
+      height: 26
+      radius: 13 * corners
+      background: on ? alpha(green, 0.3) : alpha(green, 0.12)
+      border: 1
+      borderColor: on ? alpha(green, 0.6) : alpha(green, 0.28)
+      padding: 3
+      align: on ? "end" : "start"
+      Box {
+        width: 18
+        height: 18
+        radius: 9 * corners
+        background: on ? green : alpha(green, 0.45)
+      }
+    }
+  }
+
   screen {
-    title: "timesheet"
+    title: str.title
 
     Box {
       fill: true
@@ -926,11 +999,11 @@ widget "timesheet" {
         padding: [0, 0, 0, 0]
 
       Column {
-        gap: 4
-        padding: 8
+        gap: 8
+        padding: [10, 10]
         fill: width
         background: alpha(accent, 0.1)
-        radius: 16 * corners
+        radius: 12 * corners
 
         Canvas {
           height: 64
@@ -1107,6 +1180,7 @@ widget "timesheet" {
             for w, wi in weeks key w.id {
               let act = dayMins[wi] ?? []
               let dfs = dayDiffs[wi] ?? []
+              let anyAct = anyDayMins[wi] ?? []
               let worked = weekWorked[wi] ?? 0
               let cnt = weekTargetCount[wi] ?? 0
               let target = avgDayMin * cnt
@@ -1148,7 +1222,7 @@ widget "timesheet" {
                     weight: 1
                     Text {
                       spans: [
-                        {text: "W${w.week}", bold: true, color: foreground},
+                        {text: str.week + w.week, bold: true, color: foreground},
                         {text: "  ${w.date}", color: #ffffff}
                       ]
                       style: body
@@ -1181,10 +1255,13 @@ widget "timesheet" {
                       let ddAbs = abs(round(dd))
                       let ddText = dd == null ? "—" : (dd > 0.5 ? "+" : dd < -0.5 ? "-" : "") + floor(ddAbs / 60) + ":" + pad(ddAbs % 60, 2, "0")
                       let ddTone = dd == null ? #ffffff : dd > 0.5 ? green : dd < -0.5 ? negTone : #ffffff
+                      let dw = anyAct[di]
+                      let dwText = dw == null ? "—" : floor(round(dw) / 60) + ":" + pad(round(dw) % 60, 2, "0")
                       let done = d.done ?? false
                       // a confirmed holiday hides that half's inputs, so no hours can be entered;
                       // its stored hours stay as they are, so the graph doesn't move
                       let dayKey = fmtTime((w.monday ?? 0) + di * 86400, "yyyy-MM-dd")
+                      let dayNum = fmtTime((w.monday ?? 0) + di * 86400, "d")
                       let hol = holDone.find(x => (x.key ?? x) == dayKey)
                       let holAmt = hol == null ? 0 : (hol.days ?? 1)
                       let holPart = hol == null ? "" : (hol.part ?? "")
@@ -1204,12 +1281,22 @@ widget "timesheet" {
                         fill: width
                         align: center
                         padding: [3, 0]
-                        Text {
-                          text: dayNames[di]
-                          style: small
-                          bold: true
-                          color: dd == null ? #ffffff : foreground
+                        Column {
                           width: 30
+                          gap: 1
+                          Text {
+                            text: dayNames[di]
+                            style: small
+                            bold: true
+                            color: dd == null ? #ffffff : foreground
+                            maxLines: 1
+                          }
+                          Text {
+                            text: dayNum
+                            style: small
+                            color: #ffffff
+                            maxLines: 1
+                          }
                         }
                         Column {
                           weight: 1
@@ -1218,7 +1305,7 @@ widget "timesheet" {
                             fill: width
                             align: center
                             gap: 0
-                            Text { text: "AM"; style: label; color: #ffffff; width: 20; fontSize: 10 }
+                            Text { text: str.am; style: label; color: #ffffff; width: 20; fontSize: 10 }
                                                         Box {
                               weight: 1
                               height: 26
@@ -1291,7 +1378,7 @@ widget "timesheet" {
                             fill: width
                             align: center
                             gap: 0
-                            Text { text: "PM"; style: label; color: #ffffff; width: 20; fontSize: 10 }
+                            Text { text: str.pm; style: label; color: #ffffff; width: 20; fontSize: 10 }
                                                         Box {
                               weight: 1
                               height: 26
@@ -1361,12 +1448,17 @@ widget "timesheet" {
                             }
                           }
                         }
-                        Text { text: ddText; width: 54; align: end; style: body; color: ddTone; maxLines: 1 }
+                        Column {
+                          width: 54
+                          gap: 1
+                          Text { text: ddText; align: end; style: body; color: ddTone; maxLines: 1 }
+                          Text { text: dwText; align: end; style: small; color: #ffffff; maxLines: 1 }
+                        }
                         Box {
-                          width: 24
-                          height: 24
+                          width: 20
+                          height: 20
                           align: center
-                          radius: 6 * corners
+                          radius: 5 * corners
                           // tick an off day to confirm it: the line turns solid through it, the hours still don't count
                           background: done ? alpha(green, 0.18) : alpha(background, 0.2)
                           border: 1
@@ -1379,7 +1471,7 @@ widget "timesheet" {
                           Text {
                             text: done ? "󰄬" : ""
                             font: icon
-                            fontSize: 12
+                            fontSize: 10
                             color: green
                             align: center
                           }
@@ -1424,7 +1516,7 @@ widget "timesheet" {
                                 openWeek = wid
                               }
                             }
-                            Text { text: "add W${nextWk}"; fontSize: 12; color: accent; align: center; maxLines: 1 }
+                            Text { text: str.addWeek + nextWk; fontSize: 12; color: accent; align: center; maxLines: 1 }
                           }
                           Spacer { width: 10 }
                           Box {
@@ -1445,7 +1537,7 @@ widget "timesheet" {
                                 confirmRemove = footerWeek.id
                               }
                             }
-                            Text { text: confirmRemove == footerWeek.id ? "sure?" : "delete"; fontSize: 12; color: negTone; align: center; maxLines: 1 }
+                            Text { text: confirmRemove == footerWeek.id ? str.sure : str.delete; fontSize: 12; color: negTone; align: center; maxLines: 1 }
                           }
                         }
                       }
@@ -1470,7 +1562,7 @@ widget "timesheet" {
                               savedId = footerWeek.id
                               savedAt = now
                             }
-                            Text { text: fwSaved ? "saved ✓" : "save"; style: body; color: fwSaved ? green : accent; align: center; maxLines: 1 }
+                            Text { text: fwSaved ? str.saved : str.saveWord; style: body; color: fwSaved ? green : accent; align: center; maxLines: 1 }
                           }
                       }
                       }
@@ -1493,7 +1585,7 @@ widget "timesheet" {
                 padding: [10, 10]
                 background: alpha(accent, 0.1)
                 radius: 12 * corners
-              Text { text: "SET AVERAGE WEEK (MON-FRI)"; style: label; color: #ffffff; letterSpacing: 1.2 }
+              Text { text: upper(str.setAverage); style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
               Row {
                 align: center
                 gap: 6
@@ -1504,9 +1596,9 @@ widget "timesheet" {
                     align: end
                     gap: 4
                     Text { text: fixed(avgWeekHrs, 2); fontSize: 32; fontWeight: 500; color: accent; maxLines: 1 }
-                    Text { text: "hours"; style: small; color: #ffffff; padding: [0, 0, 0, 5] }
+                    Text { text: str.hours; style: small; color: #ffffff; padding: [0, 0, 0, 5] }
                   }
-                  Text { text: "avg day ${avgDayText}"; style: small; color: #ffffff }
+                  Text { text: str.avgDay + " " + avgDayText; style: small; color: #ffffff }
                 }
                 Box {
                   width: 34
@@ -1572,23 +1664,17 @@ widget "timesheet" {
                 align: center
                 gap: 8
                 padding: [2, 0, 0, 0]
-                Text { text: "Add Sat & Sun to your week"; style: body; color: foreground; weight: 1; maxLines: 1 }
+                Text { text: str.addWeekend; style: body; color: foreground; weight: 1; maxLines: 1 }
                 Box {
-                  width: 24
-                  height: 24
-                  align: center
-                  radius: 6 * corners
-                  background: includeWeekend ? alpha(green, 0.18) : alpha(background, 0.2)
-                  border: 1
-                  borderColor: includeWeekend ? alpha(green, 0.7) : alpha(accent, 0.3)
                   onTap: {
+                    haptic()
                     let next = !includeWeekend
                     includeWeekend = next
                     if (next) {
                       weeks = weeks.map(w => len(w.days) < 7 ? set(w, "days", (w.days + weekendDays.drop(max(0, len(w.days) - 5))).take(7)) : w)
                     }
                   }
-                  Text { text: includeWeekend ? "󰄬" : ""; font: icon; fontSize: 12; color: green; align: center }
+                  Toggle { on: includeWeekend }
                 }
               }
               Row {
@@ -1599,24 +1685,18 @@ widget "timesheet" {
                 Column {
                   gap: 0
                   weight: 1
-                  Text { text: "Add default lunch break"; style: body; color: foreground; maxLines: 1 }
+                  Text { text: str.addLunch; style: body; color: foreground; maxLines: 1 }
                 }
                 Box {
-                  width: 24
-                  height: 24
-                  align: center
-                  radius: 6 * corners
-                  background: lunchOn ? alpha(green, 0.18) : alpha(background, 0.2)
-                  border: 1
-                  borderColor: lunchOn ? alpha(green, 0.7) : alpha(accent, 0.3)
                   onTap: {
+                    haptic()
                     let next = !lunchOn
                     lunchOn = next
                     if (lunchReady) {
                       weeks = weeks.map((w, wi) => wi != todayWi ? w : set(w, "days", w.days.map((d, di) => di >= 5 || (d.done ?? false) || fmtTime((w.monday ?? 0) + di * 86400, "yyyy-MM-dd") < todayIso ? d : (next ? merge(d, {amOut: lunchStartHM, amOutM: lunchStartMin, pmIn: lunchEndHM, pmInM: lunchEndMin}) : (d.amOutM == lunchStartMin && d.pmInM == lunchEndMin ? merge(d, {amOut: "", amOutM: null, pmIn: "", pmInM: null}) : d)))))
                     }
                   }
-                  Text { text: lunchOn ? "󰄬" : ""; font: icon; fontSize: 12; color: green; align: center }
+                  Toggle { on: lunchOn }
                 }
               }
               Row {
@@ -1624,7 +1704,7 @@ widget "timesheet" {
                 align: center
                 justify: end
                 gap: 6
-                Text { text: "Start time:"; style: small; color: #ffffff; maxLines: 1 }
+                Text { text: str.startTime; style: small; color: #ffffff; maxLines: 1 }
                 Box {
                   width: 74
                   height: 30
@@ -1664,7 +1744,7 @@ widget "timesheet" {
                     }
                   }
                 }
-                Text { text: "Duration:"; style: small; color: #ffffff; maxLines: 1 }
+                Text { text: str.duration; style: small; color: #ffffff; maxLines: 1 }
                 Box {
                   width: 74
                   height: 30
@@ -1715,8 +1795,8 @@ widget "timesheet" {
               background: alpha(accent, 0.1)
               radius: 12 * corners
 
-              Text { text: "LOG YOUR DAYS OFF"; style: label; color: #ffffff; letterSpacing: 1.2 }
-              Text { text: "How many holidays do you get?"; style: body; color: foreground; maxLines: 1 }
+              Text { text: upper(str.daysOff); style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
+              Text { text: str.holidayAsk; style: body; color: foreground; maxLines: 1 }
               Row {
                 align: center
                 gap: 6
@@ -1724,7 +1804,7 @@ widget "timesheet" {
                   align: end
                   gap: 4
                   Text { text: fixed(holidayDays, 2); fontSize: 32; fontWeight: 500; color: accent; maxLines: 1 }
-                  Text { text: "days"; style: small; color: #ffffff; padding: [0, 0, 0, 5] }
+                  Text { text: str.days; style: small; color: #ffffff; padding: [0, 0, 0, 5] }
                 }
                 Box { weight: 1; height: 1 }
                 Box {
@@ -1779,13 +1859,13 @@ widget "timesheet" {
                 gap: 1
                 padding: [4, 0, 0, 0]
                 Text {
-                  text: "${fixed(holAllocated, 2)} of ${fixed(holidayDays, 2)} days logged"
+                  text: fixed(holAllocated, 2) + str.of + " " + fixed(holidayDays, 2) + " " + str.daysLogged
                   style: small
                   color: #ffffff
                   maxLines: 1
                 }
                 Text {
-                  text: "${fixed(holPickDays, 2)} unconfirmed / ${fixed(sickTotal, 2)} sick"
+                  text: fixed(holPickDays, 2) + str.unconfirmed + " / " + fixed(sickTotal, 2) + " " + str.sick
                   style: small
                   color: #ffffff
                   maxLines: 1
@@ -1838,23 +1918,23 @@ widget "timesheet" {
                       weight: 1
                       height: 30
                       align: center
-                      radius: 7 * corners
-                      background: calSick ? alpha(background, 0.35) : alpha(accent, 0.9)
+                      radius: 8 * corners
+                      background: calSick ? alpha(background, 0.35) : alpha(accent, 0.15)
                       border: 1
-                      borderColor: calSick ? alpha(accent, 0.4) : accent
+                      borderColor: alpha(accent, 0.3)
                       onTap: calSick = false
-                      Text { text: "Holidays"; style: small; color: calSick ? foreground : background; align: center; maxLines: 1 }
+                      Text { text: str.holidays; style: body; color: calSick ? muted : #ffffff; align: center; maxLines: 1 }
                     }
                     Box {
                       weight: 1
                       height: 30
                       align: center
-                      radius: 7 * corners
-                      background: calSick ? alpha(negTone, 0.55) : alpha(background, 0.35)
+                      radius: 8 * corners
+                      background: calSick ? alpha(accent, 0.15) : alpha(background, 0.35)
                       border: 1
-                      borderColor: calSick ? alpha(negTone, 0.8) : alpha(accent, 0.4)
+                      borderColor: alpha(accent, 0.3)
                       onTap: calSick = true
-                      Text { text: "Sick days"; style: small; color: calSick ? foreground : #ffffff; align: center; maxLines: 1 }
+                      Text { text: str.sickDays; style: body; color: calSick ? #ffffff : muted; align: center; maxLines: 1 }
                     }
                   }
 
@@ -1918,7 +1998,7 @@ widget "timesheet" {
                     gap: 8
                     padding: [2, 0, 2, 0]
                     Text {
-                      text: calSick ? "tap a day to log a full or half sick day" : "tap a day to plan it off, tap it again to confirm"
+                      text: calSick ? str.tapSick : str.tapHoliday
                       style: small
                       color: #ffffff
                       weight: 1
@@ -1930,12 +2010,10 @@ widget "timesheet" {
               if len(clashDays) > 0 {
                 Column {
                   fill: width
-                  gap: 3
-                  padding: [7, 8]
-                  background: alpha(negTone, 0.22)
-                  radius: 8 * corners
-                  border: 1
-                  borderColor: alpha(negTone, 0.8)
+                  gap: 8
+                  padding: [10, 10]
+                  background: alpha(accent, 0.1)
+                  radius: 12 * corners
                   // one line per day, naming the other booking: in sick mode it warns about the holiday, and the other way round.
                   // an unconfirmed holiday is only planned, so it says so
                   for c in clashDays.take(4) {
@@ -1949,7 +2027,7 @@ widget "timesheet" {
                     let bpartText = bpart == "" ? "" : " (" + (bpart == "am" ? "AM" : "PM") + ")"
                     let bverb = calSick && !(c.holConf ?? false) ? " planned in for " : " booked in for "
                     Text {
-                      text: "WARNING: you already have a " + (bamt >= 1 ? "full" : "half") + " " + bkind + bverb + bwhen + bpartText
+                      text: str.warningAlready + (bamt >= 1 ? "full" : "half") + " " + bkind + bverb + bwhen + bpartText
                       style: small
                       color: #ffffff
                       maxLines: 2
@@ -1966,7 +2044,7 @@ widget "timesheet" {
                 padding: [10, 10]
                 background: alpha(accent, 0.1)
                 radius: 12 * corners
-                Text { text: "SELECT FOLDER TO SAVE TO"; style: label; color: #ffffff; letterSpacing: 1.2 }
+                Text { text: upper(str.selectFolder); style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
                 Row {
                   fill: width
                   align: center
@@ -1989,7 +2067,7 @@ widget "timesheet" {
                   Column {
                     gap: 1
                     weight: 1
-                    Text { text: "Launcher Files/Home/Downloads"; style: small; color: foreground; maxLines: 2 }
+                    Text { text: str.folderHint; style: small; color: foreground; maxLines: 2 }
                     Text { text: saveFileName; style: small; color: #ffffff; maxLines: 1 }
                   }
                   Box {
@@ -2018,7 +2096,7 @@ widget "timesheet" {
                     Row {
                       align: center
                       justify: center
-                      Text { text: settingsSaved ? "saved ✓" : "save"; style: body; color: settingsSaved ? green : accent; maxLines: 1 }
+                      Text { text: settingsSaved ? str.saved : str.saveWord; style: body; color: settingsSaved ? green : accent; maxLines: 1 }
                     }
                   }
                 }
@@ -2027,11 +2105,11 @@ widget "timesheet" {
                   align: center
                   gap: 8
                   padding: [0, 0, 0, 0]
-                  Text { text: "save as:"; style: small; color: #ffffff; maxLines: 1 }
+                  Text { text: str.saveAs; style: small; color: #ffffff; maxLines: 1 }
                   Row {
                     align: center
                     gap: 5
-                    Text { text: ".md"; style: small; color: foreground; maxLines: 1 }
+                    Text { text: str.md; style: small; color: foreground; maxLines: 1 }
                     Box {
                       width: 20
                       height: 20
@@ -2047,7 +2125,7 @@ widget "timesheet" {
                   Row {
                     align: center
                     gap: 5
-                    Text { text: ".txt"; style: small; color: foreground; maxLines: 1 }
+                    Text { text: str.txt; style: small; color: foreground; maxLines: 1 }
                     Box {
                       width: 20
                       height: 20
@@ -2063,7 +2141,7 @@ widget "timesheet" {
                   Row {
                     align: center
                     gap: 5
-                    Text { text: ".csv"; style: small; color: foreground; maxLines: 1 }
+                    Text { text: str.csv; style: small; color: foreground; maxLines: 1 }
                     Box {
                       width: 20
                       height: 20
@@ -2082,23 +2160,12 @@ widget "timesheet" {
                   align: center
                   gap: 8
                   padding: [2, 0, 0, 0]
-                  Text { text: "Auto save: Automatically save after any change"; style: body; color: foreground; weight: 1; maxLines: 2 }
-                  Box {
-                    width: 24
-                    height: 24
-                    align: center
-                    radius: 6 * corners
-                    background: autoSave ? alpha(green, 0.18) : alpha(background, 0.2)
-                    border: 1
-                    borderColor: autoSave ? alpha(green, 0.7) : alpha(accent, 0.3)
-                    onTap: autoSave = !autoSave
-                    Text { text: autoSave ? "󰄬" : ""; font: icon; fontSize: 12; color: green; align: center }
-                  }
+                  Text { text: str.autoSave; style: body; color: foreground; weight: 1; maxLines: 2 }
+                  Box { onTap: { haptic(); autoSave = !autoSave }; Toggle { on: autoSave } }
                 }
               }
-              Box { height: 78 }
               Text {
-                text: "built by jaquesbody"
+                text: str.builtBy
                 style: small
                 color: #ffffff
                 align: center
@@ -2123,7 +2190,7 @@ widget "timesheet" {
           gap: 8
           padding: [6, 4]
           Text {
-            text: (halfKind == "sick" ? "Sick day" : "Day off") + (halfKey == "" ? "" : " · " + fmtTime(parseTime(halfKey + " 12:00", "yyyy-MM-dd HH:mm") ?? 0, "EEE d MMM", null, "en"))
+            text: (halfKind == "sick" ? str.sickDay : str.dayOff) + (halfKey == "" ? "" : " · " + fmtTime(parseTime(halfKey + " 12:00", "yyyy-MM-dd HH:mm") ?? 0, "EEE d MMM", null, "en"))
             style: small
             color: foreground
             align: center
@@ -2190,7 +2257,7 @@ widget "timesheet" {
                   haptic()
                 }
               }
-              Text { text: "full day"; style: small; color: halfKind == "sick" ? negTone : accent; align: center; maxLines: 1 }
+              Text { text: str.fullDay; style: small; color: halfKind == "sick" ? negTone : accent; align: center; maxLines: 1 }
             }
             Box {
               width: 68
@@ -2247,7 +2314,7 @@ widget "timesheet" {
                   haptic()
                 }
               }
-              Text { text: "½ day AM"; style: small; color: halfKind == "sick" ? negTone : accent; align: center; maxLines: 1 }
+              Text { text: str.halfAm; style: small; color: halfKind == "sick" ? negTone : accent; align: center; maxLines: 1 }
             }
             Box {
               width: 68
@@ -2304,7 +2371,7 @@ widget "timesheet" {
                   haptic()
                 }
               }
-              Text { text: "½ day PM"; style: small; color: halfKind == "sick" ? negTone : accent; align: center; maxLines: 1 }
+              Text { text: str.halfPm; style: small; color: halfKind == "sick" ? negTone : accent; align: center; maxLines: 1 }
             }
           }
           Row {
@@ -2347,7 +2414,7 @@ widget "timesheet" {
                 }
                 halfKey = ""
               }
-              Text { text: pickCanRemove ? "Remove" : "Cancel"; style: small; color: #ffffff; align: center; maxLines: 1 }
+              Text { text: pickCanRemove ? str.remove : str.cancel; style: small; color: #ffffff; align: center; maxLines: 1 }
             }
             // a planned day is confirmed here, in the one colour that stands out
             if pickPlanned && halfKind != "sick" {
@@ -2387,26 +2454,28 @@ widget "timesheet" {
                     haptic()
                   }
                 }
-                Text { text: "confirm"; style: small; color: background; bold: true; align: center; maxLines: 1 }
+                Text { text: str.confirmLower; style: small; color: background; bold: true; align: center; maxLines: 1 }
               }
             }
           }
         }
       }
+      // title-bar controls: one row, two square buttons, same frame as the other widgets
       Row {
         fill: width
-        height: 30
+        height: 26
+        align: center
         justify: end
-        padding: [0, 0, 24, 0]
-        offset: [0, -42]
+        gap: 8
+        offset: [0, -38]
         Box {
-          width: 34
-          height: 30
+          width: 26
+          height: 26
           align: center
           radius: 8 * corners
-          background: alpha(background, 0)
-          border: pane != "weeks" ? 1 : 0
-          borderColor: alpha(accent, 0.55)
+          background: alpha(background, 0.35)
+          border: 1
+          borderColor: alpha(accent, 0.3)
           onTap: {
             if pane == "settings" {
               pane = "weeks"
@@ -2421,11 +2490,21 @@ widget "timesheet" {
           Text {
             text: pane != "weeks" ? "<" : "⚙"
             font: sans
-            fontSize: 20
+            fontSize: 18
             color: accent
             align: center
             maxLines: 1
           }
+        }
+        // the window draws its own ✕ over this outline
+        Box {
+          width: 26
+          height: 26
+          radius: 8 * corners
+          background: alpha(background, 0.35)
+          border: 1
+          borderColor: alpha(accent, 0.3)
+          onTap: close()
         }
       }
     }
