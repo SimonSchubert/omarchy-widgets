@@ -1,5 +1,6 @@
 // routstrd — the routstr daemon at a glance: the mark in green while it runs,
 // amber when this phone can't reach it, red when it is down; a tap opens the
+
 // wallet, a switch for the daemon, the last 30 days, the monitor's breakdowns,
 // the logs and a Lightning top-up. Data and control go through one command,
 // routstr-ctl: reads over the SSH tunnel this phone keeps to the desktop,
@@ -10,7 +11,7 @@ widget "routstrd" {
   meta {
     owl: 16
     description: "Control, monitor and top up your routstr usage. The tile is red, amber or green with your connection status, with every routstrd monitor metric, detailed logs and Lightning payment by QR or invoice."
-    version: "1.2"
+    version: "1.3"
     license: "MIT"
     category: "dev"
   }
@@ -28,6 +29,12 @@ widget "routstrd" {
   strings {
     en {
       title: "routstrd"
+      builtBy: "built by jaquesbody"
+      requestsLower: "requests"
+      sat: "sat"
+      reqs: "reqs"
+      tok: "tok"
+      satPerReq: "sat/req"
       running: "Running"
       starting: "Starting…"
       stopping: "Stopping…"
@@ -35,6 +42,10 @@ widget "routstrd" {
       stopped: "Stopped"
       offline: "Offline"
       unknown: "Unknown"
+      unlinked: "Set up"
+      host: "Host"
+      hostHint: "SSH host of the machine that runs routstrd. Leave it blank to run it on this device."
+      save: "Save"
       balance: "Balance"
       spend: "30d spend"
       spent: "Spent"
@@ -72,8 +83,102 @@ widget "routstrd" {
   // Image's tint is the only colour it has
   asset logo = base64"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjI2MiAyODAgNTI2IDQ2NyI+PHBhdGggZmlsbD0iY3VycmVudENvbG9yIiBkPSJNNjM5LjEgMjgxLjdjLTQuNCAyLjItNy4xIDYuNy03LjEgMTIuMSAwIDUuMSAyLjIgOS4zIDYgMTEuNiAyLjQgMS40IDYuOCAxLjYgMzEuOSAxLjYgMTkuMSAwIDI5LjEuMyAyOS4xIDEgMCAyLjItMjAuNiAyMy4zLTEwMy4yIDEwNS43LTczLjYgNzMuNS04NS44IDg1LjMtODkuMyA4Ni4yLTIuNC43LTE1LjggMS4xLTMzLjkgMS4xaC0zMGwtNDcuMy00Ny4zLTQ3LjMtNDcuMiAyLTYuM2MyLjUtNy44IDIuNi0xOS43LjQtMjcuMy0uOS0zLTIuOS03LjctNC41LTEwLjYtMy4zLTUuOC0xMi4yLTE0LjQtMTgtMTcuNC01LjMtMi43LTE0LjQtNC45LTIwLjItNC45LTguMSAwLTE4LjEgMi44LTI0LjQgNi45LTcuMyA0LjctMTIuNCAxMC40LTE2LjEgMTcuOC01LjIgMTAuNC02LjUgMjEtMy43IDMxLjggNC4zIDE2LjQgMTguNiAyOS40IDM2IDMyLjYgNy4yIDEuMyAxNC45LjYgMjMtMi4ybDYtMi4xIDQ0LjUgNDQuNmMyNC41IDI0LjYgNDQuNiA0NSA0NC43IDQ1LjRzLTE5LjIgMjAuNC00MyA0NC41bC00My4yIDQzLjgtNS41LTIuNWMtNy45LTMuNi0xOC4yLTUtMjYuMi0zLjYtOC45IDEuNi0xNy45IDYuMi0yNC4yIDEyLjQtMTEuMSAxMC44LTE1LjggMjctMTIuNSA0Mi44IDMuOCAxOCAxOS4zIDMyLjggMzcuNyAzNiA5LjEgMS41IDE3LjEuMSAyNi45LTQuNyAxMy02LjQgMjIuMS0xOS40IDI0LjQtMzQuOC45LTYuMi44LTguOS0uNC0xNC45LS44LTQtMS44LTgtMi4yLTguOS0uNC0xLjIgMTItMTQuMyA0Ni42LTQ5LjNsNDcuMS00Ny42aDMxLjRjMTkuMiAwIDMzLjQtLjQgMzYuNi0xLjEgMTMuNC0yLjggOC44IDEuMyAxMTIuNi0xMDIuM2w5Ni4yLTk2LjEuMSA0LjVjMCAyLjUgMCAxNC4yLS4xIDI2LjEtLjEgMjQgLjMgMjYuNSA1LjkgMzEuMiAyLjUgMi4xIDQuMyAyLjcgNy44IDIuNyA1LjcgMCAxMC41LTIuOCAxMi43LTcuNCAxLjQtMyAxLjYtOS4zIDEuNi01MC4xIDAtNDAuMy0uMi00Ny0xLjYtNDkuNi0zLTUuOC0zLjctNS45LTU2LjEtNS45LTQyLjUgMC00OC4yLjItNTEuMiAxLjdtNzcuMyAxNzIuMmMtMy4yIDEuOS02LjQgNy40LTYuNCAxMC45IDAgNC41IDIuNyA4LjMgMTUuMiAyMSA3LjkgOCAxMi43IDEzLjcgMTIuMiAxNC4ycy0yNS44IDEtNTguOSAxLjJsLTU4IC4zLTYgMi40Yy01LjUgMi4yLTguOSA1LjMtMzguOSAzNS0xOC4xIDE3LjktMzYuNCAzNi42LTQwLjggNDEuNi00LjMgNC45LTkgMTEuMi0xMC4zIDEzLjktMy41IDYuOS0zLjQgMTMuOC4zIDIwLjUgMS45IDMuNSAxMi42IDE1LjEgMzUuMSAzNy43IDMxLjIgMzEuNSAzMi4zIDMyLjcgMzEuNiAzNS44LS4zIDEuNy0uOSA2LTEuMiA5LjYtLjYgNy43IDEuNCAxNy42IDUuMyAyNS4yIDMuOSA3LjcgMTIgMTUuMiAyMS4xIDE5LjYgNy42IDMuNiA4LjEgMy43IDE5LjMgMy43IDEwLjkgMCAxMS45LS4yIDE4LjMtMy4yIDkuNS00LjUgMTcuOC0xMi43IDIyLjUtMjIuMiAzLjYtNy4zIDMuNy03LjcgMy43LTE5cy0uMS0xMS44LTMuNy0xOS40Yy02LjgtMTQuMS0xOC44LTIzLjItMzQuNS0yNS45LTguOC0xLjUtMTcuOS0uMS0yNi43IDRsLTYuMyAzLTI5LjctMjkuN0M1NjMuMyA2MTcuOCA1NTAgNjA0IDU1MCA2MDMuNWMwLS42IDE2LjEtMTcuMSAzNS44LTM2LjcgMjQuMS0yNC4yIDM2LjktMzYuMiAzOS40LTM3LjMgMy4yLTEuMyAxMS42LTEuNSA1OC44LTEuNSAzMC4yIDAgNTUgLjMgNTUgLjggMCAuNC01LjIgNS45LTExLjYgMTIuMnMtMTIuOSAxMy41LTE0LjUgMTUuOWMtMS42IDIuNS0yLjkgNS45LTIuOSA3LjUgMCA5LjggMTEuMyAxNi43IDE5LjggMTIuMiAxLjUtLjggMTQuNS0xMy4zIDI5LTI3LjggMTkuNy0xOS44IDI2LjYtMjcuNCAyNy42LTMwLjIgMi43LTcuOCAyLjEtOC42LTI2LjYtMzcuMy0xNC41LTE0LjYtMjcuNS0yNy4xLTI5LTI3LjktMy44LTItMTAuNy0xLjgtMTQuNC41Ii8+PC9zdmc+"
 
-  // one command, whichever device this file runs on
-  source st = cmd("routstr-ctl status") every 20s json timeout 15s
+  // ---- state ------------------------------------------------------------
+  state view = ""          // "", "monitor" or "logs"
+  state win = "today"      // all, today (24h), 7d, 30d
+  // blank = run the commands on this device; otherwise an SSH host alias
+  state link = "" persist
+  state editLink = false
+  state linkDraft = ""
+  state amount = "2100" persist
+  state invRaw = ""
+  state quoteId = ""
+  state paid = false
+  state qrPath = ""
+  state quoteRaw = ""
+  state topupRaw = ""
+
+  // The helper, written out rather than kept in a script on disk. One shell
+  // program covers every verb; ssh runs it on the other machine when a host
+  // is set, bash runs the same text here when it isn't. __H__, __V__ and
+  // __A__ are filled in per command. No address, user or token is in here.
+  let agent = """
+H=__H__
+verb=__V__
+arg=__A__
+api=http://127.0.0.1:8008
+off() { jq -nc --arg e "$1" --arg s "$2" '{error:$e,service:$s,balance:-1,spent:-1,requests:-1,avg:-1,at:now}'; }
+z=$(date +%z)
+tz=$((10#$(printf %s "$z" | cut -c2-3) * 60 + 10#$(printf %s "$z" | cut -c4-5)))
+case "$z" in -*) tz=$((0 - tz));; esac
+trim() {
+  jq -c '{w:(.output.window.window // "all"),t:{r:(.output.window.totals.requests // 0),s:(.output.window.totals.satsCost // 0),tok:(.output.window.totals.totalTokens // 0),pt:(.output.window.totals.promptTokens // 0),ct:(.output.window.totals.completionTokens // 0)},m:[.output.window.models[]?|{i:.modelId,r:.requests,s:.satsCost,t:.totalTokens}],p:[.output.window.providers[]?|{u:((.baseUrl // "")|sub("^https?://";"")),r:.requests,s:.satsCost,t:.totalTokens}],c:[.output.window.clients[]?|{c:(.client // "unknown"),r:.requests,s:.satsCost,t:.totalTokens,m:[.topModels[]?|{i:.modelId,r:.requests,s:.satsCost}]}],tl:{p:[.output.window.timeline.points[]?|{t:.timestamp,s:.satsCost}]},rec:[.output.recent[0:20][]?|{t:.timestamp,m:.modelId,c:(.client // ""),s:((.totalMsats // 0)/1000),tok:.totalTokens}]}'
+}
+case "$verb" in
+status)
+  svc=$(systemctl --user is-active routstrd.service 2>/dev/null)
+  [ -n "$svc" ] || svc=unknown
+  stj=$(curl -fsS --max-time 5 "$api/status" 2>/dev/null)
+  bj=$(curl -fsS --max-time 5 "$api/keys/balance" 2>/dev/null)
+  ua=$(curl -fsS --max-time 6 "$api/usage/summary?tz=$tz&window=30d" 2>/dev/null)
+  if [ -z "$stj" ] || [ -z "$bj" ]; then
+    if [ -z "$H" ]; then if [ "$svc" = inactive ] || [ "$svc" = failed ]; then off 'routstrd is down' "$svc"; else off 'set the SSH host' unlinked; fi; else off 'no answer from routstrd' "$svc"; fi
+    exit 0
+  fi
+  bal=$(printf '%s' "$bj" | jq -r '.output.total // -1' 2>/dev/null)
+  sp=$(printf '%s' "$ua" | jq -r '.output.window.totals.satsCost // -1' 2>/dev/null)
+  rq=$(printf '%s' "$ua" | jq -r '.output.window.totals.requests // -1' 2>/dev/null)
+  [ -n "$bal" ] || bal=-1
+  [ -n "$sp" ] || sp=-1
+  [ -n "$rq" ] || rq=-1
+  av=$(jq -nc --argjson s "$sp" --argjson r "$rq" 'if ($r > 0 and $s >= 0) then $s/$r else 0 end' 2>/dev/null)
+  [ -n "$av" ] || av=0
+  jq -nc --arg service "$svc" --argjson balance "$bal" --argjson spent "$sp" --argjson requests "$rq" --argjson avg "$av" '{service:$service,balance:$balance,spent:$spent,requests:$requests,avg:$avg,at:now}'
+  ;;
+usage)
+  case "$arg" in all|today|7d|30d) ;; *) arg=today ;; esac
+  r=$(curl -fsS --max-time 12 "$api/usage/summary?tz=$tz&window=$arg" 2>/dev/null)
+  if [ -z "$r" ]; then off 'no usage from routstrd' unknown; exit 0; fi
+  printf '%s' "$r" | trim
+  ;;
+logs)
+  journalctl --user -u routstrd -n "$arg" --no-pager 2>/dev/null | tail -n "$arg"
+  ;;
+topup)
+  case "$arg" in ''|*[!0-9]*) off 'amount must be whole sats' unknown; exit 0;; esac
+  r=$(curl -sS --max-time 20 -H 'Content-Type: application/json' -d "$(jq -nc --argjson a "$arg" '{amount:$a}')" "$api/wallet/receive/bolt11" 2>/dev/null)
+  if [ -z "$r" ]; then off 'no invoice from routstrd' unknown; exit 0; fi
+  printf '%s' "$r" | jq -c '{invoice:(.output.invoice // ""),operationId:(.output.operationId // ""),error:(.error // "")}'
+  ;;
+quote)
+  case "$arg" in ''|*[!a-zA-Z0-9._=-]*) off 'bad operation id' unknown; exit 0;; esac
+  r=$(curl -sS --max-time 8 "$api/wallet/receive/bolt11/$arg" 2>/dev/null)
+  if [ -z "$r" ]; then off 'no quote from routstrd' unknown; exit 0; fi
+  printf '%s' "$r" | jq -c '{state:(.output.state // ""),error:(.output.error // .error // "")}'
+  ;;
+start) systemctl --user start routstrd.service ;;
+stop) systemctl --user stop routstrd.service ;;
+restart) systemctl --user restart routstrd.service ;;
+esac
+"""
+
+  // only digits reach the invoice command, and only an operation id the
+  // daemon could have made reaches the quote command
+  let safeAmount = match(amount, "^[1-9][0-9]*$") == null ? "" : amount
+  let safeQuote = match(quoteId, "^[A-Za-z0-9._=-]+$") == null ? "" : quoteId
+
+  // one program per command, filled in from the state above
+  let scStatus = replace(replace(replace(agent, "__H__", link), "__V__", "status"), "__A__", "")
+  let scUsage = replace(replace(replace(agent, "__H__", link), "__V__", "usage"), "__A__", win)
+  let scLogs = replace(replace(replace(agent, "__H__", link), "__V__", "logs"), "__A__", "120")
+  let scTopup = replace(replace(replace(agent, "__H__", link), "__V__", "topup"), "__A__", safeAmount)
+  let scQuote = replace(replace(replace(agent, "__H__", link), "__V__", "quote"), "__A__", safeQuote)
+  let scStart = replace(replace(replace(agent, "__H__", link), "__V__", "start"), "__A__", "")
+  let scStop = replace(replace(replace(agent, "__H__", link), "__V__", "stop"), "__A__", "")
+  let scRestart = replace(replace(replace(agent, "__H__", link), "__V__", "restart"), "__A__", "")
+
+  // ---- sources ----------------------------------------------------------
+  source st = cmd("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scStatus)} 2>/dev/null || bash -c ${sh(scStatus)}; else bash -c ${sh(scStatus)}; fi") every 20s json timeout 20s
 
   let loading = st == null
   let svc = loading ? "" : (st.service ?? "unknown")
@@ -86,26 +191,23 @@ widget "routstrd" {
   // so a theme red would paint Failed the same as Running. Green means the daemon
   // answers, red that it is down, amber that this phone can't reach it at all.
   let up = svc == "active" || svc == "activating" || svc == "reloading"
-  let reach = svc == "unreachable" || svc == "unknown" || svc == ""
+  let reach = svc == "unreachable" || svc == "unlinked" || svc == "unknown" || svc == ""
   let dotColor = loading || reach ? "#fbbf24" : up ? "#4ade80" : "#f87171"
-  let stateText = loading ? "…" : svc == "active" ? str.running : (svc == "activating" || svc == "reloading") ? str.starting : svc == "deactivating" ? str.stopping : svc == "failed" ? str.failed : svc == "inactive" ? str.stopped : svc == "unreachable" ? str.offline : str.unknown
+  let stateText = loading ? "…" : svc == "active" ? str.running : (svc == "activating" || svc == "reloading") ? str.starting : svc == "deactivating" ? str.stopping : svc == "failed" ? str.failed : svc == "inactive" ? str.stopped : svc == "unreachable" ? str.offline : svc == "unlinked" ? str.unlinked : str.unknown
 
-  // null is still loading, a negative number is the desktop saying "no answer"
+  // null is still loading, a negative number is the other side saying "no answer"
   let balFull = bal == null ? "…" : bal < 0 ? str.unavailable : fmtNum(bal)
   let spentText = spent == null ? "…" : spent < 0 ? str.unavailable : fmtNum(round(spent))
   let reqsText = reqs == null ? "…" : reqs < 0 ? str.unavailable : fmtNum(reqs)
   let avgText = avg == null ? "…" : avg < 0 ? str.unavailable : fmtNum(avg, 2)
 
-  // ---- what the screen shows -------------------------------------------
-  state view = ""          // "", "monitor" or "logs"
-  state win = "today"      // all, today (24h), 7d, 30d
+  // the host card opens on a fresh install, or whenever a tap asks for it
+  let showLink = editLink || (link == "" && (loading || svc == "unlinked"))
 
-  // the monitor's summary, cut down to what a phone draws, read only while
-  // its view is open; "echo '{}'" is an empty answer that costs no work
-  source u = cmd(view == "monitor" ? "routstr-ctl usage ${sh(win)}" : "echo '{}'") every 30s json timeout 25s
-
-  // the journal, over SSH, so one read per half minute and only while open
-  source lg = cmd(view == "logs" ? "routstr-ctl logs 120" : "true") every 30s timeout 25s
+  // the monitor's summary and the journal: only while their views are open;
+  // "echo '{}'" and "true" are empty answers that cost no work
+  source u = cmd(view == "monitor" ? "if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scUsage)} 2>/dev/null || bash -c ${sh(scUsage)}; else bash -c ${sh(scUsage)}; fi" : "echo '{}'") every 30s json timeout 25s
+  source lg = cmd(view == "logs" ? "if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scLogs)} 2>/dev/null || bash -c ${sh(scLogs)}; else bash -c ${sh(scLogs)}; fi" : "true") every 30s timeout 25s
 
   let loaded = u != null && u.w != null
   let uErr = u == null ? "" : (u.error ?? "")
@@ -138,31 +240,39 @@ widget "routstrd" {
   let colW = ((screenWidth ?? 400) - 40) / 3
 
   // ---- top-up ----------------------------------------------------------
-  state amount = "2100" persist
-  state invRaw = ""
-  state quoteId = ""
-  state paid = false
-
   let inv = invRaw == "" ? null : parseJson(invRaw)
   let invoice = inv == null ? "" : (inv.invoice ?? "")
-  let qr = inv == null ? "" : (inv.qr ?? "")
+  let qr = qrPath
   let invErr = inv == null ? "" : (inv.error ?? "")
   let shortInvoice = len(invoice) > 96 ? sub(invoice, 0, 96) + "…" : invoice
 
-  // while an invoice is open, ask the desktop about it; with none, the command
-  // does nothing, so the source stays quiet
-  source qs = cmd(quoteId == "" ? "echo '{}'" : "routstr-ctl quote ${sh(quoteId)}") every 5s json timeout 12s
+  let qs = quoteRaw == "" ? null : parseJson(quoteRaw)
   let qState = qs == null ? "" : (qs.state ?? "")
   let qErr = qs == null ? "" : (qs.error ?? "")
 
-  on invRaw first { let q = parseJson(value); quoteId = q == null ? "" : (q.operationId ?? "") }
+  on invRaw first {
+    let q = parseJson(value)
+    quoteId = q == null ? "" : (q.operationId ?? "")
+    quoteRaw = ""
+  }
 
-  on qs {
-    if value != null && (value.state ?? "") == "finalized" {
-      paid = true
-      quoteId = ""
-      invRaw = ""
-      refresh()
+  // no invoice, no command: this block starts nothing while the wallet is idle
+  every 5s {
+    if quoteId != "" {
+      quoteRaw = run("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scQuote)} 2>/dev/null || bash -c ${sh(scQuote)}; else bash -c ${sh(scQuote)}; fi")
+    }
+  }
+
+  on quoteRaw {
+    if quoteId != "" && value != "" {
+      let q = parseJson(value)
+      if q != null && (q.state ?? "") == "finalized" {
+        paid = true
+        quoteId = ""
+        invRaw = ""
+        quoteRaw = ""
+        qrPath = ""
+      }
     }
   }
 
@@ -171,7 +281,7 @@ widget "routstrd" {
   component Line(cap, val) {
     Row {
       gap: 8
-      Text { text: cap; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: cap; style: body; color: foreground; weight: 1; maxLines: 1 }
       Text { text: val; style: body; maxLines: 1 }
     }
   }
@@ -189,18 +299,17 @@ widget "routstrd" {
     Box {
       width: 46
       height: 26
-      radius: 13
-      background: lit ? accent : surface
+      radius: 13 * corners
+      background: lit ? alpha(green, 0.3) : alpha(green, 0.12)
       border: 1
-      borderColor: lit ? accent : muted
-      align: center
-      onTap: { haptic(); run(lit ? "routstr-ctl stop" : "routstr-ctl start") }
+      borderColor: lit ? alpha(green, 0.6) : alpha(green, 0.28)
+      padding: 3
+      align: lit ? "end" : "start"
       Box {
-        width: 20
-        height: 20
-        radius: 10
-        offset: [lit ? 10 : -10, 0]
-        background: lit ? background : muted
+        width: 18
+        height: 18
+        radius: 9 * corners
+        background: lit ? green : alpha(green, 0.45)
       }
     }
   }
@@ -208,19 +317,18 @@ widget "routstrd" {
   // one figure of the window, a label over its value, on the soft green
   component Stat(name, val) {
     Column {
-      gap: 2
-      padding: [10, 8]
-      background: alpha(green, 0.07)
-      border: 1
-      borderColor: alpha(green, 0.45)
-      radius: 8 * corners
-      Text { text: name; style: label; color: muted; maxLines: 1 }
+      gap: 4
+      fill: width
+      padding: [10, 6]
+      background: alpha(accent, 0.1)
+      radius: 12 * corners
+      Text { text: name; style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
       Text { text: val; style: body; maxLines: 1 }
     }
   }
 
   component Head(t) {
-    Text { text: t; style: label; color: "#ffffff"; letterSpacing: 1; maxLines: 1 }
+    Text { text: t; style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
   }
 
   // one line of the monitor: a name with its cost at the far end, the rest
@@ -235,14 +343,14 @@ widget "routstrd" {
       }
       Text { text: sub; style: small; color: muted; maxLines: 1 }
       if extra != "" {
-        Text { text: extra; style: label; color: muted; maxLines: 1 }
+        Text { text: extra; style: small; color: muted; maxLines: 1 }
       }
     }
   }
 
-  // the amount and Top up, with an invoice under them while one is open. It
-  // comes after whatever the body shows, so opening Monitor drops it to the
-  // bottom of the screen instead of hiding it
+  // the amount and Top up share a row in the fixed card: the field spans the
+  // first two button slots, so the button sits directly under Logs. The invoice
+  // appears under them while one is open.
   component TopUp() {
     Column {
       gap: 8
@@ -250,32 +358,41 @@ widget "routstrd" {
       Row {
         gap: 6
         align: center
-        // the field wears the buttons' frame: Input draws none of its own;
-        // two thirds of the row, as Monitor and Restart are above it
         Box {
           width: 2 * colW + 6
           align: center
           border: 1
-          borderColor: accent
+          borderColor: alpha(accent, 0.3)
+          background: alpha(background, 0.35)
           radius: 8 * corners
           padding: [12, 0]
           // Input draws its text from its own left edge and has no alignment,
-          // so the field is as wide as what it holds and centred in the frame:
-          // the caret then sits on the digits, where the text is. One 13sp mono
-          // character advances 7.8 dp, and "sats" is four of them
-          Input {
-            width: max(len(amount), 4) * 7.8 + 2
-            text: amount
-            placeholder: str.sats
-            underline: false
-            onChange: amount = value
-            onSubmit: { invRaw = run("routstr-ctl topup ${sh(amount)}"); paid = false }
+          // so it is as wide as what it holds and the row is centred in the
+          // frame. One 13sp mono character advances 7.8 dp, and the empty field
+          // holds the four-letter placeholder
+          Row {
+            align: center
+            Input {
+              width: max(len(amount), 4) * 7.8 + 2
+              text: amount
+              placeholder: str.sats
+              underline: false
+              onChange: amount = value
+              onSubmit: { topupRaw = run("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scTopup)} 2>/dev/null || bash -c ${sh(scTopup)}; else bash -c ${sh(scTopup)}; fi"); invRaw = topupRaw; paid = false; qrPath = ""; let parsed = parseJson(topupRaw); let b = parsed == null ? "" : (parsed.invoice ?? ""); if b != "" { run("mkdir -p ~/.cache && printf %s ${sh(b)} | qrencode -o ~/.cache/routstr-qr.png -s 6 -m 2 -l M"); qrPath = "~/.cache/routstr-qr.png" } }
+            }
+            if amount != "" {
+              Text { text: " " + str.sats; style: body; color: muted; maxLines: 1 }
+            }
           }
         }
         Button {
           text: str.topup
           width: colW
-          onTap: { haptic(); invRaw = run("routstr-ctl topup ${sh(amount)}"); paid = false }
+          radius: 8 * corners
+          border: 1
+          borderColor: alpha(accent, 0.3)
+          background: alpha(background, 0.35)
+          onTap: { haptic(); topupRaw = run("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scTopup)} 2>/dev/null || bash -c ${sh(scTopup)}; else bash -c ${sh(scTopup)}; fi"); invRaw = topupRaw; paid = false; qrPath = ""; let parsed = parseJson(topupRaw); let b = parsed == null ? "" : (parsed.invoice ?? ""); if b != "" { run("mkdir -p ~/.cache && printf %s ${sh(b)} | qrencode -o ~/.cache/routstr-qr.png -s 6 -m 2 -l M"); qrPath = "~/.cache/routstr-qr.png" } }
         }
       }
 
@@ -302,7 +419,14 @@ widget "routstrd" {
           gap: 8
           align: top
           Text { text: shortInvoice; style: small; font: mono; weight: 1; maxLines: 3 }
-          Button { text: str.copy; onTap: { haptic(); copy(invoice) } }
+          Button {
+            radius: 8 * corners
+            border: 1
+            borderColor: alpha(accent, 0.3)
+            background: alpha(background, 0.35)
+            text: str.copy
+            onTap: { haptic(); copy(invoice) }
+          }
         }
         if quoteId != "" {
           Text {
@@ -316,8 +440,12 @@ widget "routstrd" {
           fill: width
           justify: end
           Button {
+            radius: 8 * corners
+            border: 1
+            borderColor: alpha(accent, 0.3)
+            background: alpha(background, 0.35)
             text: str.cancel
-            onTap: { haptic(); invRaw = ""; quoteId = ""; paid = false }
+            onTap: { haptic(); invRaw = ""; quoteId = ""; quoteRaw = ""; qrPath = ""; paid = false }
           }
         }
       }
@@ -332,18 +460,90 @@ widget "routstrd" {
   screen {
     title: str.title
 
+    // the window draws its own ✕ over this frame, so this only supplies the
+    // outline and a tap target behind the glyph
+    Row {
+      fill: width
+      height: 26
+      align: center
+      justify: end
+      offset: [0, -38]
+      Box {
+        width: 26
+        height: 26
+        radius: 8 * corners
+        border: 1
+        borderColor: alpha(accent, 0.3)
+        background: alpha(background, 0.35)
+        onTap: close()
+      }
+    }
+
+
+    // the state, figures and controls stay fixed above the scrolling detail
     Column {
-      scroll: true
-      padding: 14
-      gap: 12
+      fill: width
+      gap: 8
+      offset: [0, -26]
+      padding: [10, 10]
+      background: alpha(accent, 0.1)
+      radius: 12 * corners
 
       // the daemon's state with a switch for it, then this window's figures
       Row {
+        fill: width
         gap: 10
         align: center
         Text { text: "●"; style: title; color: dotColor }
-        Text { text: stateText; style: body; weight: 1; maxLines: 1 }
-        Toggle { lit: up }
+        Text { text: stateText; style: body; color: #ffffff; weight: 1; maxLines: 1 }
+        Box { onTap: { haptic(); run("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(up ? scStop : scStart)} || bash -c ${sh(up ? scStop : scStart)}; else bash -c ${sh(up ? scStop : scStart)}; fi"); refresh() }; Toggle { lit: up } }
+        Button { text: str.host; onTap: { haptic(); linkDraft = link; editLink = !editLink } }
+      }
+
+      if showLink {
+        Column {
+          gap: 6
+          padding: [12, 10]
+          background: alpha(accent, 0.1)
+          border: 1
+          borderColor: alpha(accent, 0.3)
+          radius: 8 * corners
+          Head { t: upper(str.host) }
+          Text { text: str.hostHint; style: small; color: muted; maxLines: 2 }
+          Row {
+            gap: 6
+            Box {
+              weight: 2
+              align: center
+              padding: [10, 8]
+              border: 1
+              borderColor: alpha(accent, 0.3)
+              background: alpha(background, 0.35)
+              radius: 8 * corners
+              Input {
+                text: linkDraft
+                placeholder: "user@host"
+                underline: false
+                onChange: linkDraft = value
+                onSubmit: {
+                  let h = trim(linkDraft)
+                  if h == "" || match(h, "^[A-Za-z0-9._@-]+$") != null { link = h; editLink = false; refresh(); haptic() }
+                }
+              }
+            }
+            Button {
+              radius: 8 * corners
+              border: 1
+              borderColor: alpha(accent, 0.3)
+              background: alpha(background, 0.35)
+              text: str.save
+              onTap: {
+                let h = trim(linkDraft)
+                if h == "" || match(h, "^[A-Za-z0-9._@-]+$") != null { link = h; editLink = false; refresh(); haptic() }
+              }
+            }
+          }
+        }
       }
 
       if !loading && (st.error ?? "") != "" {
@@ -353,10 +553,10 @@ widget "routstrd" {
       Grid {
         columns: 2
         gap: 8
-        Stat { name: upper(str.balance); val: "${balFull} sat" }
-        Stat { name: upper(str.spend); val: "${spentText} sat" }
+        Stat { name: upper(str.balance); val: balFull + " " + str.sat }
+        Stat { name: upper(str.spend); val: spentText + " " + str.sat }
         Stat { name: upper(str.requests); val: reqsText }
-        Stat { name: upper(str.avg); val: "${avgText} sat" }
+        Stat { name: upper(str.avg); val: avgText + " " + str.sat }
       }
 
       Row {
@@ -364,34 +564,66 @@ widget "routstrd" {
         Button {
           text: str.monitor
           weight: 1
-          background: view == "monitor" ? alpha(accent, 0.15) : background
+          radius: 8 * corners
+          border: 1
+          borderColor: alpha(accent, 0.3)
+          background: view == "monitor" ? alpha(accent, 0.15) : alpha(background, 0.35)
           onTap: { haptic(); view = view == "monitor" ? "" : "monitor" }
         }
         Button {
+          radius: 8 * corners
+          border: 1
+          borderColor: alpha(accent, 0.3)
+          background: alpha(background, 0.35)
           text: str.restart
           weight: 1
-          onTap: { haptic(); run("routstr-ctl restart") }
+          onTap: { haptic(); run("if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} ${sh(scRestart)} || bash -c ${sh(scRestart)}; else bash -c ${sh(scRestart)}; fi"); refresh() }
         }
         Button {
           text: str.logs
           weight: 1
-          background: view == "logs" ? alpha(accent, 0.15) : background
+          radius: 8 * corners
+          border: 1
+          borderColor: alpha(accent, 0.3)
+          background: view == "logs" ? alpha(accent, 0.15) : alpha(background, 0.35)
           onTap: { haptic(); view = view == "logs" ? "" : "logs" }
         }
       }
 
+      TopUp { }
+    }
+
+    // the window's [W] buttons in their own card, fixed below the edit box
+    // and Top up so any window can be picked without scrolling back up
+    if view == "monitor" {
+      Column {
+        gap: 8
+        fill: width
+        offset: [0, -21]
+        padding: [10, 10]
+        background: alpha(accent, 0.1)
+        radius: 12 * corners
+        Row {
+          gap: 6
+          fill: width
+          Button { text: str.all; weight: 1; radius: 8 * corners; border: 1; borderColor: alpha(accent, 0.3); background: win == "all" ? alpha(accent, 0.15) : alpha(background, 0.35); onTap: { haptic(); win = "all" } }
+          Button { text: str.h24; weight: 1; radius: 8 * corners; border: 1; borderColor: alpha(accent, 0.3); background: win == "today" ? alpha(accent, 0.15) : alpha(background, 0.35); onTap: { haptic(); win = "today" } }
+          Button { text: str.d7; weight: 1; radius: 8 * corners; border: 1; borderColor: alpha(accent, 0.3); background: win == "7d" ? alpha(accent, 0.15) : alpha(background, 0.35); onTap: { haptic(); win = "7d" } }
+          Button { text: str.d30; weight: 1; radius: 8 * corners; border: 1; borderColor: alpha(accent, 0.3); background: win == "30d" ? alpha(accent, 0.15) : alpha(background, 0.35); onTap: { haptic(); win = "30d" } }
+        }
+      }
+    }
+
+    Column {
+      scroll: true
+      fill: true
+      gap: 10
+      offset: [0, -16]
+      padding: [0, 0, 0, 0]
+
       if view == "monitor" {
         Column {
           gap: 10
-
-          // routstrd monitor's [W]: all, the last day, week or month
-          Row {
-            gap: 6
-            Button { text: str.all; weight: 1; background: win == "all" ? alpha(accent, 0.15) : background; onTap: win = "all" }
-            Button { text: str.h24; weight: 1; background: win == "today" ? alpha(accent, 0.15) : background; onTap: win = "today" }
-            Button { text: str.d7; weight: 1; background: win == "7d" ? alpha(accent, 0.15) : background; onTap: win = "7d" }
-            Button { text: str.d30; weight: 1; background: win == "30d" ? alpha(accent, 0.15) : background; onTap: win = "30d" }
-          }
 
           if uErr != "" {
             Text { text: uErr; style: small; color: red; maxLines: 2 }
@@ -402,31 +634,29 @@ widget "routstrd" {
               gap: 12
 
               Column {
-                gap: 6
-                padding: [12, 10]
-                background: alpha(green, 0.07)
-                border: 1
-                borderColor: alpha(green, 0.45)
-                radius: 8 * corners
+                gap: 8
+                fill: width
+                padding: [10, 10]
+                background: alpha(accent, 0.1)
+                radius: 12 * corners
                 Head { t: upper(str.overview) }
-                Line { cap: upper(str.balance); val: "${balFull} sat" }
-                Line { cap: upper(str.spent); val: "${fmtNum(round(mSpent))} sat" }
-                Line { cap: upper(str.requests); val: fmtNum(mReqs) }
-                Line { cap: upper(str.tokens); val: fmtNum(mTok, {compact: true}) }
-                Line { cap: upper(str.avg); val: "${fmtNum(mAvg, 2)} sat" }
-                Line { cap: upper(str.avgTokens); val: fmtNum(round(mAvgTok)) }
-                Line { cap: upper(str.promptComp); val: "${fmtNum(mPC, 2)} : 1" }
+                Line { cap: str.balance; val: balFull + " " + str.sat }
+                Line { cap: str.spent; val: fmtNum(round(mSpent)) + " " + str.sat }
+                Line { cap: str.requests; val: fmtNum(mReqs) }
+                Line { cap: str.tokens; val: fmtNum(mTok, {compact: true}) }
+                Line { cap: str.avg; val: fmtNum(mAvg, 2) + " " + str.sat }
+                Line { cap: str.avgTokens; val: fmtNum(round(mAvgTok)) }
+                Line { cap: str.promptComp; val: "${fmtNum(mPC, 2)} : 1" }
               }
 
               Column {
-                gap: 6
-                padding: [12, 10]
-                background: alpha(green, 0.07)
-                border: 1
-                borderColor: alpha(green, 0.45)
-                radius: 8 * corners
+                gap: 8
+                fill: width
+                padding: [10, 10]
+                background: alpha(accent, 0.1)
+                radius: 12 * corners
                 Head { t: upper(str.history) }
-                Text { text: "${fmtNum(round(mSpent))} sat · ${fmtNum(mReqs)} requests"; style: small; color: muted }
+                Text { text: fmtNum(round(mSpent)) + " " + str.sats + " · " + fmtNum(mReqs) + " " + str.requestsLower; style: small; color: muted }
                 if len(sparks) == 0 {
                   Text { text: str.noData; style: small; color: muted }
                 } else {
@@ -464,12 +694,11 @@ widget "routstrd" {
               }
 
               Column {
-                gap: 6
-                padding: [12, 10]
-                background: alpha(green, 0.07)
-                border: 1
-                borderColor: alpha(green, 0.45)
-                radius: 8 * corners
+                gap: 8
+                fill: width
+                padding: [10, 10]
+                background: alpha(accent, 0.1)
+                radius: 12 * corners
                 Head { t: upper(str.models) }
                 if len(models) == 0 {
                   Text { text: str.noData; style: small; color: muted }
@@ -477,20 +706,19 @@ widget "routstrd" {
                   for m, i in models.take(5) key i {
                     MonRow {
                       name: m.i
-                      sub: "${fmtNum(m.r)} reqs · ${fmtNum(m.t, {compact: true})} tok · ${fmtNum(m.s / max(m.r, 1), 2)} sat/req"
-                      val: "${fmtNum(round(m.s))} sat"
+                      sub: fmtNum(m.r) + " " + str.reqs + " · " + fmtNum(m.t, {compact: true}) + " " + str.tok + " · " + fmtNum(m.s / max(m.r, 1), 2) + " " + str.satPerReq
+                      val: fmtNum(round(m.s)) + " " + str.sat
                     }
                   }
                 }
               }
 
               Column {
-                gap: 6
-                padding: [12, 10]
-                background: alpha(green, 0.07)
-                border: 1
-                borderColor: alpha(green, 0.45)
-                radius: 8 * corners
+                gap: 8
+                fill: width
+                padding: [10, 10]
+                background: alpha(accent, 0.1)
+                radius: 12 * corners
                 Head { t: upper(str.providers) }
                 if len(provs) == 0 {
                   Text { text: str.noData; style: small; color: muted }
@@ -498,20 +726,19 @@ widget "routstrd" {
                   for p, i in provs.take(5) key i {
                     MonRow {
                       name: p.u
-                      sub: "${fmtNum(p.r)} reqs · ${fmtNum(p.t, {compact: true})} tok · ${fmtNum(p.s / max(p.r, 1), 2)} sat/req"
-                      val: "${fmtNum(round(p.s))} sat"
+                      sub: fmtNum(p.r) + " " + str.reqs + " · " + fmtNum(p.t, {compact: true}) + " " + str.tok + " · " + fmtNum(p.s / max(p.r, 1), 2) + " " + str.satPerReq
+                      val: fmtNum(round(p.s)) + " " + str.sat
                     }
                   }
                 }
               }
 
               Column {
-                gap: 6
-                padding: [12, 10]
-                background: alpha(green, 0.07)
-                border: 1
-                borderColor: alpha(green, 0.45)
-                radius: 8 * corners
+                gap: 8
+                fill: width
+                padding: [10, 10]
+                background: alpha(accent, 0.1)
+                radius: 12 * corners
                 Head { t: upper(str.clients) }
                 if len(clients) == 0 {
                   Text { text: str.noData; style: small; color: muted }
@@ -519,8 +746,8 @@ widget "routstrd" {
                   for c, i in clients.take(5) key i {
                     MonRow {
                       name: c.c
-                      sub: "${fmtNum(c.r)} reqs · ${fmtNum(c.t, {compact: true})} tok · ${fmtNum(c.s / max(c.r, 1), 2)} sat/req"
-                      val: "${fmtNum(round(c.s))} sat"
+                      sub: fmtNum(c.r) + " " + str.reqs + " · " + fmtNum(c.t, {compact: true}) + " " + str.tok + " · " + fmtNum(c.s / max(c.r, 1), 2) + " " + str.satPerReq
+                      val: fmtNum(round(c.s)) + " " + str.sat
                       extra: join((c.m ?? []).take(3).map(x => x.i), " · ")
                     }
                   }
@@ -528,12 +755,11 @@ widget "routstrd" {
               }
 
               Column {
-                gap: 6
-                padding: [12, 10]
-                background: alpha(green, 0.07)
-                border: 1
-                borderColor: alpha(green, 0.45)
-                radius: 8 * corners
+                gap: 8
+                fill: width
+                padding: [10, 10]
+                background: alpha(accent, 0.1)
+                radius: 12 * corners
                 Head { t: upper(str.recent) }
                 if len(recent) == 0 {
                   Text { text: str.noData; style: small; color: muted }
@@ -545,10 +771,10 @@ widget "routstrd" {
                       Column {
                         gap: 1
                         weight: 1
-                        Text { text: r.m; style: small; maxLines: 1 }
-                        Text { text: "${fmtTime(r.t / 1000, "HH:mm")} · ${r.c} · ${fmtNum(r.tok, {compact: true})} tok"; style: label; color: muted; maxLines: 1 }
+                        Text { text: r.m; style: body; maxLines: 1 }
+                        Text { text: fmtTime(r.t / 1000, "HH:mm") + " · " + r.c + " · " + fmtNum(r.tok, {compact: true}) + " " + str.tok; style: small; color: muted; maxLines: 1 }
                       }
-                      Text { text: "${fmtNum(r.s, 2)} sat"; style: small; align: end; maxLines: 1 }
+                      Text { text: fmtNum(r.s, 2) + " " + str.sats; style: body; align: end; maxLines: 1 }
                     }
                   }
                 }
@@ -559,6 +785,10 @@ widget "routstrd" {
       } else if view == "logs" {
         Column {
           gap: 8
+          fill: width
+          padding: [10, 10]
+          background: alpha(accent, 0.1)
+          radius: 12 * corners
           Head { t: upper(str.logs) }
           if lg == "" {
             Text { text: "…"; style: small; color: muted }
@@ -573,7 +803,16 @@ widget "routstrd" {
         }
       }
 
-      TopUp { }
+      // who made it, at the foot of this screen and out of the way
+      Text {
+        text: str.builtBy
+        style: small
+        color: #ffffff
+        align: center
+        maxLines: 1
+        onTap: url("https://jaquesbody.github.io/")
+      }
     }
+
   }
 }
