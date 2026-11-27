@@ -235,9 +235,12 @@ esac
   let x2 = nPts == 0 ? "" : fmtTime(pts[floor((nPts - 1) / 2)].t / 1000, xpat)
   let x3 = nPts == 0 ? "" : fmtTime(pts[nPts - 1].t / 1000, xpat)
 
-  // the screen's three columns of buttons, so the amount box is exactly as
-  // wide as Monitor and Restart side by side, and Top up as wide as Logs
-  let colW = ((screenWidth ?? 400) - 40) / 3
+  // the three buttons share the card's width less its 20 dp side padding and
+  // the two 6 dp gaps between them, so the amount box is exactly Monitor + gap
+  // + Restart and Top up is exactly as wide as Logs, right under it
+  let gap = 6
+  let colW = ((screenWidth ?? 400) - 32) / 3
+  let amountW = 2 * colW + gap
 
   // ---- top-up ----------------------------------------------------------
   let inv = invRaw == "" ? null : parseJson(invRaw)
@@ -359,7 +362,7 @@ esac
         gap: 6
         align: center
         Box {
-          width: 2 * colW + 6
+          width: amountW
           align: center
           border: 1
           borderColor: alpha(accent, 0.3)
@@ -497,7 +500,6 @@ esac
         Text { text: "●"; style: title; color: dotColor }
         Text { text: stateText; style: body; color: #ffffff; weight: 1; maxLines: 1 }
         Box { onTap: { haptic(); if up { run("f=~/.cache/routstrd-stop.sh; mkdir -p ~/.cache; printf %s ${sh(scStop)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-stop.sh && bash ~/.cache/routstrd-stop.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi") } else { run("f=~/.cache/routstrd-start.sh; mkdir -p ~/.cache; printf %s ${sh(scStart)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-start.sh && bash ~/.cache/routstrd-start.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi") }; refresh() }; Toggle { lit: up } }
-        Button { text: str.host; onTap: { haptic(); linkDraft = link; editLink = !editLink } }
       }
 
       if showLink {
@@ -563,7 +565,7 @@ esac
         gap: 6
         Button {
           text: str.monitor
-          weight: 1
+          width: colW
           radius: 8 * corners
           border: 1
           borderColor: alpha(accent, 0.3)
@@ -576,12 +578,12 @@ esac
           borderColor: alpha(accent, 0.3)
           background: alpha(background, 0.35)
           text: str.restart
-          weight: 1
+          width: colW
           onTap: { haptic(); run("f=~/.cache/routstrd-restart.sh; mkdir -p ~/.cache; printf %s ${sh(scRestart)} > \"$f\"; if [ -n ${sh(link)} ]; then ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${sh(link)} 'mkdir -p ~/.cache && cat > ~/.cache/routstrd-restart.sh && bash ~/.cache/routstrd-restart.sh' < \"$f\" 2>/dev/null || bash \"$f\"; else bash \"$f\"; fi"); refresh() }
         }
         Button {
           text: str.logs
-          weight: 1
+          width: colW
           radius: 8 * corners
           border: 1
           borderColor: alpha(accent, 0.3)
@@ -803,7 +805,16 @@ esac
         }
       }
 
-      // who made it, at the foot of this screen and out of the way
+      // who made it, at the foot of this screen and out of the way; the host
+      // setting sits here too, so it never crowds the status row
+      Text {
+        text: link == "" ? str.host : str.host + ": " + link
+        style: small
+        color: muted
+        align: center
+        maxLines: 1
+        onTap: { haptic(); linkDraft = link; editLink = !editLink }
+      }
       Text {
         text: str.builtBy
         style: small
