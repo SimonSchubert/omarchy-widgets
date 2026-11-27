@@ -1,5 +1,5 @@
 face "Omagara" {
-  meta { owl: 25; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.9.4"; license: "MIT"; category: "home" }
+  meta { owl: 25; description: "Niagara-inspired transparent home face with elastic alphabetical navigation, app search, notifications, calendar, timers and world clocks"; version: "1.9.5"; license: "MIT"; category: "home" }
   // Omalauncher OWL time animations are capped at 60 FPS, regardless of display Hz.
   // Keep the highest supported rate; reduce work rather than reducing responsiveness.
   fps: 60
@@ -351,7 +351,11 @@ face "Omagara" {
   let fullAlphabet = split("A B C D E F G H I J K L M N O P Q R S T U V W X Y Z #", " ")
   // Search remains automatically sorted; the A-Z browser replays per-app moves.
   // Other apps continue following usage/name ordering. Keys include profile copies.
-  let searchApps = (installed ?? []).sortBy(a => cfg.sortMode == "Most used" ? -(a.score ?? 0) : lower(trim(a.name)))
+  // Retain native app keys for existing settings; drawer shortcut keys are distinct.
+  // The drawer includes accepted browser web apps and other pinned Android shortcuts.
+  let pinnedShortcuts = (drawer.apps ?? []).filter(a => a.kind == "shortcut").map(a => merge(a, {package: get(split(first(split(a.key, "/")), ":"), 1, "")}))
+  let appCatalog = (installed ?? []) + pinnedShortcuts
+  let searchApps = appCatalog.sortBy(a => cfg.sortMode == "Most used" ? -(a.score ?? 0) : lower(trim(a.name)))
   let automaticGroups = groupBy(searchApps, a => contains(fullAlphabet, upper(sub(trim(a.name), 0, 1))) ? upper(sub(trim(a.name), 0, 1)) : "#")
   let orderedGroups = reduce(fullAlphabet, (m, c) => set(m, c,
     reduce(manualAppMoves.filter(move => move.letter == c), (rows, move) =>
@@ -363,7 +367,8 @@ face "Omagara" {
       get(automaticGroups, c, []))), {})
   let apps = flatten(fullAlphabet.map(c => get(orderedGroups, c, []))).filter(a => !contains(hiddenAppKeys, a.key))
   let pickerApps = (installed ?? []).filter(a => trim(appPickerQuery) == "" || contains(lower(a.name), lower(trim(appPickerQuery))) || contains(lower(a.package), lower(trim(appPickerQuery)))).sortBy(a => lower(a.name)).take(40)
-  let selectedMusicApps = (installed ?? []).filter(a => contains(musicAppKeys, a.key)).sortBy(a => lower(a.name)).take(5)
+  let catalogPickerApps = appCatalog.filter(a => trim(appPickerQuery) == "" || contains(lower(a.name), lower(trim(appPickerQuery))) || contains(lower(a.package), lower(trim(appPickerQuery)))).sortBy(a => lower(a.name)).take(40)
+  let selectedMusicApps = appCatalog.filter(a => contains(musicAppKeys, a.key)).sortBy(a => lower(a.name)).take(5)
   // Stable folder IDs survive rename; prefix disambiguates app/profile keys.
   // OWL lets are sequential: declare available width before pin geometry.
   let availableWidth = (tileWidth ?? 400) - screenLeft - screenRight
@@ -372,7 +377,7 @@ face "Omagara" {
   let noticeWidth = max(0, availableWidth - 80)
   let pinRowCapacity = max(1, floor((noticeWidth - 2) / 34))
   let folderPins = customFolders.map(f => {key: "folder:" + f.id, name: f.name, folderId: f.id})
-  let pinnedApps = pinnedAppKeys.map(k => find(folderPins, p => p.key == k) ?? find(installed ?? [], a => a.key == k)).filter(a => a != null)
+  let pinnedApps = pinnedAppKeys.map(k => find(folderPins, p => p.key == k) ?? find(appCatalog, a => a.key == k)).filter(a => a != null)
   // Separate logical stacks from width-based automatic wraps. Dragging on
   // narrow devices must not turn an automatic wrap into a saved row break.
   let pinnedLogicalPlan = reduce(pinnedApps, (state, a) =>
@@ -392,7 +397,7 @@ face "Omagara" {
   let pinnedRows = unique(pinnedRowNumbers).map(r => pinnedApps.filter(a => get(pinnedRowNumbers, indexOf(pinnedApps.map(p => p.key), a.key), 0) == r))
   // Android notification identity is package + profile, not a launcher key.
   // Multiple activities for one package have only one notification owner.
-  let pinnedProfiles = unique(pinnedApps.filter(a => a.folderId == null).map(a => toJson([a.package, a.profile])))
+  let pinnedProfiles = unique(pinnedApps.filter(a => a.folderId == null && a.kind != "shortcut").map(a => toJson([a.package, a.profile])))
   let hasMedia = cfg.mediaPlayer && playback != null && playback.available != false && trim(playback.title ?? "") != ""
   let mediaNeedsAccess = cfg.mediaPlayer && playback != null && playback.available == false
   let audioConnected = audio != null && contains(["bluetooth", "wired", "usb", "dock"], audio.output.type ?? "")
@@ -406,7 +411,7 @@ face "Omagara" {
   let moveKeys = moveMode == "pin" ? pinnedAppKeys : moveMode == "alphabet" ? get(groups, moveLetter, []).map(a => a.key) : []
   let moveOriginIndex = indexOf(moveKeys, moveKey)
   let moveOtherKeys = moveKeys.filter(k => k != moveKey)
-  let moveApp = moveMode == "pin" ? find(pinnedApps, a => a.key == moveKey) : find(installed ?? [], a => a.key == moveKey)
+  let moveApp = moveMode == "pin" ? find(pinnedApps, a => a.key == moveKey) : find(appCatalog, a => a.key == moveKey)
   // Freeze mapping and geometry for the entire touch, even if apps update.
   let liveAlphabet = cfg.hideEmpty ? fullAlphabet.filter(c => len(get(groups, c, [])) > 0) : fullAlphabet
   // Freeze letters through the return, so changing available apps cannot reshape the worm mid-snap.
@@ -696,7 +701,7 @@ face "Omagara" {
   let appLabelHeight = 32 * appScale
   let activeFolder = find(customFolders, f => f.id == folderOpenId)
   let editingFolder = find(customFolders, f => f.id == folderEditId)
-  let folderApps = activeFolder == null ? [] : activeFolder.keys.map(k => find(installed ?? [], a => a.key == k)).filter(a => a != null)
+  let folderApps = activeFolder == null ? [] : activeFolder.keys.map(k => find(appCatalog, a => a.key == k)).filter(a => a != null)
   let folderKeys = folderApps.map(a => a.key)
   let appSafeTop = screenTop
   let appSafeBottom = max(appSafeTop, (tileHeight ?? 800) - screenInset)
@@ -1403,7 +1408,7 @@ face "Omagara" {
         queryText = ""
         if folderView { folderOpenId = "" }
         if searchView { close() }
-        androidApp(launchKey)
+        open(launchKey)
         }
       }
       onLongPress: {
@@ -1456,7 +1461,7 @@ face "Omagara" {
           }
           menuShortcuts = null
           menu = a.key
-          menuShortcuts = shortcuts(a.key)
+          if a.kind == "shortcut" { menuShortcuts = [] } else { menuShortcuts = shortcuts(a.key) }
         }
       }
       Popup {
@@ -1571,7 +1576,7 @@ face "Omagara" {
         }
         for actionWord in (find(drawer.apps ?? [], d => d.key == a.key || d.key == "a:" + a.key).actions ?? []) {
           Text {
-            text: get({pin: "Pin to Omalauncher home", info: "App info", uninstall: "Uninstall", remove: "Remove", edit: "Edit", share: "Share"}, actionWord, actionWord)
+            text: get({pin: "Pin to Omalauncher home", info: "App info", uninstall: "Uninstall", remove: a.kind == "shortcut" ? "Remove Android shortcut" : "Remove", edit: "Edit", share: "Share"}, actionWord, actionWord)
             fill: width
             padding: [12, 14]
             onTap: { menu = ""; appVelocity = 0; browsing = false; activeSide = 0; railHeld = false; draggingSide = 0; letter = first(liveAlphabet) ?? "A"; appScroll = 0; appAnchor = ""; queryText = ""; if folderView { folderOpenId = "" }; appAction(actionWord, a.key) }
@@ -1592,7 +1597,7 @@ face "Omagara" {
   // A real folder silhouette with a 2x2 miniature preview of its installed apps.
   // The preview uses actual app/profile icons, not package-name guesses.
   component FolderIcon(f, side = 36) {
-    let previews = take(f.keys.map(k => find(installed ?? [], a => a.key == k)).filter(a => a != null), 4)
+    let previews = take(f.keys.map(k => find(appCatalog, a => a.key == k)).filter(a => a != null), 4)
     Box {
       size: side
       clip: true
@@ -1709,7 +1714,7 @@ face "Omagara" {
             pinnedMenuShortcuts = null
           }
         } else if moveMode == "" {
-          androidApp(a.key)
+          open(a.key)
         }
       }
       onLongPress: {
@@ -1719,7 +1724,7 @@ face "Omagara" {
           if a.folderId != null {
     pinnedMenuShortcuts = []
     } else {
-    pinnedMenuShortcuts = shortcuts(a.key)
+    if a.kind == "shortcut" { pinnedMenuShortcuts = [] } else { pinnedMenuShortcuts = shortcuts(a.key) }
     }
         }
       }
@@ -1785,9 +1790,9 @@ face "Omagara" {
   component HomePinIcon(a, iconSize = 30, showNoticeDot = false) {
     // Hold opens the app menu; Home editing owns row alignment actions.
     let identity = toJson([a.package, a.profile])
-    let notificationOwner = first(pinnedApps.filter(p => p.folderId == null && toJson([p.package, p.profile]) == identity))
+    let notificationOwner = first(pinnedApps.filter(p => p.folderId == null && p.kind != "shortcut" && toJson([p.package, p.profile]) == identity))
     let ownedNotices = get(noticeGroups, identity, [])
-    let hasOwnNotices = a.folderId == null && cfg.notifications && notices != null && notices.available != false && notificationOwner != null && notificationOwner.key == a.key && len(ownedNotices) > 0
+    let hasOwnNotices = a.folderId == null && a.kind != "shortcut" && cfg.notifications && notices != null && notices.available != false && notificationOwner != null && notificationOwner.key == a.key && len(ownedNotices) > 0
     Box {
       size: iconSize
       onTap: {
@@ -1831,7 +1836,7 @@ face "Omagara" {
             folderOpenId = folderOpenId == a.folderId ? "" : a.folderId
             pinnedMenuKey = ""; pinnedMenuShortcuts = null
           } else {
-            androidApp(a.key)
+            open(a.key)
           }
         }
       }
@@ -1862,7 +1867,7 @@ face "Omagara" {
             if a.folderId != null {
               pinnedMenuShortcuts = []
             } else {
-              pinnedMenuShortcuts = shortcuts(a.key)
+              if a.kind == "shortcut" { pinnedMenuShortcuts = [] } else { pinnedMenuShortcuts = shortcuts(a.key) }
             }
           }
       }
@@ -1889,7 +1894,7 @@ face "Omagara" {
           onLongPress: {
             pinnedMenuShortcuts = null
             pinnedMenuKey = a.key
-            pinnedMenuShortcuts = shortcuts(a.key)
+            if a.kind == "shortcut" { pinnedMenuShortcuts = [] } else { pinnedMenuShortcuts = shortcuts(a.key) }
           }
           Box {
             size: 9
@@ -2004,7 +2009,7 @@ face "Omagara" {
         }
         for actionWord in (find(drawer.apps ?? [], d => d.key == a.key || d.key == "a:" + a.key).actions ?? []) {
           Text {
-            text: get({pin: "Pin to Omalauncher home", info: "App info", uninstall: "Uninstall", remove: "Remove", edit: "Edit", share: "Share"}, actionWord, actionWord)
+            text: get({pin: "Pin to Omalauncher home", info: "App info", uninstall: "Uninstall", remove: a.kind == "shortcut" ? "Remove Android shortcut" : "Remove", edit: "Edit", share: "Share"}, actionWord, actionWord)
             fill: width
             padding: [12, 14]
             onTap: { pinnedMenuKey = ""; pinnedMenuShortcuts = null; appAction(actionWord, a.key) }
@@ -2019,13 +2024,13 @@ face "Omagara" {
     // The same package may exist in multiple Android profiles. Dismiss only
     // notifications belonging to this exact pinned app/profile identity.
     let identity = toJson([a.package, a.profile])
-    let notificationOwner = first(pinnedApps.filter(p => p.folderId == null && toJson([p.package, p.profile]) == identity))
+    let notificationOwner = first(pinnedApps.filter(p => p.folderId == null && p.kind != "shortcut" && toJson([p.package, p.profile]) == identity))
     let ownedNotices = get(noticeGroups, identity, [])
     let clearablePinnedNotices = ownedNotices.filter(n => n.clearable)
     Column {
       fill: width
       gap: 3
-      if a.folderId == null && cfg.notifications && notices != null && notices.available != false && notificationOwner != null && notificationOwner.key == a.key && expandedPinnedKey == a.key && len(ownedNotices) > 0 {
+      if a.folderId == null && a.kind != "shortcut" && cfg.notifications && notices != null && notices.available != false && notificationOwner != null && notificationOwner.key == a.key && expandedPinnedKey == a.key && len(ownedNotices) > 0 {
         // Never use native global notification("clear"). Only submit this
         // app/profile's dismissible keys, including items below Show more.
         if len(clearablePinnedNotices) > 0 {
@@ -2912,7 +2917,7 @@ face "Omagara" {
                   // opacity; All Shades OFF must leave no independent chip.
                   background: cfg.shadeMediaCard ? noticeCardShade : transparent
                   radius: cfg.roundAppLabels ? 8 : 0
-                  onTap: androidApp(a.key)
+                  onTap: open(a.key)
                   if a.icon != null && a.icon != "" {
                     IconWithThemeOverlay { iconSrc: a.icon; iconSize: 22; iconLabel: a.name }
                   }
@@ -3609,7 +3614,7 @@ face "Omagara" {
         weight: 1
         gap: 2
         Text { text: a.name + (a.profile == null ? "" : " · " + a.profile); font: chosenFont; fontSize: 14; color: primaryText; maxLines: 1 }
-        Text { text: a.package; font: "mono"; fontSize: 11; color: secondaryText; maxLines: 2 }
+        Text { text: a.kind == "shortcut" ? "Shortcut · " + a.package : a.package; font: "mono"; fontSize: 11; color: secondaryText; maxLines: 2 }
       }
     }
   }
@@ -4745,11 +4750,11 @@ face "Omagara" {
               }
             }
           }
-          Text { text: "Add or remove installed apps"; font: chosenFont; fontSize: 14; color: muted }
+          Text { text: "Add or remove apps and shortcuts"; font: chosenFont; fontSize: 14; color: muted }
           Input { text: folderAppQuery; placeholder: "Find apps…"; onChange: folderAppQuery = value }
           Column {
             fill: width; weight: 1; scroll: true; gap: 2
-            for a in (installed ?? []).filter(a => trim(folderAppQuery) == "" || contains(lower(a.name), lower(trim(folderAppQuery))) || contains(lower(a.package), lower(trim(folderAppQuery)))).sortBy(a => lower(a.name)).take(80) key a.key {
+            for a in appCatalog.filter(a => trim(folderAppQuery) == "" || contains(lower(a.name), lower(trim(folderAppQuery))) || contains(lower(a.package), lower(trim(folderAppQuery)))).sortBy(a => lower(a.name)).take(80) key a.key {
               Row {
                 fill: width; align: center; gap: 8; padding: [4, 10]
                 if a.icon != null && a.icon != "" { Image { src: a.icon; size: 26; label: a.name } }
@@ -4836,7 +4841,7 @@ face "Omagara" {
               menu = ""
               queryText = ""
               close()
-              androidApp(launchKey)
+              open(launchKey)
             }
           }
         }
@@ -5068,8 +5073,8 @@ face "Omagara" {
               Text { text: "Alphabet visibility / audio shortcuts"; color: accent; font: chosenFont; fontSize: 16; padding: [0, 12, 0, 2] }
               Text { text: "Hidden apps are removed only from the A–Z worm. They remain available in normal Search. Select up to five audio shortcuts."; font: chosenFont; fontSize: 12; color: secondaryText }
               Text { text: str(len(hiddenAppKeys)) + " hidden · " + str(len(musicAppKeys)) + " audio shortcuts"; font: chosenFont; fontSize: 13; color: secondaryText }
-              Input { text: appPickerQuery; placeholder: "Find an installed app…"; onChange: appPickerQuery = value }
-              for a in (installed ?? []).filter(a => contains(hiddenAppKeys, a.key) || contains(musicAppKeys, a.key)).sortBy(a => lower(a.name)) key a.key {
+              Input { text: appPickerQuery; placeholder: "Find an app or shortcut…"; onChange: appPickerQuery = value }
+              for a in appCatalog.filter(a => contains(hiddenAppKeys, a.key) || contains(musicAppKeys, a.key)).sortBy(a => lower(a.name)) key a.key {
                 Column {
                   fill: width
                   gap: 6
@@ -5088,7 +5093,7 @@ face "Omagara" {
                   }
                 }
               }
-              for a in pickerApps key a.key {
+              for a in catalogPickerApps key a.key {
                 Column {
                   fill: width
                   gap: 4
