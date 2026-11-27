@@ -1,0 +1,628 @@
+app "Peg Pop: Color Blindness Test" {
+  meta {
+    owl: 21
+    category: "games"
+    description: "An informal color-matching game across eight colors. Try Normal, Hard, or Hardcore and review your first-try stats and achievements."
+    version: "1.1"
+    license: "MIT"
+  }
+  title: ""
+  back: statsOpen
+  onBack: {
+    if resetOpen { resetOpen = false }
+    else { statsOpen = false }
+  }
+  statusBar: false
+  fps: phase == "ready" ? 24 : 45
+  icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+    <rect width="256" height="256" rx="56" fill="#27213A"/>
+    <path d="M60 129h136l-15 64a19 19 0 0 1-18 15H93a19 19 0 0 1-18-15z" fill="#244C9D"/>
+    <path d="M60 129h136l-15 53a19 19 0 0 1-18 14H93a19 19 0 0 1-18-14z" fill="#3675DE"/>
+    <rect x="49" y="113" width="158" height="42" rx="21" fill="#80AAF4"/>
+    <rect x="63" y="123" width="130" height="22" rx="11" fill="#19386C"/>
+    <rect x="107" y="58" width="42" height="80" rx="19" fill="#D73742"/>
+    <circle cx="128" cy="67" r="37" fill="#F4545D"/>
+    <path d="M108 62a21 21 0 0 1 20-16" fill="none" stroke="#FFACAE" stroke-width="9" stroke-linecap="round"/>
+  </svg>"""
+
+  strings {
+    en {
+      title: "Peg Pop"
+      subtitle: "Color Blindness Test"
+      backToPlay: "‹  Back to play"
+      statsTitle: "Colour stats"
+      difficulty: "Difficulty"
+      normal: "Normal"
+      hard: "Hard"
+      hardcore: "Hardcore"
+      modeSubtitle: (mode) => "${mode} mode"
+      achievements: "Achievements"
+      unlocked: "Unlocked"
+      cleanHits: "Clean hits"
+      cleanHitsGoal: "Match 10 pegs on the first try."
+      fullSpectrum: "Full spectrum"
+      fullSpectrumGoal: "Match each of the eight colours on the first try."
+      wrongTurns: "Wrong turns"
+      wrongTurnsGoal: "Miss five first taps."
+      repeatMixup: "Déjà vu"
+      repeatMixupGoal: "Make the same first-tap mix-up three times."
+      shadeName: (number) => "Shade ${number}"
+      earlierStats: (matches, tries) => "In earlier purple-only rounds, you matched ${matches} of ${tries} on the first try."
+      statsEmpty: "Play a few pegs to see results here."
+      statsSummary: (matches, tries) => "${matches} of ${tries} matched on the first try"
+      statsButton: (matches, tries) => "${matches} of ${tries} first try  ·  Stats"
+      lookFor: "What to look for"
+      patternsEmpty: "This view shows which boxes you pick first."
+      frequentMixup: (target, choice, picks, offers) => "For a ${lower(target)} peg, you picked the ${lower(choice)} box ${picks} of the ${offers} times it was offered."
+      oneOffMixups: "The mix-ups so far are one-offs. See whether the same pair comes up again."
+      allMatched: "All first taps have matched so far. More play gives each colour more chances to come up."
+      statsNote: "This informal game records colour matches. Attention, guessing and screen colours can affect results. Diagnosis requires a clinical colour vision test."
+      firstTryByColour: "First try by peg colour"
+      noTries: "No tries yet"
+      colourScore: (matches, tries) => "${matches} / ${tries}"
+      mixupsTitle: "First taps on a different box"
+      mixupPair: (target, choice) => "${target} peg → ${lower(choice)} box"
+      mixupCount: (picks, offers) => "Picked ${picks} of ${offers} times that box was offered"
+      resetStats: "Reset stats"
+      resetPrompt: (mode) => "Clear ${mode} stats and start a new round?"
+      resetChallengePrompt: (mode) => "Clear ${mode} stats and achievements, and start a new round?"
+      cancel: "Cancel"
+      niceMatch: "Nice match!"
+      tryAgain: "Try another box"
+      matchPrompt: "Tap the matching box"
+      redName: "Red"
+      blueName: "Blue"
+      yellowName: "Yellow"
+      greenName: "Green"
+      orangeName: "Orange"
+      purpleName: "Purple"
+      tealName: "Teal"
+      pinkName: "Pink"
+    }
+  }
+
+  // Each group contains one peg of every colour.
+  state pegs = shuffle(range(8))
+  state boxSeed = random(1000000)
+  state roundIndex = 0
+  state firstPick = -1
+  state statsOpen = false
+  state resetOpen = false
+  state difficulty = 0 persist
+  state colourResults = [] persist
+  // Preserve scores from the original purple-only challenge rounds.
+  state challengeResults = [[], []] persist
+  state familyResults = [[], [], []] persist
+  state phase = "ready"
+  state elapsed = 0
+  state pickedBox = 0
+
+  // Keep the saved IDs for Hard and Hardcore. A saved Hell selection opens Hardcore.
+  let activeDifficulty = difficulty == 2 ? 1 : difficulty
+  let modes = [
+    {label: str.normal, spread: 1},
+    {label: str.hardcore, spread: 0.12},
+    null,
+    {label: str.hard, spread: 0.32}
+  ]
+  let colours = [
+    {name: str.redName, main: #EB414C, light: #FF999D, dark: #B62C3A, inside: #802C3D, pale: #FCE4E2},
+    {name: str.blueName, main: #3373DF, light: #8DB7FF, dark: #2452A7, inside: #203F81, pale: #E3ECFF},
+    {name: str.yellowName, main: #F6C227, light: #FFE484, dark: #BC850D, inside: #77501C, pale: #FFF1C3},
+    {name: str.greenName, main: #35AB64, light: #92DB9F, dark: #23794B, inside: #23563D, pale: #E1F2DD},
+    {name: str.orangeName, main: #F58630, light: #FFC283, dark: #B75022, inside: #78371F, pale: #FFE8D3},
+    {name: str.purpleName, main: #8C55CE, light: #C8A6F4, dark: #6135A1, inside: #4A2874, pale: #EFE2FC},
+    {name: str.tealName, main: #17A9AF, light: #7CDCE0, dark: #117581, inside: #1B505E, pale: #DEF3F3},
+    {name: str.pinkName, main: #E963A4, light: #FFA9CF, dark: #AE3977, inside: #78284F, pale: #FCE3F1}
+  ]
+  let pegColour = pegs[roundIndex % len(pegs)]
+  let base = colours[pegColour]
+  // Every challenge round uses one colour family, with a random shade as its match.
+  let spread = modes[activeDifficulty].spread
+  let shades = activeDifficulty == 0 ? colours : colours.map(colour => {
+    main: mix(base.main, colour.main, spread),
+    light: mix(base.light, colour.light, spread),
+    dark: mix(base.dark, colour.dark, spread),
+    inside: mix(base.inside, colour.inside, spread),
+    pale: mix(base.pale, colour.pale, spread)
+  })
+  let targetShade = activeDifficulty == 0 ? pegColour : first(shuffle(range(len(shades)), boxSeed + 2))
+  let peg = shades[targetShade]
+  // Older saves contain only the Hardcore and Hell score lists.
+  let familyScores = len(familyResults) == 2 ? familyResults + [[]] : familyResults
+  let savedResults = activeDifficulty == 0 ? colourResults : familyScores[activeDifficulty - 1]
+  let earlier = activeDifficulty == 1 ? challengeResults[0] : []
+  let results = len(savedResults) > 0 ? savedResults : range(len(colours)).map(i => {
+    tries: 0, matches: 0,
+    offered: range(len(colours)).map(j => 0), picked: range(len(colours)).map(j => 0)
+  })
+  let missed = firstPick >= 0 && firstPick != targetShade
+  let totalTries = sum(results.map(result => result.tries))
+  let totalMatches = sum(results.map(result => result.matches))
+  // Show two fixed comparisons and one other shade beside the match.
+  let comparisons = [[3, 4], [5, 6], [4, 7], [0, 6], [0, 2], [1, 7], [1, 3], [2, 5]]
+  let choices = [targetShade] + comparisons[targetShade]
+  let remaining = range(len(colours)).filter(c => !any(choices, choice => choice == c))
+  let boxes = shuffle(choices + [first(shuffle(remaining, boxSeed))], boxSeed + 1)
+  let compact = (screenHeight ?? 700) < 520
+  let boardWidth = min(440, (screenWidth ?? 400) - 36, (screenHeight ?? 700) * 1.15)
+  let gapSize = compact ? 8 : 12
+  let stageHeight = min(boardWidth * 0.46, (screenHeight ?? 700) * (compact ? 0.23 : 0.27))
+  let boxWidth = (boardWidth - gapSize) / 2
+  let boxHeight = min(boxWidth * 0.76, (screenHeight ?? 700) * (compact ? 0.16 : 0.19))
+  let boardHeight = stageHeight + 2 * (gapSize + boxHeight)
+
+  every frame {
+    if phase != "ready" {
+      elapsed = elapsed + dt
+      if phase == "match" && elapsed >= 0.95 {
+        roundIndex = roundIndex + 1
+        if roundIndex % len(pegs) == 0 {
+          pegs = shuffle(range(len(colours)))
+        }
+        boxSeed = random(1000000)
+        firstPick = -1
+        phase = "ready"
+      } else if phase == "retry" && elapsed >= 0.42 {
+        phase = "ready"
+      }
+    }
+  }
+
+  if statsOpen {
+    Column {
+      fill: true
+      background: #FFF8ED
+      gap: 10
+      padding: [18, max(screenTop, 10) + 8, 18, 12]
+
+      Box {
+        width: 144
+        height: 44
+        align: center
+        radius: 14
+        background: #F5E8D8
+        onTap: {
+          resetOpen = false
+          statsOpen = false
+        }
+        Text {
+          text: str.backToPlay
+          align: center
+          font: sans
+          fontSize: 15
+          fontWeight: 650
+          color: #604F69
+        }
+      }
+
+      Column {
+        weight: 1
+        fill: width
+        scroll: true
+        gap: 14
+        let mixups = flatten(range(len(colours)).map(target =>
+          results[target].picked.map((n, choice) => {
+            target: target, choice: choice, picks: n, offers: results[target].offered[choice]
+          })
+        )).filter(pair => pair.picks > 0 && (activeDifficulty != 0 || pair.target != pair.choice)).sortBy(pair => -pair.picks)
+        let mostFrequent = first(mixups)
+        let shadeNames = activeDifficulty == 0 ? colours.map(colour => colour.name) : range(len(colours)).map(i => str.shadeName(i + 1))
+        let earlierTries = sum(earlier.map(result => result.tries))
+
+        Text { text: str.statsTitle; font: sans; fontSize: 30; fontWeight: 900; color: #33263E }
+        Column {
+          gap: 6
+          Text { text: str.difficulty; font: sans; fontSize: 17; fontWeight: 800; color: #33263E }
+          Row {
+            fill: width
+            height: 44
+            gap: 6
+            for i in [0, 3, 1] {
+              Box {
+                weight: 1
+                fill: height
+                align: center
+                radius: 14
+                background: activeDifficulty == i ? #604F69 : #F5E8D8
+                onTap: {
+                  if activeDifficulty != i {
+                    difficulty = i
+                    pegs = shuffle(range(len(colours)))
+                    boxSeed = random(1000000)
+                    roundIndex = 0
+                    firstPick = -1
+                    phase = "ready"
+                    resetOpen = false
+                  }
+                }
+                Text {
+                  text: modes[i].label
+                  align: center
+                  font: sans
+                  fontSize: 15
+                  fontWeight: 650
+                  color: activeDifficulty == i ? #FFF8ED : #604F69
+                }
+              }
+            }
+          }
+        }
+        Text {
+          text: totalTries == 0 ? str.statsEmpty : str.statsSummary(totalMatches, totalTries)
+          font: sans
+          fontSize: 17
+          color: #604F69
+        }
+        if earlierTries > 0 {
+          Text {
+            text: str.earlierStats(sum(earlier.map(result => result.matches)), earlierTries)
+            font: sans
+            fontSize: 15
+            color: #604F69
+          }
+        }
+
+        if activeDifficulty != 0 {
+          Column {
+            gap: 6
+            let badges = [
+              {name: str.cleanHits, goal: str.cleanHitsGoal, count: totalMatches, target: 10, positive: true},
+              {name: str.fullSpectrum, goal: str.fullSpectrumGoal,
+                count: len(results.filter(result => result.matches > 0)), target: len(colours), positive: true},
+              {name: str.wrongTurns, goal: str.wrongTurnsGoal, count: totalTries - totalMatches, target: 5, positive: false},
+              {name: str.repeatMixup, goal: str.repeatMixupGoal, count: mostFrequent.picks ?? 0, target: 3, positive: false}
+            ]
+            Text { text: str.achievements; font: sans; fontSize: 18; fontWeight: 800; color: #33263E }
+            for badge in badges {
+              let earned = badge.count >= badge.target
+              Column {
+                gap: 3
+                padding: [12, 8]
+                radius: 12
+                background: earned ? (badge.positive ? #E1F2DD : #FCE4E2) : #F5E8D8
+                Row {
+                  gap: 8
+                  Text { weight: 1; text: badge.name; font: sans; fontSize: 16; fontWeight: 750; color: #33263E }
+                  Text {
+                    text: earned ? str.unlocked : str.colourScore(badge.count, badge.target)
+                    font: sans
+                    fontSize: 14
+                    fontWeight: 650
+                    color: earned ? (badge.positive ? #23563D : #802C3D) : #604F69
+                  }
+                }
+                Text { text: badge.goal; font: sans; fontSize: 14; color: #604F69 }
+              }
+            }
+          }
+        }
+
+        Column {
+          gap: 8
+          padding: 14
+          radius: 18
+          background: #F5E8D8
+          Text { text: str.lookFor; font: sans; fontSize: 17; fontWeight: 800; color: #33263E }
+          Text {
+            text: totalTries == 0 ? str.patternsEmpty :
+              mostFrequent.picks > 1 ? str.frequentMixup(colours[mostFrequent.target].name,
+                shadeNames[mostFrequent.choice], mostFrequent.picks, mostFrequent.offers) :
+              len(mixups) > 0 ? str.oneOffMixups : str.allMatched
+            font: sans
+            fontSize: 15
+            color: #604F69
+          }
+          Text {
+            text: str.statsNote
+            font: sans
+            fontSize: 14
+            color: #604F69
+          }
+        }
+
+        Text {
+          text: str.firstTryByColour
+          font: sans
+          fontSize: 18
+          fontWeight: 800
+          color: #33263E
+        }
+        Column {
+          gap: 4
+          for colour, i in colours {
+            let result = results[i]
+            Row {
+              align: center
+              height: 36
+              gap: 10
+              padding: [10, 0]
+              background: colour.pale
+              radius: 10
+              Box { size: 14; radius: 7; background: colour.main }
+              Text { weight: 1; text: colour.name; font: sans; fontSize: 15; color: #33263E }
+              Text {
+                text: result.tries == 0 ? str.noTries : str.colourScore(result.matches, result.tries)
+                font: sans
+                fontSize: 15
+                color: #604F69
+              }
+            }
+          }
+        }
+
+        if len(mixups) > 0 {
+          Text { text: str.mixupsTitle; font: sans; fontSize: 18; fontWeight: 800; color: #33263E }
+          for pair in mixups {
+            Column {
+              gap: 4
+              padding: 12
+              radius: 12
+              background: #F5E8D8
+              Text {
+                text: str.mixupPair(colours[pair.target].name, shadeNames[pair.choice])
+                font: sans
+                fontSize: 16
+                fontWeight: 700
+                color: #33263E
+              }
+              Text {
+                text: str.mixupCount(pair.picks, pair.offers)
+                font: sans
+                fontSize: 14
+                color: #604F69
+              }
+            }
+          }
+        }
+      }
+
+      if totalTries > 0 || len(earlier) > 0 {
+        Column {
+          gap: 8
+          if resetOpen {
+            Text {
+              text: activeDifficulty == 0 ? str.resetPrompt(str.normal) : str.resetChallengePrompt(modes[activeDifficulty].label)
+              font: sans
+              fontSize: 15
+              color: #33263E
+            }
+          }
+          Row {
+            height: 44
+            gap: 8
+            if resetOpen {
+              Box {
+                weight: 1
+                fill: height
+                align: center
+                radius: 14
+                background: #F5E8D8
+                onTap: resetOpen = false
+                Text { text: str.cancel; align: center; font: sans; fontSize: 15; fontWeight: 650; color: #604F69 }
+              }
+            }
+            Box {
+              weight: 1
+              fill: height
+              align: center
+              radius: 14
+              background: resetOpen ? #802C3D : #F5E8D8
+              onTap: {
+                if resetOpen {
+                  if activeDifficulty == 0 { colourResults = [] }
+                  else {
+                    familyResults = set(familyScores, activeDifficulty - 1, [])
+                    if len(earlier) > 0 {
+                      challengeResults = set(challengeResults, 0, [])
+                    }
+                  }
+                  pegs = shuffle(range(len(colours)))
+                  boxSeed = random(1000000)
+                  roundIndex = 0
+                  firstPick = -1
+                  phase = "ready"
+                  resetOpen = false
+                } else {
+                  resetOpen = true
+                }
+              }
+              Text {
+                text: str.resetStats
+                align: center
+                font: sans
+                fontSize: 15
+                fontWeight: 650
+                color: resetOpen ? #FFF8ED : #802C3D
+              }
+            }
+          }
+        }
+      }
+    }
+  } else {
+    Column {
+      fill: true
+      background: #FFF8ED
+      align: center
+      gap: 0
+      padding: [18, max(screenTop, 10) + 8, 18, 12]
+
+      Text {
+        text: str.title
+        align: center
+        font: sans
+        fontSize: compact ? 24 : 34
+        fontWeight: 900
+        color: #33263E
+      }
+      Text {
+        text: activeDifficulty == 0 ? str.subtitle : str.modeSubtitle(modes[activeDifficulty].label)
+        align: center
+        font: sans
+        fontSize: compact ? 16 : 21
+        fontWeight: 650
+        color: #604F69
+      }
+
+      Spacer { weight: 1 }
+
+      Text {
+        text: phase == "match" ? str.niceMatch : missed ? str.tryAgain : str.matchPrompt
+        align: center
+        font: sans
+        fontSize: compact ? 15 : 19
+        fontWeight: 650
+        color: #604F69
+      }
+      Spacer { height: compact ? 6 : 12 }
+
+      Box {
+        width: boardWidth
+        height: boardHeight
+
+        Canvas {
+          let homeX = boardWidth / 2
+          let homeY = stageHeight * 0.50
+          let pegSize = min(stageHeight / 118, 1.45)
+          let binSize = min(boxWidth / 126, boxHeight / 94)
+          let targetX = boxWidth / 2 + (pickedBox % 2) * (boxWidth + gapSize)
+          let targetY = stageHeight + gapSize + boxHeight / 2 + floor(pickedBox / 2) * (boxHeight + gapSize)
+          let flight = phase == "match" ? clamp(elapsed / 0.54, 0, 1) : 0
+          let descent = flight * flight
+          let hop = phase == "ready" ? -9 * abs(sin(time * 2.8)) : 0
+          let wiggle = phase == "retry" ? sin(elapsed * 45) * max(0, 1 - elapsed / 0.42) : 0
+          let pegX = lerp(homeX + 13 * wiggle, targetX, flight)
+          let pegY = lerp(homeY + hop, targetY - 10 * binSize, descent) - sin(flight * 3.14159) * 22
+          let scaleDown = lerp(1, 0.34, flight) * (1 - clamp((flight - 0.84) / 0.16, 0, 1))
+
+          rect(0, 0, boardWidth, stageHeight, radius: 24, fill: #F5E8D8)
+          rect(homeX - 30 * pegSize, homeY + 39 * pegSize, 60 * pegSize, 9 * pegSize,
+            radius: 5 * pegSize, fill: alpha(#BA987D, 0.3 * (1 - flight)))
+
+          for colour, index in boxes {
+            let bin = shades[colour]
+            let bx = (index % 2) * (boxWidth + gapSize)
+            let by = stageHeight + gapSize + floor(index / 2) * (boxHeight + gapSize)
+            let cx = bx + boxWidth / 2
+            let cy = by + boxHeight / 2
+            let flash = phase == "match" && index == pickedBox ? clamp((elapsed - 0.40) / 0.18, 0, 1) : 0
+
+            rect(bx, by, boxWidth, boxHeight, radius: 22, fill: mix(bin.pale, bin.light, flash * 0.5))
+            scale(binSize, binSize, cx, cy) {
+              rect(cx - 43, cy + 30, 86, 8, radius: 4, fill: alpha(bin.dark, 0.18))
+              path([
+                [cx - 48, cy - 8], [cx + 48, cy - 8], [cx + 39, cy + 25],
+                [cx + 33, cy + 31], [cx - 33, cy + 31], [cx - 39, cy + 25]
+              ], closed: true, fill: bin.dark)
+              rect(cx - 30, cy + 3, 60, 20, radius: 10, fill: bin.main)
+              rect(cx - 53, cy - 23, 106, 28, radius: 14, fill: bin.light)
+              rect(cx - 44, cy - 16, 88, 14, radius: 7, fill: bin.inside)
+            }
+          }
+
+          if scaleDown > 0 {
+            let size = pegSize * scaleDown
+            rotate(wiggle * 16 + sin(flight * 3.14159) * (targetX < homeX ? -20 : 20), pegX, pegY) {
+              scale(size, size, pegX, pegY) {
+                rect(pegX - 17, pegY - 9, 34, 47, radius: 13, fill: peg.dark)
+                rect(pegX - 17, pegY - 9, 27, 42, radius: 13, fill: peg.main)
+                circle(pegX, pegY - 14, 29, fill: peg.dark)
+                circle(pegX, pegY - 18, 28, fill: peg.main)
+                arc(pegX, pegY - 18, 17, 286, 65, stroke: peg.light, width: 5, cap: round)
+              }
+            }
+          }
+
+          if phase == "match" && elapsed > 0.46 {
+            let burst = clamp((elapsed - 0.46) / 0.49, 0, 1)
+            for ray in range(8) {
+              let angle = ray * 0.7854
+              let distance = (22 + burst * 38) * binSize
+              let dx = cos(angle)
+              let dy = sin(angle)
+              let tip = distance + 8 * binSize
+              line(targetX + dx * distance, targetY - 8 * binSize + dy * distance,
+                targetX + dx * tip, targetY - 8 * binSize + dy * tip,
+                stroke: alpha(peg.dark, 1 - burst), width: 4, cap: round)
+            }
+          }
+        }
+
+        Column {
+          fill: true
+          gap: gapSize
+          Spacer { height: stageHeight }
+          for row in range(2) {
+            Row {
+              height: boxHeight
+              fill: width
+              gap: gapSize
+              for col in range(2) {
+                let index = row * 2 + col
+                Box {
+                  width: boxWidth
+                  fill: height
+                  radius: 22
+                  ripple: false
+                  onTap: {
+                    if phase != "match" {
+                      let chosen = boxes[index]
+                      let matched = chosen == targetShade
+                      if firstPick < 0 {
+                        let result = results[pegColour]
+                        let distractors = boxes.filter(box => box != targetShade)
+                        let updatedResults = set(results, pegColour, {
+                          tries: result.tries + 1,
+                          matches: result.matches + (matched ? 1 : 0),
+                          offered: result.offered.map((n, shade) => n + (any(distractors, box => box == shade) ? 1 : 0)),
+                          picked: matched ? result.picked : set(result.picked, chosen, result.picked[chosen] + 1)
+                        })
+                        if activeDifficulty == 0 { colourResults = updatedResults }
+                        else { familyResults = set(familyScores, activeDifficulty - 1, updatedResults) }
+                        firstPick = chosen
+                      }
+                      pickedBox = index
+                      elapsed = 0
+                      if matched {
+                        phase = "match"
+                        sound(matchChime)
+                      } else {
+                        if phase != "retry" { sound(retryChime) }
+                        phase = "retry"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      Spacer { weight: 1 }
+
+      Box {
+        width: boardWidth
+        height: 44
+        align: center
+        radius: 14
+        background: #F5E8D8
+        onTap: statsOpen = true
+        Text {
+          text: str.statsButton(totalMatches, totalTries)
+          align: center
+          minLines: 1
+          font: sans
+          fontSize: 14
+          fontWeight: 650
+          color: #604F69
+        }
+      }
+    }
+  }
+
+  // Original synthesized chimes, embedded for offline playback.
+  asset matchChime = base64"//NExAASALo8AVl4Ac69PK4bdtTNCWnWXsMhg4qjogFmDFhPPs+aSJI1YThXAybB7824amaK4EAMBKE/BtgZwb5L24g49Zc1Gzv37+PEAAAAAA8PD6FQGg/LBaLQMMAA//NExAsVUJqln5vRIi7VpZr/lJc6uyP39EAUcIxDDUfRBioICp8IlK9zOB/CCb+BYwzbFnxjAUo/AWnN78fOQlftLo/ww+VX72YVPN+3CX//JCtP+xK6FcSAAALdbaBh//NExAgSIJJuX9zQAt5//rLLHGaaUpsoaYKHZtZaHVTIY9GhhgJmDA6XlabZyyy7lEmtI9GjsJqONLr4lc/080lc79X2/2//6v////l1QCAVQf///ZyBmWo2joIIQ2IB//NExBIWEKIo1Oe6gOGAUWYi2hkG/NGlGRIYDYR5iGDJlAPJeYiFomAFqUgm32ZUnKFQIMDhjMW9rMxAxAQLLFl1WXUtM7////16E/4vub//3fqVICgAeh1KHKfdxiaY//NExAwScK5AFg92LAAgPMNAgNo9OOEBgMTQZMhFTIkgx0MZYrewhmLXmoNMd+BE1jmlgid2OwqQTk/Yp6SvcBcmcp2f////Z1+t8MDskFzcExR8Mm6gESjRBgidFRQZ//NExBUWmOaFGA86cjgMZ5T59MbGQBeYWHwXAaCtnLPBQKxXo5mCcpPBxgkKhiS0ZzS+5lmHwsIKJYkAIsB8z2eoqlfVXoOCpsewNlFXsT/3NQqiQ0SoWjbATbeYGTdA//NExA0VmMaBvhd4br7EAerFjj+oeGHJMHFYYHAYdGVQtlki+gcDX5fdUVsv9dpZVJZM3ECkQxTzT7/0MajUMGCgghAIYRbH/nWJ+r//+x/uo/Qm7/21EQAQLRRaB8s9//NExAkQ0L5qHg54Znb0Nm1GJrtpKUjDD6jPjmYwqEUJDD3YhvPDdZGyFc//5lZjQWCZE1GOz9e4CPspq7LP+/5X///5vQOVGAAH2wwA+nKgWtBKiRhYUwCO5CkvKMhA//NExBgR+MpN/hd0aDFJmfZsGINohMxgqV271+wEFm8t/+9V4gvMEQj5VVAH/jcUbaf5+un9tH7dv///1v69jMnBmwDIwURHDBbAgEABJgBAJmA2CAYTCMpoZBgGcg+A//NExCMR4Mo0AIe4hIXF6WTSaglM02EwwL0+cu42aaWu8kKYVQh2sKiwyaBHHhh+Lbr+tJI1NiqLmD4QPlwTkEQmAUACYHIARiHGgnBUF+AqgLFsaCiNa6HYlfG7Flln//NExC4RwMokAJ+4oFnL7k3DDIwsBDDaVOfsgwWB0xGcMvL8vJ0TAAR2RzD1p+YC5Y7kRd4ASBZiIWh2sTpiwMkW1x/4xSW+f///5Y5UrtAw3OWBkgaO7NTln31f7HMZ//NExDoRWMY5/j92hOquj/9X9P/7vT9dtYIA8y/tdvLmJg3ThSuCoDDAgmBGWHACUmAlQ4CqPPXDE5R3v////qSt9FKzCEQ9xxBwAzt/38YNPuVr//t/6u+9f//1fZVR//NExEcSKMYhSg92aP9KdQAJUk4b3XWsYaFgWZyw5FICAqYYyYbljmZeDCwC16K28csf//1zHKrKm4g1EOTFUgqK5Mz9r6q1p/Un6f1er/u///0f3x8AJttfuPE3P5S7//NExFEReMYl9g92aD12HDAVA4kUWfOZ8zX/9aBsAWjdgFOf2be9tHZT//V/RrT43T+v91Z6wACAO26zAVeR88Ny3huMGPR/Y1uUV9bP/+pwUIAkc3fO/0Lmpp/qfv9K//NExF4MuLJJ/g7iiL///0SzfaeCfeVqEoQULDKUmVQQd4zpolwkoiwyi7nYe52ItEIs7EQo3UauKTMrWPKGDB0NfWzircfxYWYZ8W//4ulyhYi7///8WkxBTUU0LjCq//NExH4NULI6Xg4UiKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExJsP8MHIHBvGcKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+  asset retryChime = base64"//NExAAR4I4wEVswAAwceSRUKhJjpiaCmmopJEtmdMB2NqdbJm2oocdmACRjAwYkEI0JVmEBRhAIW8ex92dtfd+HwAACBAgQQgEwfB8HwfBAEP+ilQBGKAKAAAG0AoZp//NExAsVAIZUH53YAOqGCwZgMFBlcpxqGVBhtmB3YVRkrCR9sI5ZMwbC0wmAUEBWHA4ABwNJV1LoSfGlJNxU4oyEgmFYa7/1QR20Hn//221/df//7esAb/bj7AVu0rsw//NExAoSQGpMf90IACK3GAYLGCoCmGipm+tZmehNmKwKioAGAYAF2l3Fzl8mHosmQQPgoDWa1qa14b+ec/mP19X9Ca//2UdP+///6JQ5apC75iMddmBsCIYRoYJlqCJG//NExBQTSGoYAMe6JFk1WGFaFOYBQEgqAqWic5bQmDsw6EAyG68z6G8QgYnq0qGZVdIGu1v//tV/07Or9HZK/S36FXV/9CoVBV4g4a5EE4ABRhEUmREAfNlxtmOCmIkA//NExBkTAGoYKue4QMEQMw0DVLmGptA0XmNAGbAm5vkGkwcY9CZ69fOW6e6M2e1px1LE/R/T9bd9v3/VZ/+36AMLcBtrx8qB4gsGYaIZ2NcCw+XrFp3L4BeELXC3UttB//NExCAM2FpEfh8yJLzP1fsRnP//6f/2f6rOu9vb/V115rnbMia6heYCYpBpQBNmEsBGYB4BAYVYzat+moCrmOZEYFCEFyjdTr/6HNRq3dDPrR//T2/9vMWVgLatLXit//NExD8QKGIUAPY4ZPx6gADkkkkkdFHNZyxBGHrlVWr900PBF5rfpje+yyef+rFqHdrfq+n/Fd/Wx1n+j/RVCqCOa3hbsRtriOZrJ4lCL063hGmiGB4c2VYldNOtxKRp//NExFELyFJVvg4SJksZO/9n9u6M+p5ZOlP8l/r+vYqpVSpCwBUsdLFQ8RmDTSEiKnC4gmQQXJGsW/rFsWF3YsK//FRTrFm1C//1CzP4twWFyNISFeLsrFW4+kxBTUU0//NExHQNiFoQTNBwYC4wqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExJAN4FWgDEpMDKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+}

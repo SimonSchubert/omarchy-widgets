@@ -1,0 +1,174 @@
+widget "spotify" {
+  size: 3x3
+  minSize: 2x2
+  padding: 0
+
+  requires { pacman: [] }
+  meta { description: "Spotify player with a compact home tile and a full-screen local favorites list."; version: "1.1"; license: "MIT"; category: "fun"; owl: 23 }
+
+  strings {
+    en {
+      name: "spotify"
+      empty: "nothing playing"
+      need: "tap to allow notifications"
+      favorites: "favorites"
+      add: "save this song"
+      saved: "saved"
+      noFavorites: "save a playing song with the heart button"
+    }
+    es {
+      name: "spotify"
+      empty: "nada sonando"
+      need: "tocá para permitir las notificaciones"
+      favorites: "favoritas"
+      add: "guardar canción"
+      saved: "guardada"
+      noFavorites: "guardá una canción con el botón de corazón"
+    }
+  }
+
+  source m = android.media
+  source apps = android.apps
+  source now = clock every 100ms
+  let pkg = lower(m.package ?? "")
+  let spotify = contains(pkg, "spotify")
+  let has = spotify && m.title != null
+  let allowed = m == null || m.available != false
+  let sp = (apps ?? []).find(a => a.profile == null && contains(a.package, "spotify"))
+  state favorites = [] persist
+  let currentKey = (m.title ?? "") + "|" + (m.artist ?? "")
+  let isFavorite = has && favorites.any(f => f.key == currentKey)
+  state overlayUntil = 0
+  on currentKey first { overlayUntil = now + 3 }
+  on currentKey { overlayUntil = now + 3 }
+  state swipeX = 0
+  state restartedBySwipe = false
+  on m.title { restartedBySwipe = false }
+
+  onTap: media("toggle")
+
+  Box {
+    fill: true
+    clip: true
+    radius: 0
+    Box {
+      fill: true
+      offset: [swipeX, 0]
+      drag: horizontal
+      onDrag: swipeX = swipeX + dx
+      onDragEnd: {
+        if swipeX < -35 { media("next"); restartedBySwipe = false }
+        else if swipeX > 35 {
+          if restartedBySwipe && num(m.position, 0) <= 3 { media("previous"); restartedBySwipe = false }
+          else { media("seek", 0); restartedBySwipe = true }
+        }
+        swipeX = 0
+      }
+      animate offset: spring()
+    if !allowed {
+      Column {
+        fill: true
+        justify: center
+        padding: 12
+        Text { text: str.name; style: label; color: muted }
+        Text { text: str.need; style: small; color: muted; maxLines: 2 }
+      }
+    } else if !has {
+      Column {
+        fill: true
+        justify: center
+        align: center
+        gap: 5
+        Text { text: str.name; style: label; color: muted }
+        Text { text: str.empty; style: small; color: muted; maxLines: 2 }
+      }
+    } else {
+      if m.art != null { Image { src: m.art; fit: cover; fill: true; label: m.title } }
+      if now < overlayUntil + 0.5 {
+        Column {
+          fill: true
+          justify: end
+          opacity: now < overlayUntil ? 1 : 0
+          offset: [0, now < overlayUntil ? 0 : 8]
+          animate opacity: tween(300ms, "out")
+          animate offset: tween(300ms, "out")
+          Column {
+            fill: width
+            gap: 1
+            padding: [10, 10, 10, 6]
+            background: linear(0, 0, 0, 1, [alpha(#000000, 0), alpha(#000000, 0.82)])
+            Text { text: m.title; color: #ffffff; font: sans; fontSize: 11; fontWeight: 500; maxLines: 2 }
+            Text { text: m.artist ?? ""; color: alpha(#ffffff, 0.8); font: sans; fontSize: 9; maxLines: 1 }
+          }
+        }
+      }
+    }
+    }
+  }
+
+  screen {
+    title: "spotify"
+    Column {
+      fill: true
+      padding: 16
+      gap: 12
+      scroll: true
+      background: alpha(#292b2d, 0.90)
+      if !allowed {
+        Text { text: str.need; style: body; color: muted; onTap: media("open") }
+      } else {
+        Row {
+          align: center
+          gap: 14
+          if m.art != null { Image { src: m.art; width: 96; height: 96; fit: cover; radius: 10; label: m.title } }
+          Column {
+            weight: 1
+            gap: 4
+            Text { text: has ? m.title : str.empty; style: body; bold: true; maxLines: 3 }
+            Text { text: has ? (m.artist ?? "") : "Spotify"; style: small; color: muted; maxLines: 2 }
+          }
+        }
+        if has {
+          Row {
+            align: center
+            justify: center
+            gap: 18
+            Text { text: "|‹"; color: #f2f2f2; fontSize: 24; onTap: media("previous") }
+            Text { text: m.playing == true ? "Ⅱ" : "▶"; color: #f2f2f2; fontSize: 24; onTap: media("toggle") }
+            Text { text: "›|"; color: #f2f2f2; fontSize: 24; onTap: media("next") }
+            for a in m.actions ?? [] {
+              if contains(lower(a.title), "shuffle") || contains(lower(a.title), "aleatorio") {
+                Text { text: "⤨"; color: #f2f2f2; fontSize: 24; onTap: media("action", a.id) }
+              } else if contains(lower(a.title), "repeat") || contains(lower(a.title), "repetir") {
+                Text { text: "↻"; color: #f2f2f2; fontSize: 24; onTap: media("action", a.id) }
+              }
+            }
+          }
+          Button {
+            text: isFavorite ? "♥  ${str.saved}" : "♡  ${str.add}"
+            onTap: favorites = isFavorite ? favorites.filter(f => f.key != currentKey) : ([{key: currentKey, title: m.title, artist: m.artist ?? "", art: m.art}] + favorites).take(100)
+          }
+        }
+        Text { text: str.favorites; style: label; color: #d0d0d0 }
+        if len(favorites) == 0 {
+          Text { text: str.noFavorites; style: small; color: #b0b0b0; maxLines: 2 }
+        } else {
+          for f in favorites key f.key {
+            Row {
+              align: center
+              gap: 10
+              if f.art != null { Image { src: f.art; width: 42; height: 42; fit: cover; radius: 5 } }
+              Column {
+                weight: 1
+                gap: 2
+                Text { text: f.title; style: small; color: #f2f2f2; maxLines: 1 }
+                Text { text: f.artist; style: label; color: #b0b0b0; maxLines: 1 }
+              }
+              Text { text: "♥"; color: #e6a5b8; onTap: favorites = favorites.filter(x => x.key != f.key) }
+            }
+          }
+        }
+      }
+    }
+  }
+}

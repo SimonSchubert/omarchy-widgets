@@ -1,0 +1,262 @@
+app "Kosakata" {
+  meta { owl: 18; description: "Vocabulary notebook with an Indonesian interface: save words with their meaning, an example and a tag, then memorize them with flashcards"; version: "1.0"; license: "MIT"; category: "productivity" }
+  title: editId == 0 ? "Kosakata" : "Edit kata"
+  back: tab != "daftar"
+  onBack: { tab = "daftar"; editId = 0; word = ""; meaning = ""; example = ""; tag = "" }
+
+  icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+    <rect width="256" height="256" rx="56" fill="#1A1B26"/>
+    <rect x="46" y="44" width="164" height="168" rx="18" fill="#0F1017"/>
+    <rect x="56" y="54" width="144" height="148" rx="12" fill="#F4E3A1"/>
+    <rect x="56" y="54" width="22" height="148" rx="11" fill="#E0AF68"/>
+    <path d="M96 96h74M96 124h58M96 152h66" stroke="#B8A36A" stroke-width="10" stroke-linecap="round"/>
+    <path d="M138 168l20 20 38-44" fill="none" stroke="#7AA2F7" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M178 40l30 30-82 82-34 4 4-34z" fill="#F7768E"/>
+    <path d="M92 172l34 4-4 34z" fill="#F0D2B0"/>
+  </svg>"""
+
+  source now = clock every 1m
+
+  state entries = [] persist
+  state nextId = 1 persist
+  state tab = "daftar"
+  state editId = 0
+  state query = ""
+  state mode = "semua"
+  state word = ""
+  state meaning = ""
+  state example = ""
+  state tag = ""
+  state cardIndex = 0
+  state revealed = false
+
+  let total = len(entries)
+  let mastered = len(entries.filter(e => e.mastered ?? false))
+  let visible = entries.filter(e =>
+    (mode == "semua" || (mode == "hafal" ? (e.mastered ?? false) : !(e.mastered ?? false))) &&
+    (query == "" || contains(lower(join([e.word ?? "", e.meaning ?? "", e.tag ?? ""], " ")), lower(query)))
+  )
+  let card = total > 0 ? entries[cardIndex % total] : null
+
+  component Tab(label, name) {
+    Text {
+      text: label; style: small; align: center; weight: 1
+      padding: [0, 8]
+      radius: 8 * corners
+      color: tab == name ? accent : muted
+      background: tab == name ? alpha(accent, 0.16) : alpha(muted, 0.08)
+      onTap: {
+        if name != "tambah" { editId = 0; word = ""; meaning = ""; example = ""; tag = "" }
+        tab = name
+      }
+    }
+  }
+
+  Column {
+    gap: 12
+    padding: [16, 0, 16, 0]
+
+    Row {
+      gap: 10
+      align: center
+      Text { text: "Kosakata"; style: title; weight: 1 }
+      Column {
+        align: end
+        Text { text: "${total} kata"; style: small }
+        Text { text: "${mastered} hafal"; style: small; color: green }
+      }
+    }
+    Progress { value: mastered; max: max(total, 1); color: green; track: alpha(muted, 0.2) }
+
+    Row {
+      gap: 6
+      Tab { label: "Daftar"; name: "daftar" }
+      Tab { label: "Tambah"; name: "tambah" }
+      Tab { label: "Hafalan"; name: "hafalan" }
+    }
+
+    if tab == "daftar" {
+      Input {
+        text: query; placeholder: "Cari kata atau arti…"; onChange: query = value
+        underline: true
+      }
+      Row {
+        gap: 6
+        Text {
+          text: "Semua"; style: small; align: center; weight: 1; padding: [0, 6]
+          radius: 6 * corners
+          color: mode == "semua" ? accent : muted
+          background: mode == "semua" ? alpha(accent, 0.14) : alpha(muted, 0.08)
+          onTap: mode = "semua"
+        }
+        Text {
+          text: "Belum"; style: small; align: center; weight: 1; padding: [0, 6]
+          radius: 6 * corners
+          color: mode == "belum" ? accent : muted
+          background: mode == "belum" ? alpha(accent, 0.14) : alpha(muted, 0.08)
+          onTap: mode = "belum"
+        }
+        Text {
+          text: "Hafal"; style: small; align: center; weight: 1; padding: [0, 6]
+          radius: 6 * corners
+          color: mode == "hafal" ? accent : muted
+          background: mode == "hafal" ? alpha(accent, 0.14) : alpha(muted, 0.08)
+          onTap: mode = "hafal"
+        }
+      }
+
+      Column {
+        gap: 8
+        weight: 1
+        scroll: true
+        if total == 0 {
+          Text { text: "Belum ada kata. Ketuk Tambah untuk menulis kata pertama."; style: muted; padding: 16 }
+        }
+        if total > 0 && len(visible) == 0 {
+          Text { text: "Tidak ada kata yang cocok."; style: muted; padding: 16 }
+        }
+        for e in visible key e.id {
+          Row {
+            gap: 8
+            padding: 10
+            radius: 10 * corners
+            background: alpha(surface, 0.75)
+            border: 1
+            borderColor: e.mastered ? alpha(green, 0.45) : alpha(border, 0.6)
+
+            Column {
+              gap: 3
+              weight: 1
+              onTap: {
+                editId = e.id
+                word = e.word ?? ""
+                meaning = e.meaning ?? ""
+                example = e.example ?? ""
+                tag = e.tag ?? ""
+                tab = "tambah"
+              }
+              Text { text: e.word; bold: true; maxLines: 2 }
+              Text { text: e.meaning; style: small; color: muted; maxLines: 3 }
+              if e.tag != null && e.tag != "" { Text { text: e.tag; style: label; color: accent } }
+            }
+            Text {
+              text: e.mastered ? "hafal" : "belum"
+              style: label
+              align: center
+              width: 54
+              padding: [4, 8]
+              radius: 6 * corners
+              color: e.mastered ? green : muted
+              background: e.mastered ? alpha(green, 0.14) : alpha(muted, 0.1)
+              onTap: entries = entries.map(x => x.id == e.id ? merge(x, {mastered: !(x.mastered ?? false)}) : x)
+            }
+          }
+        }
+      }
+    } else {
+      if tab == "tambah" {
+        Text { text: editId == 0 ? "Kata baru" : "Edit kata"; style: title }
+        Input { text: word; placeholder: "kata, mis. serendipity"; onChange: word = value }
+        Input { text: meaning; placeholder: "arti atau terjemahan"; onChange: meaning = value }
+        Input { text: example; placeholder: "contoh kalimat (opsional)"; lines: 3; onChange: example = value }
+        Input { text: tag; placeholder: "kategori, mis. sastra (opsional)"; onChange: tag = value }
+        Row {
+          gap: 8
+          Button {
+            text: "Simpan"; weight: 1; color: accent
+            onTap: {
+              if trim(word) != "" && trim(meaning) != "" {
+                if editId == 0 {
+                  entries = [{id: nextId, word: trim(word), meaning: trim(meaning), example: trim(example), tag: trim(tag), mastered: false, added: now}] + entries
+                  nextId = nextId + 1
+                } else {
+                  entries = entries.map(e => e.id == editId ? merge(e, {word: trim(word), meaning: trim(meaning), example: trim(example), tag: trim(tag)}) : e)
+                }
+                word = ""; meaning = ""; example = ""; tag = ""
+                editId = 0; tab = "daftar"
+              }
+            }
+          }
+          if editId != 0 {
+            Button {
+              text: "Hapus"; weight: 1; color: red
+              onTap: {
+                entries = entries.filter(e => e.id != editId)
+                word = ""; meaning = ""; example = ""; tag = ""
+                editId = 0; tab = "daftar"
+              }
+            }
+          }
+          Button {
+            text: "Batal"; weight: 1
+            onTap: { editId = 0; tab = "daftar"; word = ""; meaning = ""; example = ""; tag = "" }
+          }
+        }
+        if trim(word) == "" || trim(meaning) == "" {
+          Text { text: "Kata dan arti wajib diisi."; style: small; color: muted }
+        }
+      } else {
+        if total == 0 {
+          Column {
+            weight: 1
+            justify: center
+            gap: 8
+            Text { text: "Belum ada kata untuk dihafal."; align: center; style: muted }
+            Button { text: "Tambah kata"; onTap: tab = "tambah" }
+          }
+        } else {
+          Text { text: "Kartu ${(cardIndex % total) + 1} dari ${total}"; style: muted }
+          Box {
+            fill: width
+            height: 250
+            padding: 20
+            radius: 14 * corners
+            background: alpha(accent, 0.12)
+            border: 1
+            borderColor: alpha(accent, 0.4)
+            onTap: revealed = !revealed
+            Column {
+              gap: 12
+              fill: true
+              justify: center
+              Text {
+                text: revealed ? (card.meaning ?? "") : (card.word ?? "")
+                style: revealed ? "body" : "title"
+                align: center
+                maxLines: 6
+              }
+              if revealed && card.example != null && card.example != "" {
+                Text { text: card.example; style: small; color: muted; align: center; maxLines: 4 }
+              }
+              Text {
+                text: revealed ? "ketuk untuk melihat kata" : "ketuk untuk melihat arti"
+                style: label; color: muted; align: center
+              }
+            }
+          }
+          Row {
+            gap: 8
+            Button {
+              text: "Belum"; weight: 1
+              onTap: {
+                entries = entries.map(e => e.id == card.id ? merge(e, {mastered: false}) : e)
+                cardIndex = random(total); revealed = false
+              }
+            }
+            Button {
+              text: "Sudah hafal"; weight: 1; color: green
+              onTap: {
+                entries = entries.map(e => e.id == card.id ? merge(e, {mastered: true}) : e)
+                cardIndex = random(total); revealed = false
+              }
+            }
+          }
+          Button {
+            text: "Kartu berikutnya"; fill: width
+            onTap: { cardIndex = random(total); revealed = false }
+          }
+        }
+      }
+    }
+  }
+}

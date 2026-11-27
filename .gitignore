@@ -6,3 +6,7 @@ deps.txt
 apps.json
 store-icon.*
 collage/
+runtimes/swiftui/.build/
+runtimes/swiftui/.swiftpm/
+faces.json
+__pycache__/

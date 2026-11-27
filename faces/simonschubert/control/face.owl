@@ -6,7 +6,7 @@ face "control" {
   meta {
     owl: 23
     description: "Mission control: live CPU, memory, storage and latency, processes you can kill, a shell, a terminal, your inbox, phone switches and an agent prompt"
-    version: "1.5"
+    version: "1.6"
     license: "MIT"
     category: "system"
   }
@@ -440,14 +440,14 @@ face "control" {
     }
   }
 
-  requires { pacman: ["procps-ng", "iputils", "iproute2", "btop"] }
+  requires { pacman: ["procps-ng", "iproute2", "btop", "curl"] }
 
   padding: 0
   background: linear(0, 0, 0, 1, [alpha(background, 0.92), alpha(background, 0.7), alpha(background, 0.8), alpha(background, 0.94)])
 
   source now = clock every 1s
   source bat = android.battery
-  source sys = android.system every 10s
+  source sys = android.system every 1m
   source modes = android.modes
   source vol = android.volume
   source m = android.media
@@ -455,32 +455,47 @@ face "control" {
   source rec = android.recent
   source ag = android.agents
   source alarm = android.alarm
-  source wx = http("https://wttr.in/?format=j1") every 30m timeout 15s json
-  source pub = http("https://ipinfo.io/json") every 15m timeout 10s json
-  // Memory and swap, in bytes.
-  source st = cmd("free -b | awk '/^Mem:/ {m = $2 \" \" $7} /^Swap:/ {s = $2 \" \" $3} END {print m, s}'") every 5s
-  // CPU from every process's ticks over a second (proot freezes /proc/stat): first the whole system's
+  source wx = http("https://wttr.in/?format=j1") every 1h timeout 15s json
+  // status tells a failed lookup from an IP the phone once had, so the net tab
+  // can say offline instead of showing a stale address forever.
+  source pub = http("https://ipinfo.io/json") every 1h timeout 10s json status
+  // Android's own byte counters. No shell and no extra radio: the rates below
+  // are worked out from rx/tx and the time Android read them, not from the poll
+  // interval. This is the traffic the net tab was missing.
+  source traf = android.network every 10s
+  // Memory and swap, in bytes. A shell spawn is the expensive part of a widget
+  // on a phone, and free memory moves in minutes, not seconds.
+  source st = cmd("free -b | awk '/^Mem:/ {m = $2 \" \" $7} /^Swap:/ {s = $2 \" \" $3} END {print m, s}'") every 1m
+  // CPU from every process's ticks over a span (proot freezes /proc/stat): first the whole system's
   // percentage, process count and cores, then the twelve busiest as "cpu% pid rss name".
+  // Every 15 s rather than 3: this walks every process's stat through a shell, cat, awk and sort.
+  // Twelve samples still cover the three minutes the CPU trace claims to show.
   source pr = cmd("""
     # Compared with the last run's snapshot rather than one taken a second ago, so it doesn't sleep in a
     # shell every widget shares; only the first run, or one after a long gap, takes a quick pair of its own.
     f=/tmp/.control-procs-$UID
     t1=${EPOCHREALTIME/./}; B=$(cat /proc/[0-9]*/stat 2>/dev/null)
     t0=; [ -s "$f" ] && { read -r t0; A=$(cat); } < "$f"
-    if [ -z "$t0" ] || (( t1 - t0 > 30000000 )); then
+    gap=0; [ -n "$t0" ] && let gap=t1-t0
+    if [ -z "$t0" ] || [ "$gap" -gt 30000000 ]; then
       sleep 0.5; t0=$t1; A=$B; t1=${EPOCHREALTIME/./}; B=$(cat /proc/[0-9]*/stat 2>/dev/null)
     fi
     printf '%s\n%s\n' "$t1" "$B" > "$f"
-    awk -v ms=$(( (t1 - t0) / 1000 )) -v cores=$(nproc) '
+    awk -v gap="$gap" -v cores=$(nproc) '
+      BEGIN { ms = gap / 1000; if (ms <= 0) ms = 1 }
       function parse(l,  r) { n = l; sub(/^[^(]*[(]/, "", n); sub(/[)][^)]*$/, "", n); r = l; sub(/^.*[)] /, "", r); split(r, f, " "); return f[12] + f[13] }
       NR == FNR { a[$1] = parse($0); next }
       { t = parse($0); d = ($1 in a) ? t - a[$1] : 0; tot += d; k++; out[k] = sprintf("%.1f %d %d %s", d * 1000 / ms, $1, f[22] * 4096, n) }
       END { print sprintf("%.1f %d %d", tot * 1000 / ms / cores, k, cores); fflush(); for (i = 1; i <= k; i++) print out[i] | "sort -rn | head -12" }
     ' <(echo "$A") <(echo "$B")
-  """) every 3s timeout 15s
-  source ipx = cmd("ip -br addr") every 1m
-  source upd = cmd("pacman -Qu 2>/dev/null | wc -l") every 30m
-  source png = stream("while :; do ping -O -n -i 5 -W 4 1.1.1.1; sleep 5; done")
+  """) every 15s timeout 15s
+  source ipx = cmd("ip -br addr") every 5m
+  source upd = cmd("pacman -Qu 2>/dev/null | wc -l") every 6h
+  // ICMP is blocked on a lot of phones: an always-on ping stream never measured
+  // anything here, and kept a shell and the radio awake all day. One HTTPS probe
+  // every two minutes measures the latency apps actually see; status turns a
+  // failure into "offline" instead of leaving a stale number on screen.
+  source probe = cmd("curl -sS -o /dev/null -w '%{time_total}' --max-time 6 https://1.1.1.1/cdn-cgi/trace") every 2m timeout 10s status
 
   state tab = "procs" persist
   state sel = null
@@ -502,7 +517,7 @@ face "control" {
   let pl = lines(pr ?? "")
   let ph = words(pl[0] ?? "")
   let cpu = ph[0] == null ? null : clamp(num(ph[0]), 0, 100)
-  let cpuHist = history(cpu, 60)
+  let cpuHist = history(cpu, 12)
   let nprocs = ph[1]
   let cores = ph[2]
   let procs = drop(pl, 1).map(l => words(l)).filter(w => len(w) >= 4).map(w => {
@@ -518,9 +533,16 @@ face "control" {
     v6: count(drop(w, 2), a => contains(a, ":") && !startsWith(a, "fe80"))
   })
   let vpn = any(ifs, i => startsWith(i.name, "tun") || startsWith(i.name, "wg"))
-  let pm = match(png ?? "", "time=([0-9.]+)")
-  let ms = pm != null ? round(num(pm[0])) : contains(png ?? "", "no answer") ? -1 : null
+  // curl's time_total is in seconds; a failed probe has ok false and no number.
+  let pm = probe != null && probe.ok ? num(probe.out) : null
+  let ms = pm != null && pm >= 0 && pm <= 10 ? round(pm * 1000) : probe != null && !probe.ok ? -1 : null
   let msHist = history(ms != null && ms >= 0 ? ms : null, 60)
+  // Rate over the time Android actually spent between reads, so a page that was
+  // off screen for a while doesn't report a huge spike when it comes back.
+  let traf0 = prev(traf)
+  let span = traf != null && traf0 != null && traf.uptime != null && traf0.uptime != null && traf.uptime > traf0.uptime ? traf.uptime - traf0.uptime : null
+  let down = span != null && traf.rx != null && traf0.rx != null && traf.rx >= traf0.rx ? (traf.rx - traf0.rx) / span : null
+  let up = span != null && traf.tx != null && traf0.tx != null && traf.tx >= traf0.tx ? (traf.tx - traf0.tx) / span : null
 
   // Phone
   let disk = sys.storage
@@ -531,6 +553,9 @@ face "control" {
   let agent = ag.default
   let strip = (rec ?? []).take(8)
   let updates = num(upd, 0)
+  let publicIp = pub != null && pub.ok && pub.out != null ? pub.out.ip : null
+  let publicWhere = publicIp == null || pub.out == null ? "" : lower("${pub.out.city ?? ""} ${pub.out.country ?? ""}")
+  let publicOrg = publicIp == null || pub.out == null ? "" : pub.out.org ?? ""
 
   let wide = (tileWidth ?? 0) > (tileHeight ?? 1)
   let typing = screenInset > 120
@@ -595,6 +620,11 @@ face "control" {
       gap: 6
       Chip { t: bat.charging ? "⚡${bat.level}%" : "${bat.level}%"; tint: bat.level < 20 && !bat.charging ? red : bat.charging ? green : foreground }
       Chip { t: str.up(fmtDuration(sys.uptime)); tint: muted }
+      // Live traffic, from Android's counters: the network is visible without
+      // having to open the net tab, and costs no extra shell or radio call.
+      if down != null && up != null {
+        Chip { t: "↓${fmtBytes(down)}/s · ↑${fmtBytes(up)}/s"; tint: muted }
+      }
       if updates > 0 {
         Text { text: str.updates(updates); font: jb; fontSize: 11; color: yellow; padding: [9, 5]; background: alpha(yellow, 0.12); border: 1; borderColor: alpha(yellow, 0.3); radius: 10 * corners; onTap: terminal("pacman -Syu", "update") }
       }
@@ -652,7 +682,7 @@ face "control" {
           fill: height
           onTap: tab = "net"
           Row {
-            Label { t: "PING 1.1.1.1"; tint: muted }
+            Label { t: "HTTPS RTT"; tint: muted }
             Spacer { weight: 1 }
             Text { text: ms == null ? "…" : ms < 0 ? str.offline : "${ms} ms"; font: jb; fontSize: 10; color: msColor }
           }
@@ -741,15 +771,22 @@ face "control" {
         }
       }
       Sparkline { values: msHist; min: 0; color: cyan; area: true; fill: width; height: 48 }
+      // The phone's own byte counters, as a rate over the time between reads.
+      Row {
+        gap: 12
+        align: center
+        Text { text: "↓ ${down == null ? "…" : fmtBytes(down) + "/s"}"; font: jb; fontSize: 12; color: down == null ? muted : green; weight: 1; maxLines: 1 }
+        Text { text: "↑ ${up == null ? "…" : fmtBytes(up) + "/s"}"; font: jb; fontSize: 12; color: up == null ? muted : cyan; weight: 1; maxLines: 1 }
+      }
       Label { t: str.public; tint: muted }
       Row {
         gap: 8
         align: center
-        onTap: { copy(pub.ip ?? ""); haptic() }
-        Text { text: pub.ip ?? "…"; font: jb; fontSize: 14; weight: 1; maxLines: 1 }
-        Text { text: lower("${pub.city ?? ""} ${pub.country ?? ""}"); font: jb; fontSize: 11; color: muted; maxLines: 1 }
+        onTap: { copy(publicIp ?? ""); haptic() }
+        Text { text: pub == null ? "…" : publicIp == null ? str.offline : publicIp; font: jb; fontSize: 14; weight: 1; maxLines: 1; color: pub != null && publicIp == null ? red : foreground }
+        Text { text: publicWhere; font: jb; fontSize: 11; color: muted; maxLines: 1 }
       }
-      Text { text: pub.org ?? ""; font: jb; fontSize: 11; color: muted; maxLines: 1 }
+      Text { text: publicOrg; font: jb; fontSize: 11; color: muted; maxLines: 1 }
       Label { t: str.interfaces; tint: muted }
       for i in ifs key i.name {
         Row {

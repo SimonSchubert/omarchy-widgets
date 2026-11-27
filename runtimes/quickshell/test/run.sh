@@ -14,6 +14,9 @@
 # and `owl check` and Owl.js must accept and reject the same files: those, and
 # cases/*.owl, small files that each pass or fail one rule.
 #
+# On a Mac it also runs walk.js in JavaScriptCore, through ../../swiftui's owl-walk,
+# since the SwiftUI runtime runs this same Owl.js there.
+#
 # Needs java (17+), javac and node. The expected output is never stored:
 # it comes from the jar in this repo, so a new owl.jar is checked as it lands.
 
@@ -32,6 +35,12 @@ export TZ=Europe/Berlin
 java_opts=(-Duser.timezone=Europe/Berlin -Duser.language=en -Duser.country=US)
 
 javac -cp "$jar" -d "$out" "$here/OwlOracle.java"
+
+walk_jsc=
+if [ "$(uname)" = Darwin ] && command -v swift >/dev/null; then
+  swift build -q --package-path "$here/../../swiftui" --product owl-walk
+  walk_jsc=$(swift build --package-path "$here/../../swiftui" --show-bin-path)/owl-walk
+fi
 
 # The same JSON, except that numbers may differ in their last bits: sin, cos and
 # pow round differently in the JVM and in V8, so a curve can land a few ulps apart.
@@ -84,6 +93,13 @@ check() {
   else
     echo "not ok - $name"
     diff <(tr ',' '\n' <"$out/java.json") <(tr ',' '\n' <"$out/js.json") | head -10 || true
+    failed=1
+  fi
+  [ -n "$walk_jsc" ] || return 0
+  "$walk_jsc" "$here/walk.js" "$owl" "$src" "$fixture" >"$out/jsc.json" 2>/dev/null || true
+  if ! same "$out/java.json" "$out/jsc.json"; then
+    echo "not ok - $name in JavaScriptCore"
+    diff <(tr ',' '\n' <"$out/java.json") <(tr ',' '\n' <"$out/jsc.json") | head -10 || true
     failed=1
   fi
 }

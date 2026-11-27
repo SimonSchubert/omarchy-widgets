@@ -1,0 +1,202 @@
+widget "water" {
+  size: 3x1
+  minSize: 3x1
+  padding: 0
+  // Вода прибывает и плещется: быстрее, пока идёт анимация после нажатия
+  fps: since < 0.8 ? 30 : 8
+
+  meta { owl: 23; description: "Pixel-art water tracker: a glass that fills, a 7-day chart and +/- buttons"; version: "2.1"; license: "MIT"; category: "productivity" }
+  requires { pacman: [] }
+
+  strings {
+    en { title: "WATER"; unit: "ML"; days: "MTWTFSS" }
+    ru { title: "ВОДА"; unit: "МЛ"; days: "ПВСЧПСВ" }
+  }
+
+  source now = clock every 30s
+  state glasses = 0 persist
+  state day = "" persist
+  state goal = 8 persist
+  state log = {} persist     // стаканы по дням: {"20261124": 7, ...}
+  state tapAt = -100
+  state from = 0
+  state press = ""
+
+  let today = fmtTime(now, "yyyyMMdd")
+  let done = glasses >= goal
+
+  // новый день — вчерашнее в историю, счётчик с нуля
+  when today != day {
+    if day != "" { log = set(log, day, glasses) }
+    glasses = 0
+    from = 0
+    day = today
+  }
+
+  // ---- размеры: холст в «арт-пикселях», 100x30 по смыслу ----
+  let W = tileWidth ?? 305
+  let H = tileHeight ?? 106
+  let P = max(2, floor(min(W / 100, H / 30) * 2) / 2)
+  let gw = floor(W / P)
+  let gh = floor(H / P)
+  let oy = floor((gh - 30) / 2)
+
+  // ---- вода: плавно поднимается после нажатия ----
+  let since = time >= tapAt ? time - tapAt : 1000
+  let ease = 1 - pow(1 - min(1, since / 0.4), 3)
+  let shown = from + (glasses - from) * ease
+  let base = round(clamp(shown / goal, 0, 1) * 20)
+
+  // ---- график за 7 дней: [6..0] дней назад ----
+  let WD = {"Mon": 0, "Tue": 1, "Wed": 2, "Thu": 3, "Fri": 4, "Sat": 5, "Sun": 6}
+  let bars = range(7).map((i) => {
+    i: i,
+    k: 6 - i,
+    v: i == 6 ? glasses : get(log, fmtTime(now - (6 - i) * 86400, "yyyyMMdd"), 0),
+    d: sub(str.days, get(WD, fmtTime(now - (6 - i) * 86400, "EEE", null, "en"), 0), get(WD, fmtTime(now - (6 - i) * 86400, "EEE", null, "en"), 0) + 1)
+  })
+  let top = reduce(bars, (m, b) => max(m, b.v), goal)
+
+  // ---- арт ----
+  let GLASS = ["WWWWWWWWWWWW", "L..........D", "Lh.........D", "Lh.........D", "Lh.........D", "Lh.........D", "Lh.........D", "Lh.........D", "Lh.........D", "L..........D", "L..........D", "L..........D", "L..........D", "L..........D", "L..........D", "L..........D", "L..........D", "L..........D", "L..........D", "L..........D", "L..........D", "LLLLLLLLLLLL", ".DDDDDDDDDD."]
+  let PLUS = ["..WWW..", "..WWW..", "WWWWWWW", "WWWWWWW", "WWWWWWW", "..WWW..", "..WWW.."]
+  let MINUS = ["WWWWWWW", "WWWWWWW"]
+  let FONT = {
+    "0": ["aaa", "a.a", "a.a", "a.a", "aaa"], "1": [".a.", "aa.", ".a.", ".a.", "aaa"], "2": ["aaa", "..a", "aaa", "a..", "aaa"],
+    "3": ["aaa", "..a", "aaa", "..a", "aaa"], "4": ["a.a", "a.a", "aaa", "..a", "..a"], "5": ["aaa", "a..", "aaa", "..a", "aaa"],
+    "6": ["aaa", "a..", "aaa", "a.a", "aaa"], "7": ["aaa", "..a", "..a", "..a", "..a"], "8": ["aaa", "a.a", "aaa", "a.a", "aaa"],
+    "9": ["aaa", "a.a", "aaa", "..a", "aaa"], "/": ["..a", "..a", ".a.", "a..", "a.."],
+    "В": ["aa.", "a.a", "aa.", "a.a", "aa."], "О": ["aaa", "a.a", "a.a", "a.a", "aaa"], "Д": ["aaa", "a.a", "a.a", "aaa", "a.a"],
+    "А": ["aaa", "a.a", "aaa", "a.a", "a.a"], "М": ["a.a", "aaa", "a.a", "a.a", "a.a"], "Л": [".aa", "a.a", "a.a", "a.a", "a.a"],
+    "П": ["aaa", "a.a", "a.a", "a.a", "a.a"], "С": ["aaa", "a..", "a..", "a..", "aaa"], "Ч": ["a.a", "a.a", "aaa", "..a", "..a"],
+    "A": ["aaa", "a.a", "aaa", "a.a", "a.a"], "E": ["aaa", "a..", "aaa", "a..", "aaa"], "F": ["aaa", "a..", "aaa", "a..", "a.."],
+    "L": ["a..", "a..", "a..", "a..", "aaa"], "M": ["a.a", "aaa", "a.a", "a.a", "a.a"], "R": ["aa.", "a.a", "aa.", "a.a", "a.a"],
+    "S": ["aaa", "a..", "aaa", "..a", "aaa"], "T": ["aaa", ".a.", ".a.", ".a.", ".a."], "W": ["a.a", "a.a", "aaa", "aaa", "a.a"]
+  }
+
+  let ml = str(glasses * 250)
+  let labels = [
+    {s: str.title, x: 19, y: 3, p: 1, c: #94b0c2},
+    {s: str(glasses), x: 19, y: 10, p: 2, c: done ? #a7f070 : #f4f4f4},
+    {s: "/" + str(goal), x: 19 + len(str(glasses)) * 8, y: 15, p: 1, c: #566c86},
+    {s: ml + " " + str.unit, x: 19, y: 22, p: 1, c: done ? #a7f070 : #41a6f6}
+  ] + bars.map(b => {s: b.d, x: 50 + b.i * 4, y: 23, p: 1, c: b.k == 0 ? #f4f4f4 : #566c86})
+  let glyphs = flatten(labels.map(l => range(len(l.s)).map(i => {g: get(FONT, sub(l.s, i, i + 1), null), x: l.x + i * 4 * l.p, y: l.y, p: l.p, c: l.c})))
+
+  let pushed = press == "plus"
+  let pulled = press == "minus"
+  let BTN = [
+    {x: gw - 20, y: 3, w: 17, h: 14, face: #3b5dc9, hi: #73eff7, lo: #29366f, on: pushed, art: PLUS, ax: 5, ay: 2, aw: 7},
+    {x: gw - 20, y: 19, w: 17, h: 8, face: #333c57, hi: #566c86, lo: #232639, on: pulled, art: MINUS, ax: 5, ay: 1, aw: 7}
+  ]
+
+  Canvas {
+    // тап: стакан и «+» добавляют, «−» убирает
+    onPress: {
+      press = x / P >= gw - 22 ? (y / P - oy > 18 ? "minus" : "plus") : ""
+      haptic("light")
+    }
+    onRelease: press = ""
+    onTap: {
+      let gx = x / P
+      let gy = y / P - oy
+      if gx >= gw - 22 && gy > 18 {
+        if glasses > 0 {
+          from = shown
+          glasses = glasses - 1
+          tapAt = time
+        }
+      } else {
+        if (gx >= gw - 22 || gx < 18) && glasses < 30 {
+          from = shown
+          glasses = glasses + 1
+          tapAt = time
+        }
+      }
+    }
+    rect(0, 0, width, height, fill: #1a1c2c)
+    scale(P, P, 0, 0) {
+      // рамка
+      rect(1, 1, gw - 2, 1, fill: #29366f)
+      rect(1, gh - 2, gw - 2, 1, fill: #29366f)
+      rect(1, 1, 1, gh - 2, fill: #29366f)
+      rect(gw - 2, 1, 1, gh - 2, fill: #29366f)
+
+      translate(0, oy) {
+        // ---- стакан ----
+        rect(5, 4, 10, 20, fill: #232a45)
+        for i in range(1, goal) {
+          rect(5, 24 - round(i * 20 / goal), 2, 1, fill: #333c57)
+        }
+        for c in range(10) {
+          let h = base > 0 ? clamp(base + (sin(c * 1.1 + time * 5) > 0.3 ? 1 : 0), 0, 20) : 0
+          if h > 0 {
+            rect(5 + c, 24 - h, 1, h, fill: #41a6f6)
+            rect(5 + c, 24 - min(h, 6), 1, min(h, 6), fill: #3b5dc9)
+            rect(5 + c, 24 - h, 1, 1, fill: #73eff7)
+          }
+        }
+        // пузырьки
+        for i in range(3) {
+          let by = 23 - ((time * (1.5 + hash(i, 1) * 2) + i * 7) % max(base - 2, 1))
+          if base > 4 {
+            rect(6 + floor(hash(i) * 8), floor(by), 1, 1, fill: alpha(#f4f4f4, 0.8))
+          }
+        }
+        sprite(GLASS, 4, 3, 1, palette: {W: #f4f4f4, L: #94b0c2, D: #566c86, h: alpha(#f4f4f4, 0.3)})
+        // брызги после «+»
+        if since < 0.6 && glasses > from {
+          for i in range(7) {
+            rect(6 + floor(hash(i, 3) * 8), floor(3 - (since * 18 * (0.6 + hash(i, 4)) - since * since * 24)), 1, 1, fill: #73eff7)
+          }
+        }
+        // цель достигнута — искры
+        for i in range(3) {
+          if done && (floor(time * 3) + i) % 3 == 0 {
+            rect([17, 18, 17][i], [5, 13, 21][i] - 1, 1, 3, fill: #ffcd75)
+            rect([17, 18, 17][i] - 1, [5, 13, 21][i], 3, 1, fill: #ffcd75)
+          }
+        }
+
+        // ---- график ----
+        rect(50, 21, 27, 1, fill: #333c57)
+        for b in bars {
+          let h = b.v > 0 ? max(1, round(b.v / top * 15)) : 0
+          let hit = b.v >= goal
+          if h > 0 {
+            rect(50 + b.i * 4, 21 - h, 3, h, fill: hit ? #38b764 : #3b5dc9)
+            rect(50 + b.i * 4, 21 - h, 3, 1, fill: hit ? #a7f070 : #41a6f6)
+          } else {
+            rect(50 + b.i * 4, 20, 3, 1, fill: #333c57)
+          }
+        }
+        for i in range(14) {
+          rect(50 + i * 2, 21 - round(goal / top * 15), 1, 1, fill: #ffcd75)
+        }
+
+        // ---- подписи ----
+        for g in glyphs {
+          if g.g != null {
+            sprite(g.g, g.x, g.y, g.p, palette: {a: g.c})
+          }
+        }
+
+        // ---- кнопки ----
+        for b in BTN {
+          let o = b.on ? 2 : 0
+          rect(b.x, b.y + 2, b.w, b.h - 2, fill: b.lo)
+          rect(b.x, b.y + o, b.w, b.h - 2, fill: b.face)
+          rect(b.x + 1, b.y + o, b.w - 2, 1, fill: b.hi)
+          rect(b.x, b.y + o + 1, 1, b.h - 4, fill: b.hi)
+          // скруглённые уголки
+          rect(b.x, b.y + o, 1, 1, fill: #1a1c2c)
+          rect(b.x + b.w - 1, b.y + o, 1, 1, fill: #1a1c2c)
+          rect(b.x, b.y + b.h - 1, 1, 1, fill: #1a1c2c)
+          rect(b.x + b.w - 1, b.y + b.h - 1, 1, 1, fill: #1a1c2c)
+          sprite(b.art, b.x + b.ax + 1, b.y + o + b.ay + 1, 1, palette: {W: b.lo})
+          sprite(b.art, b.x + b.ax, b.y + o + b.ay, 1, palette: {W: #f4f4f4})
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,325 @@
+app "drawer settings" {
+  meta { description: "Sort the app drawer, set its background transparency and manage the folders that group its apps; needs the app drawer face from the same author"; version: "1.2"; license: "MIT"; category: "system"; owl: 16 }
+  requires { pacman: ["bash", "coreutils"] }
+  strings {
+    en {
+      title: "drawer settings"
+      openSettings: "open launcher settings"
+      sortHeading: "Sort apps in the drawer"
+      sortDrawer: "drawer order"
+      sortName: "name A–Z"
+      sortRecent: "recently used"
+      sortHelp: "Drawer order keeps the launcher's own order; recently used puts the apps you opened last first."
+      faceHelp: "These settings take effect in the app drawer face from the same author: install it from the store and swipe to that page."
+      backgroundHeading: "Drawer background"
+      transparency: "Transparency"
+      transparencyHelp: "0% is solid; 100% leaves the wallpaper fully visible behind the drawer face."
+      foldersHeading: n => "Folders (${n})"
+      foldersHelp: "apps in a folder leave their old section"
+      foldersEmpty: "No folders yet. Make one below, then add apps to it."
+      appsCount: n => "${n} apps"
+      up: "↑"
+      down: "↓"
+      edit: "edit"
+      remove: "✕"
+      newFolderPlaceholder: "new folder name"
+      add: "[ add ]"
+      duplicate: "that folder already exists"
+      back: "[‹ folders]"
+      folderNamePlaceholder: "folder name"
+      rename: "[ rename ]"
+      appsHeading: n => "Apps in this folder (${n})"
+      deleteFolder: "delete folder"
+      findPlaceholder: "find an app to add"
+      clear: "[ clear ]"
+      checked: "[x]"
+      unchecked: "[ ]"
+    }
+  }
+  title: str.title
+  icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" rx="56" fill="#24283B"/><path d="M44 84a16 16 0 0 1 16-16h48l18 22h70a16 16 0 0 1 16 16v14H44z" fill="currentColor"/><path d="M44 120h168v68a16 16 0 0 1-16 16H60a16 16 0 0 1-16-16z" fill="#7AA2F7"/><circle cx="182" cy="154" r="26" fill="#1A1B26"/><path d="M182 132v8m0 28v8m-22-22h8m28 0h8m-37-16 6 6m22 22 6 6m0-34-6 6m-22 22-6 6" stroke="#F4E3A1" stroke-width="8" stroke-linecap="round"/><circle cx="182" cy="154" r="9" fill="#F4E3A1"/></svg>"""
+
+  // The drawer face reads this same file, so changes here show there as soon as the file changes.
+  source raw = file("~/.config/omalauncher/drawer-settings.json") json
+  source d = android.drawer
+  source now = clock every 1s
+
+  state cfg = {sort: "kind", folders: []}
+  state view = "main"
+  state active = 0
+  state newName = ""
+  state renameText = ""
+  state query = ""
+  state note = ""
+  state saveAt = 0
+
+  let apps = d.apps ?? []
+  let folders = cfg.folders ?? []
+  let sort = cfg.sort ?? "kind"
+  let transparency = clamp(num(cfg.transparency ?? 3), 0, 100)
+  let activeFolder = folders[active] ?? {name: "", apps: []}
+  let activeApps = activeFolder.apps ?? []
+  let found = trim(query)
+  let visibleApps = found == "" ? apps : rank(apps, found)
+
+  on raw first { if raw != null && raw.folders != null { cfg = raw } }
+  on raw { if raw != null && raw.folders != null && toJson(raw) != toJson(cfg) { cfg = raw } }
+  on view {
+    note = ""
+    if view == "folder" {
+      renameText = activeFolder.name
+      query = ""
+    }
+  }
+
+  // The slider updates the number on every step; save once after it settles. run() is async,
+  // so a write per step could land out of order and put a stale value back in cfg.
+  at saveAt {
+    if saveAt > 0 {
+      run("f=$HOME/.config/omalauncher/drawer-settings.json; printf '%s' ${sh(toJson(cfg))} > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+      saveAt = 0
+    }
+  }
+
+  // Saves below quote the JSON as one shell word with sh(), including any quotes in a folder name,
+  // and write it to the file the drawer reads. The file is the only source of truth.
+  Column {
+    scroll: true
+    gap: 12
+    padding: [12, 0]
+
+    if view == "main" {
+      Row {
+        fill: width
+        align: center
+        gap: 8
+        Text { text: str.title; fontSize: 24; color: accent; weight: 1 }
+        Text { text: str.openSettings; style: small; color: accent; onTap: launcher("settings") }
+      }
+      Text { text: str.faceHelp; style: small; color: muted }
+      Text { text: str.sortHeading; style: label }
+
+      Row {
+        fill: width
+        gap: 4
+        for s in [{id: "kind", label: str.sortDrawer}, {id: "name", label: str.sortName}, {id: "recent", label: str.sortRecent}] key s.id {
+          Text {
+            text: sort == s.id ? "[${s.label}]" : s.label
+            color: sort == s.id ? accent : muted
+            align: center
+            maxLines: 1
+            padding: [10, 6]
+            radius: 8 * corners
+            background: sort == s.id ? surface : transparent
+            weight: 1
+            onTap: {
+              let next = merge(cfg, {sort: s.id})
+              cfg = next
+              run("f=$HOME/.config/omalauncher/drawer-settings.json; printf '%s' ${sh(toJson(next))} > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+            }
+          }
+        }
+      }
+      Text { text: str.sortHelp; style: small; color: muted }
+
+      Text { text: str.backgroundHeading; style: label }
+
+      Row {
+        fill: width
+        align: center
+        gap: 8
+        Text { text: str.transparency; maxLines: 1 }
+        Slider {
+          value: transparency
+          min: 0
+          max: 100
+          step: 1
+          live: true
+          weight: 1
+          color: accent
+          track: alpha(muted, 0.25)
+          onChange: {
+            let next = merge(cfg, {transparency: round(value)})
+            cfg = next
+            saveAt = now + 1
+          }
+        }
+        Text { text: "${round(transparency)}%"; width: 56; align: end; color: accent }
+      }
+      Text { text: str.transparencyHelp; style: small; color: muted }
+
+      Row {
+        fill: width
+        align: center
+        Text { text: str.foldersHeading(len(folders)); style: label; weight: 1 }
+        Text { text: str.foldersHelp; style: small; color: muted }
+      }
+
+      if len(folders) == 0 {
+        Text { text: str.foldersEmpty; color: muted; padding: [8, 0] }
+      }
+
+      for f, i in folders key f.name {
+        Row {
+          fill: width
+          align: center
+          gap: 4
+          padding: [8, 0]
+          Text { text: i > 0 ? str.up : " "; color: accent; width: 24; align: center; onTap: if i > 0 {
+            let nf = set(set(folders, i, folders[i - 1]), i - 1, folders[i])
+            let next = merge(cfg, {folders: nf})
+            cfg = next
+            run("f=$HOME/.config/omalauncher/drawer-settings.json; printf '%s' ${sh(toJson(next))} > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+          } }
+          Text { text: i < len(folders) - 1 ? str.down : " "; color: accent; width: 24; align: center; onTap: if i < len(folders) - 1 {
+            let nf = set(set(folders, i, folders[i + 1]), i + 1, folders[i])
+            let next = merge(cfg, {folders: nf})
+            cfg = next
+            run("f=$HOME/.config/omalauncher/drawer-settings.json; printf '%s' ${sh(toJson(next))} > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+          } }
+          Text { text: "${f.name ?? ""}"; weight: 1; maxLines: 1; onTap: { active = i; view = "folder" } }
+          Text { text: str.appsCount(len(f.apps ?? [])); style: small; color: muted }
+          Text { text: str.edit; color: accent; onTap: { active = i; view = "folder" } }
+          Text { text: str.remove; color: red; onTap: {
+            let next = merge(cfg, {folders: remove(folders, i)})
+            cfg = next
+            run("f=$HOME/.config/omalauncher/drawer-settings.json; printf '%s' ${sh(toJson(next))} > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+            if active >= len(folders) - 1 { active = max(0, len(folders) - 2) }
+          } }
+        }
+      }
+
+      Row {
+        fill: width
+        align: center
+        gap: 8
+        Input {
+          text: newName
+          placeholder: str.newFolderPlaceholder
+          weight: 1
+          clear: true
+          onChange: newName = value
+          onSubmit: if trim(value) != "" {
+            let name = trim(value)
+            if any(folders, f => lower(f.name ?? "") == lower(name)) {
+              note = str.duplicate
+            } else {
+              let next = merge(cfg, {folders: flatten([folders, [{name: name, apps: []}]])})
+              cfg = next
+              run("f=$HOME/.config/omalauncher/drawer-settings.json; printf '%s' ${sh(toJson(next))} > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+              newName = ""
+              note = ""
+            }
+          }
+        }
+        Text { text: str.add; color: accent; onTap: if trim(newName) != "" {
+          let name = trim(newName)
+          if any(folders, f => lower(f.name ?? "") == lower(name)) {
+            note = str.duplicate
+          } else {
+            let next = merge(cfg, {folders: flatten([folders, [{name: name, apps: []}]])})
+            cfg = next
+            run("f=$HOME/.config/omalauncher/drawer-settings.json; printf '%s' ${sh(toJson(next))} > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+            newName = ""
+            note = ""
+          }
+        } }
+      }
+      if note != "" { Text { text: note; color: orange; style: small } }
+    } else {
+      Row {
+        fill: width
+        align: center
+        gap: 8
+        Text { text: str.back; color: accent; onTap: view = "main" }
+        Text { text: activeFolder.name; weight: 1; maxLines: 1 }
+      }
+
+      Row {
+        fill: width
+        align: center
+        gap: 8
+        Input {
+          text: renameText
+          placeholder: str.folderNamePlaceholder
+          weight: 1
+          onChange: renameText = value
+          onSubmit: if trim(value) != "" {
+            let name = trim(value)
+            if any(folders, f => f.name != activeFolder.name && lower(f.name ?? "") == lower(name)) {
+              note = str.duplicate
+            } else {
+              let next = merge(cfg, {folders: set(folders, active, merge(activeFolder, {name: name}))})
+              cfg = next
+              run("f=$HOME/.config/omalauncher/drawer-settings.json; printf '%s' ${sh(toJson(next))} > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+              note = ""
+            }
+          }
+        }
+        Text { text: str.rename; color: accent; onTap: if trim(renameText) != "" {
+          let name = trim(renameText)
+          if any(folders, f => f.name != activeFolder.name && lower(f.name ?? "") == lower(name)) {
+            note = str.duplicate
+          } else {
+            let next = merge(cfg, {folders: set(folders, active, merge(activeFolder, {name: name}))})
+            cfg = next
+            run("f=$HOME/.config/omalauncher/drawer-settings.json; printf '%s' ${sh(toJson(next))} > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+            note = ""
+          }
+        } }
+      }
+
+      Row {
+        fill: width
+        align: center
+        Text { text: str.appsHeading(len(activeApps)); style: label; weight: 1 }
+        Text { text: str.deleteFolder; color: red; onTap: {
+          let next = merge(cfg, {folders: remove(folders, active)})
+          cfg = next
+          run("f=$HOME/.config/omalauncher/drawer-settings.json; printf '%s' ${sh(toJson(next))} > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+          active = 0
+          view = "main"
+        } }
+      }
+
+      Row {
+        fill: width
+        align: center
+        Input {
+          text: query
+          placeholder: str.findPlaceholder
+          weight: 1
+          clear: true
+          onChange: query = value
+        }
+        Text { text: str.clear; color: muted; onTap: query = "" }
+      }
+      if note != "" { Text { text: note; color: orange; style: small } }
+
+      for a in visibleApps key a.key {
+        Row {
+          fill: width
+          align: center
+          gap: 8
+          padding: [6, 0]
+          Text {
+            text: any(activeApps, k => k == a.key) ? str.checked : str.unchecked
+            color: any(activeApps, k => k == a.key) ? accent : muted
+            width: 28
+            onTap: {
+              let inFolder = any(activeApps, k => k == a.key)
+              let newApps = inFolder ? activeApps.filter(k => k != a.key) : flatten([activeApps, [a.key]])
+              let next = merge(cfg, {folders: set(folders, active, merge(activeFolder, {apps: newApps}))})
+              cfg = next
+              run("f=$HOME/.config/omalauncher/drawer-settings.json; printf '%s' ${sh(toJson(next))} > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"")
+            }
+          }
+          if a.icon != null {
+            Image { src: a.icon; size: 24; label: a.name }
+          }
+          Text { text: a.name; weight: 1; maxLines: 1 }
+        }
+      }
+    }
+  }
+}

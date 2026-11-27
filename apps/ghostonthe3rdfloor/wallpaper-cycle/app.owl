@@ -5,8 +5,8 @@ app "wallpaper cycle" {
   // Android won't let an app set the system wallpaper silently; the live-wallpaper route is the supported way.
   // The detached Linux loop keeps cycling after you leave the app; the JSON config keeps each theme's own settings.
 
-  meta { description: "Auto-cycle theme wallpapers: hours-based interval, per-theme order, add or exclude images"; version: "2.2"; license: "MIT"; category: "system"; owl: 11 }
-  title: "wallpaper cycle"
+  meta { description: "Auto-cycle theme wallpapers: hours-based interval, per-theme order, thumbnails, add or exclude images"; version: "2.3"; license: "MIT"; category: "system"; owl: 16 }
+  title: str.appTitle
   icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
     <rect width="256" height="256" rx="56" fill="#1A1B26"/>
     <rect x="38" y="54" width="180" height="132" rx="16" fill="#24283B"/>
@@ -17,10 +17,45 @@ app "wallpaper cycle" {
   </svg>"""
   requires { pacman: ["bash", "coreutils", "findutils", "gawk", "grep", "sed", "jq", "util-linux"] }
 
+  strings {
+    en {
+      appTitle: "wallpaper cycle"
+      intro: "Cycles the applied theme's backgrounds. Time and order are saved per theme."
+      on: "ON"
+      offButton: "OFF"
+      offStatus: "off"
+      next: "next"
+      noWallpapers: "no wallpapers included"
+      position: (name, pos, total) => "${name}  ${pos}/${total}"
+      every: t => "every ${t}"
+      cycleTime: "cycle time"
+      hoursHelp: "Hours, fractions allowed. Minimum one minute."
+      hoursUnit: "h"
+      minutesUnit: "min"
+      hoursValue: n => "${n} h"
+      minutesValue: n => "${n} min"
+      equals: t => "= ${t}"
+      wallpapers: "wallpapers"
+      included: (n, total) => "${n} of ${total} included"
+      orderHelp: "tap to include · ‹ › to change order"
+      showNames: "[ show names ]"
+      hideNames: "[ hide names ]"
+      addedHelp: "Added images go into this theme's backgrounds folder."
+      addImages: "[ add images ]"
+      up: "‹ up"
+      down: "down ›"
+      androidSetup: "Android home + lock screen"
+      setupHelp: "One-time setup: open Style › Background, tap [ use live wallpaper ], and choose Home + Lock screen. After that, every change here updates Android too."
+      openStyle: "[ open style ]"
+      footer: "The switch is global; time, order and excludes are per theme. Cycling runs in the background while on. Added images go into this theme's backgrounds folder."
+    }
+  }
+
   // The script writes six status lines (name, count, position, enabled, interval seconds, theme) and a JSON list
-  // of every candidate with its included/excluded state. file() sources update as soon as the files change.
+  // of every candidate with its path, included/excluded state and order. file() sources update as soon as the files change.
   source status = file("~/.cache/omalauncher/wallpaper-cycle.status")
   source wallpapers = file("~/.cache/omalauncher/wallpaper-cycle.list") json
+  source curTheme = cmd("sed -n 's/^theme[[:space:]]*=[[:space:]]\"\\(.*\\)\"/\\1/p' \"$HOME/.config/omalauncher/style/style.toml\" 2>/dev/null | tail -n 1") every 10s
   let sl = lines(status)
   let shown = sl[0] ?? ""
   let total = int(sl[1] ?? "0") ?? 0
@@ -28,16 +63,41 @@ app "wallpaper cycle" {
   let enabled = (sl[3] ?? "0") == "1"
   let interval = int(sl[4] ?? "300") ?? 300
   let theme = sl[5] ?? ""
-  let intervalText = interval >= 3600 ? "${fixed(interval / 3600, 2)} h" : "${round(interval / 60, 0)} min"
+  let intervalText = interval >= 3600 ? str.hoursValue(fixed(interval / 3600, 2)) : str.minutesValue(round(interval / 60, 0))
+
+  // A local order lets a button press swap two thumbnails before the saved list catches up.
+  let shownNames = orderPreview == null ? (wallpapers ?? []).map(w => w.name) : orderPreview
+  let shownItems = shownNames.map(nm => find(wallpapers ?? [], w => w.name == nm) ?? {name: nm, src: "", included: false})
 
   state installed = 0
+  state nextCheck = 0 persist
   state hoursInput = ""
+  state showNames = false persist
+  // Taps change the dot at once; the list file confirms the saved value a moment later.
+  state pending = {}
+  state orderPreview = null
+  state lastTheme = ""
+  // Also refresh on the first value: after a theme change while the app was closed, this is the
+  // first fetch and a plain `on` would skip it, leaving the old theme's thumbnails on screen.
+  on wallpapers {
+    pending = {}
+    if orderPreview != null {
+      let names = (wallpapers ?? []).map(w => w.name)
+      if join(names, "|") == join(orderPreview, "|") { orderPreview = null }
+    }
+  }
   // Show the switch change immediately, then let the status file confirm it.
   state uiOn = null
   let shownOn = uiOn == null ? enabled : uiOn
   on status { uiOn = null }
+  on curTheme first {
+    if curTheme != lastTheme {
+      lastTheme = curTheme
+      run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh status')
+    }
+  }
 
-  // Writes the helper once; it owns ~/.cache/omalauncher/wallpaper-cycle.json and .list.
+  // Writes the helper when the app starts; it owns ~/.cache/omalauncher/wallpaper-cycle.json and .list.
   let install = """
 mkdir -p "$HOME/.cache/omalauncher"
 cat > "$HOME/.cache/omalauncher/wallpaper-cycle.sh" <<'EOS'
@@ -161,7 +221,7 @@ sync() {
   }
   cfg_json=${out%%$'\t'*}
   summary=${out#*$'\t'}
-  printf '%s\n' "$cfg_json" > "$dir/.wc-cfg.tmp" && mv "$dir/.wc-cfg.tmp" "$cfg"
+  printf '%s\n' "$cfg_json" > "$dir/.wc-cfg.tmp.$$" && mv "$dir/.wc-cfg.tmp.$$" "$cfg"
   parse_summary "$summary"
 }
 
@@ -176,18 +236,32 @@ read_light() {
   CFG_ORDER=("${parts[@]:2}")
 }
 
+# The UI list follows the saved order first, so the order buttons have something to reorder.
+# Excluded files come after it; their position in this list is not a cycle position.
 write_list() {
   {
+    local sep="" t=${TNAME:-$(theme_name)} f d src on
+    emit() {
+      [ -n "$1" ] || return 0
+      f=$1
+      src=""
+      for d in "$HOME/.config/omarchy/backgrounds/$t" "$HOME/.config/omarchy/themes/$t/backgrounds" "$HOME/.local/share/omarchy/themes/$t/backgrounds"; do
+        [ -f "$d/$f" ] && { src="$d/$f"; break; }
+      done
+      [ -n "$src" ] || return 0
+      if in_array "$f" "${CFG_EXCLUDE[@]}"; then on=false; else on=true; fi
+      printf '%s{"name":"%s","src":"%s","included":%s}' "$sep" "$(json_quote "$f")" "$(json_quote "$src")" "$on"
+      sep=","
+    }
     printf '['
-    sep=""
+    for f in "${CFG_ORDER[@]}"; do emit "$f"; done
     while IFS= read -r f; do
       [ -n "$f" ] || continue
-      if in_array "$f" "${CFG_EXCLUDE[@]}"; then on=false; else on=true; fi
-      printf '%s{"name":"%s","included":%s}' "$sep" "$(json_quote "$f")" "$on"
-      sep=","
+      in_array "$f" "${CFG_ORDER[@]}" && continue
+      emit "$f"
     done <<< "$FOUND_LIST"
     printf ']\n'
-  } > "$list.tmp" && mv "$list.tmp" "$list"
+  } > "$list.tmp.$$" && mv "$list.tmp.$$" "$list"
 }
 
 write_status() {
@@ -198,7 +272,7 @@ write_status() {
   [ -n "$shown" ] || shown=${CFG_ORDER[0]}
   pos=$((idx + 1))
   [ "$pos" -lt 1 ] && pos=1
-  printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$shown" "${#CFG_ORDER[@]}" "$pos" "$CFG_ENABLED" "$CFG_INTERVAL" "${TNAME:-$(theme_name)}" > "$status.tmp" && mv "$status.tmp" "$status"
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$shown" "${#CFG_ORDER[@]}" "$pos" "$CFG_ENABLED" "$CFG_INTERVAL" "${TNAME:-$(theme_name)}" > "$status.tmp.$$" && mv "$status.tmp.$$" "$status"
   write_list
 }
 
@@ -208,7 +282,7 @@ set_bg() {
     /^\[/ && !done { print "background = \"" name "\""; done = 1 }
     { print }
     END { if (!done) print "background = \"" name "\"" }
-  ' "$st" > "$dir/.style.tmp" && cat "$dir/.style.tmp" > "$st"
+  ' "$st" > "$dir/.style.tmp.$$" && cat "$dir/.style.tmp.$$" > "$st"
 }
 
 step() {
@@ -234,7 +308,25 @@ move_item() {
   [ "$ni" -eq "$idx" ] && { write_status; return 0; }
   swap=${CFG_ORDER[$ni]}; CFG_ORDER[$ni]=${CFG_ORDER[$idx]}; CFG_ORDER[$idx]=$swap
   arr=$(printf '%s\n' "${CFG_ORDER[@]}" | json_array)
-  jq --arg t "$TNAME" --argjson arr "$arr" '.themes[$t].order = $arr' "$cfg" > "$dir/.wc-cfg.tmp" && mv "$dir/.wc-cfg.tmp" "$cfg"
+  jq --arg t "$TNAME" --argjson arr "$arr" '.themes[$t].order = $arr' "$cfg" > "$dir/.wc-cfg.tmp.$$" && mv "$dir/.wc-cfg.tmp.$$" "$cfg"
+  write_status
+}
+
+# Move any item to any position, for the order buttons in the app.
+reorder_item() {
+  local from=$1 to=$2 n=${#CFG_ORDER[@]} item
+  local -a before after
+  [ "$from" -ge 0 ] && [ "$from" -lt "$n" ] || { write_status; return 0; }
+  [ "$to" -ge 0 ] && [ "$to" -lt "$n" ] || { write_status; return 0; }
+  [ "$from" -eq "$to" ] && { write_status; return 0; }
+  item=${CFG_ORDER[$from]}
+  unset 'CFG_ORDER[$from]'
+  CFG_ORDER=("${CFG_ORDER[@]}")
+  before=("${CFG_ORDER[@]:0:$to}")
+  after=("${CFG_ORDER[@]:$to}")
+  CFG_ORDER=("${before[@]}" "$item" "${after[@]}")
+  arr=$(printf '%s\n' "${CFG_ORDER[@]}" | json_array)
+  jq --arg t "$TNAME" --argjson arr "$arr" '.themes[$t].order = $arr' "$cfg" > "$dir/.wc-cfg.tmp.$$" && mv "$dir/.wc-cfg.tmp.$$" "$cfg"
   write_status
 }
 
@@ -249,6 +341,27 @@ kill_daemon() {
 }
 
 start_daemon() { setsid -f bash "$self" loop </dev/null >/dev/null 2>&1; }
+
+daemon_live() {
+  [ -f "$pid" ] || return 1
+  p=$(cat "$pid" 2>/dev/null) || return 1
+  case "$p" in ''|*[!0-9]*) return 1;; esac
+  kill -0 "$p" 2>/dev/null
+}
+
+# Re-read the saved config, write the UI files and restore the loop if a reboot or a Linux
+# restart killed it. The app calls this from `at nextCheck` even while it is closed; the next
+# check is sent back through owl-send so the app doesn't need a live source to advance it.
+keepalive() {
+  sync
+  write_status
+  if [ "$CFG_ENABLED" = 1 ]; then
+    daemon_live || start_daemon
+  else
+    kill_daemon
+  fi
+  owl-send wallpaper-cycle.owl set nextCheck "$(( $(date +%s) + 300 ))" >/dev/null 2>&1 || true
+}
 
 valid_secs() { case "${1:-}" in ''|*[!0-9]*) return 1;; *) [ "$1" -ge 60 ];; esac; }
 
@@ -281,6 +394,13 @@ case "${1:-status}" in
     sync
     case "${2:-}" in ''|*[!0-9-]*) write_status;; *) move_item "$2";; esac
     ;;
+  reorder)
+    sync
+    case "${2:-}" in
+      ''|*[!0-9]*) write_status;;
+      *) case "${3:-}" in ''|*[!0-9]*) write_status;; *) reorder_item "$2" "$3";; esac;;
+    esac
+    ;;
   next)
     sync
     step
@@ -310,26 +430,25 @@ case "${1:-status}" in
     sync
     write_status
     ;;
+  keepalive) keepalive ;;
   loop)
     [ -f "$pid" ] && p=$(cat "$pid" 2>/dev/null) && kill -0 "$p" 2>/dev/null && exit 0
     echo $$ > "$pid"
     trap '[ "$(cat "$pid" 2>/dev/null)" = "$$" ] && rm -f "$pid"; exit 0' TERM INT EXIT
-    # Opening the app restarts the loop, so the first change waits a whole interval.
-    # Settings are checked every 30 s, not every second: start and stop kill the loop themselves.
-    first=1
     while true; do
       sync
       read_light
       [ "$CFG_ENABLED" = 1 ] || break
       t=${TNAME:-$(theme_name)}
       [ -n "$t" ] || { sleep 30; continue; }
-      [ -n "$first" ] || step
-      first=
+      step
+      # Sleep for the full interval but check enabled/theme every ~30s
+      wait_total=$CFG_INTERVAL
+      [ "$wait_total" -lt 10 ] && wait_total=10
       waited=0
-      while [ "$waited" -lt "$CFG_INTERVAL" ]; do
-        s=$((CFG_INTERVAL - waited < 30 ? CFG_INTERVAL - waited : 30))
-        sleep "$s"
-        waited=$((waited + s))
+      while [ "$waited" -lt "$wait_total" ]; do
+        sleep 30
+        waited=$((waited + 30))
         read_light
         [ "$CFG_ENABLED" = 1 ] || break 2
         [ "${TNAME:-}" = "$t" ] || break
@@ -343,15 +462,18 @@ case "${1:-status}" in
 esac
 
 EOS
-bash "$HOME/.cache/omalauncher/wallpaper-cycle.sh" status
+bash "$HOME/.cache/omalauncher/wallpaper-cycle.sh" keepalive
 """
 
-  // Install first, then honour the saved switch. A plain `start` never overwrites this theme's settings.
-  on installed first { installed = run(install) }
-  on installed {
-    if enabled { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh start') }
-    else { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh stop') }
-  }
+  // The helper resumes from its own saved config. Checking `enabled` here would read an unloaded
+  // status source at launcher start (apps run only while open) and switch cycling off on every boot.
+  on installed first { if !installed { installed = run(install) } }
+  on installed { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh keepalive') }
+
+  // `at` keeps firing while the app is closed: it brings the loop back after a Linux restart and
+  // refreshes the list, so a theme change updates the thumbnails. keepalive sets the next time
+  // through owl-send. Check every 5 minutes instead of every minute to save battery.
+  at nextCheck { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh keepalive') }
 
   Column {
     fill: true
@@ -364,9 +486,9 @@ bash "$HOME/.cache/omalauncher/wallpaper-cycle.sh" status
       align: center
       gap: 8
       Box { width: 3; height: 26; radius: 2; background: accent }
-      Text { text: "wallpaper cycle"; fontSize: 24; color: accent; weight: 1 }
+      Text { text: str.appTitle; fontSize: 24; color: accent; weight: 1 }
     }
-    Text { text: "Cycles the applied theme's backgrounds. Time and order are saved per theme."; style: small; color: muted; maxLines: 2; padding: [0, 0, 0, 11] }
+    Text { text: str.intro; style: small; color: muted; maxLines: 2; padding: [0, 0, 0, 11] }
 
     // Status card: the controls you reach for most, plus a one-line readout.
     Column {
@@ -385,7 +507,7 @@ bash "$HOME/.cache/omalauncher/wallpaper-cycle.sh" status
           background: shownOn ? accent : background
           align: center
           onTap: { haptic(); if shownOn { uiOn = false; run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh stop') } else { uiOn = true; run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh start') } }
-          Text { text: shownOn ? "ON" : "OFF"; color: shownOn ? background : foreground; weight: 1 }
+          Text { text: shownOn ? str.on : str.offButton; color: shownOn ? background : foreground; weight: 1 }
         }
         Box {
           width: 78
@@ -394,11 +516,11 @@ bash "$HOME/.cache/omalauncher/wallpaper-cycle.sh" status
           background: background
           align: center
           onTap: { haptic(); run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh next') }
-          Text { text: "next"; color: accent }
+          Text { text: str.next; color: accent }
         }
       }
       Text {
-        text: total > 0 ? "${shown}  ${position}/${total}" : "no wallpapers included"
+        text: total > 0 ? str.position(shown, position, total) : str.noWallpapers
         style: label
         color: foreground
         weight: 1
@@ -409,7 +531,7 @@ bash "$HOME/.cache/omalauncher/wallpaper-cycle.sh" status
         align: center
         gap: 8
         Text { text: theme; style: small; color: muted; weight: 1; maxLines: 1 }
-        Text { text: !shownOn ? "off" : "every ${intervalText}"; style: small; color: shownOn ? green : muted; weight: 1; maxLines: 1 }
+        Text { text: !shownOn ? str.offStatus : str.every(intervalText); style: small; color: shownOn ? green : muted; weight: 1; maxLines: 1 }
       }
     }
 
@@ -420,8 +542,8 @@ bash "$HOME/.cache/omalauncher/wallpaper-cycle.sh" status
       padding: 14
       background: surface
       radius: 10 * corners
-      Text { text: "cycle time · ${theme}"; style: label; color: accent }
-      Text { text: "Hours, fractions allowed. Minimum one minute."; style: small; color: muted }
+      Text { text: "${str.cycleTime} · ${theme}"; style: label; color: accent }
+      Text { text: str.hoursHelp; style: small; color: muted }
       Row {
         fill: width
         align: center
@@ -440,8 +562,8 @@ bash "$HOME/.cache/omalauncher/wallpaper-cycle.sh" status
             }
           }
         }
-        Text { text: "h"; style: small; color: muted }
-        Text { text: "= ${intervalText}"; style: small; color: accent; weight: 1; maxLines: 1 }
+        Text { text: str.hoursUnit; style: small; color: muted }
+        Text { text: str.equals(intervalText); style: small; color: accent; weight: 1; maxLines: 1 }
       }
     }
 
@@ -456,64 +578,106 @@ bash "$HOME/.cache/omalauncher/wallpaper-cycle.sh" status
         fill: width
         align: center
         gap: 8
-        Text { text: "wallpapers · ${theme}"; style: label; color: accent; weight: 1 }
-        Text { text: "${total} of ${len(wallpapers ?? [])} included"; style: small; color: muted; weight: 1 }
+        Text { text: "${str.wallpapers} · ${theme}"; style: label; color: accent; weight: 1 }
+        Text { text: str.included(total, len(wallpapers ?? [])); style: small; color: muted; weight: 1 }
       }
       Row {
         fill: width
         align: center
-        gap: 10
-        Text { text: "Tap a wallpaper to include or exclude it."; style: small; color: muted; weight: 1 }
-        Text { text: "[ add images ]"; style: small; color: accent; onTap: { haptic(); run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh pick') } }
+        gap: 8
+        Text { text: str.orderHelp; style: small; color: muted; weight: 1; maxLines: 2 }
+        Text { text: showNames ? str.hideNames : str.showNames; style: small; color: accent; onTap: { haptic(); showNames = !showNames } }
       }
-      Column {
-        gap: 2
-        for w in wallpapers ?? [] key w.name {
-          Row {
-            fill: width
-            gap: 8
-            align: center
-            padding: [8, 10]
-            radius: 8 * corners
-            background: background
-            onTap: { haptic(); if w.included { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh exclude ' + sh(w.name)) } else { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh include ' + sh(w.name)) } }
-            Text { text: w.included ? "●" : "○"; color: w.included ? green : muted; width: 18; align: center }
-            Text { text: w.name; weight: 1; color: w.included ? foreground : muted; maxLines: 1 }
-            Text { text: w.included ? "in" : "out"; style: small; color: w.included ? green : muted }
-          }
-        }
-      }
-    }
-
-    // Order card.
-    Column {
-      fill: width
-      gap: 8
-      padding: 14
-      background: surface
-      radius: 10 * corners
-      Text { text: "order · ${theme}"; style: label; color: accent }
-      Text { text: "Move the current wallpaper earlier or later."; style: small; color: muted }
       Row {
         fill: width
+        align: center
         gap: 8
-        Box {
-          weight: 1
-          height: 40
-          radius: 8 * corners
-          background: background
-          align: center
-          onTap: if position > 1 { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh move -1') }
-          Text { text: "‹ earlier"; style: small; color: position > 1 ? accent : muted }
-        }
-        Box {
-          weight: 1
-          height: 40
-          radius: 8 * corners
-          background: background
-          align: center
-          onTap: if position < total { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh move 1') }
-          Text { text: "later ›"; style: small; color: position < total ? accent : muted }
+        Text { text: str.addedHelp; style: small; color: muted; weight: 1; maxLines: 1 }
+        Text { text: str.addImages; style: small; color: accent; onTap: { haptic(); run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh pick') } }
+      }
+      Grid {
+        fill: width
+        columns: 3
+        gap: 6
+        for w, wi in shownItems key w.name {
+          let sel = get(pending, w.name, w.included)
+          Column {
+            height: showNames ? 131 : 112
+            gap: 3
+            padding: 3
+            radius: 8 * corners
+            background: sel ? background : alpha(surface, 0.5)
+            border: 1
+            borderColor: sel ? alpha(accent, 0.5) : muted
+            opacity: sel ? 1 : 0.6
+            Box {
+              fill: width
+              height: 76
+              radius: 6 * corners
+              clip: true
+              onTap: {
+                haptic()
+                pending = set(pending, w.name, !sel)
+                if sel { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh exclude ' + sh(w.name)) }
+                else { run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh include ' + sh(w.name)) }
+              }
+              Image { src: w.src; fit: cover; fill: true }
+              if sel {
+                Box {
+                  width: 10
+                  height: 10
+                  radius: 5
+                  background: #00E676
+                  border: 1
+                  borderColor: alpha(#000000, 0.4)
+                  align: topStart
+                  offset: [5, 5]
+                }
+              }
+            }
+            if showNames {
+              Text { text: w.name; style: small; color: sel ? foreground : muted; weight: 1; maxLines: 1; align: center }
+            }
+            Row {
+              fill: width
+              gap: 4
+              visible: sel
+              Box {
+                weight: 1
+                height: 24
+                radius: 5 * corners
+                background: alpha(surface, 0.9)
+                align: center
+                onTap: {
+                  if wi > 0 {
+                    haptic()
+                    let names = orderPreview ?? (wallpapers ?? []).map(x => x.name)
+                    let j = wi - 1
+                    orderPreview = set(set(names, wi, names[j]), j, names[wi])
+                    run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh reorder ' + sh(wi) + ' ' + sh(j))
+                  }
+                }
+                Text { text: str.up; style: small; color: wi > 0 ? accent : muted }
+              }
+              Box {
+                weight: 1
+                height: 24
+                radius: 5 * corners
+                background: alpha(surface, 0.9)
+                align: center
+                onTap: {
+                  if wi < total - 1 {
+                    haptic()
+                    let names = orderPreview ?? (wallpapers ?? []).map(x => x.name)
+                    let j = wi + 1
+                    orderPreview = set(set(names, wi, names[j]), j, names[wi])
+                    run('bash $HOME/.cache/omalauncher/wallpaper-cycle.sh reorder ' + sh(wi) + ' ' + sh(j))
+                  }
+                }
+                Text { text: str.down; style: small; color: wi < total - 1 ? accent : muted }
+              }
+            }
+          }
         }
       }
     }
@@ -525,18 +689,18 @@ bash "$HOME/.cache/omalauncher/wallpaper-cycle.sh" status
       padding: 14
       background: surface
       radius: 10 * corners
-      Text { text: "Android home + lock screen"; style: label; color: accent }
+      Text { text: str.androidSetup; style: label; color: accent }
       Text {
-        text: "One-time setup: open Style › Background, tap [ use live wallpaper ], and choose Home + Lock screen. After that, every change here updates Android too."
+        text: str.setupHelp
         style: small
         color: muted
         maxLines: 4
       }
-      Text { text: "[ open style ]"; style: small; color: accent; onTap: launcher("style") }
+      Text { text: str.openStyle; style: small; color: accent; onTap: launcher("style") }
     }
 
     Text {
-      text: "The switch is global; time, order and excludes are per theme. Cycling runs in the background while on. Added images go into this theme's backgrounds folder."
+      text: str.footer
       style: small
       color: muted
       maxLines: 4

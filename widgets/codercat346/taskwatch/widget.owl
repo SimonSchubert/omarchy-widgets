@@ -1,0 +1,247 @@
+// Taskwatch by CoderCat346. MIT.
+// The /proc sampler, memory reader and process panel (including the two-step
+// term/kill controls) are adapted from SimonSchubert's control face,
+// faces/simonschubert/control/face.owl in the omarchy-widgets store. The idea
+// of a dedicated task watcher came from an earlier local taskwatch widget.
+widget "taskwatch" {
+  page: 7
+  order: 20
+  size: 6x10
+  minSize: 3x4
+
+  meta {
+    description: "Processes and memory at a glance: recent CPU, resident RAM, the running count and one tap to terminate or kill a process."
+    version: "1.1"
+    license: "MIT"
+    category: "system"
+    author: "CoderCat346"
+    owl: 12
+  }
+
+  requires { pacman: ["procps-ng"] }
+
+  // The two sources the control face uses for its process panel, nothing else.
+  // Memory and swap, in bytes.
+  source st = cmd("free -b | awk '/^Mem:/ {m = $2 \" \" $7} /^Swap:/ {s = $2 \" \" $3} END {print m, s}'") every 1m
+  // CPU from every process's ticks over a span (proot freezes /proc/stat): first the whole system's
+  // percentage, process count and cores, then the twelve busiest as "cpu% pid rss name".
+  // Compared with the last run's snapshot rather than one taken a second ago, so it doesn't sleep in a
+  // shell every widget shares; only the first run, or one after a long gap, takes a quick pair of its own.
+  source pr = cmd("""
+    # Compared with the last run's snapshot rather than one taken a second ago, so it doesn't sleep in a
+    # shell every widget shares; only the first run, or one after a long gap, takes a quick pair of its own.
+    f=/tmp/.taskwatch-procs-$UID
+    t1=${EPOCHREALTIME/./}; B=$(cat /proc/[0-9]*/stat 2>/dev/null)
+    t0=; [ -s "$f" ] && { read -r t0; A=$(cat); } < "$f"
+    gap=0; [ -n "$t0" ] && let gap=t1-t0
+    if [ -z "$t0" ] || [ "$gap" -gt 30000000 ]; then
+      # No usable previous snapshot: show this one with zero CPU until the next poll.
+      t0=$t1; A=$B
+    fi
+    printf '%s\n%s\n' "$t1" "$B" > "$f"
+    awk -v gap="$gap" -v cores=$(nproc) '
+      BEGIN { ms = gap / 1000; if (ms <= 0) ms = 1 }
+      function parse(l,  r) { n = l; sub(/^[^(]*[(]/, "", n); sub(/[)][^)]*$/, "", n); r = l; sub(/^.*[)] /, "", r); split(r, f, " "); return f[12] + f[13] }
+      NR == FNR { a[$1] = parse($0); next }
+      { t = parse($0); d = ($1 in a) ? t - a[$1] : 0; tot += d; k++; out[k] = sprintf("%.1f %d %d %s", d * 1000 / ms, $1, f[22] * 4096, n) }
+      END { print sprintf("%.1f %d %d", tot * 1000 / ms / cores, k, cores); fflush(); for (i = 1; i <= k; i++) print out[i] | "sort -rn | head -12" }
+    ' <(echo "$A") <(echo "$B")
+  """) every 15s timeout 15s
+
+  // The row whose term/kill buttons are showing. One at a time, so a tap can't
+  // send a signal to the wrong process.
+  state sel = null
+
+  let s = words(st ?? "")
+  let memT = num(s[0])
+  let memA = num(s[1])
+  let memPct = memT ? (memT - memA) / memT * 100 : null
+  let swapT = num(s[2])
+  let swapU = num(s[3])
+  let pl = lines(pr ?? "")
+  let ph = words(pl[0] ?? "")
+  let cpu = ph[0] == null ? null : clamp(num(ph[0]), 0, 100)
+  let cpuHist = history(cpu, 12)
+  let nprocs = ph[1]
+  let cores = ph[2]
+  let procs = drop(pl, 1).map(l => words(l)).filter(w => len(w) >= 4).map(w => {
+    cpu: num(w[0]),
+    pid: int(w[1]),
+    rss: num(w[2]),
+    name: join(drop(w, 3), " ")
+  })
+
+  component Label(t, tint = muted) {
+    Text { text: t; fontSize: 10; fontWeight: 600; letterSpacing: 1.5; color: tint; maxLines: 1 }
+  }
+
+  component Gauge(label, pct, sub) {
+    Column {
+      gap: 4
+      weight: 1
+      align: center
+      Ring {
+        value: pct ?? 0
+        max: 100
+        thickness: 5
+        color: pct == null ? muted : pct > 85 ? red : pct > 60 ? yellow : green
+        track: alpha(foreground, 0.1)
+        size: 62
+      }
+      Text { text: pct == null ? "…" : "${round(pct)}"; fontSize: 18; align: center; width: 62 }
+      Label { t: label; tint: muted }
+      Text { text: sub; fontSize: 10; color: alpha(foreground, 0.7); align: center; maxLines: 1 }
+    }
+  }
+
+  component ProcessList() {
+    Column {
+      gap: 0
+      weight: 1
+      Row {
+        gap: 8
+        padding: [0, 4]
+        Label { t: "PROCESS"; tint: muted }
+        Spacer { weight: 1 }
+        Label { t: nprocs == null ? "…" : "${nprocs} running"; tint: muted }
+      }
+      Column {
+        gap: 2
+        scroll: true
+        weight: 1
+        if pr == null {
+          Text { text: "reading /proc…"; fontSize: 11; color: muted; padding: [8, 5] }
+        } else if len(procs) == 0 {
+          Text { text: "no processes"; fontSize: 11; color: muted; padding: [8, 5] }
+        } else {
+          for p in procs key p.pid {
+            Column {
+              gap: 4
+              padding: [8, 5]
+              background: sel == p.pid ? alpha(accent, 0.14) : alpha(accent, 0)
+              radius: 8 * corners
+              onTap: sel = sel == p.pid ? null : p.pid
+              Row {
+                gap: 8
+                align: center
+                Text { text: p.name; fontSize: 12; maxLines: 1; weight: 1 }
+                Text { text: fmtBytes(p.rss); fontSize: 11; color: muted; width: 48; align: end }
+                Text { text: "${fixed(p.cpu, 1)}%"; fontSize: 12; color: (p.cpu == null ? muted : p.cpu > 85 ? red : p.cpu > 60 ? yellow : green); width: 52; align: end }
+              }
+              Progress {
+                value: p.cpu == null ? 0 : min(p.cpu, 100)
+                color: alpha(p.cpu == null ? muted : p.cpu > 85 ? red : p.cpu > 60 ? yellow : green, 0.7)
+                track: alpha(foreground, 0.06)
+                height: 2
+                fill: width
+              }
+              if sel == p.pid {
+                Row {
+                  gap: 6
+                  Text { text: "pid ${p.pid}"; fontSize: 11; color: muted; weight: 1 }
+                  Text {
+                    text: "term"
+                    fontSize: 11
+                    color: yellow
+                    maxLines: 1
+                    padding: [9, 5]
+                    background: alpha(yellow, 0.12)
+                    border: 1
+                    borderColor: alpha(yellow, 0.3)
+                    radius: 10 * corners
+                    onTap: { haptic(); run("kill -TERM ${int(p.pid)}"); sel = null }
+                  }
+                  Text {
+                    text: "kill -9"
+                    fontSize: 11
+                    color: red
+                    maxLines: 1
+                    padding: [9, 5]
+                    background: alpha(red, 0.12)
+                    border: 1
+                    borderColor: alpha(red, 0.3)
+                    radius: 10 * corners
+                    onTap: { haptic(); run("kill -KILL ${int(p.pid)}"); sel = null }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      Row {
+        gap: 6
+        Text { text: "swap ${swapT ? fmtBytes(swapU) : "off"}"; fontSize: 10; color: muted }
+        Spacer { weight: 1 }
+        Text { text: "tap a process to end it"; fontSize: 10; color: muted; maxLines: 1 }
+      }
+    }
+  }
+
+  Column {
+    fill: true
+    padding: [12, 8]
+    gap: 10
+    Row {
+      align: center
+      Label { t: "TASKWATCH"; tint: accent }
+      Spacer { weight: 1 }
+      Text { text: "↻"; fontSize: 14; color: accent; padding: [0, 6]; onTap: refresh() }
+      Text { text: "⤢"; fontSize: 14; color: muted; padding: [0, 6]; onTap: screen() }
+    }
+    Column {
+      // Fixed height: without it the sparkline's fill:height makes this card
+      // grow to swallow the whole tile and the process list never gets drawn.
+      height: 160
+      gap: 8
+      padding: [12, 10]
+      frost: 24
+      background: alpha(background, 0.5)
+      border: 1
+      borderColor: alpha(accent, 0.22)
+      radius: 16 * corners
+      Row {
+        gap: 4
+        Gauge { label: "MEM"; pct: memPct; sub: memT ? "${fmtBytes(memT - memA)}/${fmtBytes(memT)}" : "…" }
+        Gauge { label: "CPU"; pct: cpu; sub: cores ? "${cores} cores" : "…" }
+        Column {
+          gap: 2
+          weight: 1
+          fill: height
+          Row {
+            Label { t: "CPU 3M"; tint: muted }
+            Spacer { weight: 1 }
+            Text { text: cpu == null ? "…" : "${round(cpu)}%"; fontSize: 10; color: cpu == null ? muted : cpu > 60 ? yellow : green }
+          }
+          Sparkline { values: cpuHist; min: 0; max: 100; color: accent; area: true; fill: width; weight: 1 }
+        }
+      }
+    }
+    Column {
+      gap: 8
+      padding: [12, 10]
+      frost: 24
+      background: alpha(background, 0.5)
+      border: 1
+      borderColor: alpha(accent, 0.22)
+      radius: 16 * corners
+      weight: 1
+      ProcessList { }
+    }
+  }
+
+  screen {
+    title: "taskwatch"
+    Column {
+      fill: true
+      padding: 12
+      gap: 10
+      Row {
+        Label { t: "TASKWATCH"; tint: accent }
+        Spacer { weight: 1 }
+        Text { text: "↻"; fontSize: 14; color: accent; padding: [0, 6]; onTap: refresh() }
+      }
+      ProcessList { }
+    }
+  }
+}
