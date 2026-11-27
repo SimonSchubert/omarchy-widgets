@@ -48,7 +48,8 @@ intervals, and only while their view is on screen.
 
 `openssh`, `coreutils`, `curl`, `jq` and `qrencode`, plus a reachable `routstrd` with a funded wallet on
 the machine named in **Host** (or on this device when it is blank). Without a reachable daemon the tile
-is amber and the screen shows a **Host** card for setting the alias.
+is amber and the screen shows a **Host** card for setting the alias; once it is set, **Host** at the
+foot of the screen opens the card again. The tile stays a clean status, switch and figures.
 
 ## Notes
 
