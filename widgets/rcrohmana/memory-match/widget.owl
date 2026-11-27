@@ -1,0 +1,395 @@
+// Memory match by rcrohmana, 2026. MIT License.
+widget "memory-match" {
+  size: 4x5
+  minSize: 4x5
+  padding: 10
+  fps: wait > 0 ? 30 : 1
+  meta { owl: 23; description: "Find the pairs: flip two cards, a match stays open, a miss turns back over. Ten themes, a move count, a timer with pause, and stars"; version: "1.3"; license: "MIT"; author: "rcrohmana"; category: "games" }
+  requires { pacman: [] }
+
+  let PAIRS = range(20).map(i => floor(i / 2))   // 4 columns x 5 rows, 10 pairs
+  // a new game picks one theme, then 10 of its 12 pictures
+  let THEMES = [
+    {name: "fruit",   badge: "🍊", icons: ["🍎", "🍋", "🍇", "🍉", "🍒", "🥝", "🍑", "🍍", "🍌", "🍓", "🥥", "🍐"]},
+    {name: "zoo", badge: "🐾", icons: ["🐶", "🐱", "🐼", "🦊", "🐸", "🐵", "🐯", "🐨", "🐷", "🐰", "🦁", "🐮"]},
+    {name: "sea",     badge: "🌊", icons: ["🐙", "🦀", "🐠", "🐳", "🦈", "🐢", "🦑", "🐬", "🦞", "🐡", "🪼", "🦭"]},
+    {name: "food",    badge: "🍽️", icons: ["🍕", "🍔", "🍟", "🌮", "🍣", "🍩", "🍪", "🧁", "🍜", "🥐", "🍦", "🥨"]},
+    {name: "sport",  badge: "🏆", icons: ["⚽️", "🏀", "🏈", "⚾️", "🎾", "🏐", "🏓", "🎱", "🥊", "⛳️", "🏸", "🛹"]},
+    {name: "ride",  badge: "🧭", icons: ["🚗", "🚀", "✈️", "🚂", "🚢", "🚁", "🏍️", "🚲", "🛸", "🚌", "⛵️", "🚒"]},
+    {name: "earth", badge: "🌿", icons: ["🌻", "🌵", "🍄", "🌈", "⭐️", "🌙", "🔥", "❄️", "🌊", "🍁", "🌸", "⚡️"]},
+    {name: "faces",   badge: "🎭", icons: ["😀", "😎", "😍", "🤔", "😴", "🤯", "😡", "🥶", "🤠", "👻", "🤖", "👽"]},
+    {name: "wings", badge: "🦅", icons: ["🦋", "🐝", "🐞", "🐌", "🦉", "🦜", "🐧", "🦆", "🦚", "🐛", "🦩", "🐓"]},
+    {name: "music",   badge: "🎶", icons: ["🎸", "🎹", "🥁", "🎺", "🎻", "🎷", "🎤", "🎧", "📻", "🪗", "🪕", "🎵"]}
+  ]
+  let TINTS = [red, yellow, magenta, green, bright_red, cyan, orange, blue, bright_green, bright_magenta]
+
+  source now = clock every 1s
+
+  state deck20 = shuffle(range(20).map(i => floor(i / 2))) persist
+  state matched20 = range(20).map(i => false) persist
+  state theme20 = 0 persist
+  state pics = ["🍎", "🍋", "🍇", "🍉", "🍒", "🥝", "🍑", "🍍", "🍌", "🍓"] persist
+  state open = []                 // indices face up, not yet matched (0 to 2)
+  state wait = 0                  // seconds left before a missed pair turns back
+  state moves = 0 persist
+  state best20 = 0 persist        // fewest moves for a full board, 0 = none yet
+  state startedAt = 0 persist     // Unix time of the first flip, 0 = not started
+  state endedAt = 0 persist       // Unix time the last pair was found
+  state newBest = false persist
+  state paused = false persist
+  state pausedAt = 0 persist      // Unix time the pause began
+  state pausedFor = 0 persist     // seconds spent paused this game
+  state popPar = range(20).map(i => 0)   // flipped for each card of a found pair: a bounce
+
+  let found = count(matched20, m => m) / 2
+  let won = found == 10
+  let th = THEMES[theme20] ?? THEMES[0]
+  let elapsed = startedAt > 0 ? max((endedAt > 0 ? endedAt : paused ? pausedAt : (now ?? startedAt)) - startedAt - pausedFor, 0) : 0
+  let canPause = startedAt > 0 && !won
+  let clockText = "${floor(elapsed / 60)}:${elapsed % 60 < 10 ? "0" : ""}${elapsed % 60}"
+  let stars = moves <= 14 ? 3 : moves <= 20 ? 2 : 1
+  // a missed pair shakes for its first 0.35 s
+  let shakeAmt = wait > 0.55 ? sin((0.9 - wait) * 55) * 4 * (wait - 0.55) / 0.35 : 0
+
+  // a missed pair stays up a moment, then turns back over
+  every frame {
+    if wait > 0 {
+      wait = wait - dt
+      if wait <= 0 {
+        wait = 0
+        open = []
+      }
+    }
+  }
+
+  // layout
+  let headerH = 44
+  let gap = 6
+  let cell = max(min(((tileWidth ?? 300) - 20 - gap * 5) / 4, ((tileHeight ?? 380) - 20 - headerH - 10 - gap * 6) / 5), 24)
+  let boardW = cell * 4 + gap * 5
+  let boardH = cell * 5 + gap * 6
+
+  // header tiles share one height, one corner and one fill
+  let tileBg = alpha(foreground, 0.07)
+  // under ~330 dp (a 4-column tile is ~250, a 6-column one ~380) the badge joins the name and moves and time share one box
+  let narrow = (tileWidth ?? 300) < 330
+  let btnW = narrow ? 36 : headerH
+
+  component Stat(label, value, tint = foreground, h = null) {
+    Column {
+      height: h
+      gap: 0
+      padding: [6, 3]
+      justify: center
+      radius: 6 * corners
+      background: alpha(foreground, 0.07)
+      align: center
+      Text { text: label; style: label; align: center }
+      Text { text: "${value}"; bold: true; fontSize: 15; color: tint; align: center; font: mono }
+    }
+  }
+
+  Column {
+    gap: 10
+    align: center
+    // header: theme and progress, moves, time, a new game
+    Row {
+      height: headerH
+      fill: width
+      align: center
+      gap: 6
+      if !narrow {
+        Box {
+          size: headerH
+          radius: 6 * corners
+          background: alpha(accent, 0.16)
+          align: center
+          Text { text: th.badge; fontSize: 22; align: center }
+        }
+      }
+      Column {
+        weight: 1
+        gap: 5
+        justify: center
+        Row {
+          fill: width
+          align: center
+          Text { text: narrow ? "${th.badge} ${th.name}" : th.name; bold: true; fontSize: narrow ? 14 : 15; color: accent; maxLines: 1; weight: 1 }
+          if !narrow {
+            Text { text: best20 > 0 ? "★${best20}" : ""; style: label; color: yellow; maxLines: 1 }
+          }
+        }
+        Row {
+          fill: width
+          align: center
+          gap: 6
+          Progress { value: found; max: 10; color: accent; track: alpha(foreground, 0.1); height: 6; weight: 1; animate value: spring() }
+          Text { text: "${found}/10"; style: muted; font: mono }
+        }
+      }
+      if narrow {
+        Column {
+          width: 56
+          height: headerH
+          gap: 0
+          justify: center
+          align: center
+          radius: 6 * corners
+          background: tileBg
+          Text { text: "${moves} mv"; style: label; align: center; maxLines: 1 }
+          Text { text: clockText; bold: true; fontSize: 15; align: center; font: mono }
+        }
+      } else {
+        Stat { label: "moves"; value: moves; width: 54; h: headerH }
+        Stat { label: "time"; value: clockText; width: 62; h: headerH }
+      }
+      Box {
+        width: btnW
+        height: headerH
+        radius: 6 * corners
+        background: paused ? alpha(accent, 0.18) : tileBg
+        align: center
+        onTap: {
+          if canPause && !paused {
+            pausedAt = now ?? 0
+            wait = 0
+            open = []
+            paused = true
+            haptic("light")
+          } else if paused {
+            pausedFor = pausedFor + max((now ?? pausedAt) - pausedAt, 0)
+            paused = false
+            haptic("light")
+          }
+        }
+        // icons drawn on one 20 dp grid, so pause, play and new game match
+        Canvas {
+          size: 20
+          opacity: canPause || paused ? 1 : 0.35
+          if paused {
+            path([[5, 3], [17, 10], [5, 17]], closed: true, fill: accent, stroke: accent, width: 2, cap: round)
+          } else {
+            rect(4, 3, 4.5, 14, radius: 1.5, fill: foreground)
+            rect(11.5, 3, 4.5, 14, radius: 1.5, fill: foreground)
+          }
+        }
+      }
+      Box {
+        width: btnW
+        height: headerH
+        radius: 6 * corners
+        background: tileBg
+        align: center
+        onTap: {
+          deck20 = shuffle(PAIRS)
+          theme20 = random(len(THEMES))
+          pics = take(shuffle(THEMES[theme20].icons), 10)
+          matched20 = range(20).map(i => false)
+          open = []
+          wait = 0
+          moves = 0
+          startedAt = 0
+          endedAt = 0
+          newBest = false
+          paused = false
+          pausedFor = 0
+          haptic()
+        }
+        Canvas {
+          size: 20
+          // a clockwise circle arrow: an arc from 40° round to 320°, a head at its end
+          arc(10, 10, 6.5, 40, 280, stroke: foreground, width: 2.6, cap: round)
+          path([[8.6, 2.7], [7.3, 8.4], [2.8, 3.1]], closed: true, fill: foreground)
+        }
+      }
+    }
+
+    Box {
+      width: boardW
+      height: boardH
+      radius: 10 * corners
+      background: alpha(foreground, 0.05)
+      align: center
+      Column {
+        gap: gap
+        padding: gap
+        for r in range(5) {
+          Row {
+            gap: gap
+            for c in range(4) {
+              let i = r * 4 + c
+              let k = deck20[i] ?? 0
+              let done = matched20[i] ?? false
+              let isOpen = indexOf(open, i) >= 0
+              let up = done || isOpen
+              let miss = wait > 0 && isOpen
+              let par = popPar[i] ?? 0
+              // outer and inner scales head opposite ways at different speeds: a bounce that settles at 1
+              Box {
+                size: cell
+                offset: [miss ? shakeAmt : 0, 0]
+                scale: par == 1 ? 1.14 : 1
+                animate scale: par == 1 ? tween(60ms, "out") : tween(220ms, "out")
+                onTap: {
+                  // tapping during a miss turns that pair back right away
+                  if wait > 0 {
+                    wait = 0
+                    open = []
+                  }
+                  if !won && !paused && !(matched20[i] ?? false) && indexOf(open, i) < 0 {
+                    startedAt = startedAt > 0 ? startedAt : (now ?? 0)
+                    open = open + [i]
+                    haptic("light")
+                    if len(open) == 2 {
+                      moves = moves + 1
+                      if deck20[open[0]] == deck20[open[1]] {
+                        popPar = set(set(popPar, open[0], 1 - (popPar[open[0]] ?? 0)), open[1], 1 - (popPar[open[1]] ?? 0))
+                        matched20 = set(set(matched20, open[0], true), open[1], true)
+                        open = []
+                        haptic("medium")
+                        if count(matched20, m => m) == 20 {
+                          endedAt = now ?? startedAt
+                          newBest = best20 == 0 || moves < best20
+                          best20 = newBest ? moves : best20
+                          haptic("strong")
+                        }
+                      } else {
+                        wait = 0.9
+                      }
+                    }
+                  }
+                }
+                Box {
+                  size: cell
+                  scale: par == 1 ? 0.88 : 1
+                  animate scale: par == 1 ? tween(220ms, "out") : tween(60ms, "out")
+                  // back: theme colored, with a small mark
+                  Box {
+                    size: cell
+                    radius: 8 * corners
+                    background: linear(0, 0, 1, 1, [alpha(accent, 0.55), alpha(accent, 0.22)])
+                    border: 1
+                    borderColor: alpha(accent, 0.6)
+                    align: center
+                    opacity: up ? 0 : 1
+                    scale: up ? 0.6 : 1
+                    animate opacity: tween(120ms, "out")
+                    animate scale: tween(140ms, "in")
+                    Box {
+                      size: cell * 0.42
+                      radius: cell * 0.21
+                      border: 1
+                      borderColor: alpha(foreground, 0.25)
+                      background: alpha(background, 0.18)
+                      align: center
+                      Text { text: "✦"; fontSize: cell * 0.2; color: alpha(foreground, 0.6); align: center }
+                    }
+                  }
+                  // face: the picture grows in as the back shrinks away
+                  Box {
+                    size: cell
+                    radius: 8 * corners
+                    background: done ? alpha(TINTS[k], 0.2) : miss ? alpha(red, 0.28) : alpha(foreground, 0.12)
+                    border: done || miss ? 2 : 1
+                    borderColor: done ? alpha(TINTS[k], 0.75) : miss ? red : alpha(foreground, 0.25)
+                    animate background: tween(160ms, "out")
+                    align: center
+                    opacity: up ? 1 : 0
+                    scale: up ? 1 : 0.6
+                    animate opacity: tween(140ms, "out")
+                    animate scale: up ? spring(0.55, 500) : tween(120ms, "in")
+                    Text { text: pics[k] ?? "?"; align: center; fontSize: cell * 0.5 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if paused && !won {
+        Column {
+          fill: true
+          align: center
+          justify: center
+          gap: 12
+          background: background
+          radius: 10 * corners
+          onTap: {
+            pausedFor = pausedFor + max((now ?? pausedAt) - pausedAt, 0)
+            paused = false
+            haptic("light")
+          }
+          Text { text: th.badge; fontSize: 40; align: center }
+          Text { text: "paused"; fontSize: 24; bold: true; color: accent; align: center }
+          Text { text: "${found}/10 · ${moves} ${moves == 1 ? "move" : "moves"} · ${clockText}"; style: muted; align: center }
+          Row {
+            justify: center
+            Box {
+              width: 150
+              padding: [0, 10]
+              radius: 8 * corners
+              background: accent
+              Text { text: "▶  resume"; bold: true; color: background; align: center }
+            }
+          }
+        }
+      }
+
+      if won {
+        Column {
+          fill: true
+          align: center
+          justify: center
+          gap: narrow ? 6 : 10
+          background: alpha(background, 0.9)
+          radius: 10 * corners
+          Text { text: th.badge; fontSize: narrow ? 28 : 40; align: center }
+          Text { text: "you did it!"; fontSize: narrow ? 19 : 22; bold: true; color: accent; align: center; maxLines: 1 }
+          Row {
+            gap: 4
+            justify: center
+            for s in range(3) {
+              Text { text: "★"; fontSize: narrow ? 26 : 34; color: s < stars ? yellow : alpha(foreground, 0.18) }
+            }
+          }
+          Row {
+            gap: 6
+            justify: center
+            Stat { label: "moves"; value: moves; width: narrow ? 58 : 70 }
+            Stat { label: "time"; value: clockText; width: narrow ? 58 : 70 }
+            Stat { label: "best"; value: best20; tint: yellow; width: narrow ? 58 : 70 }
+          }
+          if newBest {
+            Text { text: "🏅 new best!"; bold: true; color: yellow; align: center }
+          }
+          Row {
+            justify: center
+            Box {
+              width: narrow ? 140 : 170
+              padding: [0, narrow ? 8 : 10]
+              radius: 8 * corners
+              background: accent
+              onTap: {
+                deck20 = shuffle(PAIRS)
+                theme20 = random(len(THEMES))
+                pics = take(shuffle(THEMES[theme20].icons), 10)
+                matched20 = range(20).map(i => false)
+                open = []
+                wait = 0
+                moves = 0
+                startedAt = 0
+                endedAt = 0
+                newBest = false
+                paused = false
+                pausedFor = 0
+                haptic()
+              }
+              Text { text: "play again"; bold: true; color: background; align: center }
+            }
+          }
+        }
+      }
+    }
+  }
+}
