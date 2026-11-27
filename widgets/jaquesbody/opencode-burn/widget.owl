@@ -11,12 +11,14 @@
 // the screen behind the dial, and it sticks.
 //
 // The free lineup rotates (cat-jam-free and step-5-preview-free are already
-// gone), so the list of what you could switch to is fetched live.
+// gone), so what counts as free, and what it costs, is fetched live. It only
+// ever reads: a usage tracker that also moved your sessions would be a fault,
+// not a feature, so the meter's side pill just picks which meter it shows.
 widget "opencode-burn" {
   meta {
     owl: 16
-    description: "Tracks the shared OpenCode free-model daily quota and each model's 5-hour window, with a total-first gauge, a per-machine chart, and the sats balance on a paid provider key."
-    version: "1.9.9"
+    description: "Tracks OpenCode's shared daily free-model quota and each model's 5-hour window, with a per-machine chart and a paid key's balance in sats or your currency."
+    version: "2.0.0"
     license: "MIT"
     category: "dev"
   }
@@ -471,9 +473,8 @@ wallet_json() {
           -o ControlPath=none -o StrictHostKeyChecking=accept-new \
           "$1" 'sh -s' 2>/dev/null <<'WALLET'
 D=''
-for d in "$HOME/.routstrd" /home/*/.routstrd; do
-  [ -d "$d" ] && { D=$d; break; }
-done
+D=$HOME/.routstrd
+[ -d "$D" ] || exit 3
 [ -n "$D" ] || exit 3
 W=$D/wallet/coco.db
 R=$D/routstr.db
@@ -498,10 +499,10 @@ WALLET
 )
   [ -n "$w" ] || return 0
   printf '%s' "$w" | jq -c --arg host "$1" --arg url "$url" --arg provider "$provider" \
-      --arg model "$pmodel" --arg topup "$topup" --argjson sw "$sw" \
+      --arg model "$pmodel" --arg topup "$topup" \
       'select(.ok != 0) | . + {ok:1, why:"", code:200, where:"wallet", reserved:0,
          first:0, n:0, daybase:1, host:$host, url:$url, provider:$provider,
-         model:$model, topup:$topup, switchable:$sw}' 2>/dev/null
+         model:$model, topup:$topup}' 2>/dev/null
 }
 
 # paid.json is only a note of where the node is: opencode's own provider holds
@@ -557,10 +558,9 @@ fi
 
 # then a device on the tailnet, read over the same ssh the usage side uses.
 # Cached for ten minutes, so an offline machine costs one attempt, not one a
-# minute. One call per device asks for both things: its opencode config, in
-# either shape and under any home (ssh lands as whichever user the key was made
-# for, which is not always the one running opencode), and whether it keeps a
-# wallet, which is the answer when the config names no node at all.
+# minute. One call per device asks for both things: the ssh user's own opencode
+# config, so no other account's settings are read, and whether that user keeps
+# a wallet, which is the answer when the config names no node at all.
 rcache=$HOME/.cache/opencode-burn/paid-scan.json
 whost=''
 if [ -z "$url" ] && [ ! -s "$cands" ] && [ -r "$HOME/.config/opencode-burn/remote" ]; then
@@ -570,13 +570,9 @@ if [ -z "$url" ] && [ ! -s "$cands" ] && [ -r "$HOME/.config/opencode-burn/remot
     while read -r rh rest; do
       case "$rh" in ''|'#'*) continue ;; esac
       rout=$(timeout 12 ssh -n -o BatchMode=yes -o ConnectTimeout=4 -o LogLevel=ERROR \
-               -o ControlPath=none "$rh" 'for f in "$HOME/.config/opencode/opencode.json" \
-                 /home/*/.config/opencode/opencode.json; do
-                   [ -r "$f" ] && { cat "$f"; break; }
-                 done 2>/dev/null
-                 for d in "$HOME/.routstrd" /home/*/.routstrd; do
-                   [ -d "$d" ] && { echo "@@wallet@@"; break; }
-                 done
+               -o ControlPath=none "$rh" 'f="$HOME/.config/opencode/opencode.json"
+                 [ -r "$f" ] && cat "$f" 2>/dev/null
+                 [ -d "$HOME/.routstrd" ] && echo "@@wallet@@"
                  exit 0' </dev/null 2>/dev/null)
       [ -n "$rout" ] || continue
       rwallet=0
@@ -618,8 +614,11 @@ if [ -z "$url" ] && [ -s "$cands" ]; then
     case "$cu" in *127.0.0.1*|*localhost*) [ -n "$host" ] && continue ;; esac
     probeu=$(printf %s "$cu" | sed 's:/$::')
     case "$probeu" in */v1) ;; *) probeu=$probeu/v1 ;; esac
+    pcfg=''
     if [ -n "$ckey" ]; then
-      pcode=$(curl -sS -m 6 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ckey" \
+      pcfg=$(mktemp); chmod 600 "$pcfg"
+      printf 'header = "Authorization: Bearer %s"\n' "$ckey" > "$pcfg"
+      pcode=$(curl -sS -m 6 -o /dev/null -w '%{http_code}' -K "$pcfg" \
                 "$probeu/balance/info" </dev/null 2>/dev/null)
     else
       pcode=$(curl -sS -m 6 -o /dev/null -w '%{http_code}' "$probeu/balance/info" </dev/null 2>/dev/null)
@@ -629,12 +628,13 @@ if [ -z "$url" ] && [ -s "$cands" ]; then
     if [ "$pcode" != 200 ]; then
       pbase=$(printf %s "$probeu" | sed 's:/v1$::')
       if [ -n "$ckey" ]; then
-        pcode=$(curl -sS -m 6 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ckey" \
+        pcode=$(curl -sS -m 6 -o /dev/null -w '%{http_code}' -K "$pcfg" \
                   "$pbase/balance" </dev/null 2>/dev/null)
       else
         pcode=$(curl -sS -m 6 -o /dev/null -w '%{http_code}' "$pbase/balance" </dev/null 2>/dev/null)
       fi
     fi
+    [ -n "$pcfg" ] && rm -f "$pcfg"
     if [ "$pcode" = 200 ]; then
       pick=$(printf '%s\t%s\t%s\t%s' "$cpid" "$cu" "$ckey" "$cmdl")
       break
@@ -645,11 +645,6 @@ if [ -z "$url" ] && [ -s "$cands" ]; then
   [ -n "$key" ] || key=$(printf '%s' "$pick" | cut -f3)
   [ -n "$pmodel" ] || pmodel=$(printf '%s' "$pick" | cut -f4)
 fi
-
-# a node reached over ssh is another machine's: this device cannot switch its
-# own sessions onto a provider it does not have, so the widget only shows it
-sw=1
-[ -n "$host" ] && sw=0
 
 # a device that keeps its own wallet needs no endpoint at all, and its periods
 # are what was really spent rather than what was sampled here
@@ -691,17 +686,16 @@ esac
 # asked in the same words as one on this machine's own loopback
 node=$(mktemp)
 cat > "$node" <<'NODE'
-base=$1; url=$2; key=$3; unit=$4
+base=$1; url=$2; unit=$3; kf=$4
+# the key arrives in a 0600 file and reaches curl through a 0600 config, so no
+# command line ever carries it and ps shows it to nobody
+key=$(cat "$kf" 2>/dev/null | tr -d '\r\n')
+hdr=$(mktemp); chmod 600 "$hdr"
+trap 'rm -f "$hdr"' EXIT
+[ -n "$key" ] && printf 'header = "Authorization: Bearer %s"\n' "$key" > "$hdr"
 now=$(date +%s); d0=$(date -d 'today 00:00' +%s)
-get() {
-  if [ -n "$key" ]; then curl -sS -m 20 -H "Authorization: Bearer $key" "$1" 2>/dev/null
-  else curl -sS -m 20 "$1" 2>/dev/null; fi
-}
-getc() {
-  if [ -n "$key" ]; then
-    curl -sS -m 30 -w '\n%{http_code}' -H "Authorization: Bearer $key" "$1" 2>/dev/null
-  else curl -sS -m 30 -w '\n%{http_code}' "$1" 2>/dev/null; fi
-}
+get() { curl -sS -m 20 -K "$hdr" "$1" 2>/dev/null; }
+getc() { curl -sS -m 30 -w '\n%{http_code}' -K "$hdr" "$1" 2>/dev/null; }
 
 # routstrd 0.5 and later: /balance holds one balance per mint, in sats, and
 # /usage is one row per request with the timestamp and what it cost. That is
@@ -835,11 +829,16 @@ NODE
 res=''; rc=0; where=local
 if [ -n "$host" ]; then
   where=ssh
-  res=$(ssh -o BatchMode=yes -o ConnectTimeout=8 -o LogLevel=ERROR \
-            -o ControlPath=none -o StrictHostKeyChecking=accept-new \
-            "$host" "sh -s $base $url $key $unit" < "$node" 2>&1); rc=$?
+  # the key is the first line of stdin, ahead of the script, and the far side
+  # writes it to a 0600 file: neither machine's command line carries it
+  res=$( { printf '%s\n%s\n%s\n%s\n' "$key" "$base" "$url" "$unit"; cat "$node"; } \
+    | ssh -o BatchMode=yes -o ConnectTimeout=8 -o LogLevel=ERROR \
+        -o ControlPath=none -o StrictHostKeyChecking=accept-new \
+        "$host" 'umask 077; kf=$(mktemp); read -r k; read -r b; read -r u; read -r n; printf %s "$k" > "$kf"; f=$(mktemp); cat > "$f"; sh "$f" "$b" "$u" "$n" "$kf"; rc=$?; rm -f "$f" "$kf"; exit $rc' 2>&1 ); rc=$?
 else
-  res=$(sh "$node" "$base" "$url" "$key" "$unit" 2>&1); rc=$?
+  kf=$(mktemp); chmod 600 "$kf"; printf '%s' "$key" > "$kf"
+  res=$(sh "$node" "$base" "$url" "$unit" "$kf" 2>&1); rc=$?
+  rm -f "$kf"
 fi
 rm -f "$node"
 
@@ -857,18 +856,18 @@ if [ "$(printf '%s' "$res" | jq -r '.ok // 0')" != 1 ]; then
   fi
   printf '%s' "$res" | jq -c --arg host "$host" --arg url "$url" \
     --arg provider "$provider" --arg model "$pmodel" --arg topup "$topup" \
-    --arg where "$where" --argjson sw "$sw" \
+    --arg where "$where" \
     '. + {host:$host, url:$url, provider:$provider, model:$model, topup:$topup,
-          where:$where, switchable:$sw}'
+          where:$where}'
   exit 0
 fi
 
 if [ "$(printf '%s' "$res" | jq -r '.sampled // 0')" = 1 ]; then
   printf '%s' "$res" | jq -c --arg host "$host" --arg url "$url" \
     --arg provider "$provider" --arg model "$pmodel" --arg topup "$topup" \
-    --arg where "$where" --argjson sw "$sw" \
+    --arg where "$where" \
     'del(.sampled) + {host:$host, url:$url, provider:$provider, model:$model,
-      topup:$topup, where:$where, switchable:$sw}'
+      topup:$topup, where:$where}'
   exit 0
 fi
 
@@ -894,9 +893,9 @@ agg=$(awk -F'\t' -v now="$now" -v day="$day" -v cur="$sp" '
 
 printf '%s' "$res" | jq -c --argjson agg "$agg" --arg host "$host" --arg url "$url" \
   --arg provider "$provider" --arg model "$pmodel" --arg topup "$topup" \
-  --arg where "$where" --argjson sw "$sw" \
+  --arg where "$where" \
   'del(.sampled) + $agg + {host:$host, url:$url, provider:$provider, model:$model,
-    topup:$topup, where:$where, switchable:$sw}'
+    topup:$topup, where:$where}'
 """) every 5m json timeout 120s
 
   // ---- what sats are worth, in the currency picked in settings ---------
@@ -928,21 +927,6 @@ if [ $fresh -eq 0 ]; then
 fi
 if [ -r "$cache" ]; then cat "$cache"; else echo '{"ok":0,"ts":0,"btc":{}}'; fi
 """) every 15m json timeout 30s
-
-  // ---- what opencode itself is running, for the switch -----------------
-  // every active session is one that was touched in the last hour, plus the
-  // newest, which is the one a switch has to reach even if it has gone quiet.
-  source sess = cmd("""
-    now=$(date +%s)
-    opencode api GET '/api/session?order=desc&limit=100' 2>/dev/null | jq -c --argjson cut $((now-3600)) '
-      if (.data // []) | length > 0 then
-        (.data[0].id) as $new
-        | {ok:1, all:(.data|length), newest:$new,
-           active:([.data[] | select((((.time.updated // 0)/1000) >= $cut) or .id == $new)] | length),
-           rows:[.data[] | {id:.id, model:(.model.id // ""), provider:(.model.providerID // ""),
-                            at:((.time.updated // 0)/1000)}]}
-      else {ok:0, all:0, active:0, newest:"", rows:[]} end' 2>/dev/null || echo '{"ok":0,"all":0,"active":0,"newest":"","rows":[]}'
-  """) every 2m json timeout 30s
 
   // the clock only drives countdowns and the pace, which move in minutes, so
   // five seconds does what one did at a fifth of the wakeups
@@ -1012,7 +996,6 @@ if [ -r "$cache" ]; then cat "$cache"; else echo '{"ok":0,"ts":0,"btc":{}}'; fi
   let paidHost = pr.host ?? ""
   let paidUrl = pr.url ?? ""
   let paidProvider = pr.provider ?? ""
-  let paidModel = pr.model ?? ""
   let paidUrlClean = replace(replace(paidUrl, "https://", ""), "http://", "")
   let paidWhereTxt = paidHost != "" ? paidHost : split(paidUrlClean, "/")[0]
   let paidErrTxt = paidWhy == "setup" ? "not set up"
@@ -1100,10 +1083,6 @@ if [ -r "$cache" ]; then cat "$cache"; else echo '{"ok":0,"ts":0,"btc":{}}'; fi
   let paidSeriesMax = max(1, paidSeries.sortBy(v => -v).first() ?? 1)
   let paidProvTxt = paidProvider != "" ? paidProvider : paidWhereTxt
 
-  // the switch: every session open in the last hour, plus the newest
-  let ss = sess == null ? {ok: false, active: 0, all: 0, rows: [], newest: ""} : sess
-  let activeCount = ss.active ?? 0
-  let switchNames = (ss.rows ?? []).filter(s => s.model != "")
   // NEW means it turned up in the lineup since the last time the widget looked,
 // and you have never run it. The first lineup after installing the widget is
 // the baseline, so nothing is flagged new on day one, and the lineup is folded
@@ -1196,15 +1175,6 @@ if [ -r "$cache" ]; then cat "$cache"; else echo '{"ok":0,"ts":0,"btc":{}}'; fi
   }
 
   let cur = scored.find(m => m.id == curModel) ?? scored.find(m => m.used > 0)
-  // what the switch button goes to: the free model you have used most today,
-  // or the paid one named in paid.json. The free lineup is all opencode's, so
-  // the provider is written here rather than guessed from the database
-  let freePick = scored.filter(m => m.isFree && !m.isUnlimited).sortBy(m => -m.used).first()
-  let switchTarget = paidNow ? (freePick != null ? freePick.id : "") : paidModel
-  let switchProv = paidNow ? "opencode" : paidProvider
-  let switchHead = "acc=$(date +%s); m="
-  let switchMid = "; p="
-  let switchTail = "; [ -n $m ] || exit 0; ids=$(opencode api GET '/api/session?order=desc&limit=100' 2>/dev/null | jq -r --argjson cut $((acc-3600)) '.data[] | select(((.time.updated // 0)/1000) >= $cut) | .id'); for id in $ids; do body=$(jq -nc --arg i $m --arg p $p '{model:{id:$i,providerID:$p}}'); opencode api POST /api/session/$id/model -d $body >/dev/null 2>&1; done; f=$HOME/.config/opencode/opencode.json; [ -r $f ] && jq --arg m $p/$m '.model = $m' $f > $f.n 2>/dev/null && mv $f.n $f; true"
   // the full mark follows the balance up and never down, so the rim drains
   // like a fuel gauge rather than snapping back on every fetch
   on paid first {
@@ -1458,7 +1428,6 @@ if [ -r "$cache" ]; then cat "$cache"; else echo '{"ok":0,"ts":0,"btc":{}}'; fi
   // a picked side stays put until the other is tapped. A 30-second pin used to
   // lapse on a stale clock after the screen had been asleep, which made the
   // tap look as though it had not registered
-  let paidSwitch = (pr.switchable ?? 0) == 1
   let onPaid = side != "" ? side == "paid" : paidNow
   // the paid screen needs a working node; without one it falls back to the
   // free view, which is always readable. The warning lives in settings.
@@ -1750,10 +1719,10 @@ if [ -r "$cache" ]; then cat "$cache"; else echo '{"ok":0,"ts":0,"btc":{}}'; fi
       justify: end
       gap: 8
       offset: [0, -38]
-      // which side you are spending, as a two-cell pill: the side in use is
-      // filled and the other is just a word, so the state needs no label. A tap
-      // on the side you are not on moves every reachable session over; the cog
-      // beside it is where the key is set up, and `$` goes there if there is none
+      // which meter is on show, as a two-cell pill: the side in use is filled
+      // and the other is just a word, so the state needs no label. A tap only
+      // changes the view, never opencode's model; the cog beside it is where
+      // the key is set up, and `$` goes there if there is none
       Row {
         align: center
         padding: [1, 1]
@@ -1767,13 +1736,7 @@ if [ -r "$cache" ]; then cat "$cache"; else echo '{"ok":0,"ts":0,"btc":{}}'; fi
           align: center
           radius: 6 * corners
           background: onPaidView ? alpha(accent, 0) : alpha(accent, 0.18)
-          onTap: {
-            if (side != "free") {
-              haptic()
-              side = "free"
-              if (paidNow && switchTarget != "") { run(switchHead + sh(switchTarget) + switchMid + sh(switchProv) + switchTail) }
-            }
-          }
+          onTap: { haptic(); side = "free" }
           Text {
             text: str.freeCaps
             fontSize: 11
@@ -1796,7 +1759,6 @@ if [ -r "$cache" ]; then cat "$cache"; else echo '{"ok":0,"ts":0,"btc":{}}'; fi
             // only a key that has never been set up needs the form; while a
             // source is still loading the tap still lands on the paid view
             if (!paidOn) { pane = "setup" }
-            if (paidOn && !paidNow && paidSwitch && switchTarget != "") { run(switchHead + sh(switchTarget) + switchMid + sh(switchProv) + switchTail) }
           }
           Text {
             text: "$"
