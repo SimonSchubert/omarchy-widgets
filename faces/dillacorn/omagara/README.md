@@ -2,6 +2,8 @@
 
 ## v1.9.5 changes
 
+- **Scrolling defaults:** Smooth alphabet opening is now OFF and static app-list scrolling is ON, with the existing 1-row step and vibration OFF defaults. Existing installations receive the two changed preferences once; later user selections are preserved. Fast flicks still coast smoothly. Revisit these defaults if the OWL engine's 60 FPS limit is lifted.
+
 - **Shortcut names:** Hold a pinned Android shortcut in Search, A–Z, a folder or Omagara Home and choose **Rename shortcut…**. Save a custom name or restore its original name. Names are local to Omagara, are included in settings backups, and determine the alphabetical section. Icons, launch targets and pins remain unchanged; manual moves involving a shortcut are cleared when it changes alphabetical section.
 
 - **Web apps and pinned shortcuts:** Add a website from its browser to the Android home screen and accept the shortcut in Omalauncher. Omagara lists accepted shortcuts alongside installed apps in A–Z and Search. Open them through their original Android shortcut, including standalone web apps where the browser supports them.
@@ -16,9 +18,9 @@
 
 ## v1.9.3 changes
 
-- **Alphabet opening:** Optional gentler 200 ms sine-eased worm entrance, enabled by default. Turn it off under **Settings → Alphabet → Smooth alphabet opening** to restore the original 160 ms cubic animation. Letter selection and the 110 ms return animation remain unchanged.
-- **Static scrolling:** Optional stepped app-list dragging under **Settings → Alphabet → Static app-list scrolling**, disabled by default. The default distance is **1 row** per step; choose **½, 1, 1½ or 2 rows**. **Vibrate on scroll step** is independent and disabled by default.
-- **Flick navigation:** A quick flick (at least 1.5 rows of travel and 550 dp/s release speed) resumes the normal smooth coast even in static mode. **Reduce motion** no longer disables app-list coasting; elastic bounce remains suppressed in static or reduced-motion modes. Ordinary continuous scrolling remains the default.
+- **Alphabet opening:** Optional gentler 200 ms sine-eased worm entrance, enabled by default in v1.9.3 (OFF from v1.9.5). Turn it off under **Settings → Alphabet → Smooth alphabet opening** to restore the original 160 ms cubic animation. Letter selection and the 110 ms return animation remain unchanged.
+- **Static scrolling:** Optional stepped app-list dragging under **Settings → Alphabet → Static app-list scrolling**, disabled by default in v1.9.3 (ON from v1.9.5). The default distance is **1 row** per step; choose **½, 1, 1½ or 2 rows**. **Vibrate on scroll step** is independent and disabled by default.
+- **Flick navigation:** A quick flick (at least 1.5 rows of travel and 550 dp/s release speed) resumes the normal smooth coast even in static mode. **Reduce motion** no longer disables app-list coasting; elastic bounce remains suppressed in static or reduced-motion modes. Ordinary continuous scrolling was the default in v1.9.3 and remains available.
 - **Performance:** Reuse worm contour calculations; avoid unnecessary per-frame app-list allocations and sorting; update the virtualized row window in smaller increments. Adjust frame-independent momentum and settle behavior without changing the existing gesture and app-editing paths.
 - **Engine:** Remains compatible with OWL 21, with the 60 FPS cap unchanged. No new permissions or packages. Runtime smoothness and frame pacing still depend on the phone.
 
