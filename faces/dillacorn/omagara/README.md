@@ -1,4 +1,10 @@
-# Omagara v1.9.4
+# Omagara v1.9.5
+
+## v1.9.5 changes
+
+- **Web apps and pinned shortcuts:** Add a website from its browser to the Android home screen and accept the shortcut in Omalauncher. Omagara lists accepted shortcuts alongside installed apps in A–Z and Search. Open them through their original Android shortcut, including standalone web apps where the browser supports them.
+- **Organization:** Pin shortcuts to Omagara Home, add them to folders, reorder or hide them from A–Z, and select them as audio shortcuts. Existing native app keys and settings remain unchanged. Shortcuts are not treated as owners of their browser's notifications.
+- **Compatibility:** Uses the existing OWL 25 APIs with no additional permissions or packages. Omalauncher must be the default Android launcher for pinned Android shortcuts; browser support depends on whether the browser exposes a standard launcher shortcut or an installed web app.
 
 ## v1.9.4 changes
 
