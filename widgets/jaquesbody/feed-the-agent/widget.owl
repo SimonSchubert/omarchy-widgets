@@ -30,7 +30,72 @@ widget "feed the agent" {
 
   // The picker and the phone-path lookup are tiny Python programs: python3
   // with no extra module, and the tile says so if it's missing.
-  requires { pacman: ["python"] }
+  requires { pacman: ["python", "gawk", "coreutils"] }
+
+  // every line a person reads lives here; str.x is the phone's language's
+  strings {
+    en {
+      title: "feed the agent"
+      builtBy: "built by jaquesbody"
+      desktop: "desktop"
+      phone: "phone"
+      server: "server"
+      cloud: "cloud"
+      noteDesktop: "enter the LAN or Tailscale address your agent answers at"
+      notePhone: "this phone's address is fixed, and it calls ~/.config/feed-agent/sorter when you sort"
+      noteServer: "your own server's address, on the LAN or Tailscale"
+      noteCloud: "an https address your phone can reach from anywhere, such as a cloud provider"
+      agentPlaceholderCloud: "https://agents.example.com"
+      agentPlaceholderLocal: "http://192.168.1.10:8787"
+      intro1: "simply feed me a note, an idea, a todo item,"
+      intro2: "a bug fix, anything and I'll organize,"
+      intro3: "prioritize and remind you of it"
+      close: "×"
+      important: "IMPORTANT: you must set up your agent to recognize, read and write to your folder and named files, they must be correctly synced for Feed the Agent to work"
+      whereAgent: "where is your agent?"
+      selectInbox: "select \"inbox\" file to write to"
+      selectFolder: "select folder with your agent files"
+      sortHelp: "Click 'sort' for your agent to actively clear your inbox and run the rules you've set it. It sorts when you tap, or whenever your agent next checks in"
+      bumpTitle: "bump notes up your list"
+      bumpHelp: "Click 'now' to bump this note to a priority"
+      bumpNote: "Your agent writes this to your \"inbox\" and reads it to prioritize the note"
+      tagPlaceholder: "e.g. go, now:, or >>>"
+      formatTitle: "format what the widget writes to file"
+      formatHelp: "Paste the exact line in your \"inbox\" file that precedes where you want each note to land. Press Enter in the field to add a blank line under it"
+      sectionPlaceholder: "e.g. Captures or To Do List"
+      prefixQuestion: "What should prefix each note?"
+      prefixPlaceholder: "e.g. {date} or {date:time}"
+      posQuestion: "Do you want new notes to land at the top or bottom of your inbox list?"
+      top: "top"
+      bottom: "bottom"
+      preview: "preview"
+      noAnchor: "(no anchor: the note joins the list)"
+      newTop: "new notes land at the top, just under that line"
+      newBottom: "new notes land at the bottom of that list"
+      sampleNote: "your most recent note goes here"
+      priorityNote: "this is a priority note"
+      notifications: "notifications"
+      notifyFailLabel: "A note could not be written to your file"
+      notifySortedLabel: "Your agent sorted your inbox"
+      notifyFailText: "not saved — the thought is back in the field"
+      inbox: "Inbox"
+      now: "Now"
+      feedIt: "feed it"
+      offline: "offline"
+      notReachable: "not reachable"
+      notSaved: "not saved"
+      notSavedTap: "not saved — tap"
+      setUp: "set up"
+      setUpWhere: "set up where it lands"
+      sorting: "Sorting…"
+      listening: "listening"
+      listeningMore: "listening…"
+      sorted: "sorted"
+      nothingNew: "nothing new"
+      couldNotFind: "couldn't find"
+      inReachableFolder: "in a folder the launcher can reach"
+    }
+  }
 
   // ---- the file --------------------------------------------------------
   // An empty folder is this phone's Documents: no permission, no setup.
@@ -110,17 +175,17 @@ widget "feed the agent" {
     base
   // The four answers, each a key and the word on its tile.
   let modes = [
-    {key: "desktop", label: "desktop"},
-    {key: "phone", label: "phone"},
-    {key: "server", label: "server"},
-    {key: "cloud", label: "cloud"}
+    {key: "desktop", label: str.desktop},
+    {key: "phone", label: str.phone},
+    {key: "server", label: str.server},
+    {key: "cloud", label: str.cloud}
   ]
   let agentText = mode == "desktop" ? base : (mode == "server" ? serverBase : cloudBase)
   let agentNote =
-    mode == "phone" ? "this phone's address is fixed, and it calls ~/.config/feed-agent/sorter when you sort" :
-    mode == "server" ? "your own server's address, on the LAN or Tailscale" :
-    mode == "cloud" ? "an https address your phone can reach from anywhere, such as a cloud provider" :
-    "enter the LAN or Tailscale address your agent answers at"
+    mode == "phone" ? str.notePhone :
+    mode == "server" ? str.noteServer :
+    mode == "cloud" ? str.noteCloud :
+    str.noteDesktop
   let where = folder == "" ? "quick" : "note"
   let dateShort = fmtTime(now, "dd-MM-yyyy")
   let dateTime = fmtTime(now, "dd-MM-yyyy HH:mm")
@@ -214,8 +279,8 @@ widget "feed the agent" {
   let agentLabelCut = len(agentLabel) <= agentChars
     ? agentLabel
     : "…" + sub(agentLabel, len(agentLabel) - agentChars + 1, len(agentLabel))
-  let sampleNote = prefixText + "your most recent note goes here"
-  let sampleNow = prefixText + (tag == "" ? "now:" : tag) + " this is a priority note"
+  let sampleNote = prefixText + str.sampleNote
+  let sampleNow = prefixText + (tag == "" ? str.now + ":" : tag) + " " + str.priorityNote
 
   // ---- reading the note ----------------------------------------------
   // Both counts come from the real file every poll: captures under the chosen
@@ -554,7 +619,7 @@ for name in names:
   source countsText = cmd(
     "where=" + sh(where) + ";dest=" + sh(destPath) + ";rel=" + sh(relToday) +
     ";section=" + sh(where == "quick" ? "" : secLine) + ";tag=" + sh(tag) + ";" +
-    countBody) every 10s optional
+    countBody) every 60s optional
   // Where the folders are on the phone, for the paths the cards show.
   source phonePathsText = cmd(
     "n=" + sh(join(phoneNames, "\n")) + ";" + phoneBody) every 5m optional
@@ -573,7 +638,7 @@ for name in names:
       working = false
       pressDeadline = 0
       deferredAt = now
-      lastLine = "not reachable"
+      lastLine = str.notReachable
     }
   }
 
@@ -582,7 +647,7 @@ for name in names:
     if working {
       working = false
       deferredAt = now
-      lastLine = "not reachable"
+      lastLine = str.notReachable
     }
     pressDeadline = 0
   }
@@ -615,7 +680,7 @@ for name in names:
       active = true
       last = now
       haptic()
-      if notifyFail { notify("feed the agent", "not saved — the thought is back in the field") }
+      if notifyFail { notify(str.title, str.notifyFailText) }
     }
   }
 
@@ -629,7 +694,7 @@ for name in names:
       if f == "!" {
         pickNote = n
       } else if f == "?" {
-        pickNote = "couldn't find " + n + " in a folder the launcher can reach"
+        pickNote = str.couldNotFind + " " + n + " " + str.inReachableFolder
       } else if n != "" {
         pickNote = ""
         folder = f
@@ -658,7 +723,7 @@ for name in names:
       if f == "!" {
         pickFolderNote = n
       } else if f == "?" {
-        pickFolderNote = "couldn't find " + n + " in a folder the launcher can reach"
+        pickFolderNote = str.couldNotFind + " " + n + " " + str.inReachableFolder
       } else if f != "" {
         // The folder the picked file is in, down to its own folder when it
         // sits in one: that is the one the row then shows.
@@ -724,9 +789,9 @@ for name in names:
         let moved = al != "" && al != beforeLast
         let clause = first(split(al, " · ")) ?? al
         let shortClause = len(clause) > 16 ? sub(clause, 0, 16) + "…" : clause
-        sortedText = moved ? (narrow ? "sorted" : "sorted · " + shortClause) : "nothing new"
+        sortedText = moved ? (narrow ? str.sorted : str.sorted + " · " + shortClause) : str.nothingNew
         sortedAt = now
-        if moved && notifySorted { notify("Inbox", al) }
+        if moved && notifySorted { notify(str.inbox, al) }
       }
     }
     // A status read that failed twice running means the computer is away.
@@ -734,14 +799,14 @@ for name in names:
       working = false
       pressDeadline = 0
       deferredAt = now
-      lastLine = "not reachable"
+      lastLine = str.notReachable
     }
     // A hung press must not sit on the tile looking like progress.
     if working && now - pressAt > 120 {
       working = false
       pressDeadline = 0
       deferredAt = now
-      lastLine = "not reachable"
+      lastLine = str.notReachable
     }
     // A deferral is a moment, not a condition: ten minutes later, the tile
     // goes back to its usual count and prompt.
@@ -768,10 +833,10 @@ for name in names:
   let unknown = first(counts) == "?"
   let pending = unknown ? 0 : (num(counts[0] ?? 0) ?? 0)
   let nowPending = unknown ? 0 : (num(counts[1] ?? 0) ?? 0)
-  let countText = unknown ? "Inbox: ?" : narrow ? "Inbox: " + pending : (tag == "" ? "Inbox: " + pending : "Inbox: " + pending + " • Now: " + nowPending)
-  let promptText = narrow ? "feed it" : "feed the agent"
-  let offlineText = narrow ? "offline" : "not reachable"
-  let failedText = narrow ? "not saved" : "not saved — tap"
+  let countText = unknown ? str.inbox + ": ?" : narrow ? str.inbox + ": " + pending : (tag == "" ? str.inbox + ": " + pending : str.inbox + ": " + pending + " • " + str.now + ": " + nowPending)
+  let promptText = narrow ? str.feedIt : str.title
+  let offlineText = narrow ? str.offline : str.notReachable
+  let failedText = narrow ? str.notSaved : str.notSavedTap
   let statusSize = narrow ? 14 : 16
   let deferred = deferredAt > 0 && now - deferredAt < 600
   let failed = saveError != ""
@@ -784,12 +849,12 @@ for name in names:
   let showUpdate = (int(now / 5) % 2) == 0
   let sorted = sortedAt > 0 && now - sortedAt < 20
   let idleText =
-    !ready ? (narrow ? "set up" : "set up where it lands") :
+    !ready ? (narrow ? str.setUp : str.setUpWhere) :
     failed ? failedText :
-    said.listening ? (heard == "" ? (narrow ? "listening" : "listening…") : heard) :
+    said.listening ? (heard == "" ? (narrow ? str.listening : str.listeningMore) : heard) :
     micError != "" ? (showUpdate ? countText : micError) :
     deferred ? (showUpdate ? offlineText : countText) :
-    working ? "Sorting…" :
+    working ? str.sorting :
     (!showUpdate ? (sorted ? sortedText : promptText) : countText)
   let countCol = unknown ? yellow : green
   let idleCol =
@@ -882,7 +947,7 @@ for name in names:
       // running): a small × drops focus on demand, as the timer and Enter do.
       if blur == 0 && active {
         Box {
-          width: 18
+          width: 22
           height: 48
           align: center
           onTap: {
@@ -890,7 +955,7 @@ for name in names:
             last = 0
             blur = 2
           }
-          Text { text: "×"; fontSize: 20; color: muted }
+          Text { text: str.close; fontSize: 20; color: muted }
         }
       }
 
@@ -1058,36 +1123,54 @@ for name in names:
   // The invitation, cut into three whole lines already: no word left alone on
   // the last one. Each line is one Text, and the size comes from the screen,
   // so the three fill the width at any size instead of running off it.
-  let introLines = [
-    "simply feed me a note, an idea, a todo item,",
-    "a bug fix, anything and I'll organize,",
-    "prioritize and remind you of it"
-  ]
+  let introLines = [str.intro1, str.intro2, str.intro3]
   let introChars = max(len(introLines[0]), max(len(introLines[1]), len(introLines[2])))
   // The screen's own inset, then the card's 12dp each side, are what is left
   // for the line; 0.57 is one mono character at a given size, a shade over.
   let introSize = clamp(((screenWidth ?? 360) - 54) / (0.57 * introChars), 8, 20)
 
-  // One switch, as the settings show it: a track, and the knob at either end.
-  component Switch(on) {
+  // One on/off switch for settings: the track takes the state's colour and
+  // the knob slides over. The handler stays at the use, as handlers do.
+  component Toggle(on) {
     Box {
-      width: 44
-      height: 24
-      align: center
-      radius: 12 * corners
-      background: on ? alpha(green, 0.3) : alpha(background, 0.5)
+      width: 46
+      height: 26
+      radius: 13 * corners
+      background: on ? alpha(green, 0.3) : alpha(green, 0.12)
       border: 1
-      borderColor: on ? alpha(green, 0.6) : alpha(foreground, 0.16)
-      Canvas {
-        width: 44
-        height: 24
-        circle(on ? 31 : 13, 12, 6, fill: on ? green : muted)
+      borderColor: on ? alpha(green, 0.6) : alpha(green, 0.28)
+      padding: 3
+      align: on ? "end" : "start"
+      Box {
+        width: 18
+        height: 18
+        radius: 9 * corners
+        background: on ? green : alpha(green, 0.45)
       }
     }
   }
 
   screen {
-    title: "feed the agent"
+    title: str.title
+
+    // the window draws its own ✕ over this frame, so this only supplies the
+    // outline and a tap target behind the glyph
+    Row {
+      fill: width
+      height: 26
+      align: center
+      justify: end
+      offset: [0, -38]
+      Box {
+        width: 26
+        height: 26
+        radius: 8 * corners
+        border: 1
+        borderColor: alpha(accent, 0.3)
+        background: alpha(background, 0.35)
+        onTap: close()
+      }
+    }
 
     Box {
       fill: true
@@ -1101,9 +1184,9 @@ for name in names:
         // the box is alive without the text ever being covered.
         Column {
           fill: width
-          gap: 0
-          background: alpha(accent, 0.07)
-          radius: 8 * corners
+          gap: 8
+          background: alpha(accent, 0.1)
+          radius: 12 * corners
           clip: true
 
           // upper teeth: every one a different length, reaching down
@@ -1122,8 +1205,8 @@ for name in names:
           }
 
           Column {
-            padding: [12, 10, 12, 10]
-            gap: 0
+            padding: [10, 10]
+            gap: 8
             for line in introLines {
               Text {
                 text: line
@@ -1162,9 +1245,9 @@ for name in names:
           radius: 12 * corners
 
           Text {
-            text: "IMPORTANT: you must set up your agent to recognize, read and write to your folder and named files, they must be correctly synced for Feed the Agent to work"
+            text: str.important
             style: small
-            color: #ffffff
+            color: foreground
           }
         }
 
@@ -1176,7 +1259,7 @@ for name in names:
           background: alpha(accent, 0.1)
           radius: 12 * corners
 
-          Text { text: "WHERE IS YOUR AGENT?"; style: label; color: #ffffff; letterSpacing: 1.2 }
+          Text { text: upper(str.whereAgent); style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
 
           // Four answers on one row, each the same box, so the card keeps one
           // size whichever is picked.
@@ -1188,12 +1271,12 @@ for name in names:
                 height: 62
                 weight: 1
                 align: center
-                radius: 10 * corners
-                background: mode == m.key ? alpha(accent, 0.16) : alpha(background, 0.2)
+                radius: 8 * corners
+                background: mode == m.key ? alpha(accent, 0.15) : alpha(background, 0.35)
                 border: 1
-                borderColor: mode == m.key ? alpha(accent, 0.65) : alpha(foreground, 0.12)
-                opacity: mode == m.key ? 1 : 0.35
+                borderColor: alpha(accent, 0.3)
                 onTap: {
+                  haptic()
                   agentMode = m.key
                 }
                 Column {
@@ -1239,6 +1322,7 @@ for name in names:
                   }
                   Text {
                     text: m.label
+                    style: small
                     fontSize: 9
                     color: mode == m.key ? accent : muted
                     align: center
@@ -1266,23 +1350,24 @@ for name in names:
                 fill: width
                 height: 34
                 align: center
-                background: mode == "phone" ? alpha(background, 0.3) : alpha(background, 0.45)
+                background: alpha(background, 0.45)
                 border: 1
-                borderColor: mode == "phone" ? alpha(foreground, 0.14) : alpha(accent, 0.55)
+                borderColor: alpha(accent, 0.55)
                 radius: 6 * corners
                 if mode == "phone" {
                   Row {
                     fill: width
                     padding: [14, 0]
                     align: center
-                    Text { text: localBase; font: mono; fontSize: 13; color: muted; maxLines: 1 }
+                    Text { text: localBase; style: small; font: mono; fontSize: 13; color: muted; maxLines: 1 }
                   }
                 } else {
                   Input {
                     fill: width
                     text: agentText
                     fontSize: 13
-                    placeholder: mode == "cloud" ? "https://agents.example.com" : "http://192.168.1.10:8787"
+                    color: foreground
+                    placeholder: mode == "cloud" ? str.agentPlaceholderCloud : str.agentPlaceholderLocal
                     underline: false
                     padding: [14, 0]
                     onChange: {
@@ -1311,7 +1396,7 @@ for name in names:
           background: alpha(accent, 0.1)
           radius: 12 * corners
 
-          Text { text: "SELECT \"INBOX\" FILE TO WRITE TO"; style: label; color: #ffffff; letterSpacing: 1.2 }
+          Text { text: upper(str.selectInbox); style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
 
           // One row, left-aligned: the path starts where the title does, and
           // when it is too long its front is cut, so the file name always
@@ -1351,6 +1436,7 @@ for name in names:
               gap: 0
               Text {
                 text: dirLabelCut
+                style: small
                 font: mono
                 fontSize: pathSize
                 color: green
@@ -1358,9 +1444,10 @@ for name in names:
               }
               Text {
                 text: destName
+                style: small
                 font: mono
                 fontSize: pathSize
-                color: #ffffff
+                color: foreground
                 maxLines: 1
               }
             }
@@ -1381,7 +1468,7 @@ for name in names:
           background: alpha(accent, 0.1)
           radius: 12 * corners
 
-          Text { text: "SELECT FOLDER WITH YOUR AGENT FILES"; style: label; color: #ffffff; letterSpacing: 1.2 }
+          Text { text: upper(str.selectFolder); style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
 
           Row {
             fill: width
@@ -1413,6 +1500,7 @@ for name in names:
             }
             Text {
               text: agentLabelCut
+              style: small
               font: mono
               fontSize: agentSize
               color: green
@@ -1439,7 +1527,7 @@ for name in names:
               align: center
               background: alpha(background, 0.35)
               border: 1
-              borderColor: alpha(green, 0.5)
+              borderColor: alpha(accent, 0.3)
               radius: 8 * corners
               Canvas {
                 width: 24
@@ -1455,7 +1543,7 @@ for name in names:
               }
             }
             Text {
-              text: "Click 'sort' for your agent to actively clear your inbox and run the rules you've set it. It sorts when you tap, or whenever your agent next checks in"
+              text: str.sortHelp
               style: small
               color: muted
               weight: 1
@@ -1471,7 +1559,7 @@ for name in names:
           background: alpha(accent, 0.1)
           radius: 12 * corners
 
-          Text { text: "BUMP NOTES UP YOUR LIST"; style: label; color: #ffffff; letterSpacing: 1.2 }
+          Text { text: upper(str.bumpTitle); style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
 
           Row {
             gap: 10
@@ -1482,7 +1570,7 @@ for name in names:
               align: center
               background: alpha(background, 0.35)
               border: 1
-              borderColor: alpha(green, 0.5)
+              borderColor: alpha(accent, 0.3)
               radius: 8 * corners
               Canvas {
                 width: 24
@@ -1494,14 +1582,14 @@ for name in names:
               }
             }
             Text {
-              text: "Click 'now' to bump this note to a priority"
+              text: str.bumpHelp
               style: small
               color: muted
               weight: 1
             }
           }
 
-          Text { text: "Your agent writes this to your \"inbox\" and reads it to prioritize the note"; style: small; color: muted }
+          Text { text: str.bumpNote; style: small; color: muted }
           Box {
             fill: width
             align: center
@@ -1517,7 +1605,8 @@ for name in names:
               fill: width
               text: tag
               fontSize: 13
-              placeholder: "e.g. go, now:, or >>>"
+              color: foreground
+              placeholder: str.tagPlaceholder
               underline: false
               padding: [14, 0]
               onChange: tag = value
@@ -1533,9 +1622,9 @@ for name in names:
           background: alpha(accent, 0.1)
           radius: 12 * corners
 
-          Text { text: "FORMAT WHAT THE WIDGET WRITES TO FILE"; style: label; color: #ffffff; letterSpacing: 1.2 }
+          Text { text: upper(str.formatTitle); style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
           Text {
-            text: "Paste the exact line in your \"inbox\" file that precedes where you want each note to land. Press Enter in the field to add a blank line under it"
+            text: str.formatHelp
             style: small
             color: muted
           }
@@ -1554,14 +1643,15 @@ for name in names:
               fill: width
               text: section
               fontSize: 13
-              placeholder: "e.g. Captures or To Do List"
+              color: foreground
+              placeholder: str.sectionPlaceholder
               underline: false
               padding: [14, 0]
               onChange: section = value
             }
           }
 
-          Text { text: "What should prefix each note?"; style: small; color: muted }
+          Text { text: str.prefixQuestion; style: small; color: muted }
           Box {
             fill: width
             align: center
@@ -1577,45 +1667,38 @@ for name in names:
               fill: width
               text: prefix
               fontSize: 13
-              placeholder: "e.g. {date} or {date:time}"
+              color: foreground
+              placeholder: str.prefixPlaceholder
               underline: false
               padding: [14, 0]
               onChange: prefix = value
             }
           }
 
-          Text { text: "Do you want new notes to land at the top or bottom of your inbox list?"; style: small; color: muted }
+          Text { text: str.posQuestion; style: small; color: muted }
           Row {
             gap: 8
             Box {
               width: 68
-              height: 28
+              height: 30
               align: center
-              background: pos == "top" ? alpha(accent, 0.22) : alpha(background, 0.35)
+              background: pos == "top" ? alpha(accent, 0.15) : alpha(background, 0.35)
               radius: 8 * corners
               border: 1
-              borderColor: pos == "top" ? alpha(accent, 0.7) : alpha(accent, 0.3)
-              onTap: pos = "top"
-              Row {
-                align: center
-                justify: center
-                Text { text: "top"; style: body; color: pos == "top" ? accent : muted; maxLines: 1 }
-              }
+              borderColor: alpha(accent, 0.3)
+              onTap: { haptic(); pos = "top" }
+              Text { text: str.top; style: body; color: pos == "top" ? #ffffff : muted; align: center; maxLines: 1 }
             }
             Box {
               width: 68
-              height: 28
+              height: 30
               align: center
-              background: pos == "bottom" ? alpha(accent, 0.22) : alpha(background, 0.35)
+              background: pos == "bottom" ? alpha(accent, 0.15) : alpha(background, 0.35)
               radius: 8 * corners
               border: 1
-              borderColor: pos == "bottom" ? alpha(accent, 0.7) : alpha(accent, 0.3)
-              onTap: pos = "bottom"
-              Row {
-                align: center
-                justify: center
-                Text { text: "bottom"; style: body; color: pos == "bottom" ? accent : muted; maxLines: 1 }
-              }
+              borderColor: alpha(accent, 0.3)
+              onTap: { haptic(); pos = "bottom" }
+              Text { text: str.bottom; style: body; color: pos == "bottom" ? #ffffff : muted; align: center; maxLines: 1 }
             }
           }
         }
@@ -1624,17 +1707,18 @@ for name in names:
         // In the order the note actually lands: at the top, the new note sits
         // above the older priority one; at the bottom, the other way round.
         Column {
-          gap: 6
+          gap: 8
           fill: width
           padding: [10, 10]
           background: alpha(accent, 0.1)
           radius: 12 * corners
 
-          Text { text: "PREVIEW"; style: label; color: #ffffff; letterSpacing: 1.2 }
+          Text { text: upper(str.preview); style: label; color: #ffffff; letterSpacing: 1.2 }
           Column {
             gap: 0
             Text {
-              text: anchorKey == "" ? "(no anchor: the note joins the list)" : anchorKey
+              text: anchorKey == "" ? str.noAnchor : anchorKey
+              style: small
               font: mono
               fontSize: 12
               color: foreground
@@ -1644,19 +1728,19 @@ for name in names:
               Spacer { height: 8 }
             }
             if pos == "top" {
-              Text { text: sampleNote; font: mono; fontSize: 12; color: foreground; maxLines: 3 }
+              Text { text: sampleNote; style: small; font: mono; fontSize: 12; color: foreground; maxLines: 3 }
               if tag != "" {
-                Text { text: sampleNow; font: mono; fontSize: 12; color: foreground; maxLines: 3 }
+                Text { text: sampleNow; style: small; font: mono; fontSize: 12; color: foreground; maxLines: 3 }
               }
             } else {
               if tag != "" {
-                Text { text: sampleNow; font: mono; fontSize: 12; color: foreground; maxLines: 3 }
+                Text { text: sampleNow; style: small; font: mono; fontSize: 12; color: foreground; maxLines: 3 }
               }
-              Text { text: sampleNote; font: mono; fontSize: 12; color: foreground; maxLines: 3 }
+              Text { text: sampleNote; style: small; font: mono; fontSize: 12; color: foreground; maxLines: 3 }
             }
           }
           Text {
-            text: pos == "top" ? "new notes land at the top, just under that line" : "new notes land at the bottom of that list"
+            text: pos == "top" ? str.newTop : str.newBottom
             style: small
             color: muted
           }
@@ -1670,19 +1754,20 @@ for name in names:
           background: alpha(accent, 0.1)
           radius: 12 * corners
 
-          Text { text: "NOTIFICATIONS"; style: label; color: #ffffff; letterSpacing: 1.2 }
+          Text { text: upper(str.notifications); style: label; color: #ffffff; letterSpacing: 1.2; maxLines: 1 }
 
           Row {
             fill: width
             align: center
             gap: 10
             Text {
-              text: "A note could not be written to your file"
-              style: small
-              color: foreground
+              text: str.notifyFailLabel
+              style: body
+              color: #ffffff
               weight: 1
+              maxLines: 1
             }
-            Box { onTap: notifyFail = !notifyFail; Switch { on: notifyFail } }
+            Box { onTap: { haptic(); notifyFail = !notifyFail }; Toggle { on: notifyFail } }
           }
 
           Row {
@@ -1690,13 +1775,24 @@ for name in names:
             align: center
             gap: 10
             Text {
-              text: "Your agent sorted your inbox"
-              style: small
-              color: foreground
+              text: str.notifySortedLabel
+              style: body
+              color: #ffffff
               weight: 1
+              maxLines: 1
             }
-            Box { onTap: notifySorted = !notifySorted; Switch { on: notifySorted } }
+            Box { onTap: { haptic(); notifySorted = !notifySorted }; Toggle { on: notifySorted } }
           }
+        }
+
+        // who made it, at the foot of this screen and out of the way
+        Text {
+          text: str.builtBy
+          style: small
+          color: #ffffff
+          align: center
+          maxLines: 1
+          onTap: url("https://jaquesbody.github.io/")
         }
       }
     }
