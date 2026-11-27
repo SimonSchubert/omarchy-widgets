@@ -1,0 +1,561 @@
+app "Twinmark" {
+  meta {
+    owl: 21
+    description: "A Dobble-inspired landscape card game with original symbols. Find the one symbol shared by both cards and tap it to score and flip that card."
+    version: "1.0"
+    license: "MIT"
+    category: "games"
+  }
+  title: ""
+  statusBar: false
+  back: helpOpen
+  onBack: helpOpen = false
+  requires { pacman: [] }
+  icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+    <rect width="256" height="256" rx="56" fill="#193532"/>
+    <rect x="39" y="62" width="96" height="134" rx="19" fill="#0E2422" transform="rotate(-16 87 129)"/>
+    <rect x="39" y="55" width="96" height="134" rx="19" fill="#FFC789" transform="rotate(-16 87 122)"/>
+    <rect x="121" y="66" width="96" height="134" rx="19" fill="#0E2422" transform="rotate(14 169 133)"/>
+    <rect x="121" y="58" width="96" height="134" rx="19" fill="#AEE2CE" transform="rotate(14 169 125)"/>
+    <path d="M81 85l8 17 19 3-14 13 3 19-17-9-17 9 3-19-14-13 20-3z" fill="#9E3E32"/>
+    <path d="M172 95l8 17 19 3-14 13 3 19-17-9-17 9 3-19-14-13 20-3z" fill="#176859"/>
+  </svg>"""
+
+  fps: 60
+  state activeCards = shuffle(range(73)).take(2)
+  state dealSeeds = [random(1000000), random(1000000)]
+  state scores = [0, 0]
+  state helpOpen = false
+  state flipSide = -1
+  state flipTime = 0
+  state nextCard = -1
+  state missSide = -1
+  state missSlot = -1
+  state missTime = 0
+
+  // The projective plane of order eight gives 73 cards of nine symbols.
+  // These are the addition and multiplication tables for GF(8), modulo x³ + x + 1.
+  let fieldAdd = [
+    [0, 1, 2, 3, 4, 5, 6, 7],
+    [1, 0, 3, 2, 5, 4, 7, 6],
+    [2, 3, 0, 1, 6, 7, 4, 5],
+    [3, 2, 1, 0, 7, 6, 5, 4],
+    [4, 5, 6, 7, 0, 1, 2, 3],
+    [5, 4, 7, 6, 1, 0, 3, 2],
+    [6, 7, 4, 5, 2, 3, 0, 1],
+    [7, 6, 5, 4, 3, 2, 1, 0]
+  ]
+  let fieldMultiply = [
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 1, 2, 3, 4, 5, 6, 7],
+    [0, 2, 4, 6, 3, 1, 7, 5],
+    [0, 3, 6, 5, 7, 4, 1, 2],
+    [0, 4, 3, 7, 6, 2, 5, 1],
+    [0, 5, 1, 4, 2, 7, 3, 6],
+    [0, 6, 7, 1, 5, 3, 2, 4],
+    [0, 7, 5, 2, 1, 6, 4, 3]
+  ]
+  let cards = range(73).map(n => n < 64
+    ? range(9).map(i => i == 8 ? 64 + floor(n / 8) : 8 * i + fieldAdd[fieldMultiply[floor(n / 8)][i]][n % 8])
+    : (n < 72 ? range(9).map(i => i == 8 ? 72 : 8 * (n - 64) + i) : range(64, 73, 1)))
+  let sharedSymbol = cards[activeCards[0]].find(mark => contains(cards[activeCards[1]], mark))
+
+  // Each additional symbol is drawn from back to front in a 90 × 90 coordinate space.
+  let newSymbols = [
+    // 21 · Umbrella
+    [[#2B6D98, [[-43,0],[-32,-22],[-12,-35],[12,-35],[32,-22],[43,0],[24,-6],[8,0],[-8,0],[-24,-6]]],
+     [#204659, [[-5,-4],[5,-4],[5,32],[13,36],[20,28],[27,30],[22,42],[12,45],[-5,39]]]],
+    // 22 · Key
+    [[#BA761A, [[-43,-12],[-33,-28],[-15,-32],[1,-24],[9,-7],[43,-7],[43,15],[33,15],[33,6],[24,6],[24,15],[7,15],[-7,28],[-28,25],[-41,13]]],
+     [#F8CE74, [[-32,-6],[-24,-17],[-13,-15],[-8,-6],[-15,5],[-26,4]]]],
+    // 23 · Music note
+    [[#9254A5, [[-4,-33],[34,-43],[37,7],[30,20],[13,22],[4,15],[5,5],[15,-1],[26,-1],[25,-23],[6,-17],[6,28],[-2,40],[-20,43],[-32,35],[-31,23],[-20,16],[-5,17]]]],
+    // 24 · Fish
+    [[#137F7B, [[-44,0],[-30,-19],[-8,-25],[14,-21],[25,-8],[43,-24],[43,24],[24,9],[13,21],[-9,24],[-30,16]]],
+     [#B1E6D5, [[-29,-4],[-23,-9],[-17,-5],[-17,2],[-24,6],[-29,2]]]],
+    // 25 · Rocket
+    [[#954D9C, [[0,-44],[17,-26],[24,1],[39,26],[17,21],[10,29],[-10,29],[-17,21],[-39,26],[-24,1],[-17,-26]]],
+     [#D8B8EA, [[-10,-10],[0,-17],[10,-10],[10,0],[0,7],[-10,0]]],
+     [#DA7B28, [[-8,34],[8,34],[0,46]]]],
+    // 26 · Pennant
+    [[#8A4A2B, [[-31,-41],[-24,-41],[-24,44],[-31,44]]],
+     [#D75342, [[-24,-36],[37,-36],[15,-16],[37,5],[-24,5]]],
+     [#FBAC7E, [[-24,-32],[28,-32],[21,-25],[-24,-25]]]],
+    // 27 · Anchor
+    [[#315A84, [[-10,-43],[10,-43],[17,-31],[13,-20],[6,-17],[6,-8],[22,-8],[22,1],[6,1],[6,29],[20,25],[29,13],[24,10],[40,6],[41,26],[35,22],[25,35],[0,45],[-25,35],[-35,22],[-41,26],[-40,6],[-24,10],[-29,13],[-20,25],[-6,29],[-6,1],[-22,1],[-22,-8],[-6,-8],[-6,-17],[-13,-20],[-17,-31]]],
+     [#A4C4DC, [[-6,-34],[6,-34],[8,-29],[5,-24],[-5,-24],[-8,-29]]]],
+    // 28 · Mushroom
+    [[#AA353D, [[-43,1],[-39,-17],[-26,-33],[-8,-41],[11,-41],[28,-32],[40,-15],[43,1],[24,10],[-25,10]]],
+     [#D28F6A, [[-11,9],[12,9],[17,39],[6,44],[-10,42],[-18,36]]],
+     [#FFCDAE, [[-29,-12],[-22,-24],[-10,-25],[-9,-17],[-17,-9]], [[7,-22],[17,-25],[24,-17],[19,-10],[8,-11]]]],
+    // 29 · Tent
+    [[#B46A16, [[0,-42],[44,33],[-44,33]]],
+     [#F4C875, [[0,-35],[-41,32],[-9,32]]],
+     [#72452A, [[2,-10],[20,33],[-13,33]]]],
+    // 30 · Paw
+    [[#68519D, [[-33,22],[-29,9],[-12,-3],[11,-3],[30,9],[34,23],[25,33],[11,34],[0,29],[-12,35],[-26,33]],
+      [[-39,-15],[-32,-22],[-23,-16],[-22,-6],[-28,0],[-37,-4]], [[-19,-26],[-13,-37],[-4,-36],[1,-23],[-5,-14],[-14,-15]],
+      [[7,-25],[13,-37],[23,-36],[28,-28],[25,-17],[15,-13],[9,-17]], [[30,-14],[37,-23],[44,-19],[44,-8],[36,0],[28,-4]]]],
+    // 31 · Heart
+    [[#BE3D53, [[0,40],[-35,8],[-44,-10],[-42,-24],[-31,-35],[-16,-35],[0,-22],[15,-35],[31,-35],[42,-24],[44,-10],[35,8]]],
+     [#EF8A9E, [[-36,-16],[-27,-27],[-17,-28],[-8,-21],[-23,-20],[-29,-9]]]],
+    // 32 · Hourglass
+    [[#3A6990, [[-29,-40],[29,-40],[29,-22],[11,0],[29,22],[29,40],[-29,40],[-29,22],[-11,0],[-29,-22]]],
+     [#E1BE64, [[-19,-23],[19,-23],[0,-1]], [[0,11],[19,30],[-19,30]]]],
+    // 33 · Crown
+    [[#AC6714, [[-43,-24],[-21,-9],[0,-35],[21,-9],[43,-24],[31,26],[-31,26]]],
+     [#F3C56F, [[-32,15],[32,15],[31,26],[-31,26]], [[0,-13],[8,-5],[0,3],[-8,-5]]]],
+    // 34 · Teacup
+    [[#1B786A, [[-41,-20],[23,-20],[23,-15],[35,-15],[42,-8],[42,8],[34,17],[21,17],[14,29],[-14,29],[-29,21],[-40,3]]],
+     [#B6E4D0, [[26,-7],[33,-7],[35,-3],[35,5],[31,9],[24,9]]],
+     [#50A394, [[-43,34],[43,34],[34,41],[-34,41]]]],
+    // 35 · Bell
+    [[#AC6B21, [[-5,-42],[5,-42],[8,-33],[23,-26],[30,-10],[32,12],[42,24],[-42,24],[-32,12],[-30,-10],[-23,-26],[-8,-33]]],
+     [#EAAF56, [[-38,17],[37,17],[42,24],[-42,24]], [[-11,30],[12,30],[9,39],[0,43],[-9,39]]]],
+    // 36 · Scissors
+    [[#3A627D, [[-28,-39],[33,23],[28,30],[-15,-2]], [[28,-39],[-33,23],[-28,30],[15,-2]]],
+     [#BB5365, [[-40,14],[-29,12],[-20,16],[-15,24],[-17,37],[-26,43],[-36,42],[-44,34],[-45,24]],
+      [[40,14],[29,12],[20,16],[15,24],[17,37],[26,43],[36,42],[44,34],[45,24]]],
+     [#F3B4BD, [[-36,23],[-27,22],[-24,27],[-26,34],[-34,34],[-37,29]], [[36,23],[27,22],[24,27],[26,34],[34,34],[37,29]]]],
+    // 37 · Sailboat
+    [[#3D69A0, [[-44,15],[44,15],[28,34],[-28,34]]],
+     [#C25243, [[-3,-42],[-3,10],[-36,10]], [[4,-30],[29,10],[4,10]]]],
+    // 38 · Car
+    [[#983C71, [[-43,-1],[-31,-8],[-22,-25],[18,-25],[27,-9],[42,-3],[43,21],[-43,21]]],
+     [#F4B9D1, [[-22,-8],[-15,-19],[-2,-19],[-2,-8]], [[5,-19],[15,-19],[21,-8],[5,-8]]],
+     [#583149, [[-32,15],[-19,15],[-15,22],[-19,30],[-31,30],[-35,24]], [[19,15],[32,15],[35,24],[31,30],[19,30],[15,22]]]],
+    // 39 · Fork
+    [[#5A659D, [[-20,-40],[-13,-40],[-13,-16],[-5,-16],[-5,-40],[4,-40],[4,-16],[12,-16],[12,-40],[20,-40],[20,-8],[14,3],[6,9],[6,42],[-6,42],[-6,9],[-14,3],[-20,-8]]]],
+    // 40 · House
+    [[#306D73, [[-43,-5],[0,-42],[43,-5],[32,-5],[32,38],[-32,38],[-32,-5]]],
+     [#A9D6CD, [[-8,10],[8,10],[8,37],[-8,37]], [[13,-7],[25,-7],[25,5],[13,5]]]],
+    // 41 · Lock
+    [[#805194, [[-22,-8],[-22,-27],[-16,-39],[-7,-43],[7,-43],[17,-39],[22,-27],[22,-8],[13,-8],[13,-25],[8,-32],[-8,-32],[-13,-25],[-13,-8]]],
+     [#AC66AD, [[-31,-11],[31,-11],[33,34],[25,41],[-25,41],[-33,34]]],
+     [#592B6C, [[-7,5],[0,1],[7,5],[7,12],[3,15],[5,26],[-5,26],[-3,15],[-7,12]]]],
+    // 42 · Pinwheel
+    [[#128286, [[0,0],[-34,-3],[-41,-17],[-31,-32],[-16,-32]], [[0,0],[4,-34],[17,-41],[32,-31],[32,-16]],
+      [[0,0],[34,4],[41,17],[31,32],[16,32]], [[0,0],[-4,34],[-17,41],[-32,31],[-32,16]]],
+     [#9CDBCB, [[-6,-6],[6,-6],[9,0],[6,6],[-6,6],[-9,0]]]],
+    // 43 · Headphones
+    [[#2A658F, [[-37,11],[-37,-9],[-31,-24],[-19,-36],[0,-42],[19,-36],[31,-24],[37,-9],[37,11],[28,11],[28,-8],[21,-22],[10,-29],[-10,-29],[-21,-22],[-28,-8],[-28,11]]],
+     [#3F8EB0, [[-42,6],[-23,6],[-17,14],[-17,31],[-23,38],[-41,38],[-45,30],[-45,15]],
+      [[42,6],[23,6],[17,14],[17,31],[23,38],[41,38],[45,30],[45,15]]]],
+    // 44 · Glasses
+    [[#743866, [[-44,-14],[-34,-19],[-14,-18],[-6,-10],[6,-10],[14,-18],[34,-19],[44,-14],[41,12],[32,22],[18,22],[9,16],[4,2],[-4,2],[-9,16],[-18,22],[-32,22],[-41,12]]],
+     [#E4AAD9, [[-36,-10],[-17,-10],[-13,-5],[-16,9],[-22,15],[-31,14],[-36,7]], [[36,-10],[17,-10],[13,-5],[16,9],[22,15],[31,14],[36,7]]]],
+    // 45 · Snow crystal
+    [[#2E8AB0, [[-4,-44],[4,-44],[4,-24],[15,-32],[20,-26],[4,-14],[4,-7],[10,-10],[12,-28],[20,-27],[19,-15],[36,-25],[41,-18],[23,-8],[36,-5],[33,3],[14,-2],[8,2],[13,6],[31,4],[33,12],[22,14],[41,24],[36,31],[17,20],[19,32],[10,33],[7,14],[4,10],[4,16],[16,29],[10,35],[4,28],[4,44],[-4,44],[-4,28],[-10,35],[-16,29],[-4,16],[-4,10],[-7,14],[-10,33],[-19,32],[-17,20],[-36,31],[-41,24],[-22,14],[-33,12],[-31,4],[-13,6],[-8,2],[-14,-2],[-33,3],[-36,-5],[-23,-8],[-41,-18],[-36,-25],[-19,-15],[-20,-27],[-12,-28],[-10,-10],[-4,-7],[-4,-14],[-20,-26],[-15,-32],[-4,-24]]]],
+    // 46 · Cactus
+    [[#398050, [[-8,43],[-8,15],[-24,15],[-34,6],[-34,-17],[-25,-23],[-18,-17],[-18,-2],[-8,-2],[-8,-35],[0,-42],[10,-42],[17,-35],[17,9],[25,9],[25,-10],[32,-16],[41,-10],[41,15],[31,25],[17,25],[17,43]]],
+     [#75AE68, [[1,-30],[6,-30],[6,33],[1,33]]]],
+    // 47 · Apple
+    [[#B44535, [[0,-17],[15,-25],[29,-19],[37,-7],[35,14],[26,34],[14,41],[1,36],[-12,41],[-25,34],[-34,16],[-38,-5],[-29,-19],[-14,-25]]],
+     [#467656, [[-3,-18],[-5,-30],[-16,-35],[-15,-43],[-3,-39],[4,-29],[17,-40],[31,-36],[25,-26],[11,-24],[4,-17]]]],
+    // 48 · Leaf
+    [[#427D47, [[-42,34],[-33,18],[-35,1],[-26,-19],[-7,-30],[16,-33],[41,-39],[37,-17],[30,5],[14,22],[-8,27],[-24,22],[-37,40]]],
+     [#8DB866, [[-27,24],[-16,7],[18,-19],[22,-15],[-11,12],[-22,27]]]],
+    // 49 · Rabbit
+    [[#A45D91, [[-30,21],[-27,4],[-15,-5],[-23,-29],[-21,-41],[-12,-45],[-5,-37],[1,-10],[7,-36],[14,-45],[22,-41],[24,-31],[18,-4],[28,5],[31,21],[22,34],[10,39],[-12,39],[-24,33]]],
+     [#F0BBD7, [[-14,14],[-7,14],[-7,21],[-14,21]], [[7,14],[14,14],[14,21],[7,21]], [[-5,25],[5,25],[0,31]]]],
+    // 50 · Cat
+    [[#885432, [[-37,15],[-30,1],[-32,-35],[-13,-21],[13,-21],[32,-35],[30,1],[37,15],[27,31],[13,36],[-13,36],[-28,31]]],
+     [#F0AC6D, [[-24,-4],[-10,2],[-17,10],[-24,7]], [[24,-4],[10,2],[17,10],[24,7]], [[-7,15],[7,15],[0,23]]]],
+    // 51 · Guitar
+    [[#8D4C33, [[4,-3],[27,-37],[33,-42],[42,-37],[39,-29],[12,5]]],
+     [#C47332, [[-42,23],[-36,7],[-22,0],[-10,2],[-5,-11],[8,-13],[22,-5],[24,7],[15,17],[5,16],[3,29],[-6,41],[-21,43],[-36,35]]],
+     [#733E2C, [[-17,11],[-10,7],[-3,12],[-3,20],[-10,24],[-17,19]]]],
+    // 52 · Airplane
+    [[#4669AA, [[0,-45],[8,-37],[10,-12],[42,9],[42,19],[10,11],[8,28],[20,37],[19,43],[0,38],[-19,43],[-20,37],[-8,28],[-10,11],[-42,19],[-42,9],[-10,-12],[-8,-37]]],
+     [#ADCAED, [[-5,-29],[0,-34],[5,-29],[5,-20],[-5,-20]]]],
+    // 53 · Pencil
+    [[#BC7318, [[-13,-29],[13,-29],[13,26],[0,44],[-13,26]]],
+     [#F5C677, [[-13,23],[13,23],[13,26],[0,44],[-13,26]]],
+     [#AC4055, [[-13,-36],[-7,-42],[7,-42],[13,-36],[13,-28],[-13,-28]]],
+     [#674333, [[-6,36],[6,36],[0,44]]]],
+    // 54 · Camera
+    [[#345D66, [[-43,-20],[-23,-20],[-15,-32],[10,-32],[18,-20],[43,-20],[43,33],[-43,33]]],
+     [#6AB4AF, [[-19,-1],[-8,-12],[8,-12],[20,-1],[20,14],[9,25],[-8,25],[-19,14]], [[28,-13],[37,-13],[37,-5],[28,-5]]],
+     [#285765, [[-9,2],[-3,-3],[5,-3],[11,3],[11,11],[5,16],[-4,16],[-9,10]]]],
+    // 55 · Gift
+    [[#AB3D53, [[-38,-13],[38,-13],[38,1],[32,1],[32,39],[-32,39],[-32,1],[-38,1]]],
+     [#EEA16C, [[-7,-13],[7,-13],[7,39],[-7,39]], [[-4,-13],[-25,-18],[-33,-29],[-30,-39],[-19,-42],[-9,-36],[0,-22],[9,-36],[19,-42],[30,-39],[33,-29],[25,-18],[4,-13],[12,-24],[24,-27],[24,-33],[18,-34],[8,-27],[0,-18],[-8,-27],[-18,-34],[-24,-33],[-24,-27],[-12,-24]]]],
+    // 56 · Trophy
+    [[#A85C1A, [[-25,-35],[25,-35],[25,-27],[41,-27],[41,-8],[33,5],[20,9],[12,17],[6,20],[6,32],[22,32],[22,41],[-22,41],[-22,32],[-6,32],[-6,20],[-12,17],[-20,9],[-33,5],[-41,-8],[-41,-27],[-25,-27]]],
+     [#F5C16A, [[-18,-28],[18,-28],[15,-4],[8,5],[0,9],[-8,5],[-15,-4]], [[29,-21],[35,-21],[35,-10],[30,-4],[24,-1]], [[-29,-21],[-35,-21],[-35,-10],[-30,-4],[-24,-1]]]],
+    // 57 · Watering can
+    [[#41825A, [[-42,-21],[-33,-28],[-22,-28],[-13,-20],[14,-20],[16,-6],[39,-20],[45,-15],[22,9],[18,31],[-20,31],[-25,12],[-36,8],[-43,-4]]],
+     [#A8CA81, [[-34,-19],[-26,-21],[-21,-15],[-23,-1],[-30,-2],[-36,-8]], [[-17,16],[17,16],[15,22],[-16,22]]]],
+    // 58 · Balloon
+    [[#3D69B4, [[-23,-26],[-13,-38],[2,-44],[17,-39],[27,-29],[30,-13],[25,4],[15,18],[6,23],[13,29],[-2,29],[2,22],[-12,15],[-22,4],[-27,-12]]],
+     [#A6CAEB, [[-17,-24],[-10,-32],[-3,-33],[-4,-26],[-11,-19]]],
+     [#3D69B4, [[4,28],[9,28],[3,36],[10,44],[6,47],[-2,36]]]],
+    // 59 · Seahorse
+    [[#167D7D, [[-8,-40],[2,-44],[9,-33],[21,-29],[30,-17],[27,-7],[14,-7],[10,-12],[2,-5],[14,0],[21,11],[20,25],[12,37],[0,42],[-11,39],[-17,28],[-14,17],[-4,14],[3,20],[-3,24],[-8,22],[-8,29],[-2,33],[7,27],[9,17],[4,10],[-14,3],[-20,-8],[-18,-24]]],
+     [#95CEB0, [[8,-26],[14,-26],[14,-20],[8,-20]]]],
+    // 60 · Strawberry
+    [[#B9434B, [[-37,-13],[-27,-27],[-10,-31],[13,-31],[31,-25],[38,-13],[35,1],[23,22],[8,38],[0,43],[-10,36],[-25,22],[-35,2]]],
+     [#35764B, [[-31,-23],[-14,-28],[-20,-40],[-6,-37],[0,-45],[6,-36],[19,-42],[17,-28],[31,-23],[15,-18],[0,-23],[-14,-18]]],
+     [#F6B673, [[-23,-6],[-17,-6],[-19,1],[-23,0]], [[9,-10],[15,-10],[14,-3],[10,-3]], [[-3,6],[3,6],[1,13],[-3,12]], [[16,10],[22,9],[19,17],[15,16]], [[-12,22],[-6,21],[-7,28],[-11,27]]]],
+    // 61 · Snail
+    [[#985324, [[-41,20],[-35,12],[-26,11],[18,13],[29,8],[28,-5],[34,-11],[41,-8],[42,13],[39,26],[29,33],[-31,33],[-41,29]]],
+     [#CB7A2C, [[-30,12],[-32,-3],[-27,-20],[-14,-31],[3,-33],[18,-26],[26,-14],[27,1],[18,17],[4,23],[-15,22]]],
+     [#F6C46D, [[-18,4],[-21,-5],[-15,-18],[-3,-23],[10,-19],[17,-11],[16,0],[10,8],[0,12],[-10,7],[-12,-1],[-5,-7],[4,-7],[8,-2],[6,3],[1,4],[0,0],[-5,0],[-4,4],[3,7],[10,2],[11,-8],[7,-13],[-4,-16],[-13,-10],[-15,0]]]],
+    // 62 · Eyedropper
+    [[#6B4D9E, [[3,-8],[3,-18],[20,-35],[31,-40],[40,-31],[36,-20],[19,-3],[10,-2],[0,-8]]],
+     [#8C76C3, [[-1,-14],[16,3],[11,8],[7,5],[-21,32],[-30,33],[-35,28],[-34,20],[-8,-6],[-10,-10]]],
+     [#4B367F, [[-38,31],[-34,36],[-42,43],[-46,39]]]],
+    // 63 · Owl
+    [[#875832, [[-31,-36],[-15,-30],[15,-30],[31,-36],[33,-10],[30,13],[20,36],[-20,36],[-31,13],[-34,-10]]],
+     [#E3AF6C, [[-26,-16],[-20,-23],[-9,-23],[-3,-15],[-7,-5],[-18,-3],[-25,-9]], [[26,-16],[20,-23],[9,-23],[3,-15],[7,-5],[18,-3],[25,-9]], [[0,3],[7,13],[0,20],[-7,13]]],
+     [#56362A, [[-17,-17],[-11,-17],[-11,-10],[-17,-10]], [[11,-17],[17,-17],[17,-10],[11,-10]]]],
+    // 64 · Windmill
+    [[#AA4A36, [[-18,4],[18,4],[24,41],[-24,41]]],
+     [#624C88, [[0,-6],[-32,-38],[-37,-28],[-9,-2],[-41,20],[-34,29],[-1,7],[26,37],[34,28],[9,1],[40,-23],[32,-31]]],
+     [#E9A777, [[-5,25],[5,25],[5,41],[-5,41]]]],
+    // 65 · Drum
+    [[#A7475E, [[-39,-15],[-25,-22],[25,-22],[39,-15],[39,23],[28,33],[-28,33],[-39,23]]],
+     [#F0A7B1, [[-39,-15],[-25,-23],[25,-23],[39,-15],[27,-7],[-27,-7]], [[-32,-5],[-20,20],[-9,-5],[-3,-5],[-19,30],[-23,30],[-37,-2]], [[7,-5],[19,20],[30,-5],[37,-2],[22,30],[17,30],[1,-5]]],
+     [#8D531F, [[-40,-40],[-34,-44],[4,-21],[-1,-16]], [[39,-40],[34,-45],[-3,-23],[2,-17]]]],
+    // 66 · Ice-cream cone
+    [[#A36532, [[-23,2],[23,2],[0,44]]],
+     [#B75C8B, [[-28,4],[-34,-6],[-31,-18],[-23,-25],[-15,-35],[-3,-42],[9,-41],[20,-34],[25,-24],[33,-14],[33,-4],[27,5],[11,8],[-12,7]]],
+     [#F3B6D2, [[-19,-18],[-11,-29],[-3,-32],[3,-28],[-7,-24],[-12,-15]]]],
+    // 67 · Lighthouse
+    [[#A23F48, [[-18,-27],[18,-27],[26,39],[-26,39]]],
+     [#F1C0A0, [[-21,-5],[21,-5],[23,10],[-23,10]], [[-25,24],[25,24],[26,38],[-26,38]]],
+     [#744556, [[-25,-27],[0,-43],[25,-27]], [[-31,40],[31,40],[31,45],[-31,45]]],
+     [#E9AD52, [[-10,-24],[10,-24],[10,-12],[-10,-12]], [[23,-21],[43,-27],[43,-12],[23,-15]]]],
+    // 68 · Compass
+    [[#5268A5, [[-42,0],[-36,-21],[-21,-36],[0,-42],[21,-36],[36,-21],[42,0],[36,21],[21,36],[0,42],[-21,36],[-36,21]]],
+     [#BECDE7, [[-33,0],[-27,-16],[-16,-27],[0,-33],[16,-27],[27,-16],[33,0],[27,16],[16,27],[0,33],[-16,27],[-27,16]]],
+     [#AB4656, [[22,-23],[7,7],[-7,-7]]],
+     [#36518B, [[-22,23],[-7,-7],[7,7]]]],
+    // 69 · Acorn
+    [[#9A5425, [[-30,-5],[30,-5],[28,15],[20,30],[9,38],[0,44],[-9,38],[-20,30],[-28,15]]],
+     [#6E4C37, [[-39,-5],[-35,-17],[-20,-26],[-7,-27],[-4,-39],[7,-44],[12,-35],[4,-26],[20,-26],[35,-17],[39,-5],[26,1],[-26,1]]],
+     [#E4A455, [[-18,9],[-11,7],[-8,18],[-3,29],[-10,28],[-16,19]]]],
+    // 70 · Whale
+    [[#286F97, [[-44,2],[-38,-15],[-25,-22],[-8,-19],[7,-9],[21,-3],[27,-8],[23,-15],[22,-25],[31,-22],[36,-16],[42,-26],[46,-21],[45,-10],[35,-3],[32,12],[19,23],[2,29],[-22,29],[-36,21]]],
+     [#ACD5E1, [[-38,14],[-23,19],[-4,20],[13,17],[8,24],[-7,29],[-23,27],[-34,22]], [[-29,-5],[-22,-5],[-22,1],[-29,1]]]],
+    // 71 · Bowling pin
+    [[#49669E, [[-6,-42],[6,-42],[12,-35],[11,-23],[7,-14],[9,-5],[20,14],[22,29],[16,40],[-16,40],[-22,29],[-20,14],[-9,-5],[-7,-14],[-11,-23],[-12,-35]]],
+     [#BBCDE5, [[-8,-20],[8,-20],[7,-14],[-7,-14]], [[-8,-9],[8,-9],[11,-3],[-11,-3]], [[-9,14],[-3,12],[-5,31],[-11,32]]]],
+    // 72 · Book
+    [[#854E96, [[-43,-31],[-24,-34],[-9,-28],[0,-21],[9,-28],[24,-34],[43,-31],[43,28],[25,25],[10,29],[0,36],[-10,29],[-25,25],[-43,28]]],
+     [#D6B6E6, [[-34,-23],[-23,-24],[-9,-19],[-9,22],[-24,16],[-34,17]], [[34,-23],[23,-24],[9,-19],[9,22],[24,16],[34,17]]],
+     [#945AA8, [[-29,-16],[-15,-13],[-15,-9],[-29,-12]], [[29,-16],[15,-13],[15,-9],[29,-12]]]]
+  ]
+
+  let boardWidth = 780
+  let boardHeight = 360
+  let boardMidX = boardWidth / 2
+  let boardMidY = boardHeight / 2
+  let frameWidth = screenWidth ?? boardWidth
+  let safeTop = screenTop ?? 0
+  let frameHeight = max(1, (screenHeight ?? boardHeight) - safeTop)
+  // OWL cannot request an Android orientation. Turn the board within a portrait window.
+  let sideways = frameHeight > frameWidth
+  let centerX = frameWidth / 2
+  let centerY = safeTop + frameHeight / 2
+  let boardScale = min((sideways ? frameHeight : frameWidth) / boardWidth,
+    (sideways ? frameWidth : frameHeight) / boardHeight)
+  let cardLeft = [12, 438]
+  let cardTop = 12
+  let cardWidth = 330
+  let cardHeight = 330
+  let edgeGap = 9
+  let symbolGap = 8
+  let slotsOnCard = range(9)
+  let startingCenters = [[56, 57], [161, 55], [273, 59], [58, 165], [164, 160], [271, 166], [57, 274], [163, 271], [273, 273]]
+  let marks = dealSeeds.map((seed, side) => shuffle(cards[activeCards[side]], seed))
+  let sizes = dealSeeds.map(seed => slotsOnCard.map(i => 0.43 + 0.32 * hash(seed, i, "size")))
+  let shapeRadii = range(21).map(i => 53) + newSymbols.map(layers =>
+    1 + sqrt(reduce(flatten(layers.map(layer => drop(layer, 1)), 2), (largest, vertex) =>
+      max(largest, vertex[0] * vertex[0] + vertex[1] * vertex[1]), 0)))
+  // Enclose every rotated silhouette in a circle. Leave 8 dp between circles and at least 9 dp from the outer edge.
+  let initialLayout = sizes.map((sideSizes, side) => slotsOnCard.map(i => {
+    slot: i, cx: startingCenters[i][0], cy: startingCenters[i][1], radius: shapeRadii[marks[side][i]] * sideSizes[i],
+    zoom: sideSizes[i], turn: 360 * hash(dealSeeds[side], i, "angle") - 180
+  }))
+  // Scatter the largest symbols first. Sample the full usable face for each symbol.
+  let candidateCenters = initialLayout.map((layout, side) => layout.map(item => range(52).map(attempt => {
+    cx: lerp(edgeGap + item.radius, cardWidth - edgeGap - item.radius, hash(dealSeeds[side], item.slot, attempt, "scatter x")),
+    cy: lerp(edgeGap + item.radius, cardHeight - edgeGap - item.radius, hash(dealSeeds[side], item.slot, attempt, "scatter y"))
+  })))
+  let scattered = initialLayout.map((layout, side) => reduce(layout.sortBy(item => -item.radius), (placed, item) =>
+    reduce([candidateCenters[side][item.slot].find(point => placed.all(other =>
+      pow(point.cx - other.cx, 2) + pow(point.cy - other.cy, 2) >= pow(item.radius + other.radius + symbolGap, 2)))],
+      (current, point) => point == null ? current : current + [merge(item, point)], placed), []))
+  // If a scatter gets crowded, start from safe spacing and shuffle positions with bounded moves.
+  let proposals = dealSeeds.map(seed => range(216).map(step => {
+    slot: floor(9 * hash(seed, step, "slot")),
+    wide: step % 3 == 0,
+    ux: hash(seed, step, "x"),
+    uy: hash(seed, step, "y")
+  }))
+  let layouts = initialLayout.map((layout, side) => len(scattered[side]) == len(layout) ? scattered[side] : reduce(proposals[side], (placed, move) =>
+    reduce([{
+      cx: move.wide ? move.ux * cardWidth : placed[move.slot].cx + (move.ux - 0.5) * 90,
+      cy: move.wide ? move.uy * cardHeight : placed[move.slot].cy + (move.uy - 0.5) * 90,
+      radius: placed[move.slot].radius
+    }], (current, point) =>
+      point.cx >= edgeGap + point.radius && point.cx <= cardWidth - edgeGap - point.radius &&
+      point.cy >= edgeGap + point.radius && point.cy <= cardHeight - edgeGap - point.radius &&
+      current.all(other => other.slot == move.slot ||
+        pow(point.cx - other.cx, 2) + pow(point.cy - other.cy, 2) >= pow(point.radius + other.radius + symbolGap, 2))
+      ? set(current, move.slot, merge(current[move.slot], point)) : current, placed), layout))
+  // Enlarge symbols in place. Each symbol sees the radii that have already grown.
+  let filledLayouts = layouts.map(layout => reduce(layout, (filled, item, index) =>
+    reduce([reduce(filled, (limit, other) => other.slot == item.slot ? limit :
+      min(limit, sqrt(pow(item.cx - other.cx, 2) + pow(item.cy - other.cy, 2)) - other.radius - symbolGap),
+      min(item.radius * 1.5, item.radius / item.zoom * 1.04,
+        min(item.cx, cardWidth - item.cx, item.cy, cardHeight - item.cy) - edgeGap))],
+      (current, radius) => set(current, index, merge(item, {radius: radius, zoom: item.zoom * radius / item.radius})),
+      filled), layout))
+  let symbols = filledLayouts.map((layout, side) => layout.map(item => merge(item, {mark: marks[side][item.slot]})))
+
+  let resetWidth = 82
+  let resetHeight = 50
+  let resetLeft = boardMidX - resetWidth / 2
+  let resetTop = boardMidY - resetHeight / 2
+  let helpTop = resetTop + resetHeight + 12
+  let helpHeight = 48
+  let guideWidth = 422
+  let guideHeight = 268
+  let guideLeft = boardMidX - guideWidth / 2
+  let guideTop = boardMidY - guideHeight / 2
+  let doneLeft = boardMidX - 58
+  let doneTop = guideTop + 202
+  let doneWidth = 116
+  let doneHeight = 48
+  let scoreText = "${pad(scores[0], 2, "0")}:${pad(scores[1], 2, "0")}"
+  let sideInk = [#FFBC87, #9ADFC8]
+  let cardPaper = [#FFF1DF, #EEFAEF]
+  let cardTrim = [#D9A57E, #90C7B3]
+
+  every frame {
+    if flipSide >= 0 {
+      flipTime = flipTime + dt
+      if flipTime >= 0.32 && nextCard >= 0 {
+        activeCards = set(activeCards, flipSide, nextCard)
+        dealSeeds = set(dealSeeds, flipSide, random(1000000))
+        nextCard = -1
+      }
+      if flipTime >= 0.64 {
+        flipSide = -1
+        flipTime = 0
+      }
+    }
+    if missTime > 0 { missTime = max(0, missTime - dt) }
+  }
+
+  Canvas {
+    fill: true
+    ripple: false
+    onTap: {
+      // Undo the exact transform used for the board before testing any hit areas.
+      let tapX = (sideways ? y - centerY : x - centerX) / boardScale + boardMidX
+      let tapY = (sideways ? centerX - x : y - centerY) / boardScale + boardMidY
+      if helpOpen {
+        let outsideGuide = tapX < guideLeft || tapX > guideLeft + guideWidth || tapY < guideTop || tapY > guideTop + guideHeight
+        let pressedDone = tapX >= doneLeft && tapX <= doneLeft + doneWidth && tapY >= doneTop && tapY <= doneTop + doneHeight
+        if outsideGuide || pressedDone { helpOpen = false }
+      } else if tapX >= resetLeft && tapX <= resetLeft + resetWidth && tapY >= helpTop && tapY <= helpTop + helpHeight {
+        helpOpen = true
+      } else if tapX >= resetLeft && tapX <= resetLeft + resetWidth && tapY >= resetTop && tapY <= resetTop + resetHeight {
+        scores = [0, 0]
+      } else if flipSide < 0 && tapY >= cardTop && tapY <= cardTop + cardHeight {
+        let pressedSide = tapX < boardMidX ? 0 : 1
+        let localX = tapX - cardLeft[pressedSide]
+        let localY = tapY - cardTop
+        if localX >= 0 && localX <= cardWidth {
+          let pair = symbols[pressedSide]
+          let hits = slotsOnCard.map(i => {
+            slot: i,
+            distance: pow(localX - pair[i].cx, 2) + pow(localY - pair[i].cy, 2),
+            radius: max(23, pair[i].radius)
+          }).filter(hit => hit.distance <= pow(hit.radius, 2))
+          let nearest = first(hits.sortBy(hit => hit.distance))
+          if nearest != null {
+            if pair[nearest.slot].mark == sharedSymbol {
+              let choices = range(len(cards)).filter(n => !contains(cards[n], sharedSymbol))
+              nextCard = choices[random(len(choices))]
+              scores = set(scores, pressedSide, scores[pressedSide] + 1)
+              missTime = 0
+              flipTime = 0
+              flipSide = pressedSide
+              haptic()
+            } else {
+              missSide = pressedSide
+              missSlot = nearest.slot
+              missTime = 0.42
+            }
+          }
+        }
+      }
+    }
+
+    rect(0, 0, width, height, fill: linear(0, 0, sideways ? width : 0, sideways ? 0 : height, sideways
+      ? [#112320, #142B28, #23413B] : [#23413B, #142B28, #112320]))
+    rotate(sideways ? 90 : 0, centerX, centerY) {
+      scale(boardScale, boardScale, centerX, centerY) {
+        translate(centerX - boardMidX, centerY - boardMidY) {
+          for side in range(2) {
+            let leftEdge = cardLeft[side]
+            let ink = sideInk[side]
+            let flipping = flipSide == side
+            let showingBack = flipping && flipTime >= 0.16 && flipTime < 0.48
+            let angle = flipTime < 0.32 ? flipTime / 0.32 * 180 : (flipTime - 0.32) / 0.32 * 180
+            let squash = flipping ? max(0.018, abs(cos(rad(angle)))) : 1
+            translate(leftEdge, cardTop) {
+              rect(2, 7, cardWidth - 2, cardHeight, radius: 20, fill: #0C1F1C)
+              scale(1, squash, cardWidth / 2, cardHeight / 2) {
+                if showingBack {
+                  rect(0, 0, cardWidth, cardHeight, radius: 20, fill: #254A43, stroke: ink, width: 1.5)
+                  rect(8, 8, cardWidth - 16, cardHeight - 16, radius: 14, stroke: ink, width: 1)
+                  for row in range(9) {
+                    for col in range(9) {
+                      let dx = 25 + col * 35
+                      let dy = 25 + row * 35
+                      path([[dx, dy - 5], [dx + 4, dy], [dx, dy + 5], [dx - 4, dy]], closed: true, fill: alpha(ink, 0.32))
+                    }
+                  }
+                  translate(cardWidth / 2, cardHeight / 2) {
+                    rotate(180, 0, 0) {
+                      circle(0, 0, 29, fill: ink)
+                      path([[0, -21], [16, -2], [0, 18], [-16, -2]], closed: true, fill: #163631)
+                      circle(0, -2, 5, fill: ink)
+                    }
+                  }
+                } else {
+                  rect(0, 0, cardWidth, cardHeight, radius: 20, fill: cardPaper[side])
+                  rect(5, 5, cardWidth - 10, cardHeight - 10, radius: 16, stroke: cardTrim[side], width: 1)
+                  for i in slotsOnCard {
+                    let item = symbols[side][i]
+                    let mark = item.mark
+                    if missSide == side && missSlot == i && missTime > 0 {
+                      circle(item.cx, item.cy, item.radius, stroke: alpha(#A63D3D, missTime / 0.42), width: 2)
+                    }
+                    translate(item.cx, item.cy) {
+                      rotate(item.turn, 0, 0) {
+                        scale(item.zoom, item.zoom, 0, 0) {
+                          if mark == 0 {
+                            path([[0,-43],[11,-14],[41,-13],[18,7],[25,36],[0,20],[-26,36],[-18,7],[-41,-13],[-11,-14]], closed: true, fill: #C26A16)
+                            circle(0, 0, 6, fill: #FFE095)
+                          } else if mark == 1 {
+                            path([[12,-42],[-32,6],[-5,6],[-16,43],[33,-11],[6,-11]], closed: true, fill: #7451AF)
+                          } else if mark == 2 {
+                            circle(0, 2, 36, fill: #226E85)
+                            circle(0, 2, 18, fill: cardPaper[side])
+                            circle(26, -29, 12, fill: #42A2A7)
+                          } else if mark == 3 {
+                            path([[0,-42],[32,-23],[38,12],[17,36],[-17,36],[-38,12],[-32,-23]], closed: true, fill: #AF3E69)
+                            path([[0,-42],[16,-10],[38,12],[-17,36],[-13,0]], closed: true, fill: #D56990)
+                            path([[-13,0],[16,-10],[17,36]], closed: true, fill: #8D3158)
+                          } else if mark == 4 {
+                            for petal in range(5) {
+                              rotate(petal * 72, 0, 0) { circle(0, -24, 15, fill: #B84848) }
+                            }
+                            circle(0, 0, 13, fill: #FFCF75)
+                          } else if mark == 5 {
+                            circle(-4, 0, 36, fill: #485EAE)
+                            circle(12, -10, 29, fill: cardPaper[side])
+                            circle(27, -26, 7, fill: #7987C7)
+                          } else if mark == 6 {
+                            path([[0,-42],[34,3],[34,22],[23,35],[0,41],[-23,35],[-34,22],[-34,3]], closed: true, fill: #197EAA)
+                            line(-18, 14, -10, 25, stroke: #B4E5F1, width: 6, cap: round)
+                          } else if mark == 7 {
+                            path([[-40,-22],[-34,-32],[-19,-31],[0,-15],[19,-31],[34,-32],[40,-22],[33,27],[22,34],[0,16],[-22,34],[-33,27]], closed: true, fill: #943C80)
+                            line(0, -15, 0, 16, stroke: #D989BA, width: 7)
+                          } else if mark == 8 {
+                            path([[0,-43],[34,-5],[22,-5],[42,26],[8,26],[8,42],[-8,42],[-8,26],[-42,26],[-22,-5],[-34,-5]], closed: true, fill: #34764D)
+                          } else if mark == 9 {
+                            path([[-39,-17],[39,-17],[24,26],[-24,26]], closed: true, fill: #A7592C)
+                            path([[0,-43],[23,-17],[-23,-17]], closed: true, fill: #E6944D)
+                            line(-34, -13, 32, -13, stroke: #FFC188, width: 6, cap: round)
+                          } else if mark == 10 {
+                            rect(-13, -41, 26, 82, radius: 8, fill: #8B3851)
+                            rect(-41, -13, 82, 26, radius: 8, fill: #8B3851)
+                            rect(-7, -7, 14, 14, radius: 4, fill: #E699A7)
+                          } else if mark == 11 {
+                            path([[-42,29],[-8,-37],[5,-12],[16,-30],[42,29]], closed: true, fill: #40579B)
+                            path([[-24,-6],[-8,-37],[7,-8],[-8,-13]], closed: true, fill: #A7BEE6)
+                          } else if mark == 12 {
+                            circle(0, 0, 29, fill: #735297)
+                            line(-37, 18, 36, -17, stroke: #AF86C2, width: 12, cap: round)
+                            circle(32, -33, 6, fill: #735297)
+                          } else if mark == 13 {
+                            path([[-42,0],[-22,-20],[0,-26],[22,-20],[42,0],[22,20],[0,26],[-22,20]], closed: true, fill: #157567)
+                            circle(0, 0, 15, fill: #A8DEC6)
+                            circle(0, 0, 8, fill: #174F46)
+                          } else if mark == 14 {
+                            circle(0, -13, 27, fill: #B03D33)
+                            line(0, 7, 0, 38, stroke: #B03D33, width: 10, cap: round)
+                            circle(-9, -22, 7, fill: #FAB088)
+                          } else if mark == 15 {
+                            path([[-42,-20],[42,-20],[37,32],[-37,32]], closed: true, fill: #9C5C26)
+                            line(-24, -21, -12, -37, stroke: #9C5C26, width: 9, cap: round)
+                            line(24, -21, 12, -37, stroke: #9C5C26, width: 9, cap: round)
+                            for reed in [-19, 0, 19] {
+                              line(reed, -6, reed, 17, stroke: #F0BD76, width: 5, cap: round)
+                            }
+                          } else if mark == 16 {
+                            circle(0, 0, 23, fill: #B96B16)
+                            for ray in range(8) {
+                              rotate(ray * 45, 0, 0) { line(0, -33, 0, -42, stroke: #B96B16, width: 6, cap: round) }
+                            }
+                          } else if mark == 17 {
+                            path([[0,-40],[15,-20],[42,-22],[24,1],[31,33],[0,21],[-31,33],[-24,1],[-42,-22],[-15,-20]], closed: true, fill: #266A61)
+                            path([[0,-40],[0,21],[-31,33],[-24,1],[-42,-22],[-15,-20]], closed: true, fill: #58AA89)
+                          } else if mark == 18 {
+                            path([[-40,-26],[-20,-26],[0,-7],[20,-26],[40,-26],[40,-6],[0,33],[-40,-6]], closed: true, fill: #AC4C38)
+                            path([[-37,-26],[-20,-26],[0,-7],[20,-26],[37,-26],[0,12]], closed: true, fill: #DD866C)
+                          } else if mark == 19 {
+                            rect(-29, -33, 58, 72, radius: 10, fill: #3E6280)
+                            rect(-18, -22, 36, 33, radius: 6, fill: #9ED5D9)
+                            line(-11, 24, 11, 24, stroke: #ABC8D6, width: 6, cap: round)
+                            line(0, -39, 0, -32, stroke: #3E6280, width: 9, cap: round)
+                          } else if mark == 20 {
+                            path([[-40,23],[-39,1],[-27,-20],[-8,-32],[13,-33],[31,-24],[41,-8],[41,12],[26,9],[15,18],[0,14],[-15,27]], closed: true, fill: #9A491E)
+                            line(-25, 10, 25, -16, stroke: #FAC986, width: 5, cap: round)
+                          } else {
+                            for layer in newSymbols[mark - 21] {
+                              for polygon in drop(layer, 1) {
+                                path(polygon, closed: true, fill: layer[0])
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          rect(resetLeft, resetTop, resetWidth, resetHeight, radius: 15, fill: #0F2421,
+            stroke: flipSide >= 0 ? sideInk[flipSide] : #5C7A70, width: 1)
+          text(scoreText, boardMidX, boardMidY, size: min(23, 114 / len(scoreText)), font: mono,
+            bold: true, align: center, color: #FFF4E4)
+          rect(resetLeft, helpTop, resetWidth, helpHeight, radius: 15, fill: #0F2421, stroke: #5C7A70, width: 1)
+          text("Help", boardMidX, helpTop + helpHeight / 2, size: 16, font: sans, bold: true, align: center, color: #FFF4E4)
+
+          if helpOpen {
+            rect(0, 0, boardWidth, boardHeight, fill: alpha(#081613, 0.76))
+            rect(guideLeft, guideTop, guideWidth, guideHeight, radius: 22, fill: #142F2B, stroke: #84B7A7, width: 1.5)
+            text("How to play", boardMidX, guideTop + 35, size: 27, font: serif, bold: true, align: center, color: #FFF4E4)
+            text("Find the one symbol on both cards.", boardMidX, guideTop + 76, size: 17, font: sans, align: center, color: #FFF4E4)
+            text("It may be a different size or angle.", boardMidX, guideTop + 99, size: 16, font: sans, align: center, color: #D4E4D9)
+            text("Tap the match on either card. That side scores", boardMidX, guideTop + 137, size: 16, font: sans, align: center, color: #FFF4E4)
+            text("one point, and its card flips to a new one.", boardMidX, guideTop + 159, size: 16, font: sans, align: center, color: #FFF4E4)
+            text("Tap the score to reset both sides.", boardMidX, guideTop + 184, size: 16, font: sans, align: center, color: #D4E4D9)
+            rect(doneLeft, doneTop, doneWidth, doneHeight, radius: 14, fill: #9ADFC8)
+            text("Got it", boardMidX, doneTop + doneHeight / 2, size: 16, font: sans, bold: true, align: center, color: #12332D)
+          }
+        }
+      }
+    }
+  }
+}
