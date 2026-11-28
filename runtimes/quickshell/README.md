@@ -155,6 +155,15 @@ Where it differs, because Android is not here:
   **Row** with `scroll: true` scrolls sideways.
 - **volume("request")** (owl 25) reports that there's nothing to ask: the
   output's `battery` is null and `granted` false.
+- **appAction("voice", key)** (owl 26) reports that it acts in the launcher's
+  drawer, like the other `appAction`s: this shell has no Voice.
+- **Right to left** (owl 27) follows the desktop's language, as `strings` does:
+  a file with a set for Arabic, Persian, Hebrew, Urdu or another language written
+  right to left runs right to left when the desktop is in it. Rows, Flows and
+  Grids fill from the right, `start` and `end` swap in `align`, `justify` and a
+  Text's `align`, `padding`'s first number is the right side's, a Popup lines up
+  with its anchor's right edge and a scrolling Row starts at its right end;
+  a Canvas, `offset`, a drag's x and a Slider stay as they are.
 - **match** and **matchAll** take java's flags at the start of a pattern,
   `(?i)`, `(?s)`, `(?m)`, as the launcher's regular expressions do.
 - **Input**'s `lines` wraps and grows up to that many lines, then scrolls;

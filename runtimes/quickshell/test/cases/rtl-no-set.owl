@@ -1,0 +1,5 @@
+widget "x" {
+  meta { owl: 27 }
+  strings { en { a: "next" } de { a: "weiter" } }
+  Row { Text { text: str.a } }
+}
