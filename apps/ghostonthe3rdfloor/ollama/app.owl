@@ -1,7 +1,8 @@
 app "ollama" {
   meta { owl: 15; description: "Run local Ollama models: start the server, chat, pull or import GGUF models and set the server context length"; version: "1.0"; license: "MIT"; category: "dev" }
   // curl checks the real server; setsid keeps it alive past the action timeout; zenity is the Linux file chooser
-  requires { pacman: ["ollama", "jq", "procps-ng", "gawk", "curl", "coreutils", "util-linux", "sed", "zenity"] }
+  // Ollama comes from ollama.com's arm64 build, not an Arch repo, so it can't be declared here.
+  requires { pacman: ["jq", "procps-ng", "gawk", "curl", "coreutils", "util-linux", "sed", "zenity"] }
   title: "ollama"
   icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
     <rect width="256" height="256" rx="56" fill="#1A1B26"/>
@@ -26,6 +27,7 @@ app "ollama" {
   // The field reads a let derived from pullName, so typing isn't rewritten mid-keystroke.
   let pullNameField = pullName
 
+  source ollamaBin = cmd("command -v ollama >/dev/null && echo found || echo missing") every 10s
   source server = cmd("curl -fsS --max-time 2 http://127.0.0.1:11434/api/version >/dev/null && echo running || echo stopped") every 5s
   source loaded = cmd("ollama ps | tail -n +2 | awk '{print $1}' | sort -u | jq -R . | jq -s .") every 5s json
   source models = cmd("""
@@ -52,7 +54,16 @@ END { print s "]" }
       padding: 16
       Column { gap: 12
         Text { text: "server"; style: title }
-        if server == "running" {
+        if ollamaBin == "missing" {
+          Column { gap: 8
+            Row { gap: 8; align: center
+              Text { text: "ollama isn't installed"; color: orange }
+              Spacer { weight: 1 }
+              Button { text: "install guide"; onTap: url("https://ollama.com/download/linux") }
+            }
+            Text { text: "Install the arm64 build from ollama.com, then reopen this app."; style: small; color: muted }
+          }
+        } else if server == "running" {
           Row { gap: 8; align: center
             Text { text: "running"; color: accent }
             Spacer { weight: 1 }
