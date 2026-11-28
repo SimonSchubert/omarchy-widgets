@@ -1,7 +1,7 @@
 widget "today" {
   size: 3x3
   minSize: 2x2
-  meta { description: "The date and the weather where you are: a city you type, else the phone's location once you allow it, else by IP. Tap it for 24 hours, three days, wind, UV, sun and moon, °C or °F, and the weather source to switch"; version: "1.18"; license: "MIT"; category: "world"; owl: 18 }
+  meta { description: "The date and weather where you are: type a city, else your location or IP. Tap for 24h, 3 days, wind, UV, sun/moon, °C or °F, and the weather source."; version: "1.18"; license: "MIT"; category: "world"; owl: 18 }
   // Only http, clock and android.location sources: no shell commands, so no packages are needed.
 
   // What it says, in the phone's language where it has a set. wttr names the sky and the moon in English, and
