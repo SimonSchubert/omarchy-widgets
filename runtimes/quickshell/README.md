@@ -113,8 +113,15 @@ Where it differs, because Android is not here:
   reports that there is none. **pickImages()** reports that there are no phone
   photos to pick.
 - **ws(...)** sources don't connect: they stay null, `send(...)` goes nowhere
-  and `on … each` never runs. `pin:` is taken and not checked: a request goes
-  out with the system's certificates, which a server with one of its own fails.
+  and `on … each` never runs. A request with `pin:` is not sent: curl
+  can pin a public key, not a certificate, so the check can't be made here,
+  and the request says so instead of going out unchecked.
+- **Requests and commands are bounded**, since every widget shares the shell:
+  a widget has 4 requests out at a time and 32 waiting, 8 `run(...)` commands
+  at a time, and `every frame { }` may act (run, post, refresh, url, sound...)
+  8 times at once and 4 times a second over time. What is past a bound is
+  left out and named in the widget's errors. A mesh's smooth normals stop
+  averaging after 4 million faces looked at, the rest taking their face's own.
 - **strings** and `lang()` take the language of Qt's locale, as the launcher
   takes the phone's.
 - **onPull** never runs: a desktop list is scrolled, not pulled.
@@ -148,6 +155,15 @@ Where it differs, because Android is not here:
   **Row** with `scroll: true` scrolls sideways.
 - **volume("request")** (owl 25) reports that there's nothing to ask: the
   output's `battery` is null and `granted` false.
+- **appAction("voice", key)** (owl 26) reports that it acts in the launcher's
+  drawer, like the other `appAction`s: this shell has no Voice.
+- **Right to left** (owl 27) follows the desktop's language, as `strings` does:
+  a file with a set for Arabic, Persian, Hebrew, Urdu or another language written
+  right to left runs right to left when the desktop is in it. Rows, Flows and
+  Grids fill from the right, `start` and `end` swap in `align`, `justify` and a
+  Text's `align`, `padding`'s first number is the right side's, a Popup lines up
+  with its anchor's right edge and a scrolling Row starts at its right end;
+  a Canvas, `offset`, a drag's x and a Slider stay as they are.
 - **match** and **matchAll** take java's flags at the start of a pattern,
   `(?i)`, `(?s)`, `(?m)`, as the launcher's regular expressions do.
 - **Input**'s `lines` wraps and grows up to that many lines, then scrolls;

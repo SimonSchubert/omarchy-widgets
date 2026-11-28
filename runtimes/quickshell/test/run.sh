@@ -135,4 +135,26 @@ else
   failed=1
 fi
 
+# Right to left (owl 27) alike: per language, for the cases and the edge files.
+javac -cp "$jar" -d "$out" "$here/OwlRtl.java"
+rtl_files=("$here/edge.owl" "$here/space.owl" "$here"/cases/*.owl)
+theirs=$(java "${java_opts[@]}" -cp "$jar:$out" OwlRtl "${rtl_files[@]}" 2>/dev/null)
+mine=$(node -e '
+  const fs = require("fs"), Module = require("module")
+  const m = new Module(process.argv[1]); m.filename = process.argv[1]
+  m._compile(fs.readFileSync(process.argv[1], "utf8").replace(/^\.pragma library/, "//"), process.argv[1])
+  for (const f of process.argv.slice(2)) {
+    const src = fs.readFileSync(f, "utf8")
+    for (const lang of ["en", "de", "ar", "fa", "he", "ur"]) {
+      try { console.log(lang + " " + m.exports.compile(src, lang).rtl + " " + f) } catch (e) { break }
+    }
+  }' "$owl" "${rtl_files[@]}")
+if [ "$mine" = "$theirs" ]; then
+  echo "ok - owl.jar and Owl.js lay out the same files right to left in each language"
+else
+  echo "not ok - owl.jar and Owl.js disagree on right to left"
+  diff <(echo "$theirs") <(echo "$mine") | head -10
+  failed=1
+fi
+
 exit $failed

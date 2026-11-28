@@ -1,0 +1,4 @@
+widget "x" {
+  meta { owl: 25 }
+  Button { text: "talk", onTap: appAction("voice", "owl:x") }
+}

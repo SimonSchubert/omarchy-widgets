@@ -2659,6 +2659,10 @@ var MAX_BSP_TRIANGLES = 8192
 var FLOAT_MAX = 3.4028234663852886e38
 var fr = Math.fround
 
+// Bounds on what one mesh may cost the thread it is built and drawn on, whatever an answer puts in it.
+var MAX_NORMAL_WORK = 4000000
+var MAX_ODD_COLORS = 256
+
 // A 3D model: points, triangles and what colors them, built once by cube(), sphere(), parseObj() and the like
 // and drawn many times. Opaque to widgets, not a list, and compared by identity.
 //
@@ -2740,10 +2744,15 @@ Mesh.prototype = {
       var id = key(tris[3 * t + k])
       if (at[id]) at[id].push(t); else at[id] = [t]
     }
+    // A point shared by thousands of faces (one face of an OBJ with that many corners, as a fan) makes this the
+    // square of them, on the thread that draws the shell: past MAX_NORMAL_WORK faces looked at, the corners left
+    // take their own face's normal, which is what a flat fan's average is anyway.
+    var work = 0
     for (t = 0; t < n; t++) {
       for (k = 0; k < 3; k++) {
         var nx = 0, ny = 0, nz = 0
-        var near = at[key(tris[3 * t + k])]
+        var near = work < MAX_NORMAL_WORK ? at[key(tris[3 * t + k])] : []
+        work += near.length
         for (var q = 0; q < near.length; q++) {
           var o = near[q]
           var d = fn[3 * o] * fn[3 * t] + fn[3 * o + 1] * fn[3 * t + 1] + fn[3 * o + 2] * fn[3 * t + 2]
@@ -2793,10 +2802,26 @@ MeshBuilder.prototype = {
     return this.points.length / 3 - 1
   },
 
-  // The palette index of a color, -1 for none.
+  // The palette index of a color, -1 for none. Text, numbers and colors are found by a key, as a mesh from an
+  // answer can name one per face and looking through the palette for each is its square; anything else is rare
+  // enough to look for among its own kind.
   color: function(c) {
     if (c === null || c === undefined) return -1
-    for (var i = 0; i < this.palette.length; i++) if (equals(this.palette[i], c)) return i
+    var key = typeof c === "string" ? "s" + c
+      : typeof c === "number" ? "n" + (c === c ? c : "NaN")
+      : c instanceof Col ? "c" + (c.theme === null ? "" : "t" + c.theme) + "," + c.argb + "," + Math.fround(c.alpha)
+      : null
+    if (key !== null) {
+      if (!this.paletteAt) this.paletteAt = new Map()
+      var at = this.paletteAt.get(key)
+      if (at !== undefined) return at
+      this.paletteAt.set(key, this.palette.length)
+    } else {
+      if (!this.paletteOdd) this.paletteOdd = []
+      for (var i = 0; i < this.paletteOdd.length; i++) if (equals(this.palette[this.paletteOdd[i]], c)) return this.paletteOdd[i]
+      if (this.paletteOdd.length >= MAX_ODD_COLORS) throw new WidgetError("a mesh has over " + MAX_ODD_COLORS + " colors that are neither text nor a color")
+      this.paletteOdd.push(this.palette.length)
+    }
     this.palette.push(c)
     return this.palette.length - 1
   },
@@ -3663,7 +3688,7 @@ Scene3d.prototype = {
 
 // ---------------------------------------------------------------- compiler
 
-var LEVEL = 25
+var LEVEL = 27
 var MAX_NODES = 500
 var MAX_SCREEN_NODES = 1000
 var MAX_ASSET_BYTES = 2097152
@@ -3851,6 +3876,12 @@ var HAPTIC_STRENGTH = "haptic(strength)"
 ;["android.strip", "Row.scroll"].forEach(function(k) { SINCE[k] = 24 })
 // owl 25: the battery of the Bluetooth device media plays on, once a tap has allowed Bluetooth.
 SINCE["volume(\"request\")"] = 25
+// owl 26: talking to the agent in Voice about an owl app, to change it.
+SINCE["appAction(\"voice\")"] = 26
+// owl 27: a file that shows a right-to-left language's strings { } set is laid out right to left.
+var RTL_LEVEL = 27
+// The languages written right to left, by the codes strings { } and lang() use.
+var RTL_LANGUAGES = ["ar", "fa", "he", "ur", "ps", "sd", "ug", "yi", "dv", "ckb"]
 // What a frame's dt is at most, as on the launcher: after a pause nothing jumps.
 var MAX_FRAME_DT = 0.1
 // The name a widget reads its strings { } by: str.feels.
@@ -3937,7 +3968,7 @@ var ACTION_WORDS = {
   haptic: words(["light", "medium", "strong"], "haptic takes light, medium, strong, or nothing for medium"),
   // Android's panel (a sheet over home) where it has one, else its settings screen.
   settings: words(SETTINGS_PAGES, "settings takes " + SETTINGS_PAGES.join(", ")),
-  appAction: words(["pin", "info", "uninstall", "remove", "edit", "share"], "appAction takes pin, info, uninstall, remove, edit, share and an app's key"),
+  appAction: words(["pin", "info", "uninstall", "remove", "edit", "voice", "share"], "appAction takes pin, info, uninstall, remove, edit, voice, share and an app's key"),
   workApps: words(["pause", "resume", "toggle"], "workApps takes pause, resume, toggle"),
   speech: words(["start", "stop", "toggle", "cancel"], "speech takes start, stop, toggle, cancel; what's heard is in source x = android.speech"),
   latch: words(LATCHES, "latch takes ctrl, alt, shift, and optionally once, locked or off"),
@@ -4101,6 +4132,8 @@ function Compiler(ast, language) {
   this.language = language
   // What str.x names, from strings { }: the language's, or en's where it has none; null without strings.
   this.texts = null
+  // Whether strings { } has a set for the language, and the language is written right to left.
+  this.textsRtl = false
   // The handler whose statements are compiling, like onTap; null outside one.
   this.handlerName = null
   this.root = new Scope(null, [])
@@ -4427,6 +4460,8 @@ Compiler.prototype = {
       name: this.ast.name === null ? "widget" : this.ast.name,
       meta: meta,
       level: level,
+      // owl 27: its nodes run right to left, start on the right and a Row's first child the rightmost.
+      rtl: level >= RTL_LEVEL && this.textsRtl,
       size: props.size ? this.cells(props.size) : null,
       minSize: props.minSize ? this.cells(props.minSize) : [1, 1],
       isFace: this.isFace,
@@ -4666,6 +4701,7 @@ Compiler.prototype = {
     var chosen = {}
     en.fields.forEach(function(f) { chosen[f.name] = (mine.hasOwnProperty(f.name) ? mine[f.name] : f).value })
     this.texts = chosen
+    this.textsRtl = RTL_LANGUAGES.indexOf(this.language) >= 0 && d.sets.some(function(x) { return x.language === self.language })
     var entries = en.fields.filter(function(f) { return chosen[f.name].k !== "lambda" }).map(function(f) { return [f.name, chosen[f.name]] })
     return { type: "let", name: d.name, value: this.ex({ k: "map", entries: entries, pos: d.pos }, this.root) }
   },
@@ -6147,6 +6183,11 @@ Instance.prototype = {
           if (!g.headers) return {}
           var h = self.guard(g.name, function() { return run(g.headers, self.env) }, null)
           return h instanceof Map ? toJson(h) : {}
+        },
+        // null without a pin; one that failed to evaluate is still a pin, and nothing to match it.
+        pin: function() {
+          if (!g.pin) return null
+          return self.guard(g.name, function() { var p = run(g.pin, self.env); return p === null ? null : show(p, self.hostBridge) }, "")
         }
       })
     })
@@ -6191,7 +6232,7 @@ Instance.prototype = {
     this.guard("render", function() { self.nodes(nodes || [], self.env, out) }, null)
     var result = {
       children: out,
-      readsTime: this.readsTime,
+      readsTime: false,
       padding: this.program.padding,
       background: this.program.background ? this.prop("background", this.program.background, this.env) : null,
       // A face's status bar: this shell has none to hide, but a host with one can follow it.
@@ -6199,6 +6240,8 @@ Instance.prototype = {
       onTap: this.program.onTap ? this.handlerFor(this.program.onTap, this.env) : null
     }
     if (screen) result.title = this.program.screenTitle ? text(this.evalSafe(this.program.screenTitle, this.env)) : this.program.name
+    // Last: the background and title above can be what reads `time`.
+    result.readsTime = this.readsTime
     // The screen's reads count with the tile's: either on show is reason to draw again.
     if (screen && this.renderReads) for (var k in this.renderReads) this.reads[k] = true
     this.renderReads = this.reads
