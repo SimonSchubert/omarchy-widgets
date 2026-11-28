@@ -1,0 +1,2191 @@
+// ============================================================================
+// AGENT EDITING GUIDE (READ FIRST BEFORE MAKING ANY EDITS)
+// ============================================================================
+// Widget: TrojanWatch (generated from TeamWatch unified engine)
+// Source config (if present locally): teamwatch/teams/trojanwatch.json
+// Full local guide (if present): teamwatch/AGENTS.md
+//
+// MANDATORY FIRST STEP:
+// Before modifying any code, ASK THE USER:
+//   "Do you want to change team data/configuration (colors, team/league IDs,
+//    score source, news feeds or number of sources, polling intervals) OR
+//    modify the core UI/engine code?"
+//
+// - IF CHANGING DATA / CONFIG ONLY:
+//   1. If `teamwatch/teams/trojanwatch.json` exists locally, edit ONLY that JSON
+//      file and run: `python3 teamwatch/build.py --all --check`
+//   2. If editing this standalone .owl file on another device, edit ONLY
+//      SECTION 1 (TEAM CONFIG) below: theme colors, source URLs, polling
+//      intervals, or news feeds. Do NOT rewrite SECTION 2 (CORE ENGINE).
+//
+// - CURRENT CONFIG SUMMARY:
+//   Provider: maxpreps | News feeds (3): Jenks News, OSSAA 6A-I, Tulsa World
+//   Theme: primary=#681A3A, secondary=#FFFFFF, accent=#681A3A
+// ============================================================================
+widget "trojanwatch" {
+  meta {
+    description: "Jenks Trojans varsity football dashboard: live scores, playoff and district tracker, MaxPreps ratings, stats, standings, schedule, and local news"
+    version: "1.1"
+    license: "MIT"
+    category: "sport"
+    owl: 19
+  }
+
+
+  size: 6x4
+  minSize: 3x3
+  padding: [10, 8]
+
+  source now = clock every 1m
+  source modes = android.modes
+  source schedIdle = http("https://www.maxpreps.com/ok/jenks/jenks-trojans/football/schedule/", {Accept: "text/html"}) every 30m timeout 20s status
+  source standHtml = http("https://www.maxpreps.com/ok/jenks/jenks-trojans/football/standings/", {Accept: "text/html"}) every 1h timeout 20s status
+  source ranksHtml = http("https://www.maxpreps.com/ok/football/rankings/1/", {Accept: "text/html"}) every 1h timeout 20s status
+  source statsHtml = http("https://www.maxpreps.com/ok/jenks/jenks-trojans/football/stats/", {Accept: "text/html"}) every 1h timeout 20s status
+  // === SECTION 1: TEAM CONFIG — NEWS SOURCES (SAFE TO EDIT) ===
+  source gnewsJenks = http("https://news.google.com/rss/search?q=%22Jenks+Trojans%22+football&hl=en-US&gl=US&ceid=US:en") every 1h timeout 20s status
+  source gnewsOk6a = http("https://news.google.com/rss/search?q=%22Jenks%22+%226A-I%22+OR+%22OSSAA%22+football&hl=en-US&gl=US&ceid=US:en") every 1h timeout 20s status
+  source tulsaWorld = http("https://tulsaworld.com/search/?f=rss&t=article&c=sports/high-school&l=25&s=start_time&sd=desc") every 1h timeout 20s status
+
+  state tab = "score"
+  state screenTab = "game"
+  state newsFilter = "all"
+  state statsFilter = "all"
+
+  // === SECTION 1: TEAM CONFIG — THEME PALETTE (SAFE TO EDIT) ===
+  let primaryColor    = #681A3A
+  let secondaryColor  = #FFFFFF
+  let accentColor     = #681A3A
+  let winColor        = #3ddc84
+
+  // Auto-derived UI tokens
+  let tabActiveBg     = alpha(primaryColor, 0.6)
+  let tabActiveBorder = accentColor
+  let tabActiveText   = secondaryColor
+  let highlightBg     = alpha(primaryColor, 0.30)
+  let barFillColor    = accentColor
+  let liveColor       = accentColor
+  // === SECTION 2: CORE ENGINE (DO NOT EDIT FOR DATA/THEME CHANGES) ===
+
+  let jenksId = "4cf688f9-83e5-4f16-9af7-eadebbff8a83"
+
+  // Parse MaxPreps __NEXT_DATA__ payloads
+  let schedIdleRaw = (schedIdle != null && schedIdle.ok ? schedIdle.out : "") ?? ""
+  let schedIdleMatch = match(schedIdleRaw, '<script[^>]*id="__NEXT_DATA__"[^>]*>([\\s\\S]*?)</script>')
+  let schedIdleJson = schedIdleMatch != null && len(schedIdleMatch) > 0 ? parseJson(schedIdleMatch[0]) : null
+  let schedIdleContests = flatten(schedIdleJson.props.pageProps.contests ?? [])
+  let isGameWindow = any(schedIdleContests, c => c.state == 1 || (parseTime(c.date) != null && now >= parseTime(c.date) - 900 && now <= parseTime(c.date) + 18000))
+  source schedLive = http(isGameWindow ? "https://www.maxpreps.com/ok/jenks/jenks-trojans/football/schedule/" : null, {Accept: "text/html"}) every 3m timeout 20s status
+  let schedHtml = isGameWindow && schedLive != null && schedLive.ok ? schedLive : schedIdle
+  let schedRaw = (schedHtml != null && schedHtml.ok ? schedHtml.out : "") ?? ""
+  let schedMatch = match(schedRaw, '<script[^>]*id="__NEXT_DATA__"[^>]*>([\\s\\S]*?)</script>')
+  let schedJson = schedMatch != null && len(schedMatch) > 0 ? parseJson(schedMatch[0]) : null
+  let schedProps = schedJson.props.pageProps ?? {}
+
+  let standRaw = (standHtml != null && standHtml.ok ? standHtml.out : "") ?? ""
+  let standMatch = match(standRaw, '<script[^>]*id="__NEXT_DATA__"[^>]*>([\\s\\S]*?)</script>')
+  let standJson = standMatch != null && len(standMatch) > 0 ? parseJson(standMatch[0]) : null
+  let standProps = standJson.props.pageProps ?? {}
+
+  let ranksRaw = (ranksHtml != null && ranksHtml.ok ? ranksHtml.out : "") ?? ""
+  let ranksMatch = match(ranksRaw, '<script[^>]*id="__NEXT_DATA__"[^>]*>([\\s\\S]*?)</script>')
+  let ranksJson = ranksMatch != null && len(ranksMatch) > 0 ? parseJson(ranksMatch[0]) : null
+  let ranksList = ranksJson.props.pageProps.rankingsListData.rankings ?? []
+  let jenksRankObj = ranksList.find(r => (r.schoolId ?? "") == jenksId)
+
+  let statsRaw = (statsHtml != null && statsHtml.ok ? statsHtml.out : "") ?? ""
+  let statsMatch = match(statsRaw, '<script[^>]*id="__NEXT_DATA__"[^>]*>([\\s\\S]*?)</script>')
+  let statsJson = statsMatch != null && len(statsMatch) > 0 ? parseJson(statsMatch[0]) : null
+  let rawLeaders = statsJson.props.pageProps.playerStatLeadersData.leaders ?? []
+  let jenksLeaders = rawLeaders.map(l => ({
+    name: trim("${l.athleteFirstName ?? ''} ${l.athleteLastName ?? ''}"),
+    pos: l.athletePositions ?? "",
+    yr: l.athleteClassYear == 12 ? "Sr" : (l.athleteClassYear == 11 ? "Jr" : (l.athleteClassYear == 10 ? "So" : (l.athleteClassYear == 9 ? "Fr" : ""))),
+    statName: l.stat.displayName ?? "",
+    statHdr: l.stat.header ?? "",
+    val: l.stat.value ?? "–",
+    side: contains(lower(l.stat.displayName ?? ""), "tackle") || contains(lower(l.stat.displayName ?? ""), "sack") || contains(lower(l.stat.displayName ?? ""), "interception") ? "def" : "off",
+    url: l.athleteCanonicalUrl ?? ""
+  })).filter(x => x.name != "" && x.statName != "")
+  let filteredLeaders = statsFilter == "all" ? jenksLeaders : jenksLeaders.filter(x => x.side == statsFilter)
+
+  let teamCtx = schedProps.teamContext.data ?? {}
+  let jenksLogoUrl = teamCtx.schoolMascotUrl ?? "https://image.maxpreps.io/school-mascot/4/c/f/4cf688f9-83e5-4f16-9af7-eadebbff8a83.gif?version=636805827600000000&width=1024&height=1024"
+  let jenksLogoRel = replace(jenksLogoUrl, "https://image.maxpreps.io/", "")
+  let leagueName = teamCtx.leagueName ?? "6A-I District 2"
+  let divisionName = teamCtx.stateDivisionName ?? "Division 6A-I"
+
+  // Standings (Section 0 = 6A-I District 2, Section 1 = OK Class 6A-I)
+  let standSections = standProps.standingsData.standingSections ?? []
+  let distEntries = standSections[0].standings ?? []
+  let classEntries = standSections[1].standings ?? []
+  let jenksStandEntry = distEntries.find(e => (e.schoolId ?? "") == jenksId)
+  let jenksClassEntry = classEntries.find(e => (e.schoolId ?? "") == jenksId)
+  let jenksDistRank = jenksStandEntry.conferenceStandingPlacement ?? jenksStandEntry.overallStandingPlacement
+  let jenksStateRank = jenksClassEntry.overallStandingPlacement
+  let distOrdinal = jenksDistRank == 1 ? "1st" : (jenksDistRank == 2 ? "2nd" : (jenksDistRank == 3 ? "3rd" : (jenksDistRank != null ? "${jenksDistRank}th" : "")))
+  let standingStr = distOrdinal != "" ? "${distOrdinal} in ${leagueName}" : leagueName
+
+  let distTop3 = take(distEntries, 3)
+  let jenksInTop3 = any(distTop3, e => (e.schoolId ?? "") == jenksId)
+  let distStrip = jenksInTop3 ? take(distEntries, 4) : (jenksStandEntry != null ? flatten([distTop3, [jenksStandEntry]]) : distTop3)
+
+  // Normalized season schedule from MaxPreps contests
+  let rawContests = schedProps.contests ?? []
+  let schedGames = rawContests.map(c => ({
+    id: c[1] ?? "",
+    ts: parseTime(c[11], null, "America/Chicago"),
+    state: (c[22] == true || c[15] == 3) ? "in" : ((c[4] == true || c[15] == 4) ? "post" : "pre"),
+    isTimeTba: c[20] == true,
+    otPeriods: c[23] ?? 0,
+    url: c[18] ?? "https://www.maxpreps.com/ok/jenks/jenks-trojans/football/schedule/",
+    desc: c[29] ?? "",
+    nfhsUrl: c[36] ?? "",
+    jt: (c[0] ?? []).find(t => (t[1] ?? "") == jenksId) ?? c[0][0],
+    ot: (c[0] ?? []).find(t => (t[1] ?? "") != jenksId) ?? c[0][1]
+  })).map(g => ({
+    id: g.id,
+    ts: g.ts,
+    state: g.state,
+    isTimeTba: g.isTimeTba,
+    otPeriods: g.otPeriods,
+    url: g.url,
+    desc: g.desc,
+    nfhsUrl: g.nfhsUrl,
+    gameType: (g.jt[12] ?? 1) == 4 ? "PLAYOFF" : ((g.jt[12] ?? 1) == 0 ? "DISTRICT" : "NON-DIST"),
+    isNeutral: (g.jt[11] ?? 0) == 2,
+    jIsHome: (g.jt[11] ?? 0) == 0,
+    jIsAway: (g.jt[11] ?? 0) == 1,
+    jScore: g.jt[6],
+    oScore: g.ot[6],
+    jResult: g.jt[5] ?? "",
+    oResult: g.ot[5] ?? "",
+    oId: g.ot[1] ?? "",
+    oName: g.ot[14] ?? "Opponent",
+    oLogo: g.ot[20] ?? "",
+    awayId: (g.jt[11] ?? 0) == 1 ? (g.jt[1] ?? "") : (g.ot[1] ?? ""),
+    awayName: (g.jt[11] ?? 0) == 1 ? (g.jt[14] ?? "Jenks") : (g.ot[14] ?? "Opponent"),
+    awayLogo: (g.jt[11] ?? 0) == 1 ? (g.jt[20] ?? "") : (g.ot[20] ?? ""),
+    awayScore: (g.jt[11] ?? 0) == 1 ? g.jt[6] : g.ot[6],
+    awayWon: ((g.jt[11] ?? 0) == 1 ? (g.jt[5] ?? "") : (g.ot[5] ?? "")) == "W",
+    homeId: (g.jt[11] ?? 0) == 1 ? (g.ot[1] ?? "") : (g.jt[1] ?? ""),
+    homeName: (g.jt[11] ?? 0) == 1 ? (g.ot[14] ?? "Opponent") : (g.jt[14] ?? "Jenks"),
+    homeLogo: (g.jt[11] ?? 0) == 1 ? (g.ot[20] ?? "") : (g.jt[20] ?? ""),
+    homeScore: (g.jt[11] ?? 0) == 1 ? g.ot[6] : g.jt[6],
+    homeWon: ((g.jt[11] ?? 0) == 1 ? (g.ot[5] ?? "") : (g.jt[5] ?? "")) == "W"
+  }))
+
+  let pastGames = schedGames.filter(g => g.state == "post")
+  let liveGames = schedGames.filter(g => g.state == "in")
+  let futureGames = schedGames.filter(g => g.state == "pre")
+  let lastGame = last(pastGames)
+  let nextSchedGame = first(futureGames)
+
+  // Live season record & scoring averages computed from completed contests
+  let winsCount = len(pastGames.filter(g => g.jResult == "W"))
+  let lossesCount = len(pastGames.filter(g => g.jResult == "L"))
+  let tiesCount = len(pastGames.filter(g => g.jResult == "T"))
+  let gamesPlayed = len(pastGames)
+  let recordStr = gamesPlayed > 0 ? (tiesCount > 0 ? "${winsCount}-${lossesCount}-${tiesCount}" : "${winsCount}-${lossesCount}") : (jenksStandEntry.overallWinLossTies ?? "–")
+
+  let totalPf = sum(pastGames.map(g => g.jScore ?? 0))
+  let totalPa = sum(pastGames.map(g => g.oScore ?? 0))
+  let totalDiff = totalPf - totalPa
+  let diffStr = totalDiff > 0 ? "+${int(totalDiff)}" : "${int(totalDiff)}"
+  let jenksPpg = gamesPlayed > 0 ? totalPf / gamesPlayed : 0
+  let jenksPapg = gamesPlayed > 0 ? totalPa / gamesPlayed : 0
+  let jenksPpgStr = gamesPlayed > 0 ? fixed(jenksPpg, 1) : "–"
+  let jenksPapgStr = gamesPlayed > 0 ? fixed(jenksPapg, 1) : "–"
+  let ppgShare = (jenksPpg + jenksPapg) > 0 ? clamp(jenksPpg / (jenksPpg + jenksPapg) * 100, 10, 90) : 50
+
+  // Current win/loss streak from the end of pastGames using reduce
+  let streakAcc = pastGames.reduce((acc, g) => g.jResult == acc.res ? {res: acc.res, cnt: acc.cnt + 1} : {res: g.jResult, cnt: 1}, {res: "", cnt: 0})
+  let streakStr = streakAcc.res != "" && streakAcc.cnt > 0 ? "${streakAcc.res}${streakAcc.cnt}" : "–"
+
+  // Featured game: live first, then recent final within 24h of kickoff, then next upcoming, fallback to last game
+  let showRecentFinal = lastGame != null && lastGame.ts != null && now >= lastGame.ts && (now - lastGame.ts) < 86400
+  let featuredGame = first(liveGames) ?? (showRecentFinal ? lastGame : null) ?? nextSchedGame ?? lastGame
+  let prevGame = lastGame
+
+  let fgIsLive = featuredGame != null && featuredGame.state == "in"
+  let fgIsFinal = featuredGame != null && featuredGame.state == "post"
+  let fgIsPre = featuredGame != null && featuredGame.state == "pre"
+  let fgJenksWon = featuredGame != null && featuredGame.jResult == "W"
+  let fgJenksLost = featuredGame != null && featuredGame.jResult == "L"
+  let fgHasWinner = fgIsFinal && (featuredGame.awayWon == true || featuredGame.homeWon == true)
+  let awayIsWinner = fgHasWinner && featuredGame.awayWon == true
+  let homeIsWinner = fgHasWinner && featuredGame.homeWon == true
+
+  // Opponent record lookup from MaxPreps featuredGameData.teamsCalculated -> classEntries -> distEntries
+  let fgCalcTeams = schedProps.featuredGameData.teamsCalculated ?? []
+  let fgAwayCalc = fgCalcTeams.find(t => (t.teamId ?? "") == (featuredGame.awayId ?? ""))
+  let fgHomeCalc = fgCalcTeams.find(t => (t.teamId ?? "") == (featuredGame.homeId ?? ""))
+  let fgAwayStand = classEntries.find(e => (e.schoolId ?? "") == (featuredGame.awayId ?? "")) ?? distEntries.find(e => (e.schoolId ?? "") == (featuredGame.awayId ?? ""))
+  let fgHomeStand = classEntries.find(e => (e.schoolId ?? "") == (featuredGame.homeId ?? "")) ?? distEntries.find(e => (e.schoolId ?? "") == (featuredGame.homeId ?? ""))
+  let fgAwayRec = (featuredGame.awayId ?? "") == jenksId ? recordStr : (fgAwayCalc.standings ?? fgAwayStand.overallWinLossTies ?? "")
+  let fgHomeRec = (featuredGame.homeId ?? "") == jenksId ? recordStr : (fgHomeCalc.standings ?? fgHomeStand.overallWinLossTies ?? "")
+
+  // Head-to-head team comparison (MaxPreps Power Rating + SOS, fallback to Season Win Pct)
+  let fgAwayRankObj = ranksList.find(r => (r.schoolId ?? "") == (featuredGame.awayId ?? ""))
+  let fgHomeRankObj = ranksList.find(r => (r.schoolId ?? "") == (featuredGame.homeId ?? ""))
+  let hasRatingComp = fgAwayRankObj != null && fgHomeRankObj != null && fgAwayRankObj.rating != null && fgHomeRankObj.rating != null
+  let awayRecParts = split(fgAwayRec, "-")
+  let homeRecParts = split(fgHomeRec, "-")
+  let awayG = len(awayRecParts) >= 2 ? (num(awayRecParts[0], 0) + num(awayRecParts[1], 0)) : 0
+  let homeG = len(homeRecParts) >= 2 ? (num(homeRecParts[0], 0) + num(homeRecParts[1], 0)) : 0
+  let awayWinPct = awayG > 0 ? num(awayRecParts[0], 0) / awayG * 100 : null
+  let homeWinPct = homeG > 0 ? num(homeRecParts[0], 0) / homeG * 100 : null
+  let hasWinPctComp = !hasRatingComp && awayWinPct != null && homeWinPct != null && (awayWinPct + homeWinPct) > 0
+  let fgAwayIsJenks = (featuredGame.awayId ?? "") == jenksId
+  let fgAwayTag = fgAwayRankObj.schoolNameAcronym ?? fgAwayStand.schoolNameAcronym ?? featuredGame.awayName ?? "AWY"
+  let fgHomeTag = fgHomeRankObj.schoolNameAcronym ?? fgHomeStand.schoolNameAcronym ?? featuredGame.homeName ?? "HME"
+  let compLeftText = hasRatingComp ? "${fgAwayTag} ${fixed(fgAwayRankObj.rating, 1)}" : (hasWinPctComp ? "${fgAwayTag} ${fixed(awayWinPct, 1)}%" : "PF ${jenksPpgStr}")
+  let compRightText = hasRatingComp ? "${fgHomeTag} ${fixed(fgHomeRankObj.rating, 1)}" : (hasWinPctComp ? "${fgHomeTag} ${fixed(homeWinPct, 1)}%" : "PA ${jenksPapgStr}")
+  let compCenterText = hasRatingComp ? "MAXPREPS RATING" : (hasWinPctComp ? "SEASON WIN PCT" : "SEASON SCORING AVG")
+  let compCenterShort = hasRatingComp ? "MP RATING" : (hasWinPctComp ? "WIN PCT" : "PPG AVG")
+  let compLeftShare = hasRatingComp ? clamp(100 / (1 + pow(10, -(fgAwayRankObj.rating - fgHomeRankObj.rating) / 45)), 12, 88) : (hasWinPctComp ? clamp(awayWinPct / (awayWinPct + homeWinPct) * 100, 12, 88) : ppgShare)
+  let compSosStr = hasRatingComp && fgAwayRankObj.strength != null && fgHomeRankObj.strength != null ? "SOS ${fixed(fgAwayRankObj.strength, 1)} / ${fixed(fgHomeRankObj.strength, 1)}" : ""
+
+  let fgAwayScore = featuredGame.awayScore != null ? "${int(featuredGame.awayScore)}" : "–"
+  let fgHomeScore = featuredGame.homeScore != null ? "${int(featuredGame.homeScore)}" : "–"
+  let fgKickDate = featuredGame.ts != null ? fmtTime(featuredGame.ts, "EEE, M/d") : "Upcoming"
+  let fgKickTime = featuredGame.ts != null && !featuredGame.isTimeTba ? fmtTime(featuredGame.ts, "h:mm a") : "TBD"
+  let fgStatusText = fgIsLive ? "LIVE" : (fgIsFinal ? (featuredGame.otPeriods > 0 ? "Final/${featuredGame.otPeriods > 1 ? "${featuredGame.otPeriods}OT" : "OT"}" : "Final") : "${fgKickDate} • ${fgKickTime}")
+  let fgBracketName = schedProps.featuredGameData.bracketName ?? "Class 6A-I"
+  let fgGameLabel = featuredGame.gameType == "PLAYOFF" ? "PLAYOFF • ${fgBracketName}" : (featuredGame.gameType == "DISTRICT" ? leagueName : "NON-DISTRICT")
+
+  let pgWon = prevGame != null && prevGame.jResult == "W"
+  let pgResult = prevGame != null ? "${prevGame.jResult} ${prevGame.jScore ?? 0}-${prevGame.oScore ?? 0} ${prevGame.jIsAway ? '@' : 'vs'} ${prevGame.oName}" : ""
+  let ngWhen = nextSchedGame != null ? (nextSchedGame.ts != null ? (nextSchedGame.isTimeTba ? "${fmtTime(nextSchedGame.ts, "EEE, M/d")} • TBD" : fmtTime(nextSchedGame.ts, "EEE, M/d • h:mma")) : "TBD") : ""
+
+  // Dynamic N-source news aggregation
+  let newsItems_0 = take(matchAll((gnewsJenks != null && gnewsJenks.ok ? gnewsJenks.out : "") ?? "", "<item>[\\s\\S]*?<title>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</title>[\\s\\S]*?<link>([^<]+)</link>[\\s\\S]*?<pubDate>([^<]+)</pubDate>")
+    .map(m => ({
+      id: "gnewsJenks-${trim(m[1])}",
+      src: "Jenks News",
+      title: replace(replace(replace(replace(trim(m[0]), "&amp;", "&"), "&#39;", "'"), "&apos;", "'"), "&quot;", "\""),
+      desc: "",
+      link: trim(m[1]),
+      ts: parseTime(trim(m[2]))
+    })), 15)
+  let newsItems_1 = take(matchAll((gnewsOk6a != null && gnewsOk6a.ok ? gnewsOk6a.out : "") ?? "", "<item>[\\s\\S]*?<title>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</title>[\\s\\S]*?<link>([^<]+)</link>[\\s\\S]*?<pubDate>([^<]+)</pubDate>")
+    .map(m => ({
+      id: "gnewsOk6a-${trim(m[1])}",
+      src: "OSSAA 6A-I",
+      title: replace(replace(replace(replace(trim(m[0]), "&amp;", "&"), "&#39;", "'"), "&apos;", "'"), "&quot;", "\""),
+      desc: "",
+      link: trim(m[1]),
+      ts: parseTime(trim(m[2]))
+    })), 15)
+  let newsItems_2 = take(matchAll((tulsaWorld != null && tulsaWorld.ok ? tulsaWorld.out : "") ?? "", "<item>[\\s\\S]*?<title>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</title>[\\s\\S]*?<link>([^<]+)</link>[\\s\\S]*?<pubDate>([^<]+)</pubDate>")
+    .map(m => ({
+      id: "tulsaWorld-${trim(m[1])}",
+      src: "Tulsa World",
+      title: replace(replace(replace(replace(trim(m[0]), "&amp;", "&"), "&#39;", "'"), "&apos;", "'"), "&quot;", "\""),
+      desc: "",
+      link: trim(m[1]),
+      ts: parseTime(trim(m[2]))
+    })), 15)
+  let allArticles = flatten([newsItems_0, newsItems_1, newsItems_2])
+    .filter(a => a.title != "" && a.link != "")
+    .sortBy(a => -(a.ts ?? 0))
+  let newsSources = [
+    {id: "all", label: "All", w: 2},
+    {id: "Jenks News", label: "Jenks", w: 3},
+    {id: "OSSAA 6A-I", label: "6A-I", w: 2},
+    {id: "Tulsa World", label: "Tulsa World", w: 4}
+  ]
+  let articles = newsFilter == "all" ? allArticles : allArticles.filter(a => a.src == newsFilter)
+
+  // Responsive tile scaling (adapts to tile size and visible strips)
+  let th = tileHeight ?? 282
+  let tw = tileWidth ?? 414
+  let hasSubStrip = (fgIsPre && prevGame != null) || (fgIsFinal && nextSchedGame != null)
+  let hasScoringBar = gamesPlayed > 0
+  let scoreBaseH = 173 + (hasSubStrip ? 23 : 0) + 21 + (hasScoringBar ? 21 : 0)
+  let scoreSpare = th - scoreBaseH
+  let isCompactTile = scoreSpare < 26
+  let isNarrowTile = tw < 290
+  let isTightWidth = tw < 340
+  let extraSpace = max(0, scoreSpare - 46)
+  let tileGap = int(clamp(3 + extraSpace * 0.04, 3, 6))
+  let cardPadY = int(clamp(4 + extraSpace * 0.06, 4, 8))
+  let cardPadX = isNarrowTile ? 6 : 8
+  let cardGap = int(clamp(2 + extraSpace * 0.05, 2, 5))
+  let tabPadY = int(clamp(3 + extraSpace * 0.04, 3, 6))
+  let stripPadY = int(clamp(3 + extraSpace * 0.04, 3, 6))
+  let barH = scoreSpare >= 64 ? 4 : 3
+  let baseLogoPx = isCompactTile ? 22 : int(clamp(scoreSpare * 0.64, 24, 42))
+  let winLogoPx = int(clamp(round(baseLogoPx * 1.08), 26, 40))
+  let loseLogoPx = int(max(18, round(baseLogoPx * 0.78)))
+  let awayLogoPx = fgHasWinner ? (awayIsWinner ? winLogoPx : loseLogoPx) : baseLogoPx
+  let homeLogoPx = fgHasWinner ? (homeIsWinner ? winLogoPx : loseLogoPx) : baseLogoPx
+  let auraW = fgHasWinner ? min(int(tw * 0.25), int(round(winLogoPx * 2.65))) : baseLogoPx
+  let logoSlotH = fgHasWinner ? int(round(winLogoPx * 1.38)) : baseLogoPx
+  let screenAwayLogoPx = fgHasWinner ? (awayIsWinner ? 56 : 44) : 54
+  let screenHomeLogoPx = fgHasWinner ? (homeIsWinner ? 56 : 44) : 54
+  let screenAuraW = fgHasWinner ? 114 : 58
+  let screenLogoSlotH = fgHasWinner ? 86 : 58
+  let expandBtnSz = int(clamp(min(tw, th) * 0.095, 22, 32))
+  let expandIconSz = int(clamp(round(expandBtnSz * 0.56), 13, 18))
+  let scoreFontSize = int(clamp(20 + extraSpace * 0.08, 20, 28))
+  let centerColW = int(clamp(tw * 0.30, 86, 130))
+
+  let distTop2 = take(distEntries, 2)
+  let jenksInTop2 = any(distTop2, e => (e.schoolId ?? "") == jenksId)
+  let distStripTight = jenksInTop2 ? take(distEntries, 3) : (jenksStandEntry != null ? flatten([distTop2, [jenksStandEntry]]) : distTop2)
+  let distTop1 = take(distEntries, 1)
+  let jenksInTop1 = any(distTop1, e => (e.schoolId ?? "") == jenksId)
+  let distStripNarrow = jenksInTop1 ? take(distEntries, 2) : (jenksStandEntry != null ? flatten([distTop1, [jenksStandEntry]]) : distTop1)
+  let distQuickStrip = isNarrowTile ? distStripNarrow : (isTightWidth ? distStripTight : distStrip)
+
+  component TeamLogo(logoUrl, px = 20, plate = false) {
+    let u = logoUrl ?? ""
+    if startsWith(u, "https://image.maxpreps.io/") {
+      let rel = replace(u, "https://image.maxpreps.io/", "")
+      Box {
+        size: px
+        radius: px / 2
+        clip: true
+        background: #ffffff
+        align: center
+        Image {
+          src: "https://image.maxpreps.io/${rel}"
+          size: max(10, px - 2)
+          fit: contain
+        }
+      }
+    }
+  }
+
+  // ── Shared UI Components (from teamwatch/engine/ui_shared.owl.tmpl) ──
+  component NewsFilterBar(padY = 3, chipRadius = 6) {
+    Row {
+      fill: width
+      gap: 4
+      for f in newsSources key f.id {
+        let active = newsFilter == f.id
+        Box {
+          weight: f.w
+          padding: [padY, 4]
+          radius: chipRadius * corners
+          background: active ? tabActiveBg : alpha(surface, 0.4)
+          border: 1
+          borderColor: active ? tabActiveBorder : border
+          onTap: { haptic(); newsFilter = f.id }
+          Text {
+            text: f.label
+            style: label
+            bold: active
+            color: active ? tabActiveText : muted
+            align: center
+            maxLines: 1
+          }
+        }
+      }
+    }
+  }
+
+  component WinnerAura(w, h, col) {
+    Canvas {
+      width: w
+      height: h
+      let cx = width / 2
+      let cy = height / 2
+      let r = min(width, height) / 2
+      let rRing = r * 0.88
+      let pulse = 0.94 + 0.06 * sin(time * 2.2)
+      let rGlow = r * 0.98 * pulse
+      circle(cx, cy, rGlow, fill: radial(cx, cy, rGlow, [alpha(col, 0.34), alpha(col, 0.13), alpha(col, 0.0)]))
+      circle(cx, cy, rRing, fill: alpha(col, 0.11), stroke: alpha(col, 0.50), width: 1.3)
+      let stars = [
+        {dx: -1.24, dy: -0.58, ph: 0.2, s: 1.02},
+        {dx: 1.24, dy: -0.54, ph: 1.6, s: 1.10},
+        {dx: -1.34, dy: 0.34, ph: 3.1, s: 0.86},
+        {dx: 1.32, dy: 0.38, ph: 4.5, s: 0.94},
+        {dx: 1.12, dy: -0.84, ph: 2.3, s: 0.72}
+      ]
+      for st in stars {
+        let twk = 0.32 + 0.68 * pow(0.5 + 0.5 * sin(time * 3.0 + st.ph), 2)
+        let drift = sin(time * 1.6 + st.ph) * (r * 0.05)
+        let sx = clamp(cx + st.dx * rRing, 5, width - 5)
+        let sy = clamp(cy + st.dy * rRing + drift, 5, height - 5)
+        let sr = max(2.2, r * 0.15 * st.s * (0.65 + 0.55 * twk))
+        path([
+          [sx, sy - sr], [sx + sr * 0.28, sy - sr * 0.28],
+          [sx + sr, sy], [sx + sr * 0.28, sy + sr * 0.28],
+          [sx, sy + sr], [sx - sr * 0.28, sy + sr * 0.28],
+          [sx - sr, sy], [sx - sr * 0.28, sy - sr * 0.28]
+        ], closed: true, fill: alpha(mix(col, foreground, 0.35), 0.40 + 0.60 * twk))
+      }
+    }
+  }
+
+  component BooAura(w, h) {
+    Canvas {
+      width: w
+      height: h
+      let cx = width / 2
+      let cy = height / 2
+      let r = min(width, height) / 2
+      let rRing = r * 0.88
+      let pulse = 0.94 + 0.06 * sin(time * 2.0)
+      let rGlow = r * 0.98 * pulse
+      circle(cx, cy, rGlow, fill: radial(cx, cy, rGlow, [alpha(red, 0.28), alpha(red, 0.10), alpha(red, 0.0)]))
+      circle(cx, cy, rRing, fill: alpha(red, 0.08), stroke: alpha(red, 0.44), width: 1.2)
+      let b1 = sin(time * 2.6) * (r * 0.08)
+      let b2 = sin(time * 2.6 + 2.2) * (r * 0.08)
+      let a1 = 0.55 + 0.45 * (0.5 + 0.5 * sin(time * 3.0))
+      let a2 = 0.55 + 0.45 * (0.5 + 0.5 * sin(time * 3.0 + 2.4))
+      let tx1 = max(14, cx - rRing * 1.28)
+      let ty1 = max(7, cy - rRing * 0.62) + b1
+      let tx2 = min(width - 17, cx + rRing * 1.28)
+      let ty2 = min(height - 7, cy + rRing * 0.58) + b2
+      rotate(-14, tx1, ty1) {
+        text("BOO!", tx1, ty1, size: max(7, r * 0.26), color: alpha(red, a1), align: center, bold: true)
+      }
+      rotate(11, tx2, ty2) {
+        text("BOOOO", tx2, ty2, size: max(6.5, r * 0.23), color: alpha(red, a2), align: center, bold: true)
+      }
+      let d1 = (time * 0.55) % 1
+      let d2 = (time * 0.55 + 0.5) % 1
+      let vx1 = min(width - 9, cx + rRing * 1.22)
+      let vy1 = max(6, cy - rRing * 0.65) + d1 * (r * 0.32)
+      let vx2 = max(9, cx - rRing * 1.22)
+      let vy2 = max(10, cy + rRing * 0.22) + d2 * (r * 0.32)
+      let cr = max(2.2, r * 0.11)
+      path([[vx1 - cr, vy1 - cr * 0.5], [vx1, vy1 + cr * 0.5], [vx1 + cr, vy1 - cr * 0.5]], stroke: alpha(red, (1 - d1) * 0.75), width: 1.4, cap: round)
+      path([[vx2 - cr, vy2 - cr * 0.5], [vx2, vy2 + cr * 0.5], [vx2 + cr, vy2 - cr * 0.5]], stroke: alpha(red, (1 - d2) * 0.75), width: 1.4, cap: round)
+    }
+  }
+
+  component ExpandButton(sz, iconSz, col) {
+    Box {
+      size: sz
+      align: center
+      radius: 6 * corners
+      background: alpha(surface, 0.55)
+      border: 1
+      borderColor: alpha(border, 0.55)
+      onTap: { haptic(); screen() }
+      Canvas {
+        width: iconSz
+        height: iconSz
+        let m = iconSz * 0.14
+        let h = iconSz * 0.38
+        let sw = max(1.6, iconSz * 0.10)
+        line(m, iconSz - m, iconSz - m, m, stroke: col, width: sw, cap: round)
+        line(iconSz - m - h, m, iconSz - m, m, stroke: col, width: sw, cap: round)
+        line(iconSz - m, m, iconSz - m, m + h, stroke: col, width: sw, cap: round)
+        line(m, iconSz - m, m + h, iconSz - m, stroke: col, width: sw, cap: round)
+        line(m, iconSz - m, m, iconSz - m - h, stroke: col, width: sw, cap: round)
+      }
+    }
+  }
+
+
+  component ScoreFeaturedCard(expand = false) {
+    Column {
+      fill: width
+      weight: expand ? 1 : 0
+      padding: [cardPadX, cardPadY]
+      radius: 8 * corners
+      background: alpha(surface, 0.6)
+      border: 1
+      borderColor: fgIsLive ? accentColor : border
+      gap: cardGap
+
+      Row {
+        fill: width
+        align: center
+        gap: 6
+        Text {
+          text: fgIsLive ? "LIVE • ${fgGameLabel}" : (fgIsFinal ? "FINAL • ${fgGameLabel}" : fgGameLabel)
+          style: small
+          bold: true
+          color: fgIsLive ? accentColor : (fgIsFinal ? (fgJenksWon ? secondaryColor : muted) : secondaryColor)
+          weight: 1
+          maxLines: 1
+        }
+        if fgIsFinal {
+          Text {
+            text: fgJenksWon ? "WIN" : (fgJenksLost ? "LOSS" : "TIE")
+            style: label
+            bold: true
+            color: fgJenksWon ? winColor : (fgJenksLost ? red : muted)
+            padding: [4, 1]
+            radius: 3 * corners
+            background: fgJenksWon ? alpha(winColor, 0.2) : (fgJenksLost ? alpha(red, 0.2) : alpha(muted, 0.2))
+          }
+        } else {
+          Text {
+            text: featuredGame.gameType ?? "GAME"
+            style: label
+            bold: true
+            color: secondaryColor
+            padding: [4, 1]
+            radius: 3 * corners
+            background: alpha(secondaryColor, 0.18)
+          }
+        }
+      }
+
+      // Teams and scores/time
+      Row {
+        fill: width
+        weight: expand ? 1 : 0
+        align: center
+        gap: 4
+
+        // Away Team
+        Column {
+          weight: 1
+          align: center
+          gap: 1
+          Box {
+            width: awayIsWinner ? auraW : awayLogoPx + 4
+            height: logoSlotH
+            align: center
+            if awayIsWinner {
+              if fgJenksWon {
+                WinnerAura { w: auraW; h: logoSlotH; col: secondaryColor }
+              } else {
+                BooAura { w: auraW; h: logoSlotH }
+              }
+            }
+            Box {
+              opacity: fgHasWinner && !awayIsWinner ? 0.82 : 1
+              TeamLogo { logoUrl: featuredGame.awayLogo; px: awayLogoPx; plate: !awayIsWinner }
+            }
+          }
+          Text {
+            text: featuredGame.awayName ?? "Away"
+            bold: true
+            style: small
+            color: fgHasWinner && !awayIsWinner ? muted : foreground
+            align: center
+            maxLines: 1
+          }
+          if fgAwayRec != "" {
+            Text { text: fgAwayRec; style: label; color: muted; align: center }
+          }
+        }
+
+        // Center Score or Kickoff
+        Column {
+          align: center
+          gap: 1
+          width: centerColW
+          if fgIsPre {
+            Text { text: featuredGame.isNeutral ? "VS" : "AT"; style: label; color: muted; bold: true; align: center }
+            Text { text: fgKickDate; style: small; color: foreground; bold: true; align: center }
+            Text { text: fgKickTime; style: small; color: secondaryColor; align: center; bold: true }
+          } else {
+            Row {
+              gap: 6
+              align: center
+              Text {
+                text: fgAwayScore
+                fontSize: scoreFontSize
+                bold: true
+                color: fgHasWinner && !awayIsWinner ? muted : foreground
+              }
+              Text { text: "-"; fontSize: scoreFontSize; color: muted }
+              Text {
+                text: fgHomeScore
+                fontSize: scoreFontSize
+                bold: true
+                color: fgHasWinner && !homeIsWinner ? muted : foreground
+              }
+            }
+            Text {
+              text: fgStatusText
+              style: small
+              color: fgIsLive ? accentColor : muted
+              bold: fgIsLive
+              align: center
+              maxLines: 1
+            }
+          }
+        }
+
+        // Home Team
+        Column {
+          weight: 1
+          align: center
+          gap: 1
+          Box {
+            width: homeIsWinner ? auraW : homeLogoPx + 4
+            height: logoSlotH
+            align: center
+            if homeIsWinner {
+              if fgJenksWon {
+                WinnerAura { w: auraW; h: logoSlotH; col: secondaryColor }
+              } else {
+                BooAura { w: auraW; h: logoSlotH }
+              }
+            }
+            Box {
+              opacity: fgHasWinner && !homeIsWinner ? 0.82 : 1
+              TeamLogo { logoUrl: featuredGame.homeLogo; px: homeLogoPx; plate: !homeIsWinner }
+            }
+          }
+          Text {
+            text: featuredGame.homeName ?? "Home"
+            bold: true
+            style: small
+            color: fgHasWinner && !homeIsWinner ? muted : foreground
+            align: center
+            maxLines: 1
+          }
+          if fgHomeRec != "" {
+            Text { text: fgHomeRec; style: label; color: muted; align: center }
+          }
+        }
+      }
+
+      // MaxPreps Rank & Context Strip
+      Box {
+        fill: width
+        padding: [6, 2]
+        radius: 5 * corners
+        background: alpha(background, 0.35)
+
+        Row {
+          fill: width
+          align: center
+          gap: 6
+          Text {
+            text: featuredGame.gameType ?? "6A-I"
+            style: label
+            bold: true
+            color: secondaryColor
+          }
+          if hasRatingComp && fgAwayRankObj.rank != null && fgHomeRankObj.rank != null {
+            Text { text: "#${fgAwayRankObj.rank} vs #${fgHomeRankObj.rank}"; style: label; bold: true; color: foreground; maxLines: 1 }
+          } else if jenksStateRank != null {
+            Text { text: "6A-I #${jenksStateRank}"; style: label; bold: true; color: foreground; maxLines: 1 }
+          }
+          if streakStr != "–" {
+            Text { text: "STRK ${streakStr}"; style: label; color: startsWith(streakStr, "W") ? winColor : red; maxLines: 1 }
+          }
+          Spacer { weight: 1 }
+          if !isNarrowTile && compSosStr != "" {
+            Text { text: compSosStr; style: label; bold: true; color: foreground; align: end; maxLines: 1 }
+          } else if !isNarrowTile && gamesPlayed > 0 {
+            Text { text: "DIFF ${diffStr}"; style: label; bold: true; color: totalDiff >= 0 ? winColor : red; align: end; maxLines: 1 }
+          }
+        }
+      }
+
+      // Head-to-Head Team Comparison Bar (MaxPreps Power Rating -> Win Pct -> PF/PA)
+      if hasRatingComp || hasWinPctComp || hasScoringBar {
+        Column {
+          fill: width
+          gap: 1
+          Row {
+            fill: width
+            align: center
+            Text {
+              text: compLeftText
+              style: label
+              bold: true
+              color: fgAwayIsJenks ? secondaryColor : foreground
+            }
+            Spacer { weight: 1 }
+            Text {
+              text: isNarrowTile ? compCenterShort : compCenterText
+              style: label
+              color: muted
+            }
+            Spacer { weight: 1 }
+            Text {
+              text: compRightText
+              style: label
+              bold: true
+              color: !fgAwayIsJenks ? secondaryColor : foreground
+            }
+          }
+          Row {
+            fill: width
+            height: barH
+            radius: 2 * corners
+            clip: true
+            gap: 2
+            Box {
+              weight: compLeftShare
+              height: barH
+              background: fgAwayIsJenks ? barFillColor : alpha(foreground, 0.32)
+            }
+            Box {
+              weight: 100 - compLeftShare
+              height: barH
+              background: !fgAwayIsJenks ? barFillColor : alpha(foreground, 0.32)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  component ScoreBottomStrips() {
+    Column {
+      fill: width
+      gap: tileGap
+
+      // Previous Game Summary (when featured is upcoming)
+      if fgIsPre && prevGame != null {
+        Box {
+          fill: width
+          padding: [6, stripPadY]
+          radius: 6 * corners
+          background: alpha(surface, 0.6)
+          border: 1
+          borderColor: border
+
+          Row {
+            fill: width
+            align: center
+            gap: 6
+            Text { text: "Last:"; style: small; color: muted }
+            Text {
+              text: prevGame.jResult
+              style: small
+              bold: true
+              color: pgWon ? winColor : red
+              padding: [4, 1]
+              radius: 3 * corners
+              background: pgWon ? alpha(winColor, 0.2) : alpha(red, 0.2)
+            }
+            TeamLogo { logoUrl: prevGame.oLogo; px: 16; plate: true }
+            Text {
+              text: "${prevGame.jScore ?? 0}-${prevGame.oScore ?? 0} ${prevGame.jIsAway ? '@' : 'vs'} ${prevGame.oName}"
+              style: small
+              bold: true
+              maxLines: 1
+            }
+            Spacer { weight: 1 }
+            Text { text: prevGame.gameType == "PLAYOFF" ? "Playoff" : "Final"; style: label; color: muted; maxLines: 1 }
+          }
+        }
+      }
+
+      // Next Upcoming Game Strip (when featured is a recent final)
+      if fgIsFinal && nextSchedGame != null {
+        Box {
+          fill: width
+          padding: [6, stripPadY]
+          radius: 6 * corners
+          background: alpha(surface, 0.6)
+          border: 1
+          borderColor: border
+
+          Row {
+            fill: width
+            align: center
+            gap: 6
+            Text { text: "Next:"; style: small; color: muted }
+            TeamLogo { logoUrl: nextSchedGame.oLogo; px: 16; plate: true }
+            Text {
+              text: "${nextSchedGame.jIsAway ? '@' : 'vs'} ${nextSchedGame.oName}"
+              style: small
+              bold: true
+              maxLines: 1
+            }
+            Spacer { weight: 1 }
+            Text { text: ngWhen; style: label; color: secondaryColor; maxLines: 1 }
+          }
+        }
+      }
+
+      // 6A-I District 2 Quick Strip
+      Box {
+        fill: width
+        padding: [6, stripPadY]
+        radius: 6 * corners
+        background: alpha(surface, 0.6)
+        border: 1
+        borderColor: border
+        onTap: { haptic(); tab = "standings" }
+
+        Row {
+          fill: width
+          align: center
+          gap: 4
+
+          Text { text: "6A-I"; style: label; bold: true; color: muted; width: 28 }
+
+          for entry, i in distQuickStrip key entry.schoolId {
+            let isJenks = (entry.schoolId ?? "") == jenksId
+            let rec = isJenks ? recordStr : (entry.overallWinLossTies ?? "–")
+            let abbr = entry.schoolNameAcronym ?? upper(entry.schoolName ?? "")
+
+            if i > 0 {
+              Box {
+                width: 1
+                height: 9
+                background: alpha(border, 0.55)
+              }
+            }
+            Row {
+              align: center
+              gap: 3
+              TeamLogo { logoUrl: entry.schoolMascotUrl; px: 14; plate: true }
+              Text {
+                text: "${abbr} ${rec}"
+                style: label
+                bold: isJenks
+                color: isJenks ? secondaryColor : muted
+              }
+              if isJenks {
+                Box {
+                  width: 4
+                  height: 4
+                  radius: 2 * corners
+                  background: secondaryColor
+                }
+              }
+            }
+          }
+          Spacer { weight: 1 }
+          Text { text: "›"; style: small; color: muted }
+        }
+      }
+    }
+  }
+
+  fps: fgHasWinner && tab == "score" ? (modes.saver ? 15 : 30) : 1
+  onTap: { haptic(); screen() }
+
+  Column {
+    gap: tileGap
+    fill: true
+
+    // Header
+    Row {
+      gap: 6
+      fill: width
+      align: center
+      Box {
+        size: 28
+        radius: 14
+        clip: true
+        background: #ffffff
+        align: center
+        Image {
+          src: "https://image.maxpreps.io/${jenksLogoRel}"
+          size: 24
+          fit: contain
+        }
+      }
+      Column {
+        gap: 0
+        Row {
+          gap: 4
+          align: center
+          Text { text: "TrojanWatch"; style: title; bold: true }
+          Text {
+            text: recordStr
+            style: small
+            bold: true
+            color: secondaryColor
+            padding: [4, 1]
+            radius: 4 * corners
+            background: alpha(secondaryColor, 0.2)
+          }
+        }
+        Text { text: standingStr; style: label; color: muted; maxLines: 1 }
+      }
+      Spacer { weight: 1 }
+      Row {
+        gap: 6
+        align: center
+        if fgIsLive {
+          Text {
+            text: "● LIVE"
+            style: small
+            bold: true
+            color: red
+            padding: [5, 2]
+            radius: 4 * corners
+            background: alpha(red, 0.2)
+          }
+        }
+        ExpandButton { sz: expandBtnSz; iconSz: expandIconSz; col: mix(foreground, muted, 0.35) }
+      }
+    }
+
+    // Tabs
+    Row {
+      fill: width
+      gap: 4
+      Box {
+        weight: 1
+        padding: [0, tabPadY]
+        radius: 6 * corners
+        background: tab == "score" ? tabActiveBg : alpha(surface, 0.4)
+        border: 1
+        borderColor: tab == "score" ? tabActiveBorder : border
+        onTap: { haptic(); tab = "score" }
+        Text {
+          text: "Score"
+          style: small
+          bold: tab == "score"
+          color: tab == "score" ? tabActiveText : muted
+          align: center
+        }
+      }
+      Box {
+        weight: 1
+        padding: [0, tabPadY]
+        radius: 6 * corners
+        background: tab == "standings" ? tabActiveBg : alpha(surface, 0.4)
+        border: 1
+        borderColor: tab == "standings" ? tabActiveBorder : border
+        onTap: { haptic(); tab = "standings" }
+        Text {
+          text: "Dist"
+          style: small
+          bold: tab == "standings"
+          color: tab == "standings" ? tabActiveText : muted
+          align: center
+          maxLines: 1
+        }
+      }
+      Box {
+        weight: 1
+        padding: [0, tabPadY]
+        radius: 6 * corners
+        background: tab == "stats" ? tabActiveBg : alpha(surface, 0.4)
+        border: 1
+        borderColor: tab == "stats" ? tabActiveBorder : border
+        onTap: { haptic(); tab = "stats" }
+        Text {
+          text: "Stats"
+          style: small
+          bold: tab == "stats"
+          color: tab == "stats" ? tabActiveText : muted
+          align: center
+          maxLines: 1
+        }
+      }
+      Box {
+        weight: 1
+        padding: [0, tabPadY]
+        radius: 6 * corners
+        background: tab == "news" ? tabActiveBg : alpha(surface, 0.4)
+        border: 1
+        borderColor: tab == "news" ? tabActiveBorder : border
+        onTap: { haptic(); tab = "news" }
+        Text {
+          text: "News"
+          style: small
+          bold: tab == "news"
+          color: tab == "news" ? tabActiveText : muted
+          align: center
+        }
+      }
+      Box {
+        weight: 1
+        padding: [0, tabPadY]
+        radius: 6 * corners
+        background: tab == "schedule" ? tabActiveBg : alpha(surface, 0.4)
+        border: 1
+        borderColor: tab == "schedule" ? tabActiveBorder : border
+        onTap: { haptic(); tab = "schedule" }
+        Text {
+          text: "Sched"
+          style: small
+          bold: tab == "schedule"
+          color: tab == "schedule" ? tabActiveText : muted
+          align: center
+          maxLines: 1
+        }
+      }
+    }
+
+    // Tab content
+    if tab == "score" && !isCompactTile {
+      Column {
+        weight: 1
+        fill: width
+        gap: tileGap
+        ScoreFeaturedCard { expand: true }
+        ScoreBottomStrips {}
+      }
+    } else {
+      Column {
+        weight: 1
+        fill: width
+        scroll: true
+        onPull: refresh()
+        gap: tileGap
+
+        if tab == "score" {
+          ScoreFeaturedCard { expand: false }
+          ScoreBottomStrips {}
+        }
+
+        if tab == "standings" {
+          Box {
+            fill: width
+            padding: 8
+            radius: 8 * corners
+            background: alpha(surface, 0.6)
+            border: 1
+            borderColor: border
+
+            Column {
+              gap: 4
+              fill: width
+
+              Row {
+                fill: width
+                align: center
+                gap: 6
+                padding: [4, 2]
+                Text { text: "#"; style: label; color: muted; width: 16 }
+                Text { text: "TEAM"; style: label; color: muted; weight: 1 }
+                Text { text: "OVR"; style: label; color: muted; width: 42; align: end }
+                Text { text: "DIST"; style: label; color: muted; width: 42; align: end }
+                Text { text: "PCT"; style: label; color: muted; width: 44; align: end }
+              }
+
+              for entry, i in distEntries key entry.schoolId {
+                let isJenks = (entry.schoolId ?? "") == jenksId
+                let rec = isJenks ? recordStr : (entry.overallWinLossTies ?? "–")
+                let dRec = entry.conferenceWinLossTies ?? "–"
+                let pct = entry.winningPercentage != null ? fixed(num(entry.winningPercentage), 3) : "–"
+
+                Row {
+                  fill: width
+                  align: center
+                  gap: 6
+                  padding: [4, 3]
+                  radius: 4 * corners
+                  background: isJenks ? highlightBg : rgb(0, 0, 0, 0)
+
+                  Text { text: "${i + 1}"; style: small; color: isJenks ? secondaryColor : muted; bold: isJenks; width: 16 }
+                  TeamLogo { logoUrl: entry.schoolMascotUrl; px: 18; plate: true }
+                  Text {
+                    text: entry.schoolName ?? ""
+                    style: small
+                    bold: isJenks
+                    color: isJenks ? secondaryColor : foreground
+                    weight: 1
+                    maxLines: 1
+                  }
+                  Text {
+                    text: rec
+                    style: small
+                    bold: true
+                    color: isJenks ? secondaryColor : foreground
+                    width: 42
+                    align: end
+                  }
+                  Text {
+                    text: dRec
+                    style: small
+                    color: muted
+                    width: 42
+                    align: end
+                  }
+                  Text {
+                    text: pct
+                    style: label
+                    color: muted
+                    width: 44
+                    align: end
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if tab == "stats" {
+          Column {
+            fill: width
+            gap: 6
+
+            // Compact Team Season Stats Strip
+            Row {
+              fill: width
+              gap: 4
+              for m in [
+                {k: "OFF PPG", v: jenksPpgStr, c: secondaryColor},
+                {k: "DEF PPG", v: jenksPapgStr, c: foreground},
+                {k: "DIFF", v: diffStr, c: totalDiff >= 0 ? winColor : red},
+                {k: "RATING", v: jenksRankObj != null ? fixed(jenksRankObj.rating, 1) : "–", c: secondaryColor}
+              ] {
+                Box {
+                  weight: 1
+                  padding: [4, 4]
+                  radius: 6 * corners
+                  background: alpha(surface, 0.55)
+                  border: 1
+                  borderColor: border
+                  Column {
+                    align: center
+                    gap: 0
+                    Text { text: m.k; style: label; color: muted; align: center; maxLines: 1 }
+                    Text { text: m.v; style: small; bold: true; color: m.c; align: center; maxLines: 1 }
+                  }
+                }
+              }
+            }
+
+            // Individual Player Leaders (MaxPreps)
+            if len(jenksLeaders) == 0 {
+              Text { text: "No player leaders available yet"; style: small; color: muted; padding: [0, 8] }
+            } else {
+              for pl in jenksLeaders {
+                Box {
+                  fill: width
+                  padding: [6, 4]
+                  radius: 6 * corners
+                  background: alpha(surface, 0.5)
+                  border: 1
+                  borderColor: border
+                  onTap: { if pl.url != "" { haptic(); url(pl.url) } }
+                  Row {
+                    fill: width
+                    align: center
+                    gap: 6
+                    Column {
+                      weight: 1
+                      gap: 0
+                      Row {
+                        align: center
+                        gap: 5
+                        Text { text: pl.name; style: small; bold: true; color: foreground; maxLines: 1 }
+                        if pl.pos != "" {
+                          Text { text: pl.pos; style: label; color: muted; maxLines: 1 }
+                        }
+                        if pl.yr != "" {
+                          Text { text: pl.yr; style: label; color: muted }
+                        }
+                      }
+                      Text { text: pl.statName; style: label; color: muted; maxLines: 1 }
+                    }
+                    Text { text: "${pl.val} ${pl.statHdr}"; style: small; bold: true; color: secondaryColor; align: end; maxLines: 1 }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if tab == "news" {
+          Column {
+            gap: 4
+            fill: width
+            NewsFilterBar { padY: 3; chipRadius: 6 }
+
+            if len(articles) == 0 {
+              Text { text: "Loading Trojans news…"; style: small; color: muted; align: center }
+            } else {
+              for item in articles.take(6) key item.id {
+                Box {
+                  fill: width
+                  padding: [6, 4]
+                  radius: 6 * corners
+                  onTap: { haptic(); url(item.link) }
+
+                  Row {
+                    fill: width
+                    gap: 6
+                    align: top
+                    Box {
+                      width: 4
+                      height: 14
+                      radius: 2 * corners
+                      background: secondaryColor
+                      offset: [0, 3]
+                    }
+                    Column {
+                      gap: 2
+                      weight: 1
+                      Text {
+                        text: item.title
+                        style: small
+                        bold: true
+                        maxLines: 2
+                      }
+                      Row {
+                        gap: 6
+                        if item.ts != null && item.ts > 0 {
+                          Text { text: fmtAgo(item.ts, now); style: label; color: accentColor; bold: true }
+                        }
+                        Text { text: item.src; style: label; color: muted; maxLines: 1 }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if tab == "schedule" {
+          for g, i in schedGames key g.id {
+            let isDone = g.state == "post"
+            let isCurrent = g.id == featuredGame.id
+            let gWon = g.jResult == "W"
+
+            Box {
+              fill: width
+              padding: [4, 2]
+              radius: 4 * corners
+              background: isCurrent ? highlightBg : rgb(0, 0, 0, 0)
+              border: isCurrent ? 1 : 0
+              borderColor: accentColor
+
+              Row {
+                fill: width
+                align: center
+                gap: 6
+
+                Text { text: "G${i + 1}"; style: small; color: isCurrent ? accentColor : muted; width: 26; bold: isCurrent }
+                TeamLogo { logoUrl: g.oLogo; px: 18; plate: true }
+                Text {
+                  text: "${g.jIsAway ? '@' : 'vs'} ${g.oName}"
+                  style: small
+                  bold: isCurrent || g.state == "in"
+                  color: g.state == "in" ? accentColor : foreground
+                  maxLines: 1
+                }
+                Spacer { weight: 1 }
+                if isDone {
+                  Text {
+                    text: "${g.jResult} ${g.jScore ?? 0}-${g.oScore ?? 0}"
+                    style: small
+                    bold: true
+                    color: gWon ? winColor : red
+                    align: end
+                  }
+                } else if g.state == "in" {
+                  Text { text: "LIVE"; style: small; bold: true; color: accentColor; align: end }
+                } else {
+                  Text {
+                    text: g.ts != null ? (g.isTimeTba ? "${fmtTime(g.ts, "M/d")} TBD" : fmtTime(g.ts, "M/d h:mma")) : "TBD"
+                    style: small
+                    color: isCurrent ? secondaryColor : muted
+                    bold: isCurrent
+                    align: end
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Full-screen Game Center
+  screen {
+    title: "TrojanWatch"
+
+    Column {
+      scroll: true
+      onPull: refresh()
+      gap: 12
+      padding: 12
+
+      // Compact Hero Banner
+      Box {
+        fill: width
+        padding: [12, 9]
+        radius: 10 * corners
+        background: alpha(surface, 0.6)
+        border: 1
+        borderColor: accentColor
+
+        Row {
+          fill: width
+          align: center
+          gap: 10
+          Box {
+            size: 38
+            radius: 19
+            clip: true
+            background: #ffffff
+            align: center
+            Image {
+              src: "https://image.maxpreps.io/${jenksLogoRel}"
+              size: 34
+              fit: contain
+            }
+          }
+          Column {
+            gap: 1
+            weight: 1
+            Text { text: "Jenks Trojans"; style: body; bold: true }
+            Text { text: standingStr; style: label; color: muted }
+          }
+          Column {
+            align: end
+            width: 72
+            gap: 1
+            Text { text: recordStr; style: title; bold: true; color: secondaryColor; align: end }
+            Text { text: "RECORD"; style: label; color: muted; align: end }
+          }
+        }
+      }
+
+      // Screen navigation tabs
+      Row {
+        fill: width
+        gap: 6
+        Box {
+          weight: 1
+          padding: [0, 8]
+          radius: 8 * corners
+          background: screenTab == "game" ? tabActiveBg : alpha(surface, 0.4)
+          border: 1
+          borderColor: screenTab == "game" ? tabActiveBorder : border
+          onTap: { haptic(); screenTab = "game" }
+          Text {
+            text: "Game"
+            style: small
+            bold: screenTab == "game"
+            color: screenTab == "game" ? tabActiveText : muted
+            align: center
+          }
+        }
+        Box {
+          weight: 1
+          padding: [0, 8]
+          radius: 8 * corners
+          background: screenTab == "stats" ? tabActiveBg : alpha(surface, 0.4)
+          border: 1
+          borderColor: screenTab == "stats" ? tabActiveBorder : border
+          onTap: { haptic(); screenTab = "stats" }
+          Text {
+            text: "Stats"
+            style: small
+            bold: screenTab == "stats"
+            color: screenTab == "stats" ? tabActiveText : muted
+            align: center
+          }
+        }
+        Box {
+          weight: 1
+          padding: [0, 8]
+          radius: 8 * corners
+          background: screenTab == "news" ? tabActiveBg : alpha(surface, 0.4)
+          border: 1
+          borderColor: screenTab == "news" ? tabActiveBorder : border
+          onTap: { haptic(); screenTab = "news" }
+          Text {
+            text: "News"
+            style: small
+            bold: screenTab == "news"
+            color: screenTab == "news" ? tabActiveText : muted
+            align: center
+          }
+        }
+        Box {
+          weight: 1
+          padding: [0, 8]
+          radius: 8 * corners
+          background: screenTab == "schedule" ? tabActiveBg : alpha(surface, 0.4)
+          border: 1
+          borderColor: screenTab == "schedule" ? tabActiveBorder : border
+          onTap: { haptic(); screenTab = "schedule" }
+          Text {
+            text: "Schedule"
+            style: small
+            bold: screenTab == "schedule"
+            color: screenTab == "schedule" ? tabActiveText : muted
+            align: center
+          }
+        }
+      }
+
+      // Screen Tab 1: Game Center
+      if screenTab == "game" {
+        Column {
+          gap: 10
+          fill: width
+
+          Text { text: fgIsLive ? "LIVE GAME" : (fgIsFinal ? "FINAL RESULT" : "NEXT MATCHUP"); style: label; color: muted }
+
+          Box {
+            fill: width
+            padding: 14
+            radius: 10 * corners
+            background: alpha(surface, 0.6)
+            border: 1
+            borderColor: fgIsLive ? accentColor : border
+
+            Column {
+              gap: 12
+              fill: width
+
+              Row {
+                fill: width
+                align: center
+                Text {
+                  text: fgIsLive ? "● LIVE IN PROGRESS" : (fgIsFinal ? "FINAL SCORE • ${fgGameLabel}" : fgGameLabel)
+                  style: small
+                  bold: true
+                  color: fgIsLive ? accentColor : secondaryColor
+                }
+                Spacer { weight: 1 }
+                if fgIsFinal {
+                  Text {
+                    text: fgJenksWon ? "WIN" : (fgJenksLost ? "LOSS" : "TIE")
+                    style: small
+                    bold: true
+                    color: fgJenksWon ? winColor : (fgJenksLost ? red : muted)
+                    padding: [6, 2]
+                    radius: 4 * corners
+                    background: fgJenksWon ? alpha(winColor, 0.2) : (fgJenksLost ? alpha(red, 0.2) : alpha(muted, 0.2))
+                  }
+                } else {
+                  Text {
+                    text: featuredGame.gameType ?? "GAME"
+                    style: small
+                    bold: true
+                    color: secondaryColor
+                    padding: [6, 2]
+                    radius: 4 * corners
+                    background: alpha(secondaryColor, 0.16)
+                  }
+                }
+              }
+
+              // Large Matchup View
+              Row {
+                fill: width
+                align: center
+
+                // Away Team
+                Column {
+                  weight: 1
+                  align: center
+                  gap: 4
+                  Box {
+                    width: awayIsWinner ? screenAuraW : screenAwayLogoPx + 4
+                    height: screenLogoSlotH
+                    align: center
+                    if awayIsWinner {
+                      if fgJenksWon {
+                        WinnerAura { w: screenAuraW; h: screenLogoSlotH; col: secondaryColor }
+                      } else {
+                        BooAura { w: screenAuraW; h: screenLogoSlotH }
+                      }
+                    }
+                    Box {
+                      opacity: fgHasWinner && !awayIsWinner ? 0.82 : 1
+                      TeamLogo { logoUrl: featuredGame.awayLogo; px: screenAwayLogoPx; plate: !awayIsWinner }
+                    }
+                  }
+                  Text {
+                    text: featuredGame.awayName ?? "Away"
+                    fontSize: 13
+                    bold: true
+                    color: fgHasWinner && !awayIsWinner ? muted : foreground
+                    align: center
+                    maxLines: 2
+                  }
+                  Text {
+                    text: fgAwayRec
+                    style: small
+                    color: muted
+                    align: center
+                  }
+                }
+
+                // Middle Score / Clock
+                Column {
+                  width: 116
+                  align: center
+                  gap: 4
+
+                  if fgIsPre {
+                    Text { text: featuredGame.isNeutral ? "VS" : "AT"; style: title; color: muted; bold: true; align: center }
+                    Text { text: fgKickDate; style: small; color: foreground; align: center; bold: true }
+                    Text { text: fgKickTime; style: small; color: secondaryColor; align: center; bold: true }
+                  } else {
+                    Row {
+                      gap: 6
+                      align: center
+                      Text {
+                        text: fgAwayScore
+                        fontSize: 28
+                        bold: true
+                        color: fgHasWinner && !awayIsWinner ? muted : foreground
+                      }
+                      Text { text: "-"; fontSize: 28; color: muted }
+                      Text {
+                        text: fgHomeScore
+                        fontSize: 28
+                        bold: true
+                        color: fgHasWinner && !homeIsWinner ? muted : foreground
+                      }
+                    }
+                    Text {
+                      text: fgStatusText
+                      style: small
+                      color: fgIsLive ? accentColor : muted
+                      bold: true
+                      align: center
+                    }
+                  }
+                }
+
+                // Home Team
+                Column {
+                  weight: 1
+                  align: center
+                  gap: 4
+                  Box {
+                    width: homeIsWinner ? screenAuraW : screenHomeLogoPx + 4
+                    height: screenLogoSlotH
+                    align: center
+                    if homeIsWinner {
+                      if fgJenksWon {
+                        WinnerAura { w: screenAuraW; h: screenLogoSlotH; col: secondaryColor }
+                      } else {
+                        BooAura { w: screenAuraW; h: screenLogoSlotH }
+                      }
+                    }
+                    Box {
+                      opacity: fgHasWinner && !homeIsWinner ? 0.82 : 1
+                      TeamLogo { logoUrl: featuredGame.homeLogo; px: screenHomeLogoPx; plate: !homeIsWinner }
+                    }
+                  }
+                  Text {
+                    text: featuredGame.homeName ?? "Home"
+                    fontSize: 13
+                    bold: true
+                    color: fgHasWinner && !homeIsWinner ? muted : foreground
+                    align: center
+                    maxLines: 2
+                  }
+                  Text {
+                    text: fgHomeRec
+                    style: small
+                    color: muted
+                    align: center
+                  }
+                }
+              }
+
+              // Game Details
+              Box {
+                fill: width
+                padding: [10, 8]
+                radius: 6 * corners
+                background: alpha(surface, 0.4)
+
+                Column {
+                  gap: 4
+                  Row {
+                    Text { text: "Division:"; style: small; color: muted; width: 64 }
+                    Text { text: "${divisionName} • ${leagueName}"; style: small; weight: 1 }
+                  }
+                  if featuredGame.desc != "" {
+                    Text { text: featuredGame.desc; style: label; color: muted; maxLines: 3 }
+                  }
+                }
+              }
+
+              // MaxPreps & NFHS Action Buttons
+              Row {
+                fill: width
+                gap: 8
+                Box {
+                  weight: 1
+                  padding: [10, 9]
+                  radius: 6 * corners
+                  background: alpha(secondaryColor, 0.12)
+                  border: 1
+                  borderColor: alpha(secondaryColor, 0.6)
+                  onTap: { haptic(); url(featuredGame.url) }
+                  Text {
+                    text: fgIsFinal ? "MaxPreps Recap ↗" : "MaxPreps Game ↗"
+                    style: small
+                    bold: true
+                    color: secondaryColor
+                    align: center
+                  }
+                }
+                if featuredGame.nfhsUrl != "" {
+                  Box {
+                    weight: 1
+                    padding: [10, 9]
+                    radius: 6 * corners
+                    background: highlightBg
+                    border: 1
+                    borderColor: alpha(accentColor, 0.65)
+                    onTap: { haptic(); url(featuredGame.nfhsUrl) }
+                    Text {
+                      text: "NFHS Stream ↗"
+                      style: small
+                      bold: true
+                      color: foreground
+                      align: center
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Head-to-Head Matchup Comparison Card
+          if hasRatingComp || hasWinPctComp {
+            Text { text: "MATCHUP COMPARISON"; style: label; color: muted }
+            Box {
+              fill: width
+              padding: 12
+              radius: 10 * corners
+              background: alpha(surface, 0.6)
+              border: 1
+              borderColor: border
+
+              Column {
+                gap: 8
+                fill: width
+
+                Row {
+                  fill: width
+                  align: center
+                  Text { text: hasRatingComp ? "MaxPreps Power Rating" : "Season Win Percentage"; style: small; bold: true; color: foreground }
+                  Spacer { weight: 1 }
+                  if hasRatingComp && fgAwayRankObj.rank != null && fgHomeRankObj.rank != null {
+                    Text { text: "OK #${fgAwayRankObj.rank} vs #${fgHomeRankObj.rank}"; style: label; color: muted }
+                  }
+                }
+
+                Row {
+                  fill: width
+                  align: center
+                  Text { text: "${featuredGame.awayName} ${hasRatingComp ? fixed(fgAwayRankObj.rating, 1) : "${fixed(awayWinPct, 1)}%"}"; style: small; bold: true; color: fgAwayIsJenks ? secondaryColor : foreground }
+                  Spacer { weight: 1 }
+                  Text { text: "${featuredGame.homeName} ${hasRatingComp ? fixed(fgHomeRankObj.rating, 1) : "${fixed(homeWinPct, 1)}%"}"; style: small; bold: true; color: !fgAwayIsJenks ? secondaryColor : foreground }
+                }
+
+                Row {
+                  fill: width
+                  height: 8
+                  radius: 4 * corners
+                  clip: true
+                  gap: 2
+                  Box {
+                    weight: compLeftShare
+                    height: 8
+                    background: fgAwayIsJenks ? barFillColor : alpha(foreground, 0.32)
+                  }
+                  Box {
+                    weight: 100 - compLeftShare
+                    height: 8
+                    background: !fgAwayIsJenks ? barFillColor : alpha(foreground, 0.32)
+                  }
+                }
+
+                if compSosStr != "" {
+                  Row {
+                    fill: width
+                    align: center
+                    Text { text: "Strength of Schedule"; style: label; color: muted }
+                    Spacer { weight: 1 }
+                    Text { text: "${fgAwayTag} ${fixed(fgAwayRankObj.strength, 1)}  •  ${fgHomeTag} ${fixed(fgHomeRankObj.strength, 1)}"; style: label; bold: true; color: foreground }
+                  }
+                }
+              }
+            }
+          }
+
+          // Season Scoring & State Rank Card
+          if gamesPlayed > 0 {
+            Text { text: "SEASON SCORING & RANKING"; style: label; color: muted }
+            Box {
+              fill: width
+              padding: 12
+              radius: 10 * corners
+              background: alpha(surface, 0.6)
+              border: 1
+              borderColor: border
+
+              Column {
+                gap: 10
+                fill: width
+
+                Row {
+                  fill: width
+                  align: center
+                  Text { text: "Points Per Game Split"; style: small; bold: true; color: foreground }
+                  Spacer { weight: 1 }
+                  if jenksStateRank != null {
+                    Text {
+                      text: "Class 6A-I #${jenksStateRank}"
+                      style: label
+                      bold: true
+                      color: secondaryColor
+                      padding: [5, 2]
+                      radius: 4 * corners
+                      background: alpha(secondaryColor, 0.16)
+                    }
+                  }
+                }
+
+                Row {
+                  fill: width
+                  align: center
+                  Text { text: "Offense ${jenksPpgStr} PPG (${int(totalPf)} PF)"; style: small; bold: true; color: secondaryColor }
+                  Spacer { weight: 1 }
+                  Text { text: "Defense ${jenksPapgStr} PPG (${int(totalPa)} PA)"; style: small; color: muted }
+                }
+
+                Row {
+                  fill: width
+                  height: 8
+                  radius: 4 * corners
+                  clip: true
+                  gap: 2
+                  Box {
+                    weight: ppgShare
+                    height: 8
+                    background: barFillColor
+                  }
+                  Box {
+                    weight: 100 - ppgShare
+                    height: 8
+                    background: alpha(foreground, 0.32)
+                  }
+                }
+
+                Row {
+                  fill: width
+                  gap: 8
+                  Box {
+                    weight: 1
+                    padding: [8, 6]
+                    radius: 6 * corners
+                    background: alpha(surface, 0.45)
+                    Column {
+                      align: center
+                      gap: 1
+                      Text { text: diffStr; style: body; bold: true; color: totalDiff >= 0 ? winColor : red; align: center }
+                      Text { text: "POINT DIFF"; style: label; color: muted; align: center }
+                    }
+                  }
+                  Box {
+                    weight: 1
+                    padding: [8, 6]
+                    radius: 6 * corners
+                    background: alpha(surface, 0.45)
+                    Column {
+                      align: center
+                      gap: 1
+                      Text { text: streakStr; style: body; bold: true; color: startsWith(streakStr, "W") ? winColor : red; align: center }
+                      Text { text: "STREAK"; style: label; color: muted; align: center }
+                    }
+                  }
+                  Box {
+                    weight: 1
+                    padding: [8, 6]
+                    radius: 6 * corners
+                    background: alpha(surface, 0.45)
+                    Column {
+                      align: center
+                      gap: 1
+                      Text { text: "${gamesPlayed}"; style: body; bold: true; color: foreground; align: center }
+                      Text { text: "GAMES"; style: label; color: muted; align: center }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // 6A-I District 2 Standings Table
+          Text { text: "6A-I DISTRICT 2 STANDINGS"; style: label; color: muted }
+          Box {
+            fill: width
+            padding: 10
+            radius: 8 * corners
+            background: alpha(surface, 0.6)
+            border: 1
+            borderColor: border
+
+            Column {
+              gap: 4
+              fill: width
+
+              Row {
+                fill: width
+                align: center
+                gap: 6
+                padding: [6, 2]
+                Text { text: "#"; style: label; color: muted; width: 16 }
+                Text { text: "TEAM"; style: label; color: muted; weight: 1 }
+                Text { text: "OVR"; style: label; color: muted; width: 42; align: end }
+                Text { text: "DIST"; style: label; color: muted; width: 42; align: end }
+                Text { text: "PCT"; style: label; color: muted; width: 46; align: end }
+              }
+
+              for entry, i in distEntries key entry.schoolId {
+                let isJenks = (entry.schoolId ?? "") == jenksId
+                let rec = isJenks ? recordStr : (entry.overallWinLossTies ?? "–")
+                let dRec = entry.conferenceWinLossTies ?? "–"
+                let pct = entry.winningPercentage != null ? fixed(num(entry.winningPercentage), 3) : "–"
+
+                Row {
+                  fill: width
+                  align: center
+                  gap: 6
+                  padding: [6, 4]
+                  radius: 4 * corners
+                  background: isJenks ? highlightBg : rgb(0, 0, 0, 0)
+
+                  Text { text: "${i + 1}"; style: small; color: isJenks ? secondaryColor : muted; bold: isJenks; width: 16 }
+                  TeamLogo { logoUrl: entry.schoolMascotUrl; px: 20; plate: true }
+                  Text {
+                    text: entry.schoolName ?? ""
+                    style: small
+                    bold: isJenks
+                    color: isJenks ? secondaryColor : foreground
+                    weight: 1
+                    maxLines: 1
+                  }
+                  Text {
+                    text: rec
+                    style: small
+                    bold: true
+                    color: isJenks ? secondaryColor : foreground
+                    width: 42
+                    align: end
+                  }
+                  Text {
+                    text: dRec
+                    style: small
+                    color: muted
+                    width: 42
+                    align: end
+                  }
+                  Text {
+                    text: pct
+                    style: label
+                    color: muted
+                    width: 46
+                    align: end
+                  }
+                }
+              }
+            }
+          }
+
+          // Previous Result (hidden when featured game is already that final)
+          if prevGame != null && prevGame.id != featuredGame.id {
+            Text { text: "PREVIOUS RESULT"; style: label; color: muted }
+            Box {
+              fill: width
+              padding: 10
+              radius: 8 * corners
+              background: alpha(surface, 0.6)
+              border: 1
+              borderColor: border
+              onTap: { haptic(); url(prevGame.url) }
+
+              Row {
+                fill: width
+                align: center
+                gap: 8
+                Text {
+                  text: pgWon ? "WIN" : "LOSS"
+                  style: small
+                  bold: true
+                  color: pgWon ? winColor : red
+                  padding: [6, 3]
+                  radius: 4 * corners
+                  background: pgWon ? alpha(winColor, 0.2) : alpha(red, 0.2)
+                }
+                TeamLogo { logoUrl: prevGame.oLogo; px: 28; plate: true }
+                Column {
+                  gap: 1
+                  weight: 1
+                  Text { text: pgResult; style: body; bold: true }
+                  Text { text: "Final Score • Tap for MaxPreps Recap ↗"; style: small; color: muted }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Screen Tab 2: Trojans News
+      if screenTab == "stats" {
+        Column {
+          gap: 10
+          fill: width
+
+          Text { text: "TEAM SEASON STATS"; style: label; color: muted }
+          Box {
+            fill: width
+            padding: 12
+            radius: 10 * corners
+            background: alpha(surface, 0.6)
+            border: 1
+            borderColor: border
+            Column {
+              gap: 8
+              fill: width
+              Row {
+                fill: width
+                gap: 8
+                for m in [
+                  {k: "OFFENSE PPG", v: jenksPpgStr, sub: "${int(totalPf)} PF", c: secondaryColor},
+                  {k: "DEFENSE PPG", v: jenksPapgStr, sub: "${int(totalPa)} PA", c: foreground},
+                  {k: "POINT DIFF", v: diffStr, sub: "${gamesPlayed} Games", c: totalDiff >= 0 ? winColor : red}
+                ] {
+                  Box {
+                    weight: 1
+                    padding: [8, 6]
+                    radius: 8 * corners
+                    background: alpha(surface, 0.5)
+                    border: 1
+                    borderColor: border
+                    Column {
+                      align: center
+                      gap: 1
+                      Text { text: m.k; style: label; color: muted; align: center; maxLines: 1 }
+                      Text { text: m.v; style: body; bold: true; color: m.c; align: center }
+                      Text { text: m.sub; style: label; color: muted; align: center; maxLines: 1 }
+                    }
+                  }
+                }
+              }
+              if jenksRankObj != null {
+                Row {
+                  fill: width
+                  gap: 8
+                  for m in [
+                    {k: "OK RANK", v: "#${jenksRankObj.rank}", c: secondaryColor},
+                    {k: "MP RATING", v: fixed(jenksRankObj.rating, 1), c: secondaryColor},
+                    {k: "STRENGTH (SOS)", v: fixed(jenksRankObj.strength, 1), c: foreground}
+                  ] {
+                    Box {
+                      weight: 1
+                      padding: [8, 6]
+                      radius: 8 * corners
+                      background: alpha(surface, 0.5)
+                      border: 1
+                      borderColor: border
+                      Column {
+                        align: center
+                        gap: 1
+                        Text { text: m.k; style: label; color: muted; align: center; maxLines: 1 }
+                        Text { text: m.v; style: body; bold: true; color: m.c; align: center }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          Text { text: "PLAYER LEADERS (MAXPREPS)"; style: label; color: muted }
+          Row {
+            fill: width
+            gap: 6
+            for f in [
+              {id: "all", label: "All"},
+              {id: "off", label: "Offense"},
+              {id: "def", label: "Defense"}
+            ] {
+              let active = statsFilter == f.id
+              Box {
+                weight: 1
+                padding: [6, 5]
+                radius: 6 * corners
+                background: active ? tabActiveBg : alpha(surface, 0.4)
+                border: 1
+                borderColor: active ? tabActiveBorder : border
+                onTap: { haptic(); statsFilter = f.id }
+                Text {
+                  text: f.label
+                  style: small
+                  bold: active
+                  color: active ? tabActiveText : muted
+                  align: center
+                }
+              }
+            }
+          }
+
+          Box {
+            fill: width
+            padding: 12
+            radius: 10 * corners
+            background: alpha(surface, 0.6)
+            border: 1
+            borderColor: border
+            Column {
+              gap: 6
+              fill: width
+              if len(filteredLeaders) == 0 {
+                Text { text: "No player leaders available"; style: small; color: muted }
+              } else {
+                for pl in filteredLeaders {
+                  Box {
+                    fill: width
+                    padding: [8, 6]
+                    radius: 8 * corners
+                    background: alpha(surface, 0.5)
+                    border: 1
+                    borderColor: border
+                    onTap: { if pl.url != "" { haptic(); url(pl.url) } }
+                    Row {
+                      fill: width
+                      align: center
+                      gap: 8
+                      Column {
+                        weight: 1
+                        gap: 1
+                        Row {
+                          align: center
+                          gap: 6
+                          Text { text: pl.name; style: body; bold: true; color: foreground; maxLines: 1 }
+                          if pl.pos != "" {
+                            Text { text: pl.pos; style: label; color: muted; maxLines: 1 }
+                          }
+                          if pl.yr != "" {
+                            Text {
+                              text: pl.yr
+                              style: label
+                              color: secondaryColor
+                              padding: [4, 1]
+                              radius: 4 * corners
+                              background: highlightBg
+                            }
+                          }
+                        }
+                        Text { text: pl.statName; style: label; color: muted; maxLines: 1 }
+                      }
+                      Text { text: "${pl.val} ${pl.statHdr}"; style: body; bold: true; color: secondaryColor; align: end }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if screenTab == "news" {
+        Column {
+          gap: 8
+          fill: width
+
+          NewsFilterBar { padY: 6; chipRadius: 8 }
+
+          if len(articles) == 0 {
+            Text { text: "Loading Trojans news…"; style: body; color: muted; align: center }
+          } else {
+            for item in articles.take(20) key item.id {
+              Box {
+                fill: width
+                padding: 12
+                radius: 8 * corners
+                background: alpha(surface, 0.6)
+                border: 1
+                borderColor: border
+                onTap: { haptic(); url(item.link) }
+
+                Column {
+                  gap: 4
+                  fill: width
+                  Text { text: item.title; style: body; bold: true; maxLines: 3 }
+                  Row {
+                    fill: width
+                    align: center
+                    gap: 8
+                    if item.ts != null && item.ts > 0 {
+                      Text { text: fmtAgo(item.ts, now); style: small; color: accentColor; bold: true }
+                    }
+                    Text { text: item.src; style: small; color: muted }
+                    Spacer { weight: 1 }
+                    Text { text: "Read story ↗"; style: small; color: secondaryColor; bold: true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Screen Tab 3: Full Schedule
+      if screenTab == "schedule" {
+        Column {
+          gap: 6
+          fill: width
+
+          for g, i in schedGames key g.id {
+            let isDone = g.state == "post"
+            let isCurrent = g.id == featuredGame.id
+            let gWon = g.jResult == "W"
+
+            Box {
+              fill: width
+              padding: [10, 8]
+              radius: 8 * corners
+              background: isCurrent ? highlightBg : alpha(surface, 0.6)
+              border: 1
+              borderColor: isCurrent ? accentColor : border
+              onTap: { haptic(); url(g.url) }
+
+              Row {
+                fill: width
+                align: center
+                gap: 8
+
+                Text { text: "G${i + 1}"; style: small; bold: true; color: isCurrent ? secondaryColor : muted; width: 28 }
+                TeamLogo { logoUrl: g.oLogo; px: 24; plate: true }
+                Column {
+                  gap: 1
+                  weight: 1
+                  Text {
+                    text: "${g.jIsAway ? '@' : 'vs'} ${g.oName}"
+                    style: body
+                    bold: true
+                    maxLines: 1
+                  }
+                  Text {
+                    text: g.ts != null ? "${fmtTime(g.ts, "EEE, M/d")} • ${g.gameType}" : g.gameType
+                    style: label
+                    color: muted
+                  }
+                }
+                if isDone {
+                  Text {
+                    text: "${g.jResult} ${g.jScore ?? 0}-${g.oScore ?? 0}"
+                    style: small
+                    bold: true
+                    color: gWon ? winColor : red
+                    padding: [6, 2]
+                    radius: 4 * corners
+                    background: gWon ? alpha(winColor, 0.2) : alpha(red, 0.2)
+                  }
+                } else if g.state == "in" {
+                  Text { text: "● LIVE"; style: small; bold: true; color: accentColor }
+                } else {
+                  Text {
+                    text: g.ts != null && !g.isTimeTba ? fmtTime(g.ts, "h:mm a") : "TBD"
+                    style: small
+                    color: secondaryColor
+                    bold: true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
