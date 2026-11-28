@@ -1,31 +1,9 @@
-// ============================================================================
-// AGENT EDITING GUIDE (READ FIRST BEFORE MAKING ANY EDITS)
-// ============================================================================
-// Widget: DawgWatch (generated from TeamWatch unified engine)
-// Source config (if present locally): teamwatch/teams/dawgwatch.json
-// Full local guide (if present): teamwatch/AGENTS.md
-//
-// MANDATORY FIRST STEP:
-// Before modifying any code, ASK THE USER:
-//   "Do you want to change team data/configuration (colors, team/league IDs,
-//    score source, news feeds or number of sources, polling intervals) OR
-//    modify the core UI/engine code?"
-//
-// - IF CHANGING DATA / CONFIG ONLY:
-//   1. If `teamwatch/teams/dawgwatch.json` exists locally, edit ONLY that JSON
-//      file and run: `python3 teamwatch/build.py --all --check`
-//   2. If editing this standalone .owl file on another device, edit ONLY
-//      SECTION 1 (TEAM CONFIG) below: theme colors, source URLs, polling
-//      intervals, or news feeds. Do NOT rewrite SECTION 2 (CORE ENGINE).
-//
-// - CURRENT CONFIG SUMMARY:
-//   Provider: espn | News feeds (4): ESPN, GoHuskies, FOX Sports, Big Ten
-//   Theme: primary=#4B2E83, secondary=#B7A57A, accent=#9668F0
-// ============================================================================
+// DawgWatch: generated from the TeamWatch engine.
+// Edits made here by hand may be overwritten by the next generated version.
 widget "dawgwatch" {
   meta {
     description: "Washington Huskies football dashboard: live score, live betting odds, ESPN win probability, stats, schedule, Big Ten standings, and team news"
-    version: "1.3"
+    version: "1.4"
     license: "MIT"
     category: "sport"
     owl: 19
@@ -313,14 +291,15 @@ widget "dawgwatch" {
     ts: parseTime(a.published)
   }))
   let newsItems_1 = (uwNews.items ?? []).map(st => ({
-    id: "uwNews-${st.id ?? st.title}",
+    id: "uw-${st.contentId}",
     src: "GoHuskies",
-    title: st.title ?? "",
-    desc: st.summary ?? "",
-    link: startsWith(st.slug ?? "", "http") ? st.slug : "https://gohuskies.com${st.slug ?? ''}",
-    ts: parseTime(st.published)
+    title: replace(trim(st.contentTitle ?? ""), "&amp;", "&"),
+    desc: st.teaser ?? "",
+    link: startsWith(st.contentUrl ?? "", "http") ? st.contentUrl : "https://gohuskies.com${st.contentUrl ?? ''}",
+    ts: parseTime(st.contentDate, null, "America/Los_Angeles")
   }))
-  let newsItems_2 = take(matchAll((foxRss != null && foxRss.ok ? foxRss.out : "") ?? "", "<item>[\\s\\S]*?<title>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</title>[\\s\\S]*?<link>([^<]+)</link>[\\s\\S]*?<pubDate>([^<]+)</pubDate>")
+  let newsItems_2 = take(matchAll((foxRss != null && foxRss.ok ? foxRss.out : "") ?? "", "<item>[\\s\\S]*?<title>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</title>[\\s\\S]*?<link>([^<]+)</link>[\\s\\S]*?<pubDate>([^<]+)</pubDate>(?:(?!</item>)[\\s\\S])*?<category>(?:<!\\[CDATA\\[)?([^<\\]]+)")
+    .filter(m => trim(m[3]) == "college-football")
     .map(m => ({
       id: "foxRss-${trim(m[1])}",
       src: "FOX Sports",
@@ -423,33 +402,6 @@ widget "dawgwatch" {
   }
 
   // ── Shared UI Components (from teamwatch/engine/ui_shared.owl.tmpl) ──
-  component NewsFilterBar(padY = 3, chipRadius = 6) {
-    Row {
-      fill: width
-      gap: 4
-      for f in newsSources key f.id {
-        let active = newsFilter == f.id
-        Box {
-          weight: f.w
-          padding: [padY, 4]
-          radius: chipRadius * corners
-          background: active ? tabActiveBg : alpha(surface, 0.4)
-          border: 1
-          borderColor: active ? tabActiveBorder : border
-          onTap: { haptic(); newsFilter = f.id }
-          Text {
-            text: f.label
-            style: label
-            bold: active
-            color: active ? tabActiveText : muted
-            align: center
-            maxLines: 1
-          }
-        }
-      }
-    }
-  }
-
   component WinnerAura(w, h, col) {
     Canvas {
       width: w
@@ -934,7 +886,7 @@ widget "dawgwatch" {
     }
   }
 
-  fps: fgHasWinner && tab == "score" ? (modes.saver ? 15 : 30) : 1
+  fps: fgHasWinner && tab == "score" ? (modes.saver ? 5 : 15) : 1
   onTap: { haptic(); screen() }
 
   Column {
@@ -1067,7 +1019,7 @@ widget "dawgwatch" {
         borderColor: tab == "schedule" ? accentColor : border
         onTap: { haptic(); tab = "schedule" }
         Text {
-          text: isTightWidth ? "Sched" : "Sched"
+          text: "Sched"
           style: small
           bold: tab == "schedule"
           color: tab == "schedule" ? accentColor : muted
