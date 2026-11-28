@@ -1,8 +1,8 @@
 app "Skilibre" {
   meta {
     owl: 23
-    description: "Carve down an endless pixel-art mountain. Race through slalom gates, take ski jumps, and stay ahead of the ridge beast and an avalanche."
-    version: "1.0.1"
+    description: "Carve down an endless pixel-art mountain. Race through slalom gates, take ski jumps, and outrun a yeti, a brown bear, and an avalanche."
+    version: "1.1.0"
     license: "MIT"
     category: "games"
   }
@@ -68,6 +68,8 @@ app "Skilibre" {
   state nextHunterTurn = 0
   state hunting = false
   state huntTime = 0
+  state bearCaveX = null
+  state bear = null
   state stride = 0
   state traffic = []
   state trafficAt = 0
@@ -98,6 +100,11 @@ app "Skilibre" {
   let burialSweepTime = 0.84
   let burialTotalTime = burialSweepTime + 0.36
   let caveZ = beastStartMeters / metersPerUnit + 75
+  let bearStartZ = 2500 / metersPerUnit
+  let bearTripZ = bearStartZ + 200 / metersPerUnit
+  let bearCaveZ = bearStartZ + 55
+  let bearScale = 0.85
+  let snowballWindup = 0.8
   let slalomSpacing = 4
   let gateHalfWidth = 22
   let skiJumpSpacing = 1000 / metersPerUnit
@@ -176,6 +183,8 @@ app "Skilibre" {
     nextHunterTurn = 0
     hunting = false
     huntTime = 0
+    bearCaveX = null
+    bear = null
     stride = 0
     traffic = []
     trafficAt = 0
@@ -242,6 +251,15 @@ app "Skilibre" {
         nextHunterTurn = 0.92
         huntTime = 0
       }
+      if bearCaveX == null && distance >= bearStartZ - 50 {
+        bearCaveX = cameraX + (rider - cameraX < slopeWidth / 2 ? slopeWidth - 34 : 34)
+      }
+      if oldDistance < bearStartZ && distance >= bearStartZ {
+        bear = {x: bearCaveX, z: bearCaveZ, vx: sign(rider - bearCaveX) * 42, vz: 60,
+          age: 0, rolledAt: null, hit: false}
+        callout = "BEAR CHASE"
+        calloutFor = 1.8
+      }
       if hopQueued && !airborne && recovery <= 0 {
         airTotal = 0.47
         airtime = airTotal
@@ -263,7 +281,8 @@ app "Skilibre" {
         z: actor.z + actor.pace * step
       })).filter(actor => actor.z >= distance - riderLine - 38
         && actor.z <= distance + viewDepth - riderLine + 120
-        && actor.x >= cameraX - 75 && actor.x <= cameraX + slopeWidth + 75)
+        && actor.x >= cameraX - 75 && actor.x <= cameraX + slopeWidth + 75
+        && (avalancheGap == null || actor.kind != "boarder"))
       // Test sideways overlap over the entire time the riders are close downhill.
       let approach = nearby.filter(actor => lift < actor.clearance
         && min(actor.pz - oldDistance, actor.z - distance) < 6
@@ -301,7 +320,8 @@ app "Skilibre" {
           pace: 396 + hash(seed, trafficAt, 9) * 23, sweep: 24, rate: 2.8, born: stride, clearance: 15}
         let crossingDog = {kind: "dog", x: dogX, z: distance + min(325, ahead + 28),
           pace: 0, dir: direction, clearance: 7}
-        traffic = traffic + [trafficGroup % 10 == 2 ? boarder : [kid, crossingDog, adult, adult, fallen][pattern]]
+        let nextActor = trafficGroup % 10 == 2 ? boarder : [kid, crossingDog, adult, adult, fallen][pattern]
+        if avalancheGap == null || nextActor.kind != "boarder" { traffic = traffic + [nextActor] }
         trafficAt = distance + 505 + 195 * hash(seed, trafficAt, 5)
         trafficGroup = trafficGroup + 1
       }
@@ -319,6 +339,33 @@ app "Skilibre" {
       let jumpProtected = longAir || takingOff || onJumpDeck
       let blocked = crossing != null && any(crossing.obstacles, obstacle =>
         abs(contact - obstacle.x) < (obstacle.rock ? 6 : 5) && lift < (obstacle.rock ? 7 : 14))
+      if bear != null {
+        if bear.rolledAt == null && distance >= bearTripZ {
+          let rollPace = max(375, bear.vz)
+          // Carry the bear's heading into the roll. Small sideways drift counts as straight.
+          let rollAcross = abs(bear.vx) < 14 ? 0 : bear.vx * rollPace / max(220, bear.vz)
+          bear = merge(bear, {rolledAt: bear.z, vx: rollAcross, vz: rollPace, age: 0})
+          callout = "SNOWBALL INCOMING"
+          calloutFor = 2
+        }
+        if bear.rolledAt == null {
+          let age = bear.age + step
+          let desiredAcross = clamp((rider - bear.x) * 3.2, -185, 185)
+          let targetGap = recovery > 0 ? 0 : 66 + sin(age * 1.7) * 10
+          let desiredPace = age < 0.45 ? 90 : clamp(speed * downhill + (distance - bear.z - targetGap) * 3.8, 0, 410)
+          let vx = lerp(bear.vx, desiredAcross, min(1, step * 1.3))
+          let vz = lerp(bear.vz, desiredPace, min(1, step * 2.2))
+          bear = merge(bear, {x: bear.x + vx * step, z: bear.z + vz * step, vx: vx, vz: vz, age: age})
+        } else {
+          let age = bear.age + step
+          // The tumble slows the bear briefly while keeping its heading.
+          let rollStep = step * lerp(0.52, 1, clamp((age - 0.16) / (snowballWindup - 0.16), 0, 1))
+          bear = merge(bear, {x: bear.x + bear.vx * rollStep, z: bear.z + bear.vz * rollStep, age: age})
+          if bear.z > distance + viewDepth + 32 || bear.z - bear.rolledAt > 1500 { bear = null }
+        }
+      }
+      let snowballHit = bear != null && bear.rolledAt != null && bear.age >= snowballWindup && !bear.hit && lift < 18
+        && dist([bear.x, bear.z], [rider, distance]) < 16
       if takingOff {
         skiJumpEnd = crossing.at + skiJumpDistance
         airtime = 0
@@ -337,9 +384,10 @@ app "Skilibre" {
           calloutFor = 0.95
         }
       }
-      if !jumpProtected && (recovery <= 0 || hunting || avalancheGap != null) && (blocked || trafficHit != null) {
+      if !jumpProtected && (recovery <= 0 || avalancheGap != null) && (blocked || trafficHit != null || snowballHit) {
+        if snowballHit { bear = merge(bear, {hit: true}) }
         lives = max(0, lives - 1)
-        haptic(avalancheGap != null || hunting || lives == 0 ? "strong" : "medium")
+        haptic(avalancheGap != null || lives == 0 ? "strong" : "medium")
         if avalancheGap != null {
           burialStartGap = avalancheGap
           burialTime = 0
@@ -352,10 +400,6 @@ app "Skilibre" {
           bestRun = recordToSave
           reason = "Buried by the avalanche"
           mode = "burial"
-        } else if hunting {
-          lives = 0
-          reason = "Run ended"
-          mode = "over"
         } else if lives == 0 {
           reason = "Out of lives"
           mode = "over"
@@ -381,9 +425,9 @@ app "Skilibre" {
           nextHunterTurn = huntTime + (canEscape ? 0.92 : 0.64)
         }
         hunterVx = lerp(hunterVx, hunterTurn, min(1, step * 3))
-        let targetGap = min(40, riderLine * 0.42) + sin(huntTime * 2.1) * 7
+        let targetGap = recovery > 0 ? 0 : min(40, riderLine * 0.42) + sin(huntTime * 2.1) * 7
         let downhillPace = speed * downhill
-        let catchupPace = clamp(downhillPace + (oldDistance - hunterZ - targetGap) * 4, 65, 440)
+        let catchupPace = clamp(downhillPace + (oldDistance - hunterZ - targetGap) * 4, recovery > 0 ? 0 : 65, 440)
         let freePace = hunterZ > distance + 14 ? 180 : 268 - abs(hunterVx) * 0.25
         let chaseSpeed = huntTime < 0.55 ? 82 : (canEscape ? freePace : catchupPace)
         hunterX = hunterX + hunterVx * step
@@ -393,12 +437,20 @@ app "Skilibre" {
         if !jumpProtected && huntTime > 0.8 && abs(gap) <= 12 && separation < 12 && lift < 19 {
           haptic("strong")
           lives = 0
-          reason = "Run ended"
+          reason = "Caught by the yeti"
           mode = "over"
         } else if canEscape && (gap >= 154 || (huntTime >= 2 && separation >= 175)) {
           hunting = false
           bonus = bonus + 120
         }
+      }
+
+      if mode == "run" && bear != null && bear.rolledAt == null && bear.age > 0.8 && !jumpProtected
+        && lift < 19 && dist([bear.x, bear.z], [rider, distance]) < 13 * bearScale {
+        haptic("strong")
+        lives = 0
+        reason = "Caught by the bear"
+        mode = "over"
       }
 
       if mode == "over" {
@@ -423,11 +475,13 @@ app "Skilibre" {
     ".offfffo.", "..offfo..", "...ofo...", "....o...."
   ]
   let pine = [
-    ".......h........", "......hll.......", "......hll.......", ".....hllls......",
-    "....hhlllls.....", "....ggtllls.....", ".....gtlss......", "...ggttlllls....",
-    "..ggttlllllss...", "..ggtttllssss...", "....ggtttts.....", "..ggttlllllss...",
-    ".gggttlllllsss..", "gggtttllsssssss.", "...ggggtssss....", "......bb........",
-    "......bd........"
+    ".......h........", "......hl........", "......hll.......", ".....hllls......",
+    "....hhlllls.....", "....ggtllls.....", ".....gtlss......", "....gttllss.....",
+    "....gttllls.....", "...ggtllllls....", "...ggttlllls....", "..ggttlllllss...",
+    "..ggtttllssss...", "....ggtttts.....", "...ggttllsss....", "...ggttllllss...",
+    "..ggttlllllss...", ".gggttlllllsss..", ".gggtttllsssss..", "gggtttllsssssss.",
+    "..ggggttsssss...", "...ggggtssss....", "......bb........", "......bb........",
+    "......bd........", "......bd........"
   ]
   let stone = [
     "....lllll....", "...llmmmmr...", "..lmmmmmmrr..", ".lmmmmmmrrrr.",
@@ -444,6 +498,22 @@ app "Skilibre" {
     "..ccllttttllcc..", "..cclttyyttlcc..", "..cclttttlcccc..", ".ddcclllccccdd.",
     "dddccllllcccddd", "dd.cllllllcc.dd", "d..ccllllccc..d.",
     "...ccc..ccc.....", "..ddcc..ccdd....", "..ddd....ddd...."
+  ]
+  let brownBear = [
+    "........ddddddd.........", ".......dmmmmmmmdd.......", ".....dsmmlllllmmssd.....",
+    "...dddmmlllllllllmsd....", "..dsdsmllllllllllmsd....", ".dssdmmlmmmmmmmmmmmsd...",
+    ".sssdmdddmmmmmmmdddsd...", "dsssdmdmdddmmmmddmdsdd..", ".dddsdmmmmmmmmmmmmmdsdd.",
+    "...dsdmmmllmmllmmmdssdsd", "...dsdmddmlllmddmmdsddsd", "...dddmedmlllmdemmdsdssd",
+    "...dddmmsllnlldsmmmddd..", "...sddmmslssllmsmmmdmsd.", "..dmddmmsnfnfndsmmddmsd.",
+    ".dsmmddmmsnnnnsmmddmmmsd", ".dmmmmddmmssdsmmddsmssd.", "dsmmmssdddmmmmmd.dsdfdd.",
+    "dssmsssd..ddddd...d.....", ".sssssdd................", ".dfdfdd................."
+  ]
+  let brownBearOtherStride = brownBear.map(row => join(split(row, "").reverse(), ""))
+  let rollingSnow = [
+    ".....sssssss.....", "...sshhhhhhlss...", "..shhhhhhhlmlls..", ".shhhhhhhhhhhlls.",
+    ".shhlmllhhhhhhls.", "shhlmmllhhhhlmlls", "shhlllhlhhhlmmlls", "shhhhhhhhhlllllls",
+    "slhhhhhhlhhhhhlms", "slhhhhhhlhhhhlmms", "sllhlmlllhhhllmms", "sllhllmmllhllmmms",
+    ".sllhllmllhllmms.", ".smlllvvllllmmms.", "..smmmvvbbmmmms..", "...ssmmmmmmmss...", ".....sssssss....."
   ]
   let cave = [
     "..........ssssssss..........", "........ssssssssssss........",
@@ -476,6 +546,7 @@ app "Skilibre" {
   let boardColors = merge(skiColors, {r: #3c2774, o: #bf77e5, a: #8454b8, p: #25395b, g: #36a9b2})
   let dogColors = {c: #ab6038, d: #563543, w: #f7e4c0}
   let beastColors = {b: #f6b552, c: #515779, l: #777ca7, t: #272c4d, y: #ffdc77, d: #3f4568}
+  let bearColors = {d: #392722, s: #64402f, m: #895635, l: #b88051, n: #211919, e: #edb363, f: #eddbbd}
   let caveColors = {s: #e1edf6, l: #b6cfdf, m: #839ab1, r: #546681, d: #273448}
 
   Box {
@@ -571,11 +642,11 @@ app "Skilibre" {
                     let flag = floor(row.index / slalomSpacing) % 2 == 1 ? #d53f49 : #3d68aa
                     for side in [-1, 1] {
                       let post = center + side * gateHalfWidth
-                      let fabric = side < 0 ? post - 8 : post + 1
-                      rect(post - 2, atY, 8, 2, fill: #c3d4e4)
-                      rect(post - 1, atY - 13, 2, 15, fill: #28596a)
-                      rect(fabric, atY - 13, 7, 3, fill: flag)
-                      rect(fabric + (side < 0 ? 1 : 0), atY - 10, 6, 2, fill: flag)
+                      let fabric = side < 0 ? post - 5 : post + 1
+                      rect(post - 1, atY, 5, 1, fill: #c3d4e4)
+                      rect(post, atY - 8, 1, 9, fill: #28596a)
+                      rect(fabric, atY - 8, 5, 2, fill: flag)
+                      rect(fabric + (side < 0 ? 1 : 0), atY - 6, 4, 1, fill: flag)
                     }
                   }
                   for obstacle in row.obstacles {
@@ -586,7 +657,7 @@ app "Skilibre" {
                       if obstacle.rock {
                         sprite(stone, px - 5, atY - 6, 0.82, palette: rockColors)
                       } else {
-                        sprite(pine, px - 5, atY - 11, 0.67, palette: pineColors)
+                        sprite(pine, px - 5, atY - 17, 0.67, palette: pineColors)
                       }
                     }
                   }
@@ -625,12 +696,16 @@ app "Skilibre" {
                   }
                 }
 
-                if caveX != null && abs(caveX - cameraX - slopeWidth / 2) < slopeWidth / 2 + 30 {
-                  let entranceY = round(caveZ - distance + riderLine)
-                  if entranceY > -8 && entranceY < depth + 30 {
-                    let entranceX = round(caveX - cameraX)
-                    rect(entranceX - 22, entranceY - 2, 44, 4, fill: #c3d4e4)
-                    sprite(cave, entranceX - 21, entranceY - 22, 1.5, palette: caveColors)
+                if caveX != null || bearCaveX != null {
+                  for entrance in [{x: caveX, z: caveZ}, {x: bearCaveX, z: bearCaveZ}] {
+                    if entrance.x != null && abs(entrance.x - cameraX - slopeWidth / 2) < slopeWidth / 2 + 30 {
+                      let entranceY = round(entrance.z - distance + riderLine)
+                      if entranceY > -8 && entranceY < depth + 30 {
+                        let entranceX = round(entrance.x - cameraX)
+                        rect(entranceX - 22, entranceY - 2, 44, 4, fill: #c3d4e4)
+                        sprite(cave, entranceX - 21, entranceY - 22, 1.5, palette: caveColors)
+                      }
+                    }
                   }
                 }
                 if hunting && hunterX >= cameraX - 18 && hunterX <= cameraX + slopeWidth + 18
@@ -640,6 +715,41 @@ app "Skilibre" {
                   let gait = floor(stride * 12) % 2
                   rect(beastX - 9, beastY - 2, 18, 3, fill: #afcfd6)
                   sprite(beast, beastX - 10, beastY - 16 + gait * 2, 1.28, palette: beastColors)
+                }
+                if bear != null && bear.x >= cameraX - 36 && bear.x <= cameraX + slopeWidth + 36
+                  && bear.z >= distance - riderLine - 22 && bear.z <= distance - riderLine + depth + 35 {
+                  let bearX = round(bear.x - cameraX)
+                  let bearY = round(bear.z - distance + riderLine)
+                  if bear.rolledAt == null {
+                    let gait = floor(bear.age * 10) % 2
+                    rect(bearX - 12 * bearScale, bearY - 2, 24 * bearScale, 3, fill: #afcfd6)
+                    sprite(gait == 0 ? brownBear : brownBearOtherStride,
+                      bearX - 15 * bearScale, bearY + (gait * 2 - 27) * bearScale, 1.25 * bearScale, palette: bearColors)
+                  } else {
+                    let rolled = bear.z - bear.rolledAt
+                    let pixel = lerp(0.95, 1.9, clamp(bear.age / snowballWindup, 0, 1))
+                    let radius = 8.5 * pixel
+                    let ballY = bearY - radius * 0.68
+                    let spin = rolled * (bear.vx < 0 ? -2.8 : 2.8)
+                    rect(bearX - radius, bearY, radius * 2, 3, fill: #afcfd6)
+                    for puff in range(4) {
+                      let spread = (hash(puff, floor(rolled / 12)) - 0.5) * radius * 2
+                      rect(round(bearX + spread - bear.vx * puff / 80), bearY - 13 - puff * 6,
+                        3, 2, fill: #c3d4e4)
+                    }
+                    rotate(spin, bearX, ballY) {
+                      let fur = bear.age < 0.55 ? #95603e : #c1d7e8
+                      let paw = bear.age < 0.55 ? #6e4432 : #a9c5dc
+                      sprite(rollingSnow, bearX - radius, ballY - radius, pixel,
+                        palette: {s: #8aacc6, m: #a9c5dc, l: #c1d7e8, h: #f4faff, v: fur, b: paw})
+                    }
+                    if bear.age < 0.25 {
+                      rotate(spin, bearX, ballY) {
+                        sprite(brownBear, bearX - 10 * bearScale, ballY - 9 * bearScale,
+                          0.85 * bearScale, palette: bearColors)
+                      }
+                    }
+                  }
                 }
                 let skiX = round(rider - cameraX)
                 let skiY = round(riderLine)
