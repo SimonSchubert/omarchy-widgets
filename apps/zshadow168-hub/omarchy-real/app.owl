@@ -1,5 +1,5 @@
 app "Omarchy Real" {
-  meta { owl: 16; description: "Control a nested Omarchy session from the launcher: see its Wayland and screensaver state, start or stop it with commands you set"; version: "1.0"; license: "MIT"; category: "system" }
+  meta { owl: 16; description: "Control a nested Omarchy session you set up: check its PID and Wayland socket, launch it, and stop only its own process group"; version: "1.1"; license: "MIT"; category: "system" }
   title: str.appTitle
   icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
     <rect width="256" height="256" rx="56" fill="#1A1B26"/>
@@ -30,21 +30,66 @@ app "Omarchy Real" {
       stop: "stop session"
       sessionPath: "session start script"
       saverPath: "screensaver script"
-      pathHint: "Absolute paths to your own scripts, saved on this phone."
+      pathHint: "Save the scripts from README.md next to this app, then enter their absolute paths here."
+      confirmStop: "Stop only this session and its screensaver? Its apps will close too."
+      cancel: "cancel"
+      stopNow: "stop now"
       hint: "The desktop opens as a window on the launcher. If it is hidden, reopen this app and launch again."
     }
   }
 
-  requires { pacman: ["procps-ng"] }
+  requires { pacman: ["util-linux"] }
 
-  // The user enters their own script paths; none are shipped in this file.
+  // The two paths are entered by the user; no personal paths ship in this file.
+  // README.md documents the PID/socket protocol both scripts must follow.
   state sessionScript = "" persist
   state saverScript = "" persist
+  state confirm = ""
+
+  let stopSessionCmd = """
+    R=$XDG_RUNTIME_DIR
+    [ -n "$R" ] || R=/run/user/$(id -u)
+    P=$R/omarchy-real/session.pid
+    pid=$(cat "$P" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill -TERM -- -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    fi
+    rm -f "$P" "$R/omarchy-real/session.socket"
+  """
+  let closeSaverCmd = """
+    R=$XDG_RUNTIME_DIR
+    [ -n "$R" ] || R=/run/user/$(id -u)
+    P=$R/omarchy-real/saver.pid
+    pid=$(cat "$P" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill -TERM -- -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    fi
+    rm -f "$P"
+  """
 
   source status = cmd("""
-    [ -S "/run/user/$(id -u)/wayland-1" ] && printf 'running' || printf 'stopped'
+    R=$XDG_RUNTIME_DIR
+    [ -n "$R" ] || R=/run/user/$(id -u)
+    D=$R/omarchy-real
+    pid=$(cat "$D/session.pid" 2>/dev/null || true)
+    sock=$(cat "$D/session.socket" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ -n "$sock" ] && [ -S "$R/$sock" ]; then
+      printf running
+    else
+      printf stopped
+    fi
   """) every 10s
-  source saver = cmd("pgrep -f '[o]rg.omarchy.screensaver' >/dev/null && echo running || echo stopped") every 10s
+  source saver = cmd("""
+    R=$XDG_RUNTIME_DIR
+    [ -n "$R" ] || R=/run/user/$(id -u)
+    P=$R/omarchy-real/saver.pid
+    pid=$(cat "$P" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      printf running
+    else
+      printf stopped
+    fi
+  """) every 10s
 
   Column {
     gap: 10
@@ -60,7 +105,7 @@ app "Omarchy Real" {
       Row {
         gap: 6
         Text { text: str.session; font: mono; fontSize: 10; color: muted }
-        Text { text: status ?? str.checking; font: mono; fontSize: 10; color: status != null && startsWith(status, "running") ? accent : muted; weight: 1 }
+        Text { text: status ?? str.checking; font: mono; fontSize: 10; color: status != null && status == "running" ? accent : muted; weight: 1 }
       }
       Row {
         gap: 6
@@ -78,9 +123,9 @@ app "Omarchy Real" {
         radius: 8 * corners
         background: surface
         Text { text: str.sessionPath; fontSize: 11; color: muted }
-        Input { text: sessionScript; placeholder: "/absolute/path/to/start-script"; fontSize: 12; onSubmit: sessionScript = value }
+        Input { text: sessionScript; placeholder: "/absolute/path/to/session.sh"; fontSize: 12; onSubmit: sessionScript = value }
         Text { text: str.saverPath; fontSize: 11; color: muted }
-        Input { text: saverScript; placeholder: "/absolute/path/to/screensaver-script"; fontSize: 12; onSubmit: saverScript = value }
+        Input { text: saverScript; placeholder: "/absolute/path/to/screensaver.sh"; fontSize: 12; onSubmit: saverScript = value }
         Text { text: str.pathHint; fontSize: 10; color: muted }
       }
 
@@ -116,7 +161,7 @@ app "Omarchy Real" {
         background: surface
         border: 1
         borderColor: border
-        onTap: run("pkill -f '[o]rg.omarchy.screensaver' 2>/dev/null || true")
+        onTap: confirm = "saver"
         Row {
           gap: 8
           align: center
@@ -130,12 +175,39 @@ app "Omarchy Real" {
         background: surface
         border: 1
         borderColor: border
-        onTap: run("pkill -f 'hyprland' 2>/dev/null || true; pkill -x quickshell 2>/dev/null || true; pkill -x swaybg 2>/dev/null || true")
+        onTap: confirm = "session"
         Row {
           gap: 8
           align: center
           Text { text: "■"; fontSize: 13; color: muted }
           Text { text: str.stop; fontSize: 13; color: foreground; weight: 1 }
+        }
+      }
+
+      if confirm != "" {
+        Column {
+          gap: 6
+          padding: [12, 16]
+          radius: 8 * corners
+          background: surface
+          Text { text: str.confirmStop; fontSize: 12; color: foreground }
+          Row {
+            gap: 8
+            Box {
+              padding: [8, 12]
+              radius: 3 * corners
+              background: alpha(border, 0.5)
+              onTap: confirm = ""
+              Text { text: str.cancel; fontSize: 12; color: foreground }
+            }
+            Box {
+              padding: [8, 12]
+              radius: 3 * corners
+              background: red
+              onTap: { run(confirm == "session" ? stopSessionCmd : closeSaverCmd); confirm = "" }
+              Text { text: str.stopNow; fontSize: 12; color: background }
+            }
+          }
         }
       }
     }
