@@ -1,0 +1,326 @@
+face "meine-apps" {
+  // A whole page left of page 1: your apps, sorted into categories.
+  // Tap opens an app, long-press shows its menu (move, reorder, remove).
+  // "edit" at the top: rename, reorder and delete categories, add apps.
+  meta { owl: 16; description: "Your apps in categories: sorted automatically at first, then arranged your way"; version: "1.0"; license: "MIT"; category: "home" }
+
+  strings {
+    en {
+      title: "My apps"; count: k => k == 1 ? "1 app" : "${k} apps"; edit: "edit"; done: "done"
+      empty: "empty – add apps with “edit”"; name: "Name"; open: "open"
+      forward: "← move forward"; backward: "move back →"; toStart: "move to the start"
+      moveTo: "move to"; remove: "remove from category"; addApps: "+ add apps"
+      newCat: "+ new category"; newCatName: "New category"; autoSort: "sort automatically"
+      resortAsk: "Sort everything again? Your own arrangement will be lost."
+      resortYes: "yes, sort again"; cancel: "cancel"; pick: "Choose apps"; search: "search"
+      unsorted: "not sorted"; here: "in this category"; inCat: n => "in ${n}"
+      comm: "Communication"; social: "Social media"; games: "Games"; media: "Music & video"
+      photos: "Photos & camera"; travel: "On the go"; shopping: "Shopping & money"; tools: "Tools"; other: "Other"
+    }
+    de {
+      title: "Meine Apps"; count: k => k == 1 ? "1 App" : "${k} Apps"; edit: "bearbeiten"; done: "fertig"
+      empty: "noch leer – über „bearbeiten“ Apps hinzufügen"; name: "Name"; open: "öffnen"
+      forward: "← weiter nach vorne"; backward: "weiter nach hinten →"; toStart: "an den Anfang"
+      moveTo: "verschieben nach"; remove: "aus Kategorie entfernen"; addApps: "+ Apps hinzufügen"
+      newCat: "+ neue Kategorie"; newCatName: "Neue Kategorie"; autoSort: "automatisch sortieren"
+      resortAsk: "Alles neu sortieren? Deine eigene Ordnung geht dabei verloren."
+      resortYes: "ja, neu sortieren"; cancel: "abbrechen"; pick: "Apps auswählen"; search: "suchen"
+      unsorted: "nicht sortiert"; here: "in dieser Kategorie"; inCat: n => "in ${n}"
+      comm: "Kommunikation"; social: "Soziale Medien"; games: "Spiele"; media: "Musik & Video"
+      photos: "Fotos & Kamera"; travel: "Unterwegs"; shopping: "Einkaufen & Finanzen"; tools: "Werkzeuge"; other: "Sonstiges"
+    }
+  }
+
+  page: 0
+  padding: 0
+  background: linear(0, 0, 0, 1, [alpha(background, 0.85), alpha(background, 0.55), alpha(background, 0.85)])
+
+  source apps = android.apps
+
+  state cats = [] persist          // [{name, apps: [key, ...]}]
+  state ready = false persist      // sorted automatically once already
+  state edit = false
+  state menu = ""                  // "category|app" of the open menu
+  state picking = -1               // category apps are being chosen for
+  state query = ""
+  state confirm = false
+
+  // Keywords for automatic sorting (package and app name, first rule wins).
+  let rules = [
+    {name: str.comm, words: ["whatsapp", "telegram", "signal", "thoughtcrime", "threema", "messag", "messen", "sms", "mms", "mail", "outlook", "dialer", "contacts", "kontakte", "telefon", "phone", "discord", "slack", "teams", "zoom", "skype", "viber", "element", "chat"]},
+    {name: str.social, words: ["instagram", "facebook", "twitter", "tiktok", "musically", "reddit", "snapchat", "linkedin", "pinterest", "mastodon", "bluesky", "threads", "tumblr", "xing", "bereal"]},
+    {name: str.games, words: ["com.king.", "game", "spiel", "supercell", "clash", "candy", "minecraft", "roblox", "chess", "schach", "puzzle", "pokemon"]},
+    {name: str.media, words: ["spotify", "music", "musik", "youtube", "netflix", "prime", "disney", "twitch", "podcast", "audible", "soundcloud", "deezer", "tidal", "video", "player", "vlc", "radio", "zdf", "ardmediathek", "joyn", "plex", "shazam"]},
+    {name: str.photos, words: ["camera", "kamera", "photo", "foto", "gallery", "galerie", "lightroom", "snapseed", "picsart", "vsco"]},
+    {name: str.travel, words: ["maps", "navi", "waze", "uber", "bolt", "bahn", "dbnavigator", "booking", "airbnb", "lufthansa", "flix", "komoot", "weather", "wetter", "mvg", "bvg", "hvv", "tier", "lime", "sharenow", "miles"]},
+    {name: str.shopping, words: ["amazon", "ebay", "kleinanzeigen", "paypal", "bank", "sparkasse", "volksbank", "n26", "revolut", "trade", "wallet", "finanz", "zalando", "lidl", "aldi", "rewe", "edeka", "shop", "klarna", "comdirect", "dkb", "coinbase", "scalable", "vinted", "temu", "lieferando"]},
+    {name: str.tools, words: ["calculator", "rechner", "calendar", "kalender", "clock", "uhr", "notes", "notiz", "keep", "files", "dateien", "settings", "einstellungen", "drive", "docs", "sheets", "office", "translate", "authenticator", "vpn", "scanner", "recorder", "termux", "chrome", "firefox", "browser", "brave", "opera", "vivaldi"]}
+  ]
+
+  let all = apps ?? []
+  let byKey = groupBy(all, a => a.key)
+  // Which category each app is in: key -> [{k, i}]
+  let where = groupBy(flatten(cats.map((c, i) => c.apps.map(k => {k: k, i: i}))), p => p.k)
+  let sorted = all.sortBy(a => lower(a.name))
+  let found = query == "" ? sorted : rank(sorted, query)
+  let tints = [accent, blue, green, magenta, orange, cyan, yellow, red]
+  // As many columns as fit at ~60 dp per app: 6 on a phone, more unfolded.
+  let per = clamp(floor(((tileWidth ?? 400) - 40) / 60), 5, 12)
+  let total = len(flatten(cats.map(c => c.apps.filter(k => get(byKey, k) != null))))
+  let glass = alpha(mix(background, surface, 0.5), max(tileOpacity, 0.6))
+
+  // On first start (and with "sort automatically") sort by keywords, most used first.
+  when !ready && len(apps ?? []) > 0 {
+    let pool = (apps ?? []).filter(a => !a.system || (a.score ?? 0) > 0).sortBy(a => -(a.score ?? 0))
+    let tagged = pool.map(a => {
+      k: a.key,
+      c: first(rules.map((r, i) => any(r.words, w => contains(lower("${a.package} ${a.name}"), w)) ? i : 99).filter(i => i < 99)) ?? 99
+    })
+    cats = flatten([
+      rules.map((r, i) => {name: r.name, apps: tagged.filter(t => t.c == i).map(t => t.k)}),
+      [{name: str.other, apps: tagged.filter(t => t.c == 99).map(t => t.k)}]
+    ]).filter(c => len(c.apps) > 0)
+    ready = true
+  }
+
+  component Item(label, tint = foreground) {
+    Text { text: label; color: tint; padding: [16, 11]; fill: width; maxLines: 1 }
+  }
+
+  Box {
+    fill: true
+
+    Column {
+      fill: true
+      scroll: true
+      gap: 8
+      padding: [10, 6]
+
+      // Header, one line
+      Row {
+        align: center
+        gap: 8
+        padding: [6, 2, 2, 2]
+        Text { text: str.title; font: sans; fontSize: 20; fontWeight: 600 }
+        Text { text: str.count(total); font: sans; fontSize: 13; color: muted; weight: 1; maxLines: 1 }
+        Text { text: edit ? str.done : str.edit; font: sans; fontSize: 13; color: edit ? background : foreground; background: edit ? accent : transparent; padding: [12, 6]; border: 1; borderColor: edit ? accent : alpha(foreground, 0.35); radius: 14 * corners; onTap: { edit = !edit; menu = "" } }
+      }
+
+      for c, ci in cats {
+        let tint = tints[ci % len(tints)]
+        let shown = c.apps.filter(k => get(byKey, k) != null)
+        Column {
+          gap: 6
+          padding: [8, 8, 8, 4]
+          frost: tileFrost
+          background: glass
+          border: 1
+          borderColor: alpha(tint, 0.25)
+          radius: 14 * corners
+
+          // Category heading
+          if edit {
+            Row {
+              align: center
+              gap: 6
+              Box { size: 10; radius: 5; background: tint }
+              Input { text: c.name; placeholder: str.name; weight: 1; onChange: cats = set(cats, ci, merge(cats[ci], {name: value})) }
+              if ci > 0 {
+                Text { text: "↑"; fontSize: 20; padding: [10, 4]; onTap: cats = set(set(cats, ci - 1, cats[ci]), ci, cats[ci - 1]) }
+              }
+              if ci < len(cats) - 1 {
+                Text { text: "↓"; fontSize: 20; padding: [10, 4]; onTap: cats = set(set(cats, ci + 1, cats[ci]), ci, cats[ci + 1]) }
+              }
+              Text { text: "✕"; fontSize: 18; color: red; padding: [10, 4]; onTap: cats = remove(cats, ci) }
+            }
+          } else {
+            Row {
+              align: center
+              gap: 8
+              Box { size: 4; height: 14; radius: 2; background: tint }
+              Text { text: c.name; font: sans; fontSize: 14; fontWeight: 600; color: tint; weight: 1; maxLines: 1 }
+              Text { text: "${len(shown)}"; font: sans; fontSize: 12; color: muted; padding: [0, 0, 4, 0] }
+            }
+          }
+
+          if len(shown) == 0 && !edit {
+            Text { text: str.empty; style: small; color: muted }
+          }
+
+          Grid {
+            columns: per
+            gap: 2
+            for k in shown key k {
+              let a = get(byKey, k)[0]
+              let id = "${ci}|${k}"
+              let pos = indexOf(c.apps, k)
+              Column {
+                gap: 3
+                align: center
+                padding: [0, 4]
+                radius: 10 * corners
+                background: menu == id ? alpha(accent, 0.18) : transparent
+                onTap: { if edit { menu = id } else { open(k) } }
+                onLongPress: { haptic(); menu = id }
+                Box {
+                  size: 44
+                  align: topEnd
+                  Image { src: a.icon; size: 44; label: a.name }
+                  if edit {
+                    Box { size: 12; radius: 6; background: tint; border: 2; borderColor: background }
+                  }
+                }
+                Text { text: a.name; font: sans; fontSize: 11; color: alpha(foreground, 0.9); align: center; maxLines: 1 }
+
+                Popup {
+                  visible: menu == id
+                  onDismiss: menu = ""
+                  width: 240
+                  gap: 0
+                  Text { text: a.name; style: label; color: muted; padding: [16, 10, 16, 4]; maxLines: 1 }
+                  Box { fill: width; onTap: { menu = ""; open(k) }; Item { label: str.open } }
+                  if pos > 0 {
+                    Box {
+                      fill: width
+                      onTap: { cats = set(cats, ci, merge(c, {apps: set(set(c.apps, pos - 1, k), pos, c.apps[pos - 1])})); menu = "" }
+                      Item { label: str.forward }
+                    }
+                  }
+                  if pos < len(c.apps) - 1 {
+                    Box {
+                      fill: width
+                      onTap: { cats = set(cats, ci, merge(c, {apps: set(set(c.apps, pos + 1, k), pos, c.apps[pos + 1])})); menu = "" }
+                      Item { label: str.backward }
+                    }
+                  }
+                  if pos > 0 {
+                    Box {
+                      fill: width
+                      onTap: { cats = set(cats, ci, merge(c, {apps: flatten([[k], c.apps.filter(z => z != k)])})); menu = "" }
+                      Item { label: str.toStart }
+                    }
+                  }
+                  if len(cats) > 1 {
+                    Text { text: str.moveTo; style: label; color: muted; padding: [16, 10, 16, 4] }
+                    for o, oi in cats {
+                      if oi != ci {
+                        Box {
+                          fill: width
+                          onTap: {
+                            cats = cats.map(x => merge(x, {apps: x.apps.filter(z => z != k)}))
+                            cats = set(cats, oi, merge(cats[oi], {apps: flatten([cats[oi].apps, [k]])}))
+                            menu = ""
+                          }
+                          Item { label: "  ${o.name}"; tint: tints[oi % len(tints)] }
+                        }
+                      }
+                    }
+                  }
+                  Box {
+                    fill: width
+                    onTap: { cats = set(cats, ci, merge(c, {apps: c.apps.filter(z => z != k)})); menu = "" }
+                    Item { label: str.remove; tint: red }
+                  }
+                }
+              }
+            }
+          }
+
+          if edit {
+            Text {
+              text: str.addApps
+              style: small
+              color: tint
+              align: center
+              fill: width
+              padding: [0, 10]
+              border: 1
+              borderColor: alpha(tint, 0.4)
+              radius: 12 * corners
+              onTap: { query = ""; picking = ci }
+            }
+          }
+        }
+      }
+
+      if edit || len(cats) == 0 {
+        Row {
+          gap: 8
+          justify: center
+          Text { text: str.newCat; style: small; color: accent; padding: [14, 8]; border: 1; borderColor: alpha(accent, 0.4); radius: 14 * corners; onTap: { cats = flatten([cats, [{name: str.newCatName, apps: []}]]); edit = true } }
+          Box {
+            Text { text: str.autoSort; style: small; padding: [14, 8]; border: 1; borderColor: alpha(foreground, 0.4); radius: 14 * corners; onTap: confirm = true }
+            Popup {
+              visible: confirm
+              position: above
+              onDismiss: confirm = false
+              width: 260
+              gap: 0
+              Text { text: str.resortAsk; style: small; color: muted; padding: [16, 12] }
+              Box { fill: width; onTap: { confirm = false; ready = false }; Item { label: str.resortYes; tint: red } }
+              Box { fill: width; onTap: confirm = false; Item { label: str.cancel } }
+            }
+          }
+        }
+      }
+
+      Spacer { height: screenInset + 8 }
+    }
+
+    // Picker: add apps to a category
+    if picking >= 0 && picking < len(cats) {
+      Column {
+        fill: true
+        gap: 10
+        padding: [16, 12]
+        background: background
+        Row {
+          align: center
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: str.pick; style: label; color: muted }
+            Text { text: cats[picking].name; style: title; color: tints[picking % len(tints)]; maxLines: 1 }
+          }
+          Text { text: str.done; style: small; color: accent; padding: [14, 8]; border: 1; borderColor: alpha(accent, 0.4); radius: 14 * corners; onTap: { picking = -1; query = "" } }
+        }
+        Input { placeholder: str.search; onChange: query = value }
+        Column {
+          lazy: true
+          weight: 1
+          gap: 2
+          for a in found key a.key {
+            let w = get(where, a.key)
+            let here = w != null && w[0].i == picking
+            Row {
+              gap: 12
+              align: center
+              padding: [8, 6]
+              radius: 12 * corners
+              background: here ? alpha(accent, 0.15) : transparent
+              onTap: {
+                let kk = a.key
+                let p = picking
+                if here {
+                  cats = set(cats, p, merge(cats[p], {apps: cats[p].apps.filter(z => z != kk)}))
+                } else {
+                  cats = cats.map(x => merge(x, {apps: x.apps.filter(z => z != kk)}))
+                  cats = set(cats, p, merge(cats[p], {apps: flatten([cats[p].apps, [kk]])}))
+                }
+              }
+              Image { src: a.icon; size: 36 }
+              Column {
+                gap: 0
+                weight: 1
+                Text { text: a.name; maxLines: 1 }
+                Text { text: w == null ? str.unsorted : here ? str.here : str.inCat(cats[w[0].i].name); style: small; color: here ? accent : muted; maxLines: 1 }
+              }
+              Text { text: here ? "󰄬" : "+"; font: icon; fontSize: 20; color: here ? accent : muted; width: 28; align: center }
+            }
+          }
+        }
+        Spacer { height: screenInset }
+      }
+    }
+  }
+}
