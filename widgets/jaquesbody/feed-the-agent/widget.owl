@@ -22,8 +22,8 @@ widget "feed the agent" {
 
   meta {
     owl: 19
-    description: "Type or say a thought on the tile and it lands in a note on this phone or in your Obsidian vault. Optionally ask a computer on your network to sort it. No model runs on the phone."
-    version: "2.6.1"
+    description: "Feed it a note, an idea, a todo or a bug fix. It connects to your agent and your file system: set the agent up to read and write your folder and named files, and it organizes and prioritizes for you."
+    version: "2.7"
     license: "MIT"
     category: "productivity"
   }
