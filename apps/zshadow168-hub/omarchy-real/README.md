@@ -1,101 +1,80 @@
 # Omarchy Real
 
-A launcher app for a nested Hyprland + Omarchy session. It does not ship a compositor or a shell
-build: you need a nested-capable Hyprland and Omarchy shell installed on the phone. The two scripts
-below make the app work with any such install, without personal paths in the app file.
+A launcher app for a nested Hyprland + Omarchy session. The app writes its own
+`session.sh`, `screensaver.sh` and `hyprland.lua` into
+`~/.local/share/omarchy-real/` when you tap **install / refresh default
+scripts**, and its buttons always run those files. Nothing has to be copied by
+hand, no personal path is entered in the app, and the exact shell that runs is
+visible in `app.owl` for review.
 
-Save them as `session.sh` and `screensaver.sh` under `$HOME/.local/share/omarchy-real/`, make them
-executable, and enter their **absolute** paths (expand `$HOME` yourself) in the app's two fields.
-The app saves those paths on the phone only.
+It does not ship a compositor: that still has to be built once (see below).
 
-## Protocol the app expects
+## What the app runs
 
-All files live in `$XDG_RUNTIME_DIR/omarchy-real/` (falling back to `/run/user/$(id -u)`).
+All files live in `$XDG_RUNTIME_DIR/omarchy-real/` (falling back to
+`/run/user/$(id -u)`).
 
 | File | Written by | Meaning |
 | --- | --- | --- |
-| `session.pid` | `session.sh` | PID of the detached session. It must be a process-group leader (start it with `setsid`), so stopping sends `SIGTERM` to `-PID` and takes only that session's children with it. |
-| `session.socket` | `session.sh` | Name of the nested Wayland socket inside `$XDG_RUNTIME_DIR`, e.g. `wayland-1`. Status is "running" only while the PID is alive **and** this socket exists. |
-| `saver.pid` | `screensaver.sh` | PID of the detached screensaver process group, stopped the same way. |
+| `session.pid` | `session.sh` | PID of the detached session. It is a process-group leader (`setsid`), so stop sends `SIGTERM` to `-PID` and takes only that session's children with it. |
+| `session.socket` | `session.sh` | Name of the nested Wayland socket inside `$XDG_RUNTIME_DIR`. Status is "running" only while the PID is alive **and** this socket exists. |
+| `saver.pid` | `screensaver.sh` | PID of the detached screensaver group, stopped the same way. |
 
-The app never uses `pgrep`/`pkill` patterns or kills other users of `quickshell`, `swaybg` or
-`hyprland`. Stopping asks for confirmation first.
+`session.sh` detaches once, replaces only a session it started before, picks a
+free `wayland-N` socket without touching the launcher's display, and execs the
+nested Hyprland with the config the app wrote. A small background watcher
+creates and removes one throwaway Wayland output once IPC is up, because some
+launchers never send the initial xdg configure Aquamarine waits for.
+`screensaver.sh` stays alive as the process-group leader until the screensaver
+foot window closes, so "running" means what is on screen. Stop/close ask for
+confirmation and never use `pgrep`/`pkill` patterns.
 
-## `session.sh`
+The generated Lua config loads the real Omarchy shell when
+`$OMARCHY_PATH/default/hypr/bootstrap.lua` exists; without it the nested
+desktop still starts. Software rendering is the default. Set
+`OMARCHY_REAL_WIDTH`, `OMARCHY_REAL_HEIGHT`, `OMARCHY_REAL_REFRESH_MHZ`,
+`OMARCHY_REAL_PREFIX` or `OMARCHY_REAL_OMARCHY_PATH` in the environment only
+if you need to override the defaults.
 
-Replace `PREFIX` (or set `OMARCHY_REAL_PREFIX`) with the root of your nested install; it must
-contain `bin/Hyprland` and `etc/hypr/hyprland.lua`.
+Packages declared in `requires`: `util-linux` provides `setsid`.
 
-```sh
-#!/bin/bash
-set -euo pipefail
-R=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
-D=$R/omarchy-real
-mkdir -p "$D"
+## Getting the nested-capable Hyprland
 
-# Detach once so the session survives the terminal or agent that launched it.
-if [ "${OMARCHY_REAL_DETACHED:-}" != 1 ]; then
-  export OMARCHY_REAL_DETACHED=1
-  setsid nohup "$0" "$@" >"$D/session.log" 2>&1 </dev/null &
-  echo $! > "$D/session.pid"
-  exit 0
-fi
+Arch's packaged `hyprland` cannot be used here: under omalauncher/proot
+`/usr/bin/Hyprland` aborts with `CBackend::create() failed` before creating a
+socket, because stock Aquamarine requires a DRM/KMS output while the launcher's
+parent surface is shared-memory only. The app therefore uses a build with the
+small nested-backend patches applied.
 
-# Replace only a session this script started before, never other processes.
-old=$(cat "$D/session.pid" 2>/dev/null || true)
-if [ -n "$old" ] && [ "$old" != "$$" ] && kill -0 "$old" 2>/dev/null; then
-  kill -TERM -- -"$old" 2>/dev/null || true
-  sleep 1
-fi
-echo $$ > "$D/session.pid"
-
-# The socket name your compositor creates inside $XDG_RUNTIME_DIR.
-SOCKET=wayland-1
-printf '%s\n' "$SOCKET" > "$D/session.socket"
-
-PREFIX=${OMARCHY_REAL_PREFIX:-$HOME/.local/share/omarchy-real}
-export OMARCHY_PATH=$PREFIX/share/omarchy
-export PATH=$PREFIX/bin:$OMARCHY_PATH/bin:$PATH
-export XDG_SESSION_TYPE=wayland
-export XDG_CURRENT_DESKTOP=Hyprland
-export XDG_SESSION_DESKTOP=Hyprland
-export QT_QPA_PLATFORM=wayland
-export QT_QUICK_BACKEND=software
-export LIBGL_ALWAYS_SOFTWARE=1
-export GALLIUM_DRIVER=llvmpipe
-export HYPRLAND_EGL_SURFACELESS=1
-export AQ_NO_KMS_REQUIREMENT=1
-
-exec "$PREFIX/bin/Hyprland" --i-am-really-stupid \
-  -c "$PREFIX/etc/hypr/hyprland.lua" "$@"
-```
-
-## `screensaver.sh`
-
-It uses the socket name recorded by `session.sh` and stops only its own process group.
+The exact, pinned recipe and the patch files are published at
+**https://github.com/zshadow168-hub/omarchy-real-nested** — no manual copying
+needed there either:
 
 ```sh
-#!/bin/bash
-set -euo pipefail
-R=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
-D=$R/omarchy-real
-mkdir -p "$D"
-
-if [ "${OMARCHY_REAL_SAVER_DETACHED:-}" != 1 ]; then
-  export OMARCHY_REAL_SAVER_DETACHED=1
-  setsid nohup "$0" "$@" >"$D/saver.log" 2>&1 </dev/null &
-  echo $! > "$D/saver.pid"
-  exit 0
-fi
-
-echo $$ > "$D/saver.pid"
-export XDG_RUNTIME_DIR=$R
-export WAYLAND_DISPLAY=$(cat "$D/session.socket" 2>/dev/null || printf wayland-1)
-PREFIX=${OMARCHY_REAL_PREFIX:-$HOME/.local/share/omarchy-real}
-export OMARCHY_PATH=$PREFIX/share/omarchy
-export PATH=$PREFIX/bin:$OMARCHY_PATH/bin:$PATH
-exec omarchy-launch-screensaver force
+pacman -S --needed --noconfirm base-devel cmake ninja git hyprland jq socat foot util-linux
+yay -S hypa-ttfx-bin                 # aarch64 ttfx for the screensaver effect
+git clone https://github.com/zshadow168-hub/omarchy-real-nested.git
+cd omarchy-real-nested
+./build.sh
 ```
 
-Packages: `util-linux` provides `setsid`. The nested compositor, its config and the Omarchy shell
-are supplied by your own install, not by this app.
+That pins Aquamarine `a79fb21b2e2a82dd061a6d071802bcf38bd5c383`, Hyprland
+`5c9377c15f85c50648f35ca5a213754f95b93ca0` and Omarchy
+`158e8cfb3a03f7b390e4213eaf15edcea0dfaa98`, applies the three plain `git diff`
+patches in that repository, and installs into
+`$HOME/.local/share/omarchy-real` with `cmake -G Ninja` and `ninja install`.
+If you export `OMARCHY_REAL_PREFIX` for a different install root, export the
+same value before tapping the app's launch button. After building, tap
+**install / refresh default scripts** in the app.
+
+Verify with:
+
+```sh
+sig=$(ls /run/user/0/hypr | head -1)
+HYPRLAND_INSTANCE_SIGNATURE=$sig "$HOME/.local/share/omarchy-real/bin/hyprctl" monitors -j
+HYPRLAND_INSTANCE_SIGNATURE=$sig "$HOME/.local/share/omarchy-real/bin/hyprctl" configerrors
+```
+
+One `WAYLAND-*` monitor at scale 1 that matches the launcher window, and no
+config errors. The app's status row turns green only while its recorded PID is
+alive and the recorded socket exists.

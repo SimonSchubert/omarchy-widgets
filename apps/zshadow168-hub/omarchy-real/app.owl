@@ -1,5 +1,5 @@
 app "Omarchy Real" {
-  meta { owl: 16; description: "Control a nested Omarchy session you set up: check its PID and Wayland socket, launch it, and stop only its own process group"; version: "1.1"; license: "MIT"; category: "system" }
+  meta { owl: 16; description: "Sets up and controls a nested Omarchy session: installs its own scripts, then launches and stops only that session"; version: "1.2"; license: "MIT"; category: "system" }
   title: str.appTitle
   icon: """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
     <rect width="256" height="256" rx="56" fill="#1A1B26"/>
@@ -23,14 +23,16 @@ app "Omarchy Real" {
       subtitle: "Hyprland + Omarchy shell in a nested Wayland session"
       session: "session"
       screensaver: "screensaver"
+      scripts: "scripts"
+      installed: "installed"
+      missing: "tap install"
       checking: "checking…"
+      setup: "install / refresh default scripts"
+      setupHint: "Writes session.sh, screensaver.sh and hyprland.lua into ~/.local/share/omarchy-real/ and uses them by default."
       launch: "launch / restart Omarchy"
       startSaver: "start landscape screensaver"
       closeSaver: "close screensaver"
       stop: "stop session"
-      sessionPath: "session start script"
-      saverPath: "screensaver script"
-      pathHint: "Save the scripts from README.md next to this app, then enter their absolute paths here."
       confirmStop: "Stop only this session and its screensaver? Its apps will close too."
       cancel: "cancel"
       stopNow: "stop now"
@@ -40,11 +42,198 @@ app "Omarchy Real" {
 
   requires { pacman: ["util-linux"] }
 
-  // The two paths are entered by the user; no personal paths ship in this file.
-  // README.md documents the PID/socket protocol both scripts must follow.
-  state sessionScript = "" persist
-  state saverScript = "" persist
-  state confirm = ""
+  // Everything the app runs is written out here. The setup button installs
+  // these exact files under ~/.local/share/omarchy-real/; no values are typed
+  // in and no personal paths ship in this file.
+  let setupCmd = """
+    APP="$HOME/.local/share/omarchy-real"
+    mkdir -p "$APP/etc/hypr"
+    cat > "$APP/session.sh" <<'OMARCHY_REAL_SESSION_EOF'
+#!/bin/bash
+# Nested Omarchy session, written by the Omarchy Real app.
+set -euo pipefail
+APP="$HOME/.local/share/omarchy-real"
+R=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+D=$R/omarchy-real
+mkdir -p "$D" "$APP"
+
+# Detach once: the compositor must outlive the launcher action or shell.
+if [ "${OMARCHY_REAL_DETACHED:-}" != 1 ]; then
+  export OMARCHY_REAL_DETACHED=1
+  setsid nohup "$0" "$@" >"$D/session.log" 2>&1 </dev/null &
+  echo $! > "$D/session.pid"
+  exit 0
+fi
+
+# Replace only the session this script started before.
+old=$(cat "$D/session.pid" 2>/dev/null || true)
+if [ -n "$old" ] && [ "$old" != "$$" ] && kill -0 "$old" 2>/dev/null; then
+  kill -TERM -- -"$old" 2>/dev/null || true
+  sleep 1
+fi
+echo $$ > "$D/session.pid"
+
+# Free only our previous socket, not the launcher's Wayland display.
+oldsock=$(cat "$D/session.socket" 2>/dev/null || true)
+[ -n "$oldsock" ] && rm -f "$R/$oldsock" "$R/$oldsock.lock" 2>/dev/null || true
+find "$R/hypr" "$R/quickshell/by-id" "$R/quickshell/by-path" -mindepth 1 -delete 2>/dev/null || true
+
+n=1
+while [ -e "$R/wayland-$n" ] || [ -e "$R/wayland-$n.lock" ]; do n=$((n + 1)); done
+SOCKET="wayland-$n"
+printf '%s\n' "$SOCKET" > "$D/session.socket"
+
+PREFIX=${OMARCHY_REAL_PREFIX:-$APP}
+export OMARCHY_PATH=${OMARCHY_REAL_OMARCHY_PATH:-$PREFIX/share/omarchy}
+if [ ! -d "$OMARCHY_PATH" ] && [ -d "$APP/share/omarchy" ]; then
+  export OMARCHY_PATH="$APP/share/omarchy"
+fi
+export PATH="$PREFIX/bin:$OMARCHY_PATH/bin:$PATH"
+export LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export XDG_RUNTIME_DIR=$R
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Hyprland
+export XDG_SESSION_DESKTOP=Hyprland
+export QT_QPA_PLATFORM=wayland
+export QT_QUICK_BACKEND=software
+export QSG_RENDER_LOOP=basic
+export LIBGL_ALWAYS_SOFTWARE=1
+export GALLIUM_DRIVER=llvmpipe
+export HYPRLAND_EGL_SURFACELESS=1
+export AQ_NO_KMS_REQUIREMENT=1
+export HYPRLAND_ANDROID_DMABUF=0
+export HYPRLAND_GL_DMABUF_EXPORT=0
+export HYPRLAND_SHM_DAMAGE=0
+export HYPRLAND_SHM_GLFINISH=1
+export HYPRLAND_NO_SD_NOTIFY=1
+if [ -n "${OMARCHY_REAL_WIDTH:-}" ] && [ -n "${OMARCHY_REAL_HEIGHT:-}" ]; then
+  export OMARCHY_OUTPUT_WIDTH=$OMARCHY_REAL_WIDTH
+  export OMARCHY_OUTPUT_HEIGHT=$OMARCHY_REAL_HEIGHT
+  export OMARCHY_REFRESH_MHZ=${OMARCHY_REAL_REFRESH_MHZ:-60000}
+  export OMARCHY_SCALE=1
+fi
+
+# Aquamarine waits for an xdg configure some launchers never send. Once IPC
+# is up, create and remove one throwaway Wayland output to flush it.
+(
+  for d in "$R"/hypr/*; do
+    [ -f "$d/hyprland.lock" ] || continue
+    HYPRLAND_INSTANCE_SIGNATURE=${d##*/}
+    export HYPRLAND_INSTANCE_SIGNATURE
+    break
+  done
+  for i in $(seq 1 100); do
+    hyprctl version >/dev/null 2>&1 && break
+    sleep 0.1
+  done
+  before=$(hyprctl monitors -j 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | sort)
+  hyprctl output create wayland >/dev/null 2>&1 || exit 0
+  sleep 1
+  after=$(hyprctl monitors -j 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | sort)
+  new=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -n1)
+  [ -n "$new" ] && hyprctl output remove "$new" >/dev/null 2>&1 || true
+) >/dev/null 2>&1 </dev/null &
+
+exec "$PREFIX/bin/Hyprland" --i-am-really-stupid \
+  -c "$APP/etc/hypr/hyprland.lua" "$@"
+OMARCHY_REAL_SESSION_EOF
+    cat > "$APP/screensaver.sh" <<'OMARCHY_REAL_SAVER_EOF'
+#!/bin/bash
+# Landscape Omarchy screensaver, written by the Omarchy Real app.
+set -euo pipefail
+APP="$HOME/.local/share/omarchy-real"
+R=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+D=$R/omarchy-real
+mkdir -p "$D"
+
+# Detach once so closing the launcher action does not stop the screensaver.
+if [ "${OMARCHY_REAL_SAVER_DETACHED:-}" != 1 ]; then
+  export OMARCHY_REAL_SAVER_DETACHED=1
+  setsid nohup "$0" "$@" >"$D/saver.log" 2>&1 </dev/null &
+  echo $! > "$D/saver.pid"
+  exit 0
+fi
+
+echo $$ > "$D/saver.pid"
+export XDG_RUNTIME_DIR=$R
+export WAYLAND_DISPLAY=$(cat "$D/session.socket" 2>/dev/null || printf wayland-1)
+for d in "$R"/hypr/*; do
+  [ -f "$d/hyprland.lock" ] || continue
+  HYPRLAND_INSTANCE_SIGNATURE=${d##*/}
+  export HYPRLAND_INSTANCE_SIGNATURE
+  break
+done
+PREFIX=${OMARCHY_REAL_PREFIX:-$APP}
+export OMARCHY_PATH=${OMARCHY_REAL_OMARCHY_PATH:-$PREFIX/share/omarchy}
+if [ ! -d "$OMARCHY_PATH" ] && [ -d "$APP/share/omarchy" ]; then
+  export OMARCHY_PATH="$APP/share/omarchy"
+fi
+export PATH="$PREFIX/bin:$OMARCHY_PATH/bin:$PATH"
+export QT_QPA_PLATFORM=wayland
+export QT_QUICK_BACKEND=software
+omarchy-launch-screensaver force
+
+# The stock launcher exits once it has opened the foot window. Stay alive as
+# the process group leader until that window closes, so the app's PID check
+# and the stop button describe the screensaver that is actually on screen.
+while hyprctl clients -j 2>/dev/null | grep -q 'org.omarchy.screensaver'; do
+  sleep 2
+done
+OMARCHY_REAL_SAVER_EOF
+    cat > "$APP/etc/hypr/hyprland.lua" <<'OMARCHY_REAL_HYPR_EOF'
+-- Nested Hyprland config, written by the Omarchy Real app.
+-- Boots the real Omarchy shell when its source tree is installed; otherwise
+-- it still gives you a working nested desktop.
+local home = os.getenv("HOME") or ""
+local app = home .. "/.local/share/omarchy-real"
+local prefix = os.getenv("OMARCHY_REAL_PREFIX") or app
+local omarchy = os.getenv("OMARCHY_PATH") or (prefix .. "/share/omarchy")
+local bootstrap = omarchy .. "/default/hypr/bootstrap.lua"
+local file = io.open(bootstrap, "r")
+local hasOmarchy = file ~= nil
+if file then file:close() end
+package.path = omarchy .. "/?.lua;" .. omarchy .. "/?/init.lua;" .. package.path
+
+if hasOmarchy then
+  dofile(bootstrap)
+  require("default.hypr.helpers")
+  require("default.hypr.envs")
+  require("default.hypr.looknfeel")
+  require("default.hypr.windows")
+  require("default.hypr.input")
+  require("default.hypr.bindings")
+  require("default.hypr.autostart")
+end
+
+local width = tonumber(os.getenv("OMARCHY_OUTPUT_WIDTH"))
+local height = tonumber(os.getenv("OMARCHY_OUTPUT_HEIGHT"))
+local refresh = tonumber(os.getenv("OMARCHY_REFRESH_MHZ")) or 60000
+local mode = (width and height)
+  and string.format("%dx%d@%.3f", width, height, refresh / 1000)
+  or "preferred"
+hl.monitor({ output = "", mode = mode, position = "auto",
+  scale = tonumber(os.getenv("OMARCHY_SCALE")) or 1, transform = 0 })
+
+-- Nested compositing presents a shared-memory buffer into the parent display.
+hl.config({
+  decoration = { blur = { enabled = false }, shadow = { enabled = false } },
+  render = { direct_scanout = false },
+  cursor = {
+    no_hardware_cursors = true,
+    use_cpu_buffer      = true,
+    hide_on_key_press   = false,
+    hide_on_touch       = false,
+    inactive_timeout    = 0,
+  },
+  xwayland = { enabled = false },
+  animations = { enabled = false },
+  misc = { disable_hyprland_logo = true },
+  debug = { damage_tracking = 1, vfr = true, enable_stdout_logs = false },
+})
+OMARCHY_REAL_HYPR_EOF
+    chmod +x "$APP/session.sh" "$APP/screensaver.sh"
+  """
 
   let stopSessionCmd = """
     R=$XDG_RUNTIME_DIR
@@ -90,6 +279,12 @@ app "Omarchy Real" {
       printf stopped
     fi
   """) every 10s
+  source installed = cmd("""
+    A="$HOME/.local/share/omarchy-real"
+    [ -x "$A/session.sh" ] && [ -x "$A/screensaver.sh" ] && printf yes || printf no
+  """) every 10s
+
+  state confirm = ""
 
   Column {
     gap: 10
@@ -112,6 +307,11 @@ app "Omarchy Real" {
         Text { text: str.screensaver; font: mono; fontSize: 10; color: muted }
         Text { text: saver ?? str.checking; font: mono; fontSize: 10; color: saver == "running" ? accent : muted; weight: 1 }
       }
+      Row {
+        gap: 6
+        Text { text: str.scripts; font: mono; fontSize: 10; color: muted }
+        Text { text: installed == "yes" ? str.installed : str.missing; font: mono; fontSize: 10; color: installed == "yes" ? green : muted; weight: 1 }
+      }
     }
 
     Column {
@@ -122,18 +322,29 @@ app "Omarchy Real" {
         padding: [12, 16]
         radius: 8 * corners
         background: surface
-        Text { text: str.sessionPath; fontSize: 11; color: muted }
-        Input { text: sessionScript; placeholder: "/absolute/path/to/session.sh"; fontSize: 12; onSubmit: sessionScript = value }
-        Text { text: str.saverPath; fontSize: 11; color: muted }
-        Input { text: saverScript; placeholder: "/absolute/path/to/screensaver.sh"; fontSize: 12; onSubmit: saverScript = value }
-        Text { text: str.pathHint; fontSize: 10; color: muted }
+        Text { text: str.setup; fontSize: 12; color: foreground }
+        Text { text: str.setupHint; fontSize: 10; color: muted; maxLines: 3 }
+      }
+      Box {
+        padding: [14, 16]
+        radius: 8 * corners
+        background: surface
+        border: 1
+        borderColor: border
+        onTap: run(setupCmd)
+        Row {
+          gap: 8
+          align: center
+          Text { text: "⚙"; fontSize: 15; color: accent }
+          Text { text: str.setup; fontSize: 13; color: foreground; weight: 1 }
+        }
       }
 
       Box {
         padding: [14, 16]
         radius: 8 * corners
         background: accent
-        onTap: run("${sh(sessionScript)}")
+        onTap: run("\"$HOME/.local/share/omarchy-real/session.sh\"")
         Row {
           gap: 8
           align: center
@@ -147,7 +358,7 @@ app "Omarchy Real" {
         background: surface
         border: 1
         borderColor: border
-        onTap: run("${sh(saverScript)}")
+        onTap: run("\"$HOME/.local/share/omarchy-real/screensaver.sh\"")
         Row {
           gap: 8
           align: center
