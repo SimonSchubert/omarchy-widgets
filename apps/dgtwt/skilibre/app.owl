@@ -2,7 +2,7 @@ app "Skilibre" {
   meta {
     owl: 23
     description: "Carve down an endless pixel-art mountain. Race through slalom gates, take ski jumps, and stay ahead of the ridge beast and an avalanche."
-    version: "1.0"
+    version: "1.0.1"
     license: "MIT"
     category: "games"
   }
@@ -84,11 +84,10 @@ app "Skilibre" {
   let meters = floor(distance * metersPerUnit)
   let score = floor(distance * 0.65) + bonus
   let savedScore = bestRun.score ?? best
-  let savedMeters = bestRun.meters
-  let betterRun = score > savedScore || (score == savedScore && score > 0
-    && (savedMeters == null || meters > savedMeters))
-  let recordToSave = betterRun ? {score: score, meters: meters} : bestRun
-  let bestLabel = "Best ${recordToSave.score ?? savedScore} pts · ${recordToSave.meters ?? (savedScore > 0 ? "—" : 0)} m"
+  let savedMeters = bestRun.meters ?? 0
+  let improvedRecord = score > savedScore || meters > savedMeters
+  let recordToSave = improvedRecord ? {score: max(score, savedScore), meters: max(meters, savedMeters)} : bestRun
+  let bestLabel = "Best ${recordToSave.score ?? savedScore} pts · ${recordToSave.meters ?? savedMeters} m"
   let ink = #183348
   let snow = #fcfeff
   let snowShade = #e8f0f7
@@ -187,9 +186,9 @@ app "Skilibre" {
     mode = "run"
   }
 
-  // Save improving scores during longer runs as well as on pause and game over.
+  // Save either record during longer runs as well as on pause and game over.
   every 5s {
-    if mode == "run" && betterRun { bestRun = recordToSave }
+    if mode == "run" && improvedRecord { bestRun = recordToSave }
   }
 
   // OWL suspends frame triggers when the app is off screen or the display sleeps.
