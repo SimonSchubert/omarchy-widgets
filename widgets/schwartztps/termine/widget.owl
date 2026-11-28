@@ -1,0 +1,108 @@
+widget "termine" {
+  size: 3x5
+  minSize: 3x3
+
+  meta { owl: 18; description: "Your next appointments from all of the phone's calendars, grouped by day, in calm colors."; version: "1.0"; license: "MIT"; category: "productivity" }
+
+  strings {
+    en {
+      title: "Appointments"
+      allow: "Allow access to the calendar to see your next appointments."
+      allowButton: "Allow"
+      empty: "No appointments in the next two weeks."
+      today: "Today"
+      tomorrow: "Tomorrow"
+      untitled: "(untitled)"
+      allDay: "all day"
+      nowUntil: t => "now · until " + t
+      headerDate: "EEE, MMM d"
+      dayDate: "EEEE, MMMM d"
+    }
+    de {
+      title: "Termine"
+      allow: "Zugriff auf den Kalender erlauben, um die nächsten Termine zu sehen."
+      allowButton: "Erlauben"
+      empty: "Keine Termine in den nächsten zwei Wochen."
+      today: "Heute"
+      tomorrow: "Morgen"
+      untitled: "(ohne Titel)"
+      allDay: "ganztägig"
+      nowUntil: t => "jetzt · bis " + t
+      headerDate: "EEE, d. MMM"
+      dayDate: "EEEE, d. MMMM"
+    }
+  }
+
+  // The next 14 days of events, read straight from the phone: no Linux, no network.
+  source c = android.calendar
+  source now = clock every 1m
+
+  let today = fmtTime(now, "yyyy-MM-dd")
+  let tomorrow = fmtTime(now + 86400, "yyyy-MM-dd")
+  let todayStart = parseTime(today)
+  // An event that began before today (multi-day) is listed under "today".
+  // The same event from two calendars (e.g. birthdays) only once.
+  let uniq = filter(c.events, (e, i) => i == 0 || !any(take(c.events, i), o => o.title == e.title && o.start == e.start))
+  let evs = map(uniq, e => merge(e, {day: e.start < todayStart ? today : fmtTime(e.start, "yyyy-MM-dd")}))
+
+  if !c.granted {
+    Column {
+      justify: center
+      gap: 6
+      fill: true
+      Text { text: str.title; style: title }
+      Text { text: str.allow; style: small; color: muted }
+      Button { text: str.allowButton; onTap: calendar("request") }
+    }
+  } else {
+    Column {
+      gap: 8
+      fill: true
+
+      Row {
+        onTap: calendar("open")
+        Text { text: str.title; bold: true; weight: 1 }
+        Text { text: fmtTime(now, str.headerDate); style: small; color: muted }
+      }
+
+      if len(evs) == 0 {
+        Text { text: str.empty; style: small; color: muted }
+      }
+
+      Column {
+        gap: 6
+        weight: 1
+        scroll: true
+        for e, i in evs key e.id {
+          let first = i == 0 || evs[max(i - 1, 0)].day != e.day
+          let running = !e.allDay && e.start <= now && e.end > now
+          if first {
+            Text {
+              text: e.day == today ? str.today : (e.day == tomorrow ? str.tomorrow : fmtTime(e.start, str.dayDate))
+              style: label
+              color: e.day == today ? accent : muted
+              padding: [0, i == 0 ? 0 : 4, 0, 0]
+            }
+          }
+          Row {
+            gap: 8
+            onTap: calendar("open", e)
+            Box { width: 3; height: 34; radius: 1; background: mix(e.color ?? muted, background, running ? 0 : 0.25) }
+            Column {
+              gap: 0
+              weight: 1
+              // The title lightly tinted in its calendar's color.
+              Text { text: e.title != "" ? e.title : str.untitled; maxLines: 1; color: mix(e.color ?? foreground, foreground, 0.45) }
+              Text {
+                text: (e.allDay ? str.allDay : (running ? str.nowUntil(fmtTime(e.end, "HH:mm")) : fmtTime(e.start, "HH:mm") + " – " + fmtTime(e.end, "HH:mm"))) + (e.location != "" ? " · " + e.location : "")
+                style: small
+                color: muted
+                maxLines: 1
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
