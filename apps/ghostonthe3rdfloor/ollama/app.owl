@@ -1,5 +1,5 @@
 app "ollama" {
-  meta { owl: 15; description: "Run local Ollama models: start the server, chat, pull or import GGUF models and tune generation settings"; version: "1.0"; license: "MIT"; category: "dev" }
+  meta { owl: 15; description: "Run local Ollama models: start the server, chat, pull or import GGUF models and set the server context length"; version: "1.0"; license: "MIT"; category: "dev" }
   // curl checks the real server; setsid keeps it alive past the action timeout; zenity is the Linux file chooser
   requires { pacman: ["ollama", "jq", "procps-ng", "gawk", "curl", "coreutils", "util-linux", "sed", "zenity"] }
   title: "ollama"
@@ -22,10 +22,9 @@ app "ollama" {
   </svg>"""
 
   state pullName = ""
-  state importName = ""
   state ctxSize = 4096
-  state temperature = 0.7
-  state numPredict = -1
+  // The field reads a let derived from pullName, so typing isn't rewritten mid-keystroke.
+  let pullNameField = pullName
 
   source server = cmd("curl -fsS --max-time 2 http://127.0.0.1:11434/api/version >/dev/null && echo running || echo stopped") every 5s
   source loaded = cmd("ollama ps | tail -n +2 | awk '{print $1}' | sort -u | jq -R . | jq -s .") every 5s json
@@ -63,7 +62,7 @@ END { print s "]" }
           Row { gap: 8; align: center
             Text { text: "stopped"; color: red }
             Spacer { weight: 1 }
-            Button { text: "start"; onTap: run("nohup setsid ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &") }
+            Button { text: "start"; onTap: run("OLLAMA_CONTEXT_LENGTH=${int(ctxSize)} nohup setsid ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &") }
           }
         }
       }
@@ -99,45 +98,32 @@ END { print s "]" }
 
     Text { text: "pull a model"; style: title; color: muted }
     Row { gap: 8
-      Input { placeholder: "model name"; text: pullName; onSubmit: pullName = value; weight: 1 }
-      Button { text: "pull"; onTap: terminal("ollama pull ${sh(pullName)}", "pull ${pullName}") }
+      Input { placeholder: "model name"; text: pullNameField; onChange: pullName = value; onSubmit: pullName = value; weight: 1 }
+      Button { text: "pull"; onTap: { if trim(pullName) != "" { terminal("ollama pull ${sh(trim(pullName))}", "pull ${trim(pullName)}") } } }
     }
 
-    Text { text: "settings"; style: title; color: muted }
+    Text { text: "server settings"; style: title; color: muted }
     Box {
       radius: 12 * corners
       background: surface
       padding: 16
-      Column { gap: 12
+      Column { gap: 8
         Row { gap: 8; align: center
           Text { text: "context"; width: 110; color: muted }
           Slider { value: ctxSize; min: 512; max: 131072; step: 512; onChange: ctxSize = value; weight: 1 }
           Text { text: "${int(ctxSize)}"; width: 60 }
         }
-        Row { gap: 8; align: center
-          Text { text: "temperature"; width: 110; color: muted }
-          Slider { value: temperature * 100; min: 0; max: 200; step: 5; onChange: temperature = value / 100; weight: 1 }
-          Text { text: "${fixed(temperature, 2)}"; width: 60 }
-        }
-        Row { gap: 8; align: center
-          Text { text: "max tokens"; width: 110; color: muted }
-          Slider { value: numPredict == -1 ? 0 : numPredict; min: 0; max: 4096; step: 64; onChange: numPredict = value == 0 ? -1 : value; weight: 1 }
-          Text { text: numPredict == -1 ? "unlimited" : "${int(numPredict)}"; width: 80 }
-        }
+        Text { text: "applies when the server starts"; style: small; color: muted }
       }
     }
 
     Text { text: "add from file"; style: title; color: muted }
     Row { gap: 8
-      Input { placeholder: "model name"; text: importName; onSubmit: importName = value; weight: 1 }
-    }
-    Row { gap: 8
-      Button { text: "pick from phone"; onTap: terminal("omalauncher pick | jq -r '.[]' | while IFS= read -r f; do b=$(basename \"$f\" | sed 's/\\.gguf$//'); ollama rm \"$b\" 2>/dev/null; echo \"FROM $f\" > /tmp/Modelfile; ollama create \"$b\" -f /tmp/Modelfile; done", "create model") }
+      Button { text: "pick from phone"; onTap: terminal("omalauncher pick | jq -r '.[]' | while IFS= read -r f; do b=$(basename \"$f\" | sed 's/\\.gguf$//'); echo \"FROM $f\" > /tmp/Modelfile; ollama create \"$b\" -f /tmp/Modelfile; done", "create model") }
       Button { text: "pick from proot"; onTap: terminal("""
 f=$(zenity --file-selection --title='Choose a GGUF model' --file-filter='GGUF models | *.gguf') &&
 [ -n "$f" ] &&
 b=$(basename "$f" .gguf) &&
-{ ollama rm "$b" 2>/dev/null || true; } &&
 echo "FROM $f" > /tmp/Modelfile &&
 ollama create "$b" -f /tmp/Modelfile
 """, "create model") }

@@ -1,6 +1,6 @@
 # ollama
 
-A full-screen app for the local Ollama server: start/stop the server, list models, chat, pull or import GGUF models, unload loaded models, and adjust context, temperature and max tokens.
+A full-screen app for the local Ollama server: start/stop the server, list models, chat, pull or import GGUF models, unload loaded models, and set the server's context length.
 
 ## Installing Ollama
 
